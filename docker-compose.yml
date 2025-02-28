@@ -1,0 +1,9 @@
+---
+services:
+  kafka:
+    image: apache/kafka:latest
+    ports:
+      - '9092:9092'
+    # environment:
+    #   - KAFKA_LOG4J_ROOT_LOGLEVEL=debug
+    #   - KAFKA_LOG4J_LOGGERS=kafka=DEBUG,kafka.controller=DEBUG,kafka.log.LogCleaner=DEBUG,state.change.logger=DEBUG,kafka.producer.async.DefaultEventHandler=DEBUG

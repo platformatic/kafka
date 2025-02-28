@@ -1,0 +1,10 @@
+{
+  "jsc": {
+    "target": "esnext",
+    "parser": {
+      "syntax": "typescript",
+      "tsx": false,
+      "dynamicImport": true
+    }
+  }
+}

@@ -1,0 +1,109 @@
+import BufferList from 'bl'
+import { ResponseError } from '../../errors.ts'
+import { type NullableString } from '../../protocol/definitions.ts'
+import { Reader } from '../../protocol/reader.ts'
+import { Writer } from '../../protocol/writer.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+
+export interface DescribeUserScramCredentialsRequestUser {
+  name: string
+}
+
+export type DescribeUserScramCredentialsRequest = Parameters<typeof createRequest>
+
+export interface DescribeUserScramCredentialsResponseResultCredentialInfo {
+  mechanism: number
+  iterations: number
+}
+
+export interface DescribeUserScramCredentialsResponseResult {
+  user: string
+  errorCode: number
+  errorMessage: NullableString
+  credentialInfos: DescribeUserScramCredentialsResponseResultCredentialInfo[]
+}
+
+export interface DescribeUserScramCredentialsResponse {
+  throttleTimeMs: number
+  errorCode: number
+  errorMessage: NullableString
+  results: DescribeUserScramCredentialsResponseResult[]
+}
+
+/*
+  DescribeUserScramCredentials Request (Version: 0) => [users] TAG_BUFFER
+    users => name TAG_BUFFER
+      name => COMPACT_STRING
+*/
+function createRequest (users: DescribeUserScramCredentialsRequestUser[]): Writer {
+  return Writer.create()
+    .appendArray(users, (w, u) => w.appendString(u.name))
+    .appendTaggedFields()
+}
+
+/*
+  DescribeUserScramCredentials Response (Version: 0) => throttle_time_ms error_code error_message [results] TAG_BUFFER
+    throttle_time_ms => INT32
+    error_code => INT16
+    error_message => COMPACT_NULLABLE_STRING
+    results => user error_code error_message [credential_infos] TAG_BUFFER
+      user => COMPACT_STRING
+      error_code => INT16
+      error_message => COMPACT_NULLABLE_STRING
+      credential_infos => mechanism iterations TAG_BUFFER
+        mechanism => INT8
+        iterations => INT32
+*/
+function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): DescribeUserScramCredentialsResponse {
+  const reader = Reader.from(raw)
+  const errors: ResponseErrorWithLocation[] = []
+
+  const throttleTimeMs = reader.readInt32()
+  const errorCode = reader.readInt16()
+
+  if (errorCode !== 0) {
+    errors.push(['', errorCode])
+  }
+
+  const response: DescribeUserScramCredentialsResponse = {
+    throttleTimeMs,
+    errorCode,
+    errorMessage: reader.readString(),
+    results: reader.readArray((r, i) => {
+      const user = r.readString()!
+      const errorCode = r.readInt16()
+
+      if (errorCode !== 0) {
+        errors.push([`/results/${i}`, errorCode])
+      }
+
+      return {
+        user,
+        errorCode,
+        errorMessage: r.readString(),
+        credentialInfos: r.readArray(r => {
+          return {
+            mechanism: r.readInt8(),
+            iterations: r.readInt32()
+          }
+        })!
+      }
+    })!
+  }
+
+  if (errors.length) {
+    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+  }
+
+  return response
+}
+
+export const describeUserScramCredentialsV0 = createAPI<
+  DescribeUserScramCredentialsRequest,
+  DescribeUserScramCredentialsResponse
+>(50, 0, createRequest, parseResponse)

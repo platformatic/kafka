@@ -1,0 +1,20 @@
+import { FindCoordinatorKeyTypes } from '../../src/apis/enumerations.ts'
+import { findCoordinatorV6 } from '../../src/apis/metadata/find-coordinator.ts'
+import { initProducerIdV5 } from '../../src/apis/producer/init-producer-id.ts'
+import { Connection } from '../../src/connection.ts'
+import { performAPICallWithRetry } from '../utils.ts'
+
+const transactionalId = 'eeeee'
+
+const connection = new Connection('111')
+await connection.start('localhost', 9092)
+
+await performAPICallWithRetry('FindCoordinator (TRANSACTION)', () =>
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId])
+)
+
+await performAPICallWithRetry('InitProducerId', () =>
+  initProducerIdV5.async(connection, transactionalId, 60000, -1n, -1)
+)
+
+await connection.close()

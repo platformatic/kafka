@@ -25,17 +25,16 @@
   "exports": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "swc --strip-leading-paths --delete-dir-on-start -d dist src",
-    "build:declarations": "tsc -p . --emitDeclarationOnly",
-    "build:api-definitions": "node --experimental-strip-types scripts/generate-api-definitions.ts",
-    "postbuild:api-definitions": "eslint --fix src/apis/definitions.ts",
-    "postbuild": "concurrently npm:lint npm:build:declarations",
+    "build": "swc --strip-leading-paths --delete-dir-on-start -d dist src && tsc -p . --emitDeclarationOnly",
     "lint": "eslint --cache",
     "test": "c8 -c test/config/c8-local.json node --env-file=test/config/env --test test/*.test.ts",
     "test:ci": "c8 -c test/config/c8-ci.json node --env-file=test/config/env --test-reporter=tap --test test/*.test.ts",
     "ci": "npm run build && npm run test:ci",
     "prepublishOnly": "npm run ci",
-    "postpublish": "git push origin && git push origin -f --tags"
+    "postpublish": "git push origin && git push origin -f --tags",
+    "generate:apis": "node --experimental-strip-types scripts/generate-apis.ts",
+    "generate:errors": "node --experimental-strip-types scripts/generate-errors.ts",
+    "create:api": "node --experimental-strip-types scripts/create-api.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
@@ -45,14 +44,16 @@
     "json5": "^2.2.3",
     "kafkajs": "^2.2.4",
     "neostandard": "^0.12.1",
+    "parse5": "^7.2.1",
+    "prettier": "^3.5.3",
+    "scule": "^1.3.0",
     "typescript": "^5.7.3"
   },
   "engines": {
     "node": ">= 22.14.0"
   },
   "dependencies": {
-    "@mongodb-js/zstd": "^2.0.0",
-    "bl": "^6.0.19",
+    "bl": "github:ShogunPanda/bl#new-methods",
     "lz4-napi": "^2.8.0",
     "semver": "^7.7.1",
     "snappy": "^7.2.2"

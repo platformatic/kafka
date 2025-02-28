@@ -1,0 +1,60 @@
+{
+  "name": "kafka",
+  "version": "0.1.0",
+  "description": "Modern and performant client for Apache Kafka",
+  "homepage": "https://github.com/platformatic/kafka",
+  "author": "Platformatic Inc. <oss@platformatic.dev> (https://platformatic.dev)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/platformatic/kafka.git"
+  },
+  "keywords": [
+    "kafka"
+  ],
+  "bugs": {
+    "url": "https://github.com/platformatic/kafka/issues"
+  },
+  "private": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "swc --strip-leading-paths --delete-dir-on-start -d dist src",
+    "build:declarations": "tsc -p . --emitDeclarationOnly",
+    "build:api-definitions": "node --experimental-strip-types scripts/generate-api-definitions.ts",
+    "postbuild:api-definitions": "eslint --fix src/apis/definitions.ts",
+    "postbuild": "concurrently npm:lint npm:build:declarations",
+    "lint": "eslint --cache",
+    "test": "c8 -c test/config/c8-local.json node --env-file=test/config/env --test test/*.test.ts",
+    "test:ci": "c8 -c test/config/c8-ci.json node --env-file=test/config/env --test-reporter=tap --test test/*.test.ts",
+    "ci": "npm run build && npm run test:ci",
+    "prepublishOnly": "npm run ci",
+    "postpublish": "git push origin && git push origin -f --tags"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "concurrently": "^9.1.2",
+    "cronometro": "^4.0.3",
+    "eslint": "^9.21.0",
+    "json5": "^2.2.3",
+    "kafkajs": "^2.2.4",
+    "neostandard": "^0.12.1",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">= 22.14.0"
+  },
+  "dependencies": {
+    "@mongodb-js/zstd": "^2.0.0",
+    "bl": "^6.0.19",
+    "lz4-napi": "^2.8.0",
+    "semver": "^7.7.1",
+    "snappy": "^7.2.2"
+  }
+}

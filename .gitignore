@@ -1,2 +1,4 @@
 dist/
 external/
+ssl/
+playground/jaas.conf

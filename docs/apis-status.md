@@ -1,85 +1,86 @@
-# API Support
+# Supported APIs
 
 ## Producer API
 
-| Name               | ID  | Status |
-| ------------------ | --- | ------ |
-| ListOffsets        | 2   | Done   |
-| Metadata           | 3   | Done   |
-| ApiVersions        | 18  | Done   |
-| Produce            | 0   | Done   |
-| FindCoordinator    | 10  | Done   |
-| InitProducerId     | 22  | Done   |
-| AddPartitionsToTxn | 24  | Done   |
-| AddOffsetsToTxn    | 25  | Done   |
-| EndTxn             | 26  | Done   |
-| TxnOffsetCommit    | 28  | Done   |
+| Name               | ID  | Version |
+| ------------------ | --- | ------- |
+| Metadata           | 3   | 12      |
+| ApiVersions        | 18  | 4       |
+| Produce            | 0   | 11      |
+| FindCoordinator    | 10  | 6       |
+| InitProducerId     | 22  | 5       |
+| AddPartitionsToTxn | 24  | 5       |
+| AddOffsetsToTxn    | 25  | 4       |
+| EndTxn             | 26  | 4       |
+| TxnOffsetCommit    | 28  | 4       |
 
 ## Consumer API
 
-| Name                   | ID  | Status |
-| ---------------------- | --- | ------ |
-| Fetch                  | 1   | Done   |
-| OffsetCommit           | 8   | Done   |
-| OffsetFetch            | 9   | Done   |
-| JoinGroup              | 11  | Done   |
-| Heartbeat              | 12  | Done   |
-| LeaveGroup             | 13  | Done   |
-| SyncGroup              | 14  | Done   |
-| ConsumerGroupHeartbeat | 68  | Done   |
+| Name                   | ID  | Version |
+| ---------------------- | --- | ------- |
+| Fetch                  | 1   | 17      |
+| ListOffsets            | 2   | 9       |
+| OffsetCommit           | 8   | 9       |
+| OffsetFetch            | 9   | 9       |
+| JoinGroup              | 11  | 9       |
+| Heartbeat              | 12  | 4       |
+| LeaveGroup             | 13  | 5       |
+| SyncGroup              | 14  | 5       |
+| ConsumerGroupHeartbeat | 68  | 0       |
 
 ## Admin API
 
-| Name                         | ID  | Status |
-| ---------------------------- | --- | ------ |
-| DescribeGroups               | 15  | Done   |
-| ListGroups                   | 16  | Done   |
-| CreateTopics                 | 19  | Done   |
-| DeleteTopics                 | 20  | Done   |
-| DeleteRecords                | 21  | Done   |
-| DescribeAcls                 | 29  | Done   |
-| CreateAcls                   | 30  | Done   |
-| DeleteAcls                   | 31  | Done   |
-| DescribeConfigs              | 32  | Done   |
-| AlterConfigs                 | 33  | Done   |
-| AlterReplicaLogDirs          | 34  | Done   |
-| DescribeLogDirs              | 35  | Done   |
-| CreatePartitions             | 37  | Done   |
-| CreateDelegationToken        | 38  | Done   |
-| RenewDelegationToken         | 39  | Done   |
-| ExpireDelegationToken        | 40  | Done   |
-| DescribeDelegationToken      | 41  | Done   |
-| DeleteGroups                 | 42  | Done   |
-| IncrementalAlterConfigs      | 44  | Done   |
-| AlterPartitionReassignments  | 45  | Done   |
-| ListPartitionReassignments   | 46  | Done   |
-| OffsetDelete                 | 47  | Done   |
-| DescribeClientQuotas         | 48  | Done   |
-| AlterClientQuotas            | 49  | Done   |
-| DescribeUserScramCredentials | 50  | Done   |
-| AlterUserScramCredentials    | 51  | Done   |
-| DescribeQuorum               | 55  | Done   |
-| AlterPartition               | 56  | Done   |
-| UpdateFeatures               | 57  | Done   |
-| Envelope                     | 58  | Done   |
-| DescribeCluster              | 60  | Done   |
-| DescribeProducers            | 61  | Done   |
-| UnregisterBroker             | 64  | Done   |
-| DescribeTransactions         | 65  | Done   |
-| ListTransactions             | 66  | Done   |
-| ConsumerGroupDescribe        | 69  | Done   |
-| DescribeTopicPartitions      | 75  | Done   |
+| Name                         | ID  | Version |
+| ---------------------------- | --- | ------- |
+| DescribeGroups               | 15  | 5       |
+| ListGroups                   | 16  | 5       |
+| CreateTopics                 | 19  | 7       |
+| DeleteTopics                 | 20  | 6       |
+| DeleteRecords                | 21  | 2       |
+| DescribeAcls                 | 29  | 3       |
+| CreateAcls                   | 30  | 3       |
+| DeleteAcls                   | 31  | 3       |
+| DescribeConfigs              | 32  | 4       |
+| AlterConfigs                 | 33  | 2       |
+| AlterReplicaLogDirs          | 34  | 2       |
+| DescribeLogDirs              | 35  | 4       |
+| CreatePartitions             | 37  | 3       |
+| CreateDelegationToken        | 38  | 3       |
+| RenewDelegationToken         | 39  | 2       |
+| ExpireDelegationToken        | 40  | 2       |
+| DescribeDelegationToken      | 41  | 3       |
+| DeleteGroups                 | 42  | 2       |
+| IncrementalAlterConfigs      | 44  | 1       |
+| AlterPartitionReassignments  | 45  | 0       |
+| ListPartitionReassignments   | 46  | 0       |
+| OffsetDelete                 | 47  | 0       |
+| DescribeClientQuotas         | 48  | 1       |
+| AlterClientQuotas            | 49  | 1       |
+| DescribeUserScramCredentials | 50  | 0       |
+| AlterUserScramCredentials    | 51  | 0       |
+| DescribeQuorum               | 55  | 2       |
+| AlterPartition               | 56  | 3       |
+| UpdateFeatures               | 57  | 1       |
+| Envelope                     | 58  | 0       |
+| DescribeCluster              | 60  | 1       |
+| DescribeProducers            | 61  | 0       |
+| UnregisterBroker             | 64  | 0       |
+| DescribeTransactions         | 65  | 0       |
+| ListTransactions             | 66  | 1       |
+| ConsumerGroupDescribe        | 69  | 0       |
+| DescribeTopicPartitions      | 75  | 0       |
 
 ## Miscellaneous
 
-| Section   | Name                       | ID   | Status |
-| --------- | -------------------------- | ---- | ------ |
-| Telemetry | GetTelemetrySubscriptions  | 71   | Done   |
-| Telemetry | PushTelemetry              | 72   | Done   |
-| Telemetry | ListClientMetricsResources | 74   | Done   |
-| SSL       | SSL Authentication         | NONE |        |
-| SASL      | SaslHandshake              | 17   |        |
-| SASL      | SaslAuthenticate           | 36   |        |
+| Section   | Name                       | ID  | Version |
+| --------- | -------------------------- | --- | ------- |
+| Telemetry | GetTelemetrySubscriptions  | 71  | 0       |
+| Telemetry | PushTelemetry              | 72  | 0       |
+| Telemetry | ListClientMetricsResources | 74  | 0       |
+| SASL      | SaslHandshake              | 17  | 1       |
+| SASL      | SaslAuthenticate           | 36  | 2       |
+
+# Unsupported APIs
 
 ## Broker API (Out of Scope)
 

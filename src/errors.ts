@@ -10,7 +10,8 @@ export const errorCodes = [
   'KFK_RESPONSE',
   'KFK_UNSUPPORTED_COMPRESSION',
   'KFK_NETWORK',
-  'KFK_PROTOCOL'
+  'KFK_PROTOCOL',
+  'KFK_AUTHENTICATION'
 ] as const
 
 export type ErrorCode = (typeof errorCodes)[number]
@@ -96,6 +97,14 @@ export class NetworkError extends KafkaError {
 
   constructor (message: string, properties: ErrorProperties = {}) {
     super(NetworkError.code, message, properties)
+  }
+}
+
+export class AuthenticationError extends KafkaError {
+  static code: ErrorCode = 'KFK_AUTHENTICATION'
+
+  constructor (message: string, properties: ErrorProperties = {}) {
+    super(AuthenticationError.code, message, properties)
   }
 }
 

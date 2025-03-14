@@ -1,11 +1,16 @@
 import BufferList from 'bl'
 import EventEmitter, { once } from 'node:events'
 import { createConnection, Socket } from 'node:net'
+import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type ResponseParser, type SendCallback } from './apis/index.ts'
 import { NetworkError, UnexpectedCorrelationIdError } from './errors.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from './protocol/definitions.ts'
 import { Reader } from './protocol/reader.ts'
 import { Writer } from './protocol/writer.ts'
+
+export interface ConnectionOptions {
+  tls?: TLSConnectionOptions
+}
 
 export interface Request {
   correlationId: number
@@ -24,6 +29,7 @@ export interface Response {
 }
 
 export class Connection extends EventEmitter {
+  #options: ConnectionOptions
   #clientId: string | undefined
   #correlationId: number
   #nextMessage: number
@@ -34,9 +40,10 @@ export class Connection extends EventEmitter {
   #socket!: Socket
   #socketMustBeDrained: boolean
 
-  constructor (clientId?: string) {
+  constructor (clientId?: string, options: ConnectionOptions = {}) {
     super()
 
+    this.#options = options
     this.#clientId = clientId
     this.#correlationId = 0
     this.#nextMessage = 0
@@ -54,7 +61,7 @@ export class Connection extends EventEmitter {
   async start (host: string, port: number): Promise<void> {
     const { promise, resolve, reject } = Promise.withResolvers<void>()
 
-    this.#socket = createConnection(port, host)
+    this.#socket = this.#options.tls ? createTLSConnection(port, host, this.#options.tls) : createConnection(port, host)
 
     this.#socket.on('connect', () => {
       this.#socket.removeListener('error', reject)

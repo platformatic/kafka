@@ -5,7 +5,7 @@ const producer = new Producer('id', ['localhost:9092'])
 
 if (process.env.PROMISES) {
   inspect(
-    'produce(callbacks)',
+    'produce(promises)',
     await Promise.all([
       producer.produce(
         [

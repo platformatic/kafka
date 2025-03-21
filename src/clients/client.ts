@@ -1,4 +1,5 @@
 import { type ValidateFunction } from 'ajv'
+import { EventEmitter } from 'node:events'
 import { type Callback } from '../apis/definitions.ts'
 import type { MetadataResponse } from '../apis/metadata/metadata.ts'
 import { metadataV12 } from '../apis/metadata/metadata.ts'
@@ -66,11 +67,11 @@ export const clientOptionsSchema = {
   additionalProperties: true
 }
 
-const optionsValidator = ajv.compile(clientOptionsSchema)
+export const optionsValidator = ajv.compile(clientOptionsSchema)
 
 export const DEFAULT_PORT = 9092
 
-export class Client<T extends ClientOptions> {
+export class Client<T extends ClientOptions> extends EventEmitter {
   // General status
   protected clientId: string
   protected bootstrapBrokers: Broker[]
@@ -78,12 +79,14 @@ export class Client<T extends ClientOptions> {
   protected connections: ConnectionPool
 
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
-  #metadata: ClusterMetadata | null
+  #metadata: ClusterMetadata | undefined
 
   constructor (clientId: string, bootstrapBrokers: Broker | string | Broker[] | string[], options: Partial<T> = {}) {
     if (typeof clientId !== 'string' || !clientId) {
       throw new UserError('/clientId must be a non-empty string.')
     }
+
+    super()
 
     this.clientId = clientId
 
@@ -96,11 +99,18 @@ export class Client<T extends ClientOptions> {
 
     this.connections = new ConnectionPool(this.clientId, this.options as ConnectionOptions)
     this.#inflightDeduplications = new Map()
-    this.#metadata = null
   }
 
-  close (): void | Promise<void[]> {
-    return this.connections.disconnect()
+  close (): Promise<void>
+  close (callback: CallbackWithPromise<void>): void
+  close (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    this.connections.disconnect(callback)
+
+    return callback[kCallbackPromise]
   }
 
   metadata (topics: string[], callback: CallbackWithPromise<ClusterMetadata>): void
@@ -135,61 +145,69 @@ export class Client<T extends ClientOptions> {
 
     return this.performDeduplicated(
       'metadata',
-      deduplicateMetadata => {
-        this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
-          if (error) {
-            deduplicateMetadata(error, undefined as unknown as ClusterMetadata)
-            return
-          }
-
-          this.performWithRetry<MetadataResponse>(
-            'Fetching metadata failed.',
-            cb => {
-              metadataV12(connection, null, autocreateTopics, true, cb)
-            },
-            (error: Error | null, metadata: MetadataResponse) => {
+      deduplicateCallback => {
+        this.performWithRetry<MetadataResponse>(
+          'Fetching metadata failed.',
+          retryCallback => {
+            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
               if (error) {
-                deduplicateMetadata(error, undefined as unknown as ClusterMetadata)
+                retryCallback(error, undefined as unknown as MetadataResponse)
                 return
               }
 
-              const brokers: ClusterMetadata['brokers'] = {}
-              const topics: ClusterMetadata['topics'] = {}
+              metadataV12(connection, null, autocreateTopics, true, retryCallback)
+            })
+          },
+          (error: Error | null, metadata: MetadataResponse) => {
+            if (error) {
+              deduplicateCallback(error, undefined as unknown as ClusterMetadata)
+              return
+            }
 
-              for (const broker of metadata.brokers) {
-                const { host, port } = broker
-                brokers[broker.nodeId] = { host, port }
+            const brokers: ClusterMetadata['brokers'] = {}
+            const topics: ClusterMetadata['topics'] = {}
+
+            for (const broker of metadata.brokers) {
+              const { host, port } = broker
+              brokers[broker.nodeId] = { host, port }
+            }
+
+            for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
+              if (isInternal) {
+                continue
               }
 
-              for (const { name, topicId: id, partitions: rawPartitions } of metadata.topics) {
-                const partitions: ClusterTopicMetadata['partitions'] = {}
+              const partitions: ClusterTopicMetadata['partitions'] = {}
 
-                for (const rawPartition of rawPartitions) {
-                  partitions[rawPartition.partitionIndex] = {
-                    leader: rawPartition.leaderId,
-                    replicas: rawPartition.replicaNodes
-                  }
+              for (const rawPartition of rawPartitions) {
+                partitions[rawPartition.partitionIndex] = {
+                  leader: rawPartition.leaderId,
+                  replicas: rawPartition.replicaNodes
                 }
-
-                topics[name] = { id, partitions, partitionsCount: rawPartitions.length }
               }
 
-              this.#metadata = {
-                id: metadata.clusterId!,
-                brokers,
-                topics,
-                lastUpdate: Date.now()
-              }
+              topics[name] = { id, partitions, partitionsCount: rawPartitions.length }
+            }
 
-              deduplicateMetadata(null, this.#metadata)
-            },
-            0,
-            this.options.retries
-          )
-        })
+            this.#metadata = {
+              id: metadata.clusterId!,
+              brokers,
+              topics,
+              lastUpdate: Date.now()
+            }
+
+            deduplicateCallback(null, this.#metadata)
+          },
+          0,
+          this.options.retries
+        )
       },
       callback
     )
+  }
+
+  protected clearMetadata (): void {
+    this.#metadata = undefined
   }
 
   protected parseBroker (broker: Broker | string, index: number): Broker {
@@ -215,23 +233,24 @@ export class Client<T extends ClientOptions> {
     callback: CallbackWithPromise<T>,
     attempt: number,
     maxAttempts: number,
-    errors: Error[] = []
+    errors: Error[] = [],
+    shouldSkipRetry?: (e: Error) => boolean
   ): void | Promise<T> {
     operation((error, result) => {
       if (error) {
         const genericError = error as GenericError
-        const retriable = genericError.code === NetworkError.code || (error as GenericError).errors?.[0]?.canRetry
+        const retriable = genericError.hasAny('code', NetworkError.code) || genericError.hasAny('canRetry', true)
         errors.push(error)
 
-        if (retriable && attempt < maxAttempts) {
+        if (attempt < maxAttempts && retriable && !shouldSkipRetry?.(error)) {
           setTimeout(() => {
-            this.performWithRetry(errorMessage, operation, callback, attempt + 1, maxAttempts, errors)
+            this.performWithRetry(errorMessage, operation, callback, attempt + 1, maxAttempts, errors, shouldSkipRetry)
           }, this.options.retryDelay)
         } else {
           callback(new MultipleErrors(errorMessage, errors), undefined as T)
         }
 
-        return callback[kCallbackPromise]
+        return
       }
 
       callback(null, result!)

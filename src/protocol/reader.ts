@@ -1,4 +1,4 @@
-import type BufferList from 'bl'
+import BufferList from 'bl'
 import { INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
 import { readUnsignedVarInt, readVarInt } from './varint32.ts'
 import { readUnsignedVarInt64, readVarInt64 } from './varint64.ts'
@@ -9,7 +9,11 @@ export class Reader {
   buffer: BufferList
   position: number
 
-  static from (buffer: BufferList): Reader {
+  static from (buffer: Buffer | BufferList): Reader {
+    if (Buffer.isBuffer(buffer)) {
+      buffer = new BufferList(buffer)
+    }
+
     return new Reader(buffer)
   }
 

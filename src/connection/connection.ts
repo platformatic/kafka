@@ -121,7 +121,6 @@ export class Connection extends EventEmitter {
 
       this.#status = ConnectionStatuses.ERROR
       this.emit('error', error)
-      callback!(error)
     }
 
     const connectionErrorHandler = (e: Error) => {
@@ -129,7 +128,6 @@ export class Connection extends EventEmitter {
 
       this.#status = ConnectionStatuses.ERROR
       this.emit('error', error)
-      callback!(error)
     }
 
     this.#socket = this.#options.tls
@@ -233,6 +231,11 @@ export class Connection extends EventEmitter {
       client_id => NULLABLE_STRING
   */
   #sendRequest (request: Request): boolean {
+    if (this.#status !== ConnectionStatuses.CONNECTED) {
+      request.callback(new NetworkError('Connection closed'), undefined)
+      return false
+    }
+
     let canWrite = true
 
     const { correlationId, apiKey, apiVersion, payload: payloadFn, hasRequestHeaderTaggedFields } = request
@@ -357,9 +360,19 @@ export class Connection extends EventEmitter {
   }
 
   #onClose (): void {
+    this.#status = ConnectionStatuses.CLOSED
     this.emit('close')
 
     const error = new NetworkError('Connection closed')
+
+    for (const request of this.#afterDrainRequests) {
+      const payload = request.payload()
+
+      if (!payload.context.noResponse) {
+        request.callback(error, undefined)
+      }
+    }
+
     for (const inflight of this.#inflightRequests.values()) {
       inflight.callback(error, undefined)
     }
@@ -458,13 +471,13 @@ export class ConnectionPool {
     return callback[kCallbackPromise]
   }
 
-  disconnect (callback?: CallbackWithPromise<void[]>): void | Promise<void[]> {
+  disconnect (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback()
     }
 
     if (this.#connections.size === 0) {
-      callback(null, [])
+      callback(null)
       return callback[kCallbackPromise]
     }
 
@@ -475,7 +488,7 @@ export class ConnectionPool {
         connection.close(cb)
         this.#connections.delete(key)
       },
-      callback
+      error => callback(error)
     )
 
     return callback[kCallbackPromise]

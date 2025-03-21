@@ -26,11 +26,7 @@ if (process.env.PROMISES) {
 
   await admin.close()
 } else if (process.env.SINGLE) {
-  admin.deleteTopics(['temp1', 'temp2'], error => {
-    // if (error) {
-    //   console.error(error)
-    // }
-
+  admin.deleteTopics(['temp1', 'temp2'], () => {
     admin.createTopics(['temp1', 'temp2'], error => {
       if (error) {
         console.error(error)

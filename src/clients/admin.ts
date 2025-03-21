@@ -115,53 +115,53 @@ export class Admin extends Client<AdminOptions> {
     return this.performDeduplicated(
       'createTopics',
       deduplicateCallback => {
-        this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
-          if (error) {
-            deduplicateCallback(error, undefined as unknown as Record<string, CreatedTopic>)
-            return
-          }
+        this.performWithRetry(
+          'Creating topics failed.',
+          retryCallback => {
+            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                return
+              }
 
-          this.performWithRetry(
-            'Creating topics failed.',
-            cb => {
               createTopicsV7(
                 connection,
                 requests,
                 this.options.operationTimeout,
                 false,
-                cb as unknown as Callback<CreateTopicsResponse>
+                retryCallback as unknown as Callback<CreateTopicsResponse>
               )
-            },
-            (error: Error | null, response: CreateTopicsResponse) => {
-              if (error) {
-                deduplicateCallback(error, undefined as unknown as Record<string, CreatedTopic>)
-                return
+            })
+          },
+          (error: Error | null, response: CreateTopicsResponse) => {
+            if (error) {
+              deduplicateCallback(error, undefined as unknown as Record<string, CreatedTopic>)
+              return
+            }
+
+            const created: Record<string, CreatedTopic> = {}
+
+            for (const {
+              name,
+              topicId: id,
+              numPartitions: partitions,
+              replicationFactor: replicas,
+              configs
+            } of response.topics) {
+              const configuration: CreatedTopic['configuration'] = {}
+
+              for (const { name, value } of configs) {
+                configuration[name] = value
               }
 
-              const created: Record<string, CreatedTopic> = {}
+              created[name] = { id, partitions, replicas, configuration }
+            }
 
-              for (const {
-                name,
-                topicId: id,
-                numPartitions: partitions,
-                replicationFactor: replicas,
-                configs
-              } of response.topics) {
-                const configuration: CreatedTopic['configuration'] = {}
-
-                for (const { name, value } of configs) {
-                  configuration[name] = value
-                }
-
-                created[name] = { id, partitions, replicas, configuration }
-              }
-
-              deduplicateCallback(null, created)
-            },
-            0,
-            this.options.retries
-          )
-        })
+            deduplicateCallback(null, created)
+          },
+          0,
+          this.options.retries
+        )
       },
       callback
     )
@@ -184,27 +184,27 @@ export class Admin extends Client<AdminOptions> {
     return this.performDeduplicated(
       'deleteTopics',
       deduplicateCallback => {
-        this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
-          if (error) {
-            deduplicateCallback(error, undefined)
-            return
-          }
+        this.performWithRetry(
+          'Deleting topics failed.',
+          retryCallback => {
+            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+              if (error) {
+                retryCallback(error, undefined)
+                return
+              }
 
-          this.performWithRetry(
-            'Deleting topics failed.',
-            cb => {
               deleteTopicsV6(
                 connection,
                 topics.map(name => ({ name })),
                 this.options.operationTimeout,
-                cb as unknown as Callback<DeleteTopicsResponse>
+                retryCallback as unknown as Callback<DeleteTopicsResponse>
               )
-            },
-            deduplicateCallback,
-            0,
-            this.options.retries
-          )
-        })
+            })
+          },
+          deduplicateCallback,
+          0,
+          this.options.retries
+        )
       },
       callback
     )

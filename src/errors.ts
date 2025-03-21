@@ -51,6 +51,14 @@ export class GenericError extends Error {
 
     Reflect.defineProperty(this, kGenericError, { value: true, enumerable: false })
   }
+
+  hasAny (property: string, value: unknown): boolean {
+    if (this[property] === value) {
+      return true
+    }
+
+    return false
+  }
 }
 
 export class MultipleErrors extends AggregateError {

@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { EMPTY_BUFFER, type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -7,12 +7,12 @@ import { createAPI } from '../definitions.ts'
 
 export interface JoinGroupRequestProtocol {
   name: string
-  metadata?: Buffer
+  metadata?: Buffer | null
 }
 
 export type JoinGroupRequest = Parameters<typeof createRequest>
 
-export interface JoinGroupRequestMember {
+export interface JoinGroupResponseMember {
   memberId: string
   groupInstanceId?: NullableString
   metadata: Buffer | null
@@ -27,7 +27,7 @@ export interface JoinGroupResponse {
   leader: string
   skipAssignment: boolean
   memberId: NullableString
-  members: JoinGroupRequestMember[]
+  members: JoinGroupResponseMember[]
 }
 
 /*
@@ -61,7 +61,7 @@ function createRequest (
     .appendString(groupInstanceId)
     .appendString(protocolType)
     .appendArray(protocols, (w, protocol) => {
-      w.appendString(protocol.name).appendBytes(protocol.metadata ?? EMPTY_BUFFER)
+      w.appendString(protocol.name).appendBytes(protocol.metadata ? protocol.metadata : EMPTY_BUFFER)
     })
     .appendString(reason)
     .appendTaggedFields()

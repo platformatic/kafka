@@ -9,7 +9,7 @@ if (process.env.FOREVER) {
     i++
 
     try {
-      inspect(await producer.produce([{ topic: 'temp1', key: `key-${i}`, value: `value-${i}` }]))
+      inspect('produce(forever)', await producer.produce([{ topic: 'temp1', key: `key-${i}`, value: `value-${i}` }]))
     } catch (e) {
       inspect(e)
       break

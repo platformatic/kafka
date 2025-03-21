@@ -27,6 +27,10 @@ export class Writer {
     return this.#bl
   }
 
+  get buffer (): Buffer {
+    return this.#bl.slice()
+  }
+
   get buffers (): Buffer[] {
     return this.#bl.getBuffers()
   }
@@ -259,7 +263,7 @@ export class Writer {
     if (compact) {
       this.appendUnsignedVarInt(value.length + 1)
     } else {
-      this.appendInt16(value.length)
+      this.appendInt32(value.length)
     }
 
     this.#bl.append(value)

@@ -3,7 +3,7 @@ import ajvErrors from 'ajv-errors'
 import type BufferList from 'bl'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-export const ajv = new Ajv({ allErrors: true })
+export const ajv = new Ajv({ allErrors: true, coerceTypes: false, strict: true })
 // @ts-ignore
 ajvErrors(ajv)
 
@@ -24,6 +24,16 @@ ajv.addKeyword({
   },
   error: {
     message: 'must be function'
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'buffer',
+  validate (_: unknown, x: unknown) {
+    return Buffer.isBuffer(x)
+  },
+  error: {
+    message: 'must be Buffer'
   }
 })
 

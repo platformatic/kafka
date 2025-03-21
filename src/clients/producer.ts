@@ -64,6 +64,7 @@ export const produceOptionsSchema = {
   },
   additionalProperties: true
 }
+
 export const produceOptionsValidator = ajv.compile(produceOptionsSchema)
 
 export class Producer extends Client<ProducerOptions> {
@@ -396,17 +397,23 @@ export class Producer extends Client<ProducerOptions> {
             const hasStaleMetadata = (error as MultipleErrors).hasAny('hasStaleMetadata', true)
 
             if (hasStaleMetadata && repeatOnStaleMetadata) {
+              this.clearMetadata()
               this.#performSingleDestinationProduce(topics, messages, timeout, acks, false, produceOptions, callback)
               return
             }
 
             callback(error, undefined as unknown as ProduceResponse)
+            return
           }
 
           callback(error, results)
         },
         0,
-        this.options.retries
+        this.options.retries,
+        [],
+        (error: Error) => {
+          return repeatOnStaleMetadata && (error as MultipleErrors).hasAny('hasStaleMetadata', true)
+        }
       )
     })
   }

@@ -27,8 +27,8 @@
   "scripts": {
     "build": "swc --strip-leading-paths --delete-dir-on-start -d dist src && tsc -p . --emitDeclarationOnly",
     "lint": "eslint --cache",
-    "test": "c8 -c test/config/c8-local.json node --env-file=test/config/env --test test/*.test.ts",
-    "test:ci": "c8 -c test/config/c8-ci.json node --env-file=test/config/env --test-reporter=tap --test test/*.test.ts",
+    "test": "c8 -c test/config/c8-local.json node --env-file=test/config/env --test 'test/**/*.test.ts'",
+    "test:ci": "c8 -c test/config/c8-ci.json node --env-file=test/config/env --test-reporter=tap --test 'test/**/*.test.ts'",
     "ci": "npm run build && npm run test:ci",
     "prepublishOnly": "npm run ci",
     "postpublish": "git push origin && git push origin -f --tags",
@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
+    "c8": "^10.1.3",
     "concurrently": "^9.1.2",
     "cronometro": "^4.0.3",
     "eslint": "^9.21.0",

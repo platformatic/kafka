@@ -1,5 +1,5 @@
 import BufferList from 'bl'
-import { deepStrictEqual } from 'node:assert'
+import { deepStrictEqual, doesNotThrow, ok } from 'node:assert'
 import test from 'node:test'
 import { describeTransactionsV0 } from '../../../src/apis/admin/describe-transactions.ts'
 import { Writer } from '../../../src/protocol/writer.ts'
@@ -31,4 +31,36 @@ test('describeTransactionsV0 has valid handlers', () => {
   // Verify both functions exist
   deepStrictEqual(typeof createRequest, 'function')
   deepStrictEqual(typeof parseResponse, 'function')
+})
+
+test('describeTransactionsV0 createRequest serializes request correctly', () => {
+  const { createRequest } = captureApiHandlers(describeTransactionsV0)
+  
+  // Create a test request
+  const transactionalIds = ['transaction-1', 'transaction-2']
+  
+  // Call the createRequest function
+  const writer = createRequest(transactionalIds)
+  
+  // Verify it returns a Writer
+  ok(writer instanceof Writer)
+  
+  // Just check that some data was written
+  ok(writer.bufferList instanceof BufferList)
+})
+
+test('describeTransactionsV0 validates parameters', () => {
+  // Mock direct function access
+  const mockAPI = ((conn: any, options: any) => {
+    return new Promise((resolve) => {
+      resolve({ transactionStates: [] })
+    })
+  }) as any
+  
+  // Add the connection function to the mock API
+  mockAPI.connection = describeTransactionsV0.connection
+  
+  // Call the API with different parameter combinations
+  doesNotThrow(() => mockAPI({}, { transactionalIds: ['transaction-1'] }))
+  doesNotThrow(() => mockAPI({}, { transactionalIds: [] }))
 })

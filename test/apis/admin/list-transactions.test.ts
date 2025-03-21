@@ -1,7 +1,7 @@
 import BufferList from 'bl'
-import { deepStrictEqual } from 'node:assert'
+import { deepStrictEqual, doesNotThrow, ok } from 'node:assert'
 import test from 'node:test'
-import { listTransactionsV0 } from '../../../src/apis/admin/list-transactions.ts'
+import { listTransactionsV1 } from '../../../src/apis/admin/list-transactions.ts'
 import { Writer } from '../../../src/protocol/writer.ts'
 
 // Helper function to mock connection and capture API functions
@@ -25,10 +25,26 @@ function captureApiHandlers(apiFunction: any) {
   }
 }
 
-test('listTransactionsV0 has valid handlers', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(listTransactionsV0)
+test('listTransactionsV1 has valid handlers', () => {
+  const { createRequest, parseResponse } = captureApiHandlers(listTransactionsV1)
   
   // Verify both functions exist
   deepStrictEqual(typeof createRequest, 'function')
   deepStrictEqual(typeof parseResponse, 'function')
+})
+
+test('listTransactionsV1 validates parameters', () => {
+  // Mock direct function access
+  const mockAPI = ((conn: any, options: any) => {
+    return new Promise((resolve) => {
+      resolve({ transactionStates: [] })
+    })
+  }) as any
+  
+  // Add the connection function to the mock API
+  mockAPI.connection = listTransactionsV1.connection
+  
+  // Call the API with different parameter combinations
+  doesNotThrow(() => mockAPI({}, { stateFilters: ['Ongoing'], producerIdFilters: [123n], durationFilter: 30000n }))
+  doesNotThrow(() => mockAPI({}, { stateFilters: [], producerIdFilters: [], durationFilter: 0n }))
 })

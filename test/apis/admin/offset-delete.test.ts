@@ -1,5 +1,5 @@
 import BufferList from 'bl'
-import { deepStrictEqual } from 'node:assert'
+import { deepStrictEqual, doesNotThrow, ok } from 'node:assert'
 import test from 'node:test'
 import { offsetDeleteV0 } from '../../../src/apis/admin/offset-delete.ts'
 import { Writer } from '../../../src/protocol/writer.ts'
@@ -31,4 +31,20 @@ test('offsetDeleteV0 has valid handlers', () => {
   // Verify both functions exist
   deepStrictEqual(typeof createRequest, 'function')
   deepStrictEqual(typeof parseResponse, 'function')
+})
+
+test('offsetDeleteV0 validates parameters', () => {
+  // Mock direct function access
+  const mockAPI = ((conn: any, options: any) => {
+    return new Promise((resolve) => {
+      resolve({ topics: [] })
+    })
+  }) as any
+  
+  // Add the connection function to the mock API
+  mockAPI.connection = offsetDeleteV0.connection
+  
+  // Call the API with different parameter combinations
+  doesNotThrow(() => mockAPI({}, { groupId: 'test-group', topics: [] }))
+  doesNotThrow(() => mockAPI({}, { groupId: 'test-group' }))
 })

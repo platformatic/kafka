@@ -4,7 +4,12 @@ import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export type EndTxnRequest = Parameters<typeof createRequest>
+export interface EndTxnRequest {
+  transactionalId: string
+  producerId: bigint
+  producerEpoch: number
+  committed: boolean
+}
 
 export interface EndTxnResponse {
   throttleTimeMs: number
@@ -18,12 +23,12 @@ export interface EndTxnResponse {
     producer_epoch => INT16
     committed => BOOLEAN
 */
-function createRequest (transactionalId: string, producerId: bigint, producerEpoch: number, committed: boolean): Writer {
+function createRequest (request: EndTxnRequest): Writer {
   return Writer.create()
-    .appendString(transactionalId)
-    .appendInt64(producerId)
-    .appendInt16(producerEpoch)
-    .appendBoolean(committed)
+    .appendString(request.transactionalId, true)
+    .appendInt64(request.producerId)
+    .appendInt16(request.producerEpoch)
+    .appendBoolean(request.committed)
     .appendTaggedFields()
 }
 

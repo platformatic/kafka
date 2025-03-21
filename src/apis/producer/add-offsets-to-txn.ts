@@ -4,7 +4,12 @@ import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export type AddOffsetsToTxnRequest = Parameters<typeof createRequest>
+export interface AddOffsetsToTxnRequest {
+  transactionalId: string
+  producerId: bigint
+  producerEpoch: number
+  groupId: string
+}
 
 export interface AddOffsetsToTxnResponse {
   throttleTimeMs: number
@@ -18,12 +23,12 @@ export interface AddOffsetsToTxnResponse {
     producer_epoch => INT16
     group_id => COMPACT_STRING
 */
-function createRequest (transactionalId: string, producerId: bigint, producerEpoch: number, groupId: string): Writer {
+function createRequest (request: AddOffsetsToTxnRequest): Writer {
   return Writer.create()
-    .appendString(transactionalId)
-    .appendInt64(producerId)
-    .appendInt16(producerEpoch)
-    .appendString(groupId)
+    .appendString(request.transactionalId, true)
+    .appendInt64(request.producerId)
+    .appendInt16(request.producerEpoch)
+    .appendString(request.groupId, true)
     .appendTaggedFields()
 }
 

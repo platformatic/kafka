@@ -5,7 +5,12 @@ import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export type InitProducerIdRequest = Parameters<typeof createRequest>
+export interface InitProducerIdRequest {
+  transactionalId: NullableString
+  transactionTimeoutMs: number
+  producerId: bigint
+  producerEpoch: number
+}
 
 export interface InitProducerIdResponseCoordinator {
   key: string
@@ -30,17 +35,12 @@ export interface InitProducerIdResponse {
     producer_id => INT64
     producer_epoch => INT16
 */
-function createRequest (
-  transactionalId: NullableString,
-  transactionTimeoutMs: number,
-  producerId: bigint,
-  producerEpoch: number
-): Writer {
+function createRequest (request: InitProducerIdRequest): Writer {
   return Writer.create()
-    .appendString(transactionalId)
-    .appendInt32(transactionTimeoutMs)
-    .appendInt64(producerId)
-    .appendInt16(producerEpoch)
+    .appendString(request.transactionalId, true)
+    .appendInt32(request.transactionTimeoutMs)
+    .appendInt64(request.producerId)
+    .appendInt16(request.producerEpoch)
     .appendTaggedFields()
 }
 

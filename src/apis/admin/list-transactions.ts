@@ -72,7 +72,7 @@ function parseResponse (
   return response
 }
 
-export const listTransactionsV0 = createAPI<ListTransactionsRequest, ListTransactionsResponse>(
+export const listTransactionsV1 = createAPI<ListTransactionsRequest, ListTransactionsResponse>(
   66,
   1,
   createRequest,

@@ -1,3 +1,4 @@
+# To listen on broker, run ./kafka-console-consumer.sh --property print.key=true --property print.value=true --property print.headers=true --property print.offset=true --bootstrap-server localhost:9092 ...
 ---
 services:
   kafka:

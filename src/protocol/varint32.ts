@@ -1,10 +1,10 @@
 import BufferList from 'bl'
 
-export const MOST_SIGNIFICANT_BIT_FLAG = 0x80 // 128 or 1000 0000
-export const LEAST_SIGNIFICANT_7_BITS = 0x7f // 127 or 0111 1111
+const MOST_SIGNIFICANT_BIT_FLAG = 0x80 // 128 or 1000 0000
+const LEAST_SIGNIFICANT_7_BITS = 0x7f // 127 or 0111 1111
 // This is used in varint to check if there are any other bits set after the first 7 bits,
 // which means it still needs more than a byte to represent the number in varint encoding
-export const BITS_8PLUS_MASK = 0xffffffff - 0x7f
+const BITS_8PLUS_MASK = 0xffffffff - 0x7f
 
 export function intZigZagEncode (value: number): number {
   return (value << 1) ^ (value >> 31)

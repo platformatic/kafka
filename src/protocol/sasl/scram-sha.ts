@@ -1,6 +1,6 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
 import { type SaslAuthenticateResponse, saslAuthenticateV2 } from '../../apis/security/sasl-authenticate.ts'
-import { type Connection } from '../../connection.ts'
+import { type Connection } from '../../connection/connection.ts'
 import { AuthenticationError } from '../../errors.ts'
 
 const GS2_HEADER = 'n,,'

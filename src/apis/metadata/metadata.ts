@@ -1,9 +1,9 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export type MetadataRequest = Parameters<typeof createRequest>
 
@@ -50,7 +50,7 @@ export interface MetadataResponse {
     include_topic_authorized_operations => BOOLEAN
 */
 function createRequest (
-  topics: string[],
+  topics: string[] | null,
   allowAutoTopicCreation: boolean = false,
   includeTopicAuthorizedOperations: boolean = false
 ): Writer {
@@ -137,7 +137,7 @@ function parseResponse (_correlationId: number, apiKey: number, apiVersion: numb
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

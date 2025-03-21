@@ -32,7 +32,7 @@ function parseResponse (_correlationId: number, apiKey: number, apiVersion: numb
   const response: #{type}Response = {}
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

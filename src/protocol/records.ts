@@ -22,6 +22,8 @@ export interface Message {
   topic: string
   partition?: number
   timestamp?: bigint
+
+  // Runtime properties
 }
 
 export interface CreateRecordsBatchOptions {
@@ -31,7 +33,7 @@ export interface CreateRecordsBatchOptions {
   // Idempotency support
   producerId: bigint
   producerEpoch: number
-  firstSequence: number
+  sequences: Record<string, number>
 
   // Unused at the moment
   partitionLeaderEpoch: number
@@ -140,6 +142,13 @@ export function createRecordsBatch (messages: Message[], options: Partial<Create
 
   let attributes = 0
 
+  let firstSequence = 0
+
+  if (options.sequences) {
+    const firstMessage = messages[0]
+    firstSequence = options.sequences[`${firstMessage.topic}:${firstMessage.partition}`] ?? 0
+  }
+
   // Set the transaction
   if (options.transactionalId) {
     attributes |= IS_TRANSACTIONAL
@@ -170,7 +179,7 @@ export function createRecordsBatch (messages: Message[], options: Partial<Create
     .appendInt64(BigInt(maxTimestamp))
     .appendInt64(options.producerId ?? -1n)
     .appendInt16(options.producerEpoch ?? 0)
-    .appendInt32(options.firstSequence ?? 0)
+    .appendInt32(firstSequence)
     .appendInt32(messages.length) // Number of records
     .append(buffer)
 

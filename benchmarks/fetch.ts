@@ -2,7 +2,7 @@ import { cronometro } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
 import { fetchV17 } from '../src/apis/fetch.ts'
 import { metadataV12 } from '../src/apis/metadata.ts'
-import { Connection } from '../src/connection.ts'
+import { Connection } from '../src/connection/connection.ts'
 
 const THRESHOLD = 100
 
@@ -18,7 +18,7 @@ console.log(
       ours: {
         before: async () => {
           connection = new Connection('123')
-          await connection.start('localhost', 9092)
+          await connection.connect('localhost', 9092)
 
           const metadata = await metadataV12(connection, ['temp'], false, false)
           topic = metadata.topics.find(t => t.name === 'temp')!.topicId

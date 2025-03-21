@@ -1,3 +1,13 @@
 import neostandard from 'neostandard'
 
-export default neostandard({ ts: true })
+const eslint = [
+  ...neostandard({ ts: true }),
+  {
+    files: ['**/*.ts'],
+    rules: {
+      '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'inline-type-imports' }]
+    }
+  }
+]
+
+export default eslint

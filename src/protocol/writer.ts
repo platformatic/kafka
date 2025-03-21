@@ -11,6 +11,7 @@ export type ChildrenWriter = (w: Writer) => void
 export type EntryWriter<T> = (writer: Writer, entry: T, index: number) => void
 
 export class Writer {
+  context: Record<string, any>
   #bl: BufferList
 
   static create (): Writer {
@@ -19,6 +20,7 @@ export class Writer {
 
   constructor (bl?: BufferList) {
     this.#bl = bl!
+    this.context = {}
   }
 
   get bufferList (): BufferList {

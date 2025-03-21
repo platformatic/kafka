@@ -1,18 +1,20 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { createRecordsBatch, type CreateRecordsBatchOptions, type Message } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { groupByProperty } from '../../utils.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { ProduceAcks } from '../enumerations.ts'
 
 export type ProduceRequest = Parameters<typeof createRequest>
 
-interface ProduceResponsePartitionRecordError {
+export interface ProduceResponsePartitionRecordError {
   batchIndex: number
   batchIndexErrorMessage: string
 }
 
-interface ProduceResponsePartition {
+export interface ProduceResponsePartition {
   index: number
   errorCode: number
   baseOffset: bigint
@@ -21,32 +23,15 @@ interface ProduceResponsePartition {
   recordErrors: ProduceResponsePartitionRecordError[]
 }
 
-interface ProduceResponseTopic {
+export interface ProduceResponseTopic {
   name: string
   partitionResponses: ProduceResponsePartition[]
 }
 
-interface ProduceResponse {
+export interface ProduceResponse {
   responses: ProduceResponseTopic[]
   throttleTimeMs: number
 }
-
-function groupByProperty<K, T> (entries: T[], property: keyof T): [K, T[]][] {
-  const grouped: Map<K, T[]> = new Map()
-
-  for (const entry of entries) {
-    const value = entry[property] as K
-
-    if (!grouped.has(value)) {
-      grouped.set(value, [])
-    }
-
-    grouped.get(value)!.push(entry)
-  }
-
-  return Array.from(grouped.entries())
-}
-
 /*
   Produce Request (Version: 11) => transactional_id acks timeout_ms [topic_data] TAG_BUFFER
     transactional_id => COMPACT_NULLABLE_STRING
@@ -76,7 +61,7 @@ function createRequest (
     }
   }
 
-  return Writer.create()
+  const writer = Writer.create()
     .appendString(options.transactionalId)
     .appendInt16(acks)
     .appendInt32(timeout)
@@ -93,6 +78,12 @@ function createRequest (
       )
     })
     .appendTaggedFields()
+
+  if (acks === ProduceAcks.NO_RESPONSE) {
+    writer.context.noResponse = true
+  }
+
+  return writer
 }
 
 /*
@@ -155,10 +146,10 @@ function parseResponse (_correlationId: number, apiKey: number, apiVersion: numb
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response
 }
 
-export const produceV11 = createAPI<ProduceRequest, ProduceResponse>(0, 11, createRequest, parseResponse)
+export const produceV11 = createAPI<ProduceRequest, ProduceResponse | boolean>(0, 11, createRequest, parseResponse)

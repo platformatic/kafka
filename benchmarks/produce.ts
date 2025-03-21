@@ -1,7 +1,7 @@
 import { cronometro } from 'cronometro'
 import { once } from 'node:events'
 import { produceV11 } from '../src/apis/producer/produce.ts'
-import { Connection } from '../src/connection.ts'
+import { Connection } from '../src/connection/connection.ts'
 
 let connection: Connection
 let kafkajs
@@ -12,7 +12,7 @@ console.log(
       ours: {
         before: async () => {
           connection = new Connection('123')
-          await connection.start('localhost', 9092)
+          await connection.connect('localhost', 9092)
         },
         async test () {
           for (let i = 0; i < 100; i++) {

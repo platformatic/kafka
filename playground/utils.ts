@@ -1,11 +1,24 @@
-import { inspect } from 'node:util'
+import { inspect as nodeInspect } from 'node:util'
 import { type JoinGroupResponse, joinGroupV9 } from '../src/apis/consumer/join-group.ts'
-import { type Connection } from '../src/connection.ts'
-import { ProtocolError, ResponseError } from '../src/errors.ts'
+import { type Connection } from '../src/connection/connection.ts'
+import { type ProtocolError, ResponseError } from '../src/errors.ts'
 import { invokeAPIWithRetry } from '../src/utils.ts'
 
+export function inspect (labelOrValue: string | unknown, value?: unknown) {
+  if (arguments.length === 1) {
+    value = labelOrValue
+    labelOrValue = undefined
+  }
+
+  if (labelOrValue) {
+    console.error(labelOrValue, nodeInspect(value, false, 10))
+  } else {
+    console.error(nodeInspect(value, false, 10))
+  }
+}
+
 export function inspectResponse (label: string, response: unknown): string {
-  return inspect({ label, response }, false, 10)
+  return nodeInspect({ label, response }, false, 10)
 }
 
 export async function performAPICallWithRetry<T> (

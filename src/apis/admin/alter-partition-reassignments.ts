@@ -3,7 +3,7 @@ import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export interface AlterPartitionReassignmentsRequestPartition {
   partitionIndex: number
@@ -108,7 +108,7 @@ function parseResponse (
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

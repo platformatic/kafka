@@ -1,0 +1,6 @@
+export * from './add-offsets-to-txn.ts'
+export * from './add-partitions-to-txn.ts'
+export * from './end-txn.ts'
+export * from './init-producer-id.ts'
+export * from './produce.ts'
+export * from './txn-offset-commit.ts'

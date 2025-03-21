@@ -1,5 +1,4 @@
-import BufferList from 'bl'
-import { UnsupportedError } from '../errors.ts'
+import type BufferList from 'bl'
 import { INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
 import { readUnsignedVarInt, readVarInt } from './varint32.ts'
 import { readUnsignedVarInt64, readVarInt64 } from './varint64.ts'
@@ -300,8 +299,9 @@ export class Reader {
 
   // TODO(ShogunPanda): Tagged fields are not supported yet
   readTaggedFields (): void {
-    if (this.readVarInt() !== 0) {
-      throw new UnsupportedError('Tagged fields are not supported yet')
+    const length = this.readVarInt()
+    if (length > 0) {
+      this.skip(length)
     }
   }
 }

@@ -2,7 +2,7 @@ import BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export interface DescribeLogDirsRequestTopic {
   name: string
@@ -117,7 +117,7 @@ function parseResponse (
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

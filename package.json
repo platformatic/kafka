@@ -1,5 +1,5 @@
 {
-  "name": "kafka",
+  "name": "@platformatic/kafka",
   "version": "0.1.0",
   "description": "Modern and performant client for Apache Kafka",
   "homepage": "https://github.com/platformatic/kafka",
@@ -36,6 +36,18 @@
     "generate:errors": "node --experimental-strip-types scripts/generate-errors.ts",
     "create:api": "node --experimental-strip-types scripts/create-api.ts"
   },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-errors": "^3.0.0",
+    "bl": "^6.1.0",
+    "fastq": "^1.19.1",
+    "mnemonist": "^0.40.3",
+    "semver": "^7.7.1"
+  },
+  "optionalDependencies": {
+    "lz4-napi": "^2.8.0",
+    "snappy": "^7.2.2"
+  },
   "devDependencies": {
     "@types/node": "^22.13.5",
     "concurrently": "^9.1.2",
@@ -51,11 +63,5 @@
   },
   "engines": {
     "node": ">= 22.14.0"
-  },
-  "dependencies": {
-    "bl": "github:ShogunPanda/bl#new-methods",
-    "lz4-napi": "^2.8.0",
-    "semver": "^7.7.1",
-    "snappy": "^7.2.2"
   }
 }

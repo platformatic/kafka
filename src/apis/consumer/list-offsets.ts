@@ -1,16 +1,16 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
-interface ListOffsetsRequestPartition {
+export interface ListOffsetsRequestPartition {
   partitionIndex: number
   currentLeaderEpoch: number
   timestamp: bigint
 }
 
-interface ListOffsetsRequestTopic {
+export interface ListOffsetsRequestTopic {
   name: string
   partitions: ListOffsetsRequestPartition[]
 }
@@ -105,7 +105,7 @@ function parseResponse (
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

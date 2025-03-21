@@ -3,7 +3,7 @@ import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI } from '../index.ts'
+import { createAPI } from '../definitions.ts'
 
 export interface DescribeClientQuotasRequestComponent {
   entityType: string
@@ -93,7 +93,7 @@ function parseResponse (
   }
 
   if (response.errorCode !== 0) {
-    throw new ResponseError(apiKey, apiVersion, { errors: { '': response.errorCode }, response })
+    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode }, response)
   }
 
   return response

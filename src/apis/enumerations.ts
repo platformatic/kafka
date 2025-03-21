@@ -3,6 +3,14 @@
 export const FindCoordinatorKeyTypes = { GROUP: 0, TRANSACTION: 1, SHARE: 2 } as const
 export type FindCoordinatorKeyType = keyof typeof FindCoordinatorKeyTypes
 
+// Producer API
+export const ProduceAcks = {
+  ALL: -1,
+  NO_RESPONSE: 0,
+  LEADER: 1
+} as const
+export type ProduceAck = keyof typeof ProduceAcks
+
 // Consumer API
 // ./consumer/fetch.ts
 export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }

@@ -3,7 +3,7 @@ import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { readRecordsBatch, type KafkaRecordsBatch } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export interface FetchRequestPartition {
   partition: number
@@ -195,7 +195,7 @@ function parseResponse (_correlationId: number, apiKey: number, apiVersion: numb
   }
 
   if (errors.length) {
-    throw new ResponseError(apiKey, apiVersion, { errors: Object.fromEntries(errors), response })
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }
 
   return response

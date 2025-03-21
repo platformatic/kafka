@@ -1,9 +1,9 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI } from '../index.ts'
+import { createAPI } from '../definitions.ts'
 
 /*
 This API might be unsupported from the broker even if it is reported to be available when
@@ -38,7 +38,6 @@ export interface ConsumerGroupHeartbeatResponse {
   assignment: ConsumerGroupHeartbeatResponseAssignment[]
 }
 
-// TODO@PI: Verify if this is needed
 /*
   ConsumerGroupHeartbeat Request (Version: 0) => group_id member_id member_epoch instance_id rack_id rebalance_timeout_ms [subscribed_topic_names] server_assignor [topic_partitions] TAG_BUFFER
     group_id => COMPACT_STRING
@@ -137,7 +136,7 @@ function parseResponse (
   }
 
   if (response.errorCode !== 0) {
-    throw new ResponseError(apiKey, apiVersion, { errors: { '': response.errorCode }, response })
+    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode }, response)
   }
 
   return response

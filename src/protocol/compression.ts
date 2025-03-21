@@ -1,13 +1,15 @@
 import BufferList from 'bl'
-import { compressSync as lz4CompressSync, uncompressSync as lz4DecompressSync } from 'lz4-napi'
+import { createRequire } from 'node:module'
 import zlib from 'node:zlib'
-import { compressSync as snappyCompressSync, uncompressSync as snappyDecompressSync } from 'snappy'
 import { UnsupportedCompressionError } from '../errors.ts'
+
+const require = createRequire(import.meta.url)
 
 // @ts-ignore
 const { zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
 
 export type SyncCompressionPhase = (data: Buffer | BufferList) => Buffer
+export type CompressionOperation = (data: Buffer) => Buffer
 
 // Right now we support sync compressing only since the average time spent on compressing small sizes of
 // data will be smaller than transferring the same data between threads to perform async (de)comporession.
@@ -22,7 +24,36 @@ function ensureBuffer (data: Buffer | BufferList): Buffer {
   return BufferList.isBufferList(data) ? (data as BufferList).slice() : (data as Buffer)
 }
 
-export const compressionsAlgorithms: Record<string, CompressionAlgorithm> = {
+let snappyCompressSync: CompressionOperation | undefined
+let snappyDecompressSync: CompressionOperation | undefined
+let lz4CompressSync: CompressionOperation | undefined
+let lz4DecompressSync: CompressionOperation | undefined
+
+function loadSnappy () {
+  try {
+    const snappy = require('snappy')
+    snappyCompressSync = snappy.compressSync
+    snappyDecompressSync = snappy.uncompressSync
+  } catch (e) {
+    throw new UnsupportedCompressionError(
+      'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
+    )
+  }
+}
+
+function loadLZ4 () {
+  try {
+    const lz4 = require('lz4')
+    lz4CompressSync = lz4.compressSync
+    lz4DecompressSync = lz4.uncompressSync
+  } catch (e) {
+    throw new UnsupportedCompressionError(
+      'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
+    )
+  }
+}
+
+export const compressionsAlgorithms = {
   gzip: {
     compressSync (data: Buffer | BufferList): Buffer {
       return gzipSync(ensureBuffer(data))
@@ -34,19 +65,35 @@ export const compressionsAlgorithms: Record<string, CompressionAlgorithm> = {
   },
   snappy: {
     compressSync (data: Buffer | BufferList): Buffer {
-      return snappyCompressSync(ensureBuffer(data))
+      if (!snappyCompressSync) {
+        loadSnappy()
+      }
+
+      return snappyCompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | BufferList): Buffer {
-      return snappyDecompressSync(ensureBuffer(data)) as Buffer
+      if (!snappyDecompressSync) {
+        loadSnappy()
+      }
+
+      return snappyDecompressSync!(ensureBuffer(data)) as Buffer
     },
     bitmask: 2
   },
   lz4: {
     compressSync (data: Buffer | BufferList): Buffer {
-      return lz4CompressSync(ensureBuffer(data))
+      if (!lz4CompressSync) {
+        loadLZ4()
+      }
+
+      return lz4CompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | BufferList): Buffer {
-      return lz4DecompressSync(ensureBuffer(data))
+      if (!lz4DecompressSync) {
+        loadLZ4()
+      }
+
+      return lz4DecompressSync!(ensureBuffer(data))
     },
     bitmask: 3
   },

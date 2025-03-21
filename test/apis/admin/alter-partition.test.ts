@@ -59,12 +59,59 @@ function directCreateRequest(brokerId: number, brokerEpoch: bigint, topics: Alte
 }
 
 // Skip test with BigInt mixing issue
-test('createRequest simple validation', { skip: 'BigInt mixing issue' }, () => {
-  const { createRequest } = captureApiHandlers(alterPartitionV3)
+test('createRequest via mockConnection', () => {
+  // Instead of directly calling createRequest, we'll pass it through the mockConnection
+  // to avoid BigInt mixing issues
   
-  const brokerId = 42
-  const brokerEpoch = 123456789n
-  const topics = [
+  // Create a mock connection that intercepts the createRequest function
+  const mockConnection = {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+      // Call the createRequest with our parameters, but don't verify its direct output
+      // Instead just make sure the function runs without errors
+      
+      const brokerId = 42
+      const brokerEpoch = 123456789n
+      const topics = [
+        {
+          topicId: '00112233-4455-6677-8899-aabbccddeeff',
+          partitions: [
+            {
+              partitionIndex: 0,
+              leaderEpoch: 3,
+              newIsrWithEpochs: [
+                {
+                  brokerId: 1,
+                  brokerEpoch: 10n
+                }
+              ],
+              leaderRecoveryState: 0,
+              partitionEpoch: 5
+            }
+          ]
+        }
+      ]
+      
+      try {
+        // This should internally call the createRequest function
+        const reqFn = createRequestFn(brokerId, brokerEpoch, topics)
+        
+        // Verify it created something that looks like a Writer
+        deepStrictEqual(typeof reqFn, 'object')
+        deepStrictEqual(typeof reqFn.length, 'number')
+        deepStrictEqual(reqFn.length > 0, true)
+        
+        // Return success
+        return { success: true }
+      } catch (err) {
+        // If there's an error, show what went wrong
+        console.error('Error in createRequest:', err)
+        throw err
+      }
+    }
+  }
+  
+  // Call the API with our mock connection
+  const result = alterPartitionV3(mockConnection as any, 42, 123456789n, [
     {
       topicId: '00112233-4455-6677-8899-aabbccddeeff',
       partitions: [
@@ -82,13 +129,10 @@ test('createRequest simple validation', { skip: 'BigInt mixing issue' }, () => {
         }
       ]
     }
-  ]
+  ])
   
-  // Create a request using the function
-  const writer = createRequest(brokerId, brokerEpoch, topics) as Writer
-  
-  // Verify the writer has length
-  deepStrictEqual(writer.length > 0, true)
+  // Verify the result
+  deepStrictEqual(result, { success: true })
 })
 
 test('direct createRequest structure validation', () => {

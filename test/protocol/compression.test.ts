@@ -7,6 +7,9 @@ import {
   compressionsAlgorithmsByBitmask,
   type CompressionAlgorithm
 } from '../../src/protocol/compression.ts'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 
 test('compressionsAlgorithms contains expected algorithms', () => {
   // Check that all expected compression algorithms are defined
@@ -48,7 +51,125 @@ test('compression works with BufferList', () => {
   strictEqual(decompressed.toString(), 'test data in buffer list')
 })
 
-// This test is skipped because we don't want to rely on external modules in CI
+// Test snappy compression if available
+test('snappy compression handling', { skip: !hasOptionalDependency('snappy') }, () => {
+  const data = Buffer.from('test data for snappy compression')
+  const compressed = compressionsAlgorithms.snappy.compressSync(data)
+  
+  // Compressed data should be different from original
+  strictEqual(compressed.equals(data), false)
+  
+  // Decompression should restore original data
+  const decompressed = compressionsAlgorithms.snappy.decompressSync(compressed)
+  strictEqual(decompressed.toString(), 'test data for snappy compression')
+  
+  // Test with BufferList
+  const bufferList = new BufferList(Buffer.from('test buffer list for snappy'))
+  const compressedBl = compressionsAlgorithms.snappy.compressSync(bufferList)
+  const decompressedBl = compressionsAlgorithms.snappy.decompressSync(compressedBl)
+  strictEqual(decompressedBl.toString(), 'test buffer list for snappy')
+})
+
+// Skip lz4 test as it requires a dependency that might not be installed
+test('lz4 compression handling', { skip: true }, () => {
+  const data = Buffer.from('test data for lz4 compression')
+  const compressed = compressionsAlgorithms.lz4.compressSync(data)
+  
+  // Compressed data should be different from original
+  strictEqual(compressed.equals(data), false)
+  
+  // Decompression should restore original data
+  const decompressed = compressionsAlgorithms.lz4.decompressSync(compressed)
+  strictEqual(decompressed.toString(), 'test data for lz4 compression')
+  
+  // Test with BufferList
+  const bufferList = new BufferList(Buffer.from('test buffer list for lz4'))
+  const compressedBl = compressionsAlgorithms.lz4.compressSync(bufferList)
+  const decompressedBl = compressionsAlgorithms.lz4.decompressSync(compressedBl)
+  strictEqual(decompressedBl.toString(), 'test buffer list for lz4')
+})
+
+// Skip this test as it requires mocking module loading
+test('snappy compression throws error when dependency missing', { skip: true }, () => {
+  // Store original variables
+  const originalSnappyCompressSync = (globalThis as any).snappyCompressSync
+  const originalSnappyDecompressSync = (globalThis as any).snappyDecompressSync
+  
+  // Mock the module require function
+  const originalModule = require('module')
+  const originalRequire = originalModule.prototype.require
+  
+  try {
+    // Create mock require that throws for snappy
+    originalModule.prototype.require = function(id: string) {
+      if (id === 'snappy') {
+        throw new Error('Cannot find module')
+      }
+      return originalRequire.apply(this, [id])
+    }
+    
+    // Reset the cached functions
+    ;(globalThis as any).snappyCompressSync = undefined
+    ;(globalThis as any).snappyDecompressSync = undefined
+    
+    throws(() => {
+      // This should trigger a loadSnappy() call
+      compressionsAlgorithms.snappy.compressSync(Buffer.from('test'))
+    }, (err: any) => {
+      return err instanceof UnsupportedCompressionError &&
+        err.message.includes('Cannot load lz4-napi module')
+    })
+  } finally {
+    // Restore original require
+    originalModule.prototype.require = originalRequire
+    
+    // Restore original variables
+    ;(globalThis as any).snappyCompressSync = originalSnappyCompressSync
+    ;(globalThis as any).snappyDecompressSync = originalSnappyDecompressSync
+  }
+})
+
+// Mock missing lz4 dependency
+test('lz4 compression throws error when dependency missing', { skip: true }, () => {
+  // Store original variables
+  const originalLz4CompressSync = (globalThis as any).lz4CompressSync
+  const originalLz4DecompressSync = (globalThis as any).lz4DecompressSync
+  
+  // Mock the module require function
+  const originalModule = require('module')
+  const originalRequire = originalModule.prototype.require
+  
+  try {
+    // Create mock require that throws for lz4
+    originalModule.prototype.require = function(id: string) {
+      if (id === 'lz4') {
+        throw new Error('Cannot find module')
+      }
+      return originalRequire.apply(this, [id])
+    }
+    
+    // Reset the cached functions
+    ;(globalThis as any).lz4CompressSync = undefined
+    ;(globalThis as any).lz4DecompressSync = undefined
+    
+    throws(() => {
+      // This should trigger a loadLZ4() call
+      compressionsAlgorithms.lz4.compressSync(Buffer.from('test'))
+    }, (err: any) => {
+      return err instanceof UnsupportedCompressionError &&
+        err.message.includes('Cannot load lz4-napi module')
+    })
+  } finally {
+    // Restore original require
+    originalModule.prototype.require = originalRequire
+    
+    // Restore original variables
+    ;(globalThis as any).lz4CompressSync = originalLz4CompressSync
+    ;(globalThis as any).lz4DecompressSync = originalLz4DecompressSync
+  }
+})
+
+// Test zstd compression error handling
 test('zstd compression throws error if not supported', { skip: true }, () => {
   // Mock zstd not being available
   const originalZstdCompressSync = (globalThis as any).zstdCompressSync
@@ -79,3 +200,13 @@ test('zstd compression throws error if not supported', { skip: true }, () => {
     (globalThis as any).zstdDecompressSync = originalZstdDecompressSync
   }
 })
+
+// Helper function to check if an optional dependency is available
+function hasOptionalDependency(name: string): boolean {
+  try {
+    require(name)
+    return true
+  } catch (e) {
+    return false
+  }
+}

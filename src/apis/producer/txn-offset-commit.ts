@@ -17,7 +17,16 @@ export interface TxnOffsetCommitRequestTopic {
   partitions: TxnOffsetCommitRequestPartition[]
 }
 
-export type TxnOffsetCommitRequest = Parameters<typeof createRequest>
+export interface TxnOffsetCommitRequest {
+  transactionalId: string
+  groupId: string
+  producerId: bigint
+  producerEpoch: number
+  generationId: number
+  memberId: string
+  groupInstanceId: NullableString
+  topics: TxnOffsetCommitRequestTopic[]
+}
 
 export interface TxnOffsetCommitResponsePartition {
   partitionIndex: number
@@ -51,32 +60,25 @@ export interface TxnOffsetCommitResponse {
         committed_leader_epoch => INT32
         committed_metadata => COMPACT_NULLABLE_STRING
 */
-function createRequest (
-  transactionalId: string,
-  groupId: string,
-  producerId: bigint,
-  producerEpoch: number,
-  generationId: number,
-  memberId: string,
-  groupInstanceId: NullableString,
-  topics: TxnOffsetCommitRequestTopic[]
-): Writer {
+function createRequest (request: TxnOffsetCommitRequest): Writer {
   return Writer.create()
-    .appendString(transactionalId)
-    .appendString(groupId)
-    .appendInt64(producerId)
-    .appendInt16(producerEpoch)
-    .appendInt32(generationId)
-    .appendString(memberId)
-    .appendString(groupInstanceId)
-    .appendArray(topics, (w, t) => {
-      w.appendString(t.name).appendArray(t.partitions, (w, p) => {
+    .appendString(request.transactionalId, true)
+    .appendString(request.groupId, true)
+    .appendInt64(request.producerId)
+    .appendInt16(request.producerEpoch)
+    .appendInt32(request.generationId)
+    .appendString(request.memberId, true)
+    .appendString(request.groupInstanceId, true)
+    .appendArray(request.topics, (w, t) => {
+      w.appendString(t.name, true).appendArray(t.partitions, (w, p) => {
         w.appendInt32(p.partitionIndex)
           .appendInt64(p.committedOffset)
           .appendInt32(p.committedLeaderEpoch)
-          .appendString(p.committedMetadata)
-      })
-    })
+          .appendString(p.committedMetadata, true)
+          .appendTaggedFields() // Add tagged fields for partitions
+      }, true, true)
+      .appendTaggedFields() // Add tagged fields for topics
+    }, true, true)
     .appendTaggedFields()
 }
 

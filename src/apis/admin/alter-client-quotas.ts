@@ -51,7 +51,7 @@ export interface AlterClientQuotasResponse {
         remove => BOOLEAN
     validate_only => BOOLEAN
 */
-function createRequest (entries: AlterClientQuotasRequestEntry[], validateOnly: boolean): Writer {
+export function createRequest (entries: AlterClientQuotasRequestEntry[], validateOnly: boolean): Writer {
   return Writer.create()
     .appendArray(entries, (w, e) => {
       w.appendArray(e.entities, (w, e) => {
@@ -74,7 +74,7 @@ function createRequest (entries: AlterClientQuotasRequestEntry[], validateOnly: 
         entity_type => COMPACT_STRING
         entity_name => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

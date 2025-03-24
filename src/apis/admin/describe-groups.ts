@@ -36,7 +36,7 @@ export interface DescribeGroupsResponse {
     groups => COMPACT_STRING
     include_authorized_operations => BOOLEAN
 */
-function createRequest (groups: string[], includeAuthorizedOperations: boolean): Writer {
+export function createRequest (groups: string[], includeAuthorizedOperations: boolean): Writer {
   return Writer.create()
     .appendArray(groups, (w, g) => w.appendString(g), true, false)
     .appendBoolean(includeAuthorizedOperations)
@@ -61,7 +61,7 @@ DescribeGroups Response (Version: 5) => throttle_time_ms [groups] TAG_BUFFER
       member_assignment => COMPACT_BYTES
     authorized_operations => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

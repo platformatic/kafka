@@ -45,7 +45,7 @@ export interface ListOffsetsResponse {
         current_leader_epoch => INT32
         timestamp => INT64
 */
-function createRequest (replica: number, isolationLevel: number, topics: ListOffsetsRequestTopic[]): Writer {
+export function createRequest (replica: number, isolationLevel: number, topics: ListOffsetsRequestTopic[]): Writer {
   return Writer.create()
     .appendInt32(replica)
     .appendInt8(isolationLevel)
@@ -71,7 +71,7 @@ function createRequest (replica: number, isolationLevel: number, topics: ListOff
         offset => INT64
         leader_epoch => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

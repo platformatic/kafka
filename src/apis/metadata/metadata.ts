@@ -49,7 +49,7 @@ export interface MetadataResponse {
     allow_auto_topic_creation => BOOLEAN
     include_topic_authorized_operations => BOOLEAN
 */
-function createRequest (
+export function createRequest (
   topics: string[] | null,
   allowAutoTopicCreation: boolean = false,
   includeTopicAuthorizedOperations: boolean = false
@@ -86,7 +86,7 @@ function createRequest (
         offline_replicas => INT32
       topic_authorized_operations => INT32
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): MetadataResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): MetadataResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 

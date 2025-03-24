@@ -43,7 +43,7 @@ export interface JoinGroupResponse {
       metadata => COMPACT_BYTES
     reason => COMPACT_NULLABLE_STRING
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   sessionTimeoutMs: number,
   rebalanceTimeoutMs: number,
@@ -83,7 +83,7 @@ JoinGroup Response (Version: 9) => throttle_time_ms error_code generation_id pro
     metadata => COMPACT_BYTES
 
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): JoinGroupResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): JoinGroupResponse {
   const reader = Reader.from(raw)
 
   const response: JoinGroupResponse = {

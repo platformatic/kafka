@@ -37,7 +37,7 @@ export interface DescribeAclsResponse {
     operation => INT8
     permission_type => INT8
 */
-function createRequest (
+export function createRequest (
   resourceTypeFilter: number,
   resourceNameFilter: NullableString,
   patternTypeFilter: number,
@@ -72,7 +72,7 @@ DescribeAcls Response (Version: 3) => throttle_time_ms error_code error_message 
       operation => INT8
       permission_type => INT8
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

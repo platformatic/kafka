@@ -42,7 +42,7 @@ export interface IncrementalAlterConfigsResponse {
         value => COMPACT_NULLABLE_STRING
     validate_only => BOOLEAN
 */
-function createRequest (resources: IncrementalAlterConfigsRequestResource[], validateOnly: boolean): Writer {
+export function createRequest (resources: IncrementalAlterConfigsRequestResource[], validateOnly: boolean): Writer {
   return Writer.create()
     .appendArray(resources, (w, r) => {
       w.appendInt8(r.resourceType)
@@ -64,7 +64,7 @@ function createRequest (resources: IncrementalAlterConfigsRequestResource[], val
       resource_type => INT8
       resource_name => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

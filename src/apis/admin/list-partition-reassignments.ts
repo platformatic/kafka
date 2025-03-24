@@ -38,7 +38,7 @@ export interface ListPartitionReassignmentsResponse {
       name => COMPACT_STRING
       partition_indexes => INT32
 */
-function createRequest (timeoutMs: number, topics: ListPartitionReassignmentsRequestTopic[]): Writer {
+export function createRequest (timeoutMs: number, topics: ListPartitionReassignmentsRequestTopic[]): Writer {
   return Writer.create()
     .appendInt32(timeoutMs)
     .appendArray(topics, (w, t) => {
@@ -60,7 +60,7 @@ function createRequest (timeoutMs: number, topics: ListPartitionReassignmentsReq
         adding_replicas => INT32
         removing_replicas => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

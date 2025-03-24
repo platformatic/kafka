@@ -19,7 +19,7 @@ export interface ListClientMetricsResourcesResponse {
 /*
   ListClientMetricsResources Request (Version: 0) => TAG_BUFFER
 */
-function createRequest (): Writer {
+export function createRequest (): Writer {
   return Writer.create().appendTaggedFields()
 }
 
@@ -30,7 +30,7 @@ ListClientMetricsResources Response (Version: 0) => throttle_time_ms error_code 
   client_metrics_resources => name TAG_BUFFER
     name => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

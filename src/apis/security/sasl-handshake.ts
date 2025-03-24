@@ -15,7 +15,7 @@ export interface SaslHandshakeResponse {
   SaslHandshake Request (Version: 0) => mechanism
     mechanism => STRING
 */
-function createRequest (mechanism: string): Writer {
+export function createRequest (mechanism: string): Writer {
   return Writer.create().appendString(mechanism, false)
 }
 
@@ -24,7 +24,7 @@ function createRequest (mechanism: string): Writer {
     error_code => INT16
     mechanisms => STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

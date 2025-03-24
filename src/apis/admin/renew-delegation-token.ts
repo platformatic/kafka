@@ -17,7 +17,7 @@ export interface RenewDelegationTokenResponse {
     hmac => COMPACT_BYTES
     renew_period_ms => INT64
 */
-function createRequest (hmac: Buffer, renewPeriodMs: bigint): Writer {
+export function createRequest (hmac: Buffer, renewPeriodMs: bigint): Writer {
   return Writer.create().appendBytes(hmac).appendInt64(renewPeriodMs).appendTaggedFields()
 }
 
@@ -27,7 +27,7 @@ function createRequest (hmac: Buffer, renewPeriodMs: bigint): Writer {
     expiry_timestamp_ms => INT64
     throttle_time_ms => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -25,7 +25,7 @@ export interface ListGroupsResponse {
     states_filter => COMPACT_STRING
     types_filter => COMPACT_STRING
 */
-function createRequest (statesFilter: ConsumerGroupState[], typesFilter: string[]): Writer {
+export function createRequest (statesFilter: ConsumerGroupState[], typesFilter: string[]): Writer {
   return Writer.create()
     .appendArray(statesFilter, (w, s) => w.appendString(s as string), true, false)
     .appendArray(typesFilter, (w, t) => w.appendString(t), true, false)
@@ -42,7 +42,7 @@ function createRequest (statesFilter: ConsumerGroupState[], typesFilter: string[
       group_state => COMPACT_STRING
       group_type => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

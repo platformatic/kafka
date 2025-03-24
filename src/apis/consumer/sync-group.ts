@@ -32,7 +32,7 @@ export interface SyncGroupResponse {
       assignment => COMPACT_BYTES
 
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   generationId: number,
   memberId: string,
@@ -60,7 +60,7 @@ function createRequest (
     protocol_name => COMPACT_NULLABLE_STRING
     assignment => COMPACT_BYTES
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): SyncGroupResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): SyncGroupResponse {
   const reader = Reader.from(raw)
 
   const response: SyncGroupResponse = {

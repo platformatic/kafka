@@ -51,7 +51,7 @@ export interface AddPartitionsToTxnResponse {
         name => COMPACT_STRING
         partitions => INT32
 */
-function createRequest (transactions: AddPartitionsToTxnRequestTransaction[]): Writer {
+export function createRequest (transactions: AddPartitionsToTxnRequestTransaction[]): Writer {
   return Writer.create()
     .appendArray(transactions, (w, transaction) => {
       w.appendString(transaction.transactionalId)
@@ -82,7 +82,7 @@ function createRequest (transactions: AddPartitionsToTxnRequestTransaction[]): W
           partition_index => INT32
           partition_error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

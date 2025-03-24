@@ -54,7 +54,7 @@ export interface OffsetFetchResponse {
         partition_indexes => INT32
     require_stable => BOOLEAN
 */
-function createRequest (groups: OffsetFetchRequestGroup[], requireStable: boolean): Writer {
+export function createRequest (groups: OffsetFetchRequestGroup[], requireStable: boolean): Writer {
   return Writer.create()
     .appendArray(groups, (w, g) => {
       w.appendString(g.groupId)
@@ -83,7 +83,7 @@ function createRequest (groups: OffsetFetchRequestGroup[], requireStable: boolea
           error_code => INT16
       error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

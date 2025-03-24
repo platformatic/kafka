@@ -39,7 +39,7 @@ export interface OffsetDeleteResponse {
       partitions => partition_index
         partition_index => INT32
 */
-function createRequest (groupId: string, topics: OffsetDeleteRequestTopic[]): Writer {
+export function createRequest (groupId: string, topics: OffsetDeleteRequestTopic[]): Writer {
   return Writer.create()
     .appendString(groupId, false)
     .appendArray(
@@ -62,7 +62,7 @@ function createRequest (groupId: string, topics: OffsetDeleteRequestTopic[]): Wr
         partition_index => INT32
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

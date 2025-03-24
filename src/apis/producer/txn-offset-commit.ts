@@ -60,7 +60,7 @@ export interface TxnOffsetCommitResponse {
         committed_leader_epoch => INT32
         committed_metadata => COMPACT_NULLABLE_STRING
 */
-function createRequest (request: TxnOffsetCommitRequest): Writer {
+export function createRequest (request: TxnOffsetCommitRequest): Writer {
   return Writer.create()
     .appendString(request.transactionalId, true)
     .appendString(request.groupId, true)
@@ -91,7 +91,7 @@ function createRequest (request: TxnOffsetCommitRequest): Writer {
         partition_index => INT32
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

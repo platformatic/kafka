@@ -35,7 +35,7 @@ export interface UpdateFeaturesResponse {
       upgrade_type => INT8
     validate_only => BOOLEAN
 */
-function createRequest (
+export function createRequest (
   timeoutMs: number,
   featureUpdates: UpdateFeaturesRequestFeature[],
   validateOnly: boolean
@@ -59,7 +59,7 @@ function createRequest (
       error_code => INT16
       error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

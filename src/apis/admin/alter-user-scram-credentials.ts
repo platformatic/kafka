@@ -43,7 +43,7 @@ export interface AlterUserScramCredentialsResponse {
       salt => COMPACT_BYTES
       salted_password => COMPACT_BYTES
 */
-function createRequest (
+export function createRequest (
   deletions: AlterUserScramCredentialsRequestDeletions[],
   upsertions: AlterUserScramCredentialsRequestUpsertions[]
 ): Writer {
@@ -70,7 +70,7 @@ function createRequest (
       error_code => INT16
       error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -17,7 +17,7 @@ export interface UnregisterBrokerResponse {
 UnregisterBroker Request (Version: 0) => broker_id TAG_BUFFER
   broker_id => INT32
 */
-function createRequest (brokerId: number): Writer {
+export function createRequest (brokerId: number): Writer {
   return Writer.create().appendInt32(brokerId).appendTaggedFields()
 }
 
@@ -27,7 +27,7 @@ function createRequest (brokerId: number): Writer {
     error_code => INT16
     error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

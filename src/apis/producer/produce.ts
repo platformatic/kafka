@@ -43,7 +43,7 @@ export interface ProduceResponse {
         index => INT32
         records => COMPACT_RECORDS
 */
-function createRequest (
+export function createRequest (
   acks: number = 1,
   timeout: number = 0,
   topicData: Message[],
@@ -102,7 +102,7 @@ function createRequest (
         error_message => COMPACT_NULLABLE_STRING
     throttle_time_ms => INT32
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): ProduceResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): ProduceResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 

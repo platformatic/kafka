@@ -76,7 +76,7 @@ export type FetchResponse = {
     partitions => INT32
   rack_id => COMPACT_STRING
 */
-function createRequest (
+export function createRequest (
   maxWaitMs: number,
   minBytes: number,
   maxBytes: number,
@@ -137,7 +137,7 @@ function createRequest (
         preferred_read_replica => INT32
         records => COMPACT_RECORDS
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): FetchResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): FetchResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 

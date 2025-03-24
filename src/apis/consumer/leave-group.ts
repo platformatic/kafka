@@ -33,7 +33,7 @@ export interface LeaveGroupResponse {
       group_instance_id => COMPACT_NULLABLE_STRING
       reason => COMPACT_NULLABLE_STRING
 */
-function createRequest (groupId: string, members: LeaveGroupRequestMember[]): Writer {
+export function createRequest (groupId: string, members: LeaveGroupRequestMember[]): Writer {
   return Writer.create()
     .appendString(groupId)
     .appendArray(members, (w, m) => {
@@ -52,7 +52,7 @@ function createRequest (groupId: string, members: LeaveGroupRequestMember[]): Wr
       error_code => INT16
 
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

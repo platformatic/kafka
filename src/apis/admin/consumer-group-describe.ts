@@ -51,7 +51,7 @@ ConsumerGroupDescribe Request (Version: 0) => [group_ids] include_authorized_ope
   group_ids => COMPACT_STRING
   include_authorized_operations => BOOLEAN
 */
-function createRequest (groupIds: string[], includeAuthorizedOperations: boolean): Writer {
+export function createRequest (groupIds: string[], includeAuthorizedOperations: boolean): Writer {
   return Writer.create()
     .appendArray(groupIds, (w, r) => w.appendString(r), true, false)
     .appendBoolean(includeAuthorizedOperations)
@@ -90,7 +90,7 @@ function createRequest (groupIds: string[], includeAuthorizedOperations: boolean
             partitions => INT32
       authorized_operations => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

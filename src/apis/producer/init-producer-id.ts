@@ -35,7 +35,7 @@ export interface InitProducerIdResponse {
     producer_id => INT64
     producer_epoch => INT16
 */
-function createRequest (request: InitProducerIdRequest): Writer {
+export function createRequest (request: InitProducerIdRequest): Writer {
   return Writer.create()
     .appendString(request.transactionalId, true)
     .appendInt32(request.transactionTimeoutMs)
@@ -51,7 +51,7 @@ function createRequest (request: InitProducerIdRequest): Writer {
     producer_id => INT64
     producer_epoch => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -35,7 +35,7 @@ export interface DescribeUserScramCredentialsResponse {
     users => name TAG_BUFFER
       name => COMPACT_STRING
 */
-function createRequest (users: DescribeUserScramCredentialsRequestUser[]): Writer {
+export function createRequest (users: DescribeUserScramCredentialsRequestUser[]): Writer {
   return Writer.create()
     .appendArray(users, (w, u) => w.appendString(u.name))
     .appendTaggedFields()
@@ -54,7 +54,7 @@ function createRequest (users: DescribeUserScramCredentialsRequestUser[]): Write
         mechanism => INT8
         iterations => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

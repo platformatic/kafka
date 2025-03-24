@@ -23,7 +23,7 @@ export interface AddOffsetsToTxnResponse {
     producer_epoch => INT16
     group_id => COMPACT_STRING
 */
-function createRequest (request: AddOffsetsToTxnRequest): Writer {
+export function createRequest (request: AddOffsetsToTxnRequest): Writer {
   return Writer.create()
     .appendString(request.transactionalId, true)
     .appendInt64(request.producerId)
@@ -37,7 +37,7 @@ function createRequest (request: AddOffsetsToTxnRequest): Writer {
     throttle_time_ms => INT32
     error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

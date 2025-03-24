@@ -23,7 +23,7 @@ export interface EndTxnResponse {
     producer_epoch => INT16
     committed => BOOLEAN
 */
-function createRequest (request: EndTxnRequest): Writer {
+export function createRequest (request: EndTxnRequest): Writer {
   return Writer.create()
     .appendString(request.transactionalId, true)
     .appendInt64(request.producerId)
@@ -37,7 +37,7 @@ function createRequest (request: EndTxnRequest): Writer {
     throttle_time_ms => INT32
     error_code => INT16
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): EndTxnResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): EndTxnResponse {
   const reader = Reader.from(raw)
 
   const response = {

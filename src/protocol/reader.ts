@@ -237,7 +237,7 @@ export class Reader {
 
       length--
     } else {
-      length = this.readUnsignedInt32()
+      length = this.readInt32()
 
       if (length === -1) {
         return null
@@ -270,7 +270,7 @@ export class Reader {
 
       length--
     } else {
-      length = this.readUnsignedInt32()
+      length = this.readInt32()
 
       if (length === -1) {
         return null

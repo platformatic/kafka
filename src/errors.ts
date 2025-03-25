@@ -1,3 +1,4 @@
+import { type JoinGroupResponse } from './apis/consumer/join-group.ts'
 import { protocolAPIsById } from './protocol/apis.ts'
 import { protocolErrors, protocolErrorsCodesById } from './protocol/errors.ts'
 
@@ -52,12 +53,12 @@ export class GenericError extends Error {
     Reflect.defineProperty(this, kGenericError, { value: true, enumerable: false })
   }
 
-  hasAny (property: string, value: unknown): boolean {
+  findBy<ErrorType extends GenericError = GenericError>(property: string, value: unknown): ErrorType | null {
     if (this[property] === value) {
-      return true
+      return this as unknown as ErrorType
     }
 
-    return false
+    return null
   }
 }
 
@@ -67,6 +68,8 @@ export class MultipleErrors extends AggregateError {
   [kGenericError]: true;
   [kMultipleErrors]: true
 
+  static code: ErrorCode = 'PLT_KFK_MULTIPLE'
+
   static isGenericError (error: Error): boolean {
     return (error as GenericError)[kGenericError] === true
   }
@@ -75,14 +78,9 @@ export class MultipleErrors extends AggregateError {
     return (error as MultipleErrors)[kMultipleErrors] === true
   }
 
-  constructor (
-    message: string,
-    errors: Error[],
-    { cause, ...rest }: ErrorProperties = {},
-    code: ErrorCode = 'PLT_KFK_MULTIPLE'
-  ) {
+  constructor (message: string, errors: Error[], { cause, ...rest }: ErrorProperties = {}) {
     super(errors, message, cause ? { cause } : {})
-    this.code = code
+    this.code = MultipleErrors.code
     this[kGenericError] = true
     this[kMultipleErrors] = true
 
@@ -101,24 +99,21 @@ export class MultipleErrors extends AggregateError {
     Reflect.defineProperty(this, kMultipleErrors, { value: true, enumerable: false })
   }
 
-  hasAny (property: string, value: unknown): boolean {
+  findBy<ErrorType extends GenericError | MultipleErrors = MultipleErrors>(
+    property: string,
+    value: unknown
+  ): ErrorType | null {
     if (this[property] === value) {
-      return true
+      return this as unknown as ErrorType
     }
 
     for (const error of this.errors) {
-      if (error[property] === value) {
-        return true
-      }
-
-      if (error[kMultipleErrors]) {
-        if (error.hasAny(property, value)) {
-          return true
-        }
+      if (error[kGenericError] ? error.findBy(property, value) : error[property] === value) {
+        return error as unknown as ErrorType
       }
     }
 
-    return false
+    return null
   }
 }
 
@@ -141,7 +136,7 @@ export class NetworkError extends GenericError {
 }
 
 export class ProtocolError extends GenericError {
-  constructor (codeOrId: string | number, properties: ErrorProperties = {}) {
+  constructor (codeOrId: string | number, properties: ErrorProperties = {}, response: unknown = undefined) {
     const { id, code, message, canRetry } =
       protocolErrors[typeof codeOrId === 'number' ? protocolErrorsCodesById[codeOrId] : codeOrId]
 
@@ -150,6 +145,10 @@ export class ProtocolError extends GenericError {
       apiCode: code,
       canRetry,
       hasStaleMetadata: ['UNKNOWN_TOPIC_OR_PARTITION', 'LEADER_NOT_AVAILABLE', 'NOT_LEADER_OR_FOLLOWER'].includes(id),
+      needsRejoin: ['MEMBER_ID_REQUIRED', 'UNKNOWN_MEMBER_ID', 'REBALANCE_IN_PROGRESS'].includes(id),
+      rebalanceInProgress: id === 'REBALANCE_IN_PROGRESS',
+      unknownMemberId: id === 'UNKNOWN_MEMBER_ID',
+      memberId: (response as JoinGroupResponse)?.memberId as string | undefined,
       ...properties
     })
   }
@@ -167,12 +166,14 @@ export class ResponseError extends MultipleErrors {
   ) {
     super(
       `Received response with error while executing API ${protocolAPIsById[apiName]}(v${apiVersion})`,
-      Object.entries(errors).map(([path, errorCode]) => new ProtocolError(errorCode as number, { path })),
+      Object.entries(errors).map(([path, errorCode]) => new ProtocolError(errorCode as number, { path }, response)),
       {
         ...properties,
         response
       }
     )
+
+    this.code = ResponseError.code
   }
 }
 

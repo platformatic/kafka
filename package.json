@@ -42,6 +42,8 @@
     "bl": "^6.1.0",
     "fastq": "^1.19.1",
     "mnemonist": "^0.40.3",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
     "semver": "^7.7.1"
   },
   "optionalDependencies": {
@@ -64,5 +66,6 @@
   },
   "engines": {
     "node": ">= 22.14.0"
-  }
+  },
+  "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
 }

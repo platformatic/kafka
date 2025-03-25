@@ -1,5 +1,6 @@
 import BufferList from 'bl'
 import { UnsupportedCompressionError } from '../errors.ts'
+import { type NumericMap } from '../utils.ts'
 import {
   type CompressionAlgorithm,
   type CompressionAlgorithms,
@@ -15,15 +16,25 @@ const CURRENT_RECORD_VERSION = 2
 const IS_TRANSACTIONAL = 0b10000 // Bit 4 set
 const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
 
-export interface Message {
-  key: string | Buffer
-  value: string | Buffer
-  headers?: Record<string, string | Buffer>
+export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> {
+  key?: Key
+  value?: Value
+  headers?: Map<HeaderKey, HeaderValue>
   topic: string
   partition?: number
   timestamp?: bigint
+  // These are only populated and used in responses
+  offset?: bigint
+  commit?(callback?: (error?: Error) => void): void | Promise<void>
+}
 
-  // Runtime properties
+export interface MessageRecord {
+  key?: Buffer
+  value: Buffer
+  headers?: Map<Buffer, Buffer>
+  topic: string
+  partition?: number
+  timestamp?: bigint
 }
 
 export interface CreateRecordsBatchOptions {
@@ -31,9 +42,10 @@ export interface CreateRecordsBatchOptions {
   compression: CompressionAlgorithms
 
   // Idempotency support
+  firstSequence?: number
   producerId: bigint
   producerEpoch: number
-  sequences: Record<string, number>
+  sequences: NumericMap
 
   // Unused at the moment
   partitionLeaderEpoch: number
@@ -80,7 +92,7 @@ export interface KafkaRecord {
       FirstSequence => INT32
       Records => [Record]
 */
-export interface KafkaRecordsBatch {
+export interface RecordsBatch {
   firstOffset: bigint
   length: number
   partitionLeaderEpoch: number
@@ -96,14 +108,34 @@ export interface KafkaRecordsBatch {
   records: KafkaRecord[]
 }
 
-export function createRecord (message: Message, offsetDelta: number, firstTimestamp: bigint): BufferList {
+export const messageSchema = {
+  type: 'object',
+  properties: {
+    key: {
+      oneOf: [{ type: 'string' }, { buffer: true }]
+    },
+    value: {
+      oneOf: [{ type: 'string' }, { buffer: true }]
+    },
+    headers: {
+      map: true
+    },
+    topic: { type: 'string' },
+    partition: { type: 'integer' },
+    timestamp: { bigint: true }
+  },
+  required: ['value', 'topic'],
+  additionalProperties: true
+}
+
+export function createRecord (message: MessageRecord, offsetDelta: number, firstTimestamp: bigint): BufferList {
   return Writer.create()
     .appendInt8(0) // Attributes are unused for now
     .appendVarInt64((message.timestamp ?? BigInt(Date.now())) - firstTimestamp)
     .appendVarInt(offsetDelta)
     .appendVarIntBytes(message.key)
     .appendVarIntBytes(message.value)
-    .appendVarIntArray(Object.entries(message.headers ?? {}), (w, [key, value]) => {
+    .appendVarIntMap(message.headers, (w, [key, value]) => {
       w.appendVarIntBytes(key).appendVarIntBytes(value)
     })
     .prependVarIntLength().bufferList
@@ -117,11 +149,14 @@ export function readRecord (reader: Reader): KafkaRecord {
     offsetDelta: reader.readVarInt(),
     key: reader.readVarIntBytes(),
     value: reader.readVarIntBytes(),
-    headers: Object.fromEntries(reader.readVarIntArray(r => [r.readVarIntBytes(), r.readVarIntBytes()]))
+    headers: reader.readVarIntArray(r => [r.readVarIntBytes(), r.readVarIntBytes()])
   }
 }
 
-export function createRecordsBatch (messages: Message[], options: Partial<CreateRecordsBatchOptions> = {}): BufferList {
+export function createRecordsBatch (
+  messages: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions> = {}
+): BufferList {
   const now = BigInt(Date.now())
   const timestamps = []
 
@@ -146,7 +181,7 @@ export function createRecordsBatch (messages: Message[], options: Partial<Create
 
   if (options.sequences) {
     const firstMessage = messages[0]
-    firstSequence = options.sequences[`${firstMessage.topic}:${firstMessage.partition}`] ?? 0
+    firstSequence = options.sequences.getWithDefault(`${firstMessage.topic}:${firstMessage.partition}`, 0)
   }
 
   // Set the transaction
@@ -195,7 +230,7 @@ export function createRecordsBatch (messages: Message[], options: Partial<Create
   )
 }
 
-export function readRecordsBatch (reader: Reader): KafkaRecordsBatch {
+export function readRecordsBatch (reader: Reader): RecordsBatch {
   const batch = {
     firstOffset: reader.readInt64(),
     length: reader.readInt32(),
@@ -222,7 +257,10 @@ export function readRecordsBatch (reader: Reader): KafkaRecordsBatch {
       throw new UnsupportedCompressionError(`Unsupported compression algorithm with bitmask ${compression}`)
     }
 
-    const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.position + length - INT64_SIZE))
+    const buffer = algorithm.decompressSync(
+      reader.buffer.slice(reader.position, reader.position + batch.length - INT64_SIZE)
+    )
+
     reader = new Reader(new BufferList(buffer))
   }
 

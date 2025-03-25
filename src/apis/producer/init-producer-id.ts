@@ -1,16 +1,11 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export interface InitProducerIdRequest {
-  transactionalId: NullableString
-  transactionTimeoutMs: number
-  producerId: bigint
-  producerEpoch: number
-}
+export type InitProducerIdRequest = Parameters<typeof createRequest>
 
 export interface InitProducerIdResponseCoordinator {
   key: string
@@ -35,12 +30,17 @@ export interface InitProducerIdResponse {
     producer_id => INT64
     producer_epoch => INT16
 */
-export function createRequest (request: InitProducerIdRequest): Writer {
+export function createRequest (
+  transactionalId: NullableString,
+  transactionTimeoutMs: number,
+  producerId: bigint,
+  producerEpoch: number
+): Writer {
   return Writer.create()
-    .appendString(request.transactionalId, true)
-    .appendInt32(request.transactionTimeoutMs)
-    .appendInt64(request.producerId)
-    .appendInt16(request.producerEpoch)
+    .appendString(transactionalId, true)
+    .appendInt32(transactionTimeoutMs)
+    .appendInt64(producerId)
+    .appendInt16(producerEpoch)
     .appendTaggedFields()
 }
 

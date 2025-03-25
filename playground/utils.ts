@@ -1,33 +1,54 @@
-import { inspect as nodeInspect } from 'node:util'
+import { inspect } from 'node:util'
 import { type JoinGroupResponse, joinGroupV9 } from '../src/apis/consumer/join-group.ts'
 import { type Connection } from '../src/connection/connection.ts'
 import { type ProtocolError, ResponseError } from '../src/errors.ts'
-import { invokeAPIWithRetry } from '../src/utils.ts'
+import { sleep } from '../src/utils.ts'
 
-export function inspect (labelOrValue: string | unknown, value?: unknown) {
-  if (arguments.length === 1) {
-    value = labelOrValue
-    labelOrValue = undefined
-  }
-
-  if (labelOrValue) {
-    console.error(labelOrValue, nodeInspect(value, false, 10))
-  } else {
-    console.error(nodeInspect(value, false, 10))
-  }
-}
-
-export function inspectResponse (label: string, response: unknown): string {
-  return nodeInspect({ label, response }, false, 10)
-}
-
-export async function performAPICallWithRetry<T> (
+export async function invokeAPIWithRetry<ReturnType> (
   operationId: string,
-  operation: () => T,
+  operation: () => ReturnType,
+  attempts: number = 0,
+  maxAttempts: number = 3,
+  retryDelay: number = 1000,
+  onFailedAttempt?: (error: Error, attempts: number) => void,
+  beforeFailure?: (error: Error, attempts: number) => void
+): Promise<ReturnType> {
+  try {
+    return await operation()
+  } catch (e) {
+    const error = e.cause?.errors[0]
+
+    if (error?.canRetry) {
+      if (attempts >= maxAttempts) {
+        beforeFailure?.(error, attempts)
+        console.log(operationId, `Failed after ${attempts} attempts. Throwing the last error.`)
+        throw e
+      }
+
+      onFailedAttempt?.(error, attempts)
+      await sleep(retryDelay)
+
+      return invokeAPIWithRetry(
+        operationId,
+        operation,
+        attempts + 1,
+        maxAttempts,
+        retryDelay,
+        onFailedAttempt,
+        beforeFailure
+      )
+    }
+
+    throw e
+  }
+}
+export async function performAPICallWithRetry<ReturnType> (
+  operationId: string,
+  operation: () => ReturnType,
   attempts: number = 0,
   maxAttempts: number = 3,
   hidden: boolean = false
-): Promise<T> {
+): Promise<ReturnType> {
   const response = await invokeAPIWithRetry(
     operationId,
     operation,
@@ -46,7 +67,7 @@ export async function performAPICallWithRetry<T> (
   )
 
   if (!hidden) {
-    console.log(operationId, inspectResponse(operationId, response))
+    console.log(operationId, inspect({ operationId, response }, false, 10))
   }
 
   return response

@@ -6,7 +6,7 @@ import { Connection } from '../../../src/connection/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')
-await connection.connect('localhost', 9092)
+await connection.connect('localhost', 29092)
 
 await performAPICallWithRetry('DescribeConfigs', () =>
   describeConfigsV4.async(
@@ -14,8 +14,8 @@ await performAPICallWithRetry('DescribeConfigs', () =>
     [
       {
         resourceType: ResourceTypes.CLUSTER,
-        resourceName: '1',
-        configurationKeys: ['compression.type']
+        resourceName: '4',
+        configurationKeys: ['log.retention.ms', 'log.retention.bytes', 'offsets.retention.minutes']
       }
     ],
     false,

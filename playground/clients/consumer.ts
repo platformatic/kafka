@@ -1,38 +1,36 @@
-import { Consumer } from '../../src/index.ts'
-import { inspect, sleep } from '../utils.ts'
+import { once } from 'node:events'
+import { Consumer, debugDump, MessagesStreamModes, stringDeserializers } from '../../src/index.ts'
 
-const consumer = new Consumer('id6', 'id', ['localhost:9092'])
+// const consumer = new Consumer({ groupId: 'id7', clientId: 'id', bootstrapBrokers: ['localhost:9092'], strict: true })
+const consumer = new Consumer({
+  groupId: 'id9',
+  clientId: 'id',
+  bootstrapBrokers: ['localhost:29092'],
+  strict: true,
+  deserializers: stringDeserializers
+})
 
-if (process.env.PROMISES) {
-  inspect(
-    'joinGroup(promises)',
-    await consumer.joinGroup({
-      sessionTimeout: 10000,
-      heartbeatInterval: 500
-    })
-  )
+const stream = await consumer.consume({
+  autocommit: false,
+  topics: ['temp1', 'temp2'],
+  sessionTimeout: 10000,
+  heartbeatInterval: 500,
+  maxWaitTime: 500,
+  mode: MessagesStreamModes.EARLIEST
+})
 
-  await sleep(3000)
-  await consumer.leaveGroup()
-  await consumer.close()
-} else {
-  consumer.joinGroup((error, result) => {
-    if (error) {
-      console.error(error)
-      consumer.close()
-      return
-    }
+// This is purposely not catched to show the error handling if we remove the force parameter
+once(process, 'SIGINT').then(() => consumer.close(true))
 
-    inspect('joinGroup(callbacks)', result)
+debugDump('start')
 
-    setTimeout(() => {
-      consumer.leaveGroup(error => {
-        if (error) {
-          console.error(error)
-        }
+stream.on('data', message => {
+  console.log('data', message.partition, message.offset, message.key, message.value, message.headers)
+})
 
-        consumer.close()
-      })
-    }, 10000)
-  })
+for await (const message of stream) {
+  console.log('data', message.partition, message.offset, message.key, message.value, message.headers)
 }
+
+debugDump('end')
+await consumer.close()

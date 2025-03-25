@@ -1,7 +1,7 @@
 import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
-import { createRecordsBatch, type CreateRecordsBatchOptions, type Message } from '../../protocol/records.ts'
+import { createRecordsBatch, type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { groupByProperty } from '../../utils.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
@@ -32,6 +32,7 @@ export interface ProduceResponse {
   responses: ProduceResponseTopic[]
   throttleTimeMs: number
 }
+
 /*
   Produce Request (Version: 11) => transactional_id acks timeout_ms [topic_data] TAG_BUFFER
     transactional_id => COMPACT_NULLABLE_STRING
@@ -46,7 +47,7 @@ export interface ProduceResponse {
 export function createRequest (
   acks: number = 1,
   timeout: number = 0,
-  topicData: Message[],
+  topicData: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions> = {}
 ): Writer {
   // Normalize the messages
@@ -65,9 +66,9 @@ export function createRequest (
     .appendString(options.transactionalId)
     .appendInt16(acks)
     .appendInt32(timeout)
-    .appendArray(groupByProperty<string, Message>(topicData, 'topic'), (w, [topic, messages]) => {
+    .appendArray(groupByProperty<string, MessageRecord>(topicData, 'topic'), (w, [topic, messages]) => {
       w.appendString(topic).appendArray(
-        groupByProperty<number, Message>(messages, 'partition'),
+        groupByProperty<number, MessageRecord>(messages, 'partition'),
         (w, [partition, messages]) => {
           const records = createRecordsBatch(messages, options)
 
@@ -102,7 +103,12 @@ export function createRequest (
         error_message => COMPACT_NULLABLE_STRING
     throttle_time_ms => INT32
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): ProduceResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): ProduceResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 

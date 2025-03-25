@@ -11,6 +11,8 @@ import {
   runConcurrentCallbacks
 } from '../clients/callbacks.ts'
 import { MultipleErrors, NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
+import { loggers } from '../logging.ts'
+import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { Reader } from '../protocol/reader.ts'
 import { Writer } from '../protocol/writer.ts'
@@ -46,7 +48,7 @@ export type ConnectionStatusValue = (typeof ConnectionStatuses)[keyof typeof Con
 
 export const defaultOptions: ConnectionOptions = {
   connectTimeout: 5000,
-  maxInflights: 2
+  maxInflights: 5
 }
 
 const kNoResponse = Symbol('plt.kafka.noResponse')
@@ -120,6 +122,7 @@ export class Connection extends EventEmitter {
       this.#socket.destroy()
 
       this.#status = ConnectionStatuses.ERROR
+      this.emit('timeout', error)
       this.emit('error', error)
     }
 
@@ -130,6 +133,7 @@ export class Connection extends EventEmitter {
       this.emit('error', error)
     }
 
+    this.emit('connect:start')
     this.#socket = this.#options.tls
       ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
       : createConnection({ ...connectionOptions, port, host })
@@ -190,14 +194,14 @@ export class Connection extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
-  send<T>(
+  send<ReturnType>(
     apiKey: number,
     apiVersion: number,
     payload: () => Writer,
-    responseParser: ResponseParser<T>,
+    responseParser: ResponseParser<ReturnType>,
     hasRequestHeaderTaggedFields: boolean,
     hasResponseHeaderTaggedFields: boolean,
-    callback: Callback<T>
+    callback: Callback<ReturnType>
   ) {
     this.#requestsQueue.push(fastQueueCallback => {
       const correlationId = ++this.#correlationId
@@ -261,6 +265,8 @@ export class Connection extends EventEmitter {
       this.#inflightRequests.set(correlationId, request)
     }
 
+    loggers.protocol?.debug({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
+
     for (const buf of writer.buffers) {
       if (!this.#socket.write(buf)) {
         canWrite = false
@@ -301,9 +307,9 @@ export class Connection extends EventEmitter {
 
       // Read the correlationId and get the handler
       const correlationId = this.#responseReader.readInt32()
-      const handler = this.#inflightRequests.get(correlationId)
+      const request = this.#inflightRequests.get(correlationId)
 
-      if (!handler) {
+      if (!request) {
         this.emit(
           'error',
           new UnexpectedCorrelationIdError(`Received unexpected response with correlation_id=${correlationId}`, {
@@ -316,7 +322,10 @@ export class Connection extends EventEmitter {
 
       this.#inflightRequests.delete(correlationId)
 
-      const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback } = handler
+      const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback } = request
+
+      let deserialized: any
+      let responseError: Error | null = null
 
       try {
         // Due to inconsistency in the wire protocol, the tag buffer in the header might have to be handled by the APIs
@@ -325,21 +334,22 @@ export class Connection extends EventEmitter {
           this.#responseReader.skip(EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE)
         }
 
-        const deserialized = parser(
+        deserialized = parser(
           correlationId,
           apiKey,
           apiVersion,
           this.#responseReader.buffer.shallowSlice(this.#responseReader.position, this.#nextMessage + INT32_SIZE)
         )
-
-        callback(null, deserialized)
       } catch (error) {
-        callback(error, undefined as void)
+        responseError = error
       } finally {
         this.#responseBuffer.consume(this.#nextMessage + INT32_SIZE)
         this.#responseReader.position = 0
         this.#nextMessage = -1
       }
+
+      loggers.protocol?.debug({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
+      callback(responseError, deserialized)
     }
   }
 
@@ -383,12 +393,14 @@ export class Connection extends EventEmitter {
   }
 }
 
-export class ConnectionPool {
+export class ConnectionPool extends EventEmitter {
   #clientId: string
   #connections: Map<string, Connection>
   #connectionOptions: ConnectionOptions
 
   constructor (clientId: string, connectionOptions: ConnectionOptions) {
+    super()
+
     this.#clientId = clientId
     this.#connections = new Map()
     this.#connectionOptions = connectionOptions
@@ -422,16 +434,25 @@ export class ConnectionPool {
     const connection = new Connection(this.#clientId, this.#connectionOptions)
     this.#connections.set(key, connection)
 
+    const eventPayload = { broker, connection }
+
+    this.emit('connect:start', eventPayload)
     connection.connect(broker.host, broker.port, error => {
       if (error) {
+        this.#connections.delete(key)
+        this.emit('failed', eventPayload)
+
         callback(error, undefined as unknown as Connection)
         return
       }
 
+      this.emit('connect', eventPayload)
       callback(null, connection)
     })
 
+    // Remove stale connections from the pool
     connection.once('close', () => {
+      this.emit('disconnect', eventPayload)
       this.#connections.delete(key)
     })
 
@@ -482,7 +503,7 @@ export class ConnectionPool {
     }
 
     runConcurrentCallbacks<void>(
-      'Cannot close some connections',
+      'Closing connections failed.',
       this.#connections,
       ([key, connection]: [string, Connection], cb: Callback<void>) => {
         connection.close(cb)

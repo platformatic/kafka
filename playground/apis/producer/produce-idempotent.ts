@@ -16,8 +16,17 @@ await performAPICallWithRetry('Produce', () =>
     1,
     0,
     [
-      { topic: 'temp', partition: 0, key: '111', value: '222', headers: { a: '123', b: Buffer.from([97, 98, 99]) } },
-      { topic: 'temp', partition: 0, key: '333', value: '444', timestamp: 12345678n }
+      {
+        topic: 'temp1',
+        partition: 0,
+        key: Buffer.from('111'),
+        value: Buffer.from('222'),
+        headers: new Map([
+          [Buffer.from('a'), Buffer.from('123')],
+          [Buffer.from('b'), Buffer.from([97, 98, 99])]
+        ])
+      },
+      { topic: 'temp1', partition: 0, key: Buffer.from('333'), value: Buffer.from('444'), timestamp: 12345678n }
     ],
     { compression: 'zstd', producerId, producerEpoch }
   )
@@ -29,8 +38,17 @@ await performAPICallWithRetry('Produce', () =>
     1,
     0,
     [
-      { topic: 'temp', partition: 0, key: '111', value: '222', headers: { a: '123', b: Buffer.from([97, 98, 99]) } },
-      { topic: 'temp', partition: 0, key: '333', value: '444', timestamp: 12345678n }
+      {
+        topic: 'temp1',
+        partition: 0,
+        key: Buffer.from('111'),
+        value: Buffer.from('222'),
+        headers: new Map([
+          [Buffer.from('a'), Buffer.from('123')],
+          [Buffer.from('b'), Buffer.from([97, 98, 99])]
+        ])
+      },
+      { topic: 'temp1', partition: 0, key: Buffer.from('333'), value: Buffer.from('444'), timestamp: 12345678n }
     ],
     { compression: 'zstd', producerId, producerEpoch }
   )

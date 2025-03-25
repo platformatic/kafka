@@ -18,6 +18,7 @@ export interface ListOffsetsRequestTopic {
 export type ListOffsetsRequest = Parameters<typeof createRequest>
 
 export interface ListOffsetResponsePartition {
+  partitionIndex: number
   errorCode: number
   timestamp: bigint
   offset: bigint

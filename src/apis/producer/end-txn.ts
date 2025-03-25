@@ -1,15 +1,10 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export interface EndTxnRequest {
-  transactionalId: string
-  producerId: bigint
-  producerEpoch: number
-  committed: boolean
-}
+export type EndTxnRequest = Parameters<typeof createRequest>
 
 export interface EndTxnResponse {
   throttleTimeMs: number
@@ -23,12 +18,17 @@ export interface EndTxnResponse {
     producer_epoch => INT16
     committed => BOOLEAN
 */
-export function createRequest (request: EndTxnRequest): Writer {
+export function createRequest (
+  transactionalId: string,
+  producerId: bigint,
+  producerEpoch: number,
+  committed: boolean
+): Writer {
   return Writer.create()
-    .appendString(request.transactionalId, true)
-    .appendInt64(request.producerId)
-    .appendInt16(request.producerEpoch)
-    .appendBoolean(request.committed)
+    .appendString(transactionalId, true)
+    .appendInt64(producerId)
+    .appendInt16(producerEpoch)
+    .appendBoolean(committed)
     .appendTaggedFields()
 }
 
@@ -37,7 +37,12 @@ export function createRequest (request: EndTxnRequest): Writer {
     throttle_time_ms => INT32
     error_code => INT16
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): EndTxnResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): EndTxnResponse {
   const reader = Reader.from(raw)
 
   const response = {

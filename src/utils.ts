@@ -1,11 +1,17 @@
 import { Ajv } from 'ajv'
 import ajvErrors from 'ajv-errors'
 import type BufferList from 'bl'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { inspect } from 'node:util'
+
+export type DebugDumpLogger = (...args: any[]) => void
+
+export { setTimeout as sleep } from 'node:timers/promises'
 
 export const ajv = new Ajv({ allErrors: true, coerceTypes: false, strict: true })
 // @ts-ignore
 ajvErrors(ajv)
+
+let debugDumpLogger: DebugDumpLogger = console.error
 
 ajv.addKeyword({
   keyword: 'bigint',
@@ -14,6 +20,16 @@ ajv.addKeyword({
   },
   error: {
     message: 'must be bigint'
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'map',
+  validate (_: unknown, x: unknown) {
+    return x instanceof Map
+  },
+  error: {
+    message: 'must be Map'
   }
 })
 
@@ -37,6 +53,25 @@ ajv.addKeyword({
   }
 })
 
+export class NumericMap extends Map<string, number> {
+  getWithDefault (key: string, fallback: number): number {
+    return this.get(key) ?? fallback
+  }
+
+  preIncrement (key: string, value: number, fallback: number): number {
+    let existing = this.getWithDefault(key, fallback)
+    existing += value
+    this.set(key, existing)
+    return existing
+  }
+
+  postIncrement (key: string, value: number, fallback: number): number {
+    const existing = this.getWithDefault(key, fallback)
+    this.set(key, existing + value)
+    return existing
+  }
+}
+
 export function niceJoin (array: string[], lastSeparator: string = ' and ', separator: string = ', '): string {
   switch (array.length) {
     case 0:
@@ -50,12 +85,27 @@ export function niceJoin (array: string[], lastSeparator: string = ' and ', sepa
   }
 }
 
-export function groupByProperty<K, T> (entries: T[], property: keyof T): [K, T[]][] {
-  const grouped: Map<K, T[]> = new Map()
-  const result: [K, T[]][] = []
+export function listErrorMessage (type: string[]): string {
+  return `should be one of ${niceJoin(Object.keys(type), ' or ')}`
+}
+
+export function enumErrorMessage (type: Record<string, unknown>, keysOnly: boolean = false): string {
+  if (keysOnly) {
+    return `should be one of ${niceJoin(Object.keys(type), ' or ')}`
+  }
+
+  return `should be one of ${niceJoin(
+    Object.entries(type).map(([k, v]) => `${v} (${k})`),
+    ' or '
+  )}`
+}
+
+export function groupByProperty<Key, Value> (entries: Value[], property: keyof Value): [Key, Value[]][] {
+  const grouped: Map<Key, Value[]> = new Map()
+  const result: [Key, Value[]][] = []
 
   for (const entry of entries) {
-    const value = entry[property] as K
+    const value = entry[property] as Key
     let values = grouped.get(value)
 
     if (!values) {
@@ -70,7 +120,7 @@ export function groupByProperty<K, T> (entries: T[], property: keyof T): [K, T[]
   return result
 }
 
-export function inspectBuffer (label: string, buffer: Buffer | BufferList): string {
+export function humanize (label: string, buffer: Buffer | BufferList): string {
   const formatted = buffer
     .toString('hex')
     .replaceAll(/(.{4})/g, '$1 ')
@@ -79,41 +129,19 @@ export function inspectBuffer (label: string, buffer: Buffer | BufferList): stri
   return `${label} (${buffer.length} bytes): ${formatted}`
 }
 
-export async function invokeAPIWithRetry<T> (
-  operationId: string,
-  operation: () => T,
-  attempts: number = 0,
-  maxAttempts: number = 3,
-  retryDelay: number = 1000,
-  onFailedAttempt?: (error: Error, attempts: number) => void,
-  beforeFailure?: (error: Error, attempts: number) => void
-): Promise<T> {
-  try {
-    return await operation()
-  } catch (e) {
-    const error = e.cause?.errors[0]
+export function setDebugDumpLogger (logger: DebugDumpLogger) {
+  debugDumpLogger = logger
+}
 
-    if (error?.canRetry) {
-      if (attempts >= maxAttempts) {
-        beforeFailure?.(error, attempts)
-        console.log(operationId, `Failed after ${attempts} attempts. Throwing the last error.`)
-        throw e
-      }
+export function debugDump (labelOrValue: string | unknown, value?: unknown) {
+  if (arguments.length === 1) {
+    value = labelOrValue
+    labelOrValue = undefined
+  }
 
-      onFailedAttempt?.(error, attempts)
-      await sleep(retryDelay)
-
-      return invokeAPIWithRetry(
-        operationId,
-        operation,
-        attempts + 1,
-        maxAttempts,
-        retryDelay,
-        onFailedAttempt,
-        beforeFailure
-      )
-    }
-
-    throw e
+  if (labelOrValue) {
+    debugDumpLogger(labelOrValue, inspect(value, false, 10))
+  } else {
+    debugDumpLogger(inspect(value, false, 10))
   }
 }

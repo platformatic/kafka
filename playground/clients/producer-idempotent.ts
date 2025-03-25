@@ -1,46 +1,46 @@
-import { ProduceAcks, Producer } from '../../src/index.ts'
-import { inspect } from '../utils.ts'
+import { ProduceAcks, Producer, debugDump, stringSerializers } from '../../src/index.ts'
 
-const producer = new Producer('id', ['localhost:9092'], { idempotent: true, autocreateTopics: true })
+const producer = new Producer({
+  clientId: 'id',
+  bootstrapBrokers: ['localhost:29092'],
+  idempotent: true,
+  autocreateTopics: true,
+  serializers: stringSerializers,
+  strict: true
+})
 
-if (process.env.FOREVER) {
-  let i = 0
-  while (true) {
-    i++
-
-    try {
-      inspect('produce(forever)', await producer.produce([{ topic: 'temp1', key: `key-${i}`, value: `value-${i}` }]))
-    } catch (e) {
-      inspect(e)
-      break
-    }
-  }
-
-  await producer.close()
-} else {
-  function callbackProduce (cb?: Function): void {
-    producer.produce(
-      [{ topic: 'temp1', key: 'key1', value: 'value1', headers: { headerKey: 'headerValue' } }],
-      { acks: ProduceAcks.ALL },
-      (error, result) => {
-        if (error) {
-          console.error('ERROR', error)
-          return
+function callbackProduce (cb?: Function): void {
+  producer.send(
+    {
+      messages: [
+        {
+          topic: 'temp1',
+          key: 'key-idempotent',
+          value: 'value-idempotent',
+          headers: new Map([['header-idempotent', 'header-value-idempotent']]),
+          partition: 0
         }
-
-        inspect('produce(callbacks)', result)
-        cb?.()
+      ],
+      acks: ProduceAcks.ALL
+    },
+    (error, result) => {
+      if (error) {
+        console.error('ERROR', error)
+        return
       }
-    )
-  }
 
-  callbackProduce(() => {
-    callbackProduce()
-  })
-
-  callbackProduce(() => {
-    callbackProduce(() => {
-      producer.close()
-    })
-  })
+      debugDump('produce(callbacks)', result)
+      cb?.()
+    }
+  )
 }
+
+callbackProduce(() => {
+  callbackProduce()
+})
+
+callbackProduce(() => {
+  callbackProduce(() => {
+    producer.close()
+  })
+})

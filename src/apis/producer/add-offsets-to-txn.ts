@@ -1,15 +1,10 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
-export interface AddOffsetsToTxnRequest {
-  transactionalId: string
-  producerId: bigint
-  producerEpoch: number
-  groupId: string
-}
+export type AddOffsetsToTxnRequest = Parameters<typeof createRequest>
 
 export interface AddOffsetsToTxnResponse {
   throttleTimeMs: number
@@ -23,12 +18,17 @@ export interface AddOffsetsToTxnResponse {
     producer_epoch => INT16
     group_id => COMPACT_STRING
 */
-export function createRequest (request: AddOffsetsToTxnRequest): Writer {
+export function createRequest (
+  transactionalId: string,
+  producerId: bigint,
+  producerEpoch: number,
+  groupId: string
+): Writer {
   return Writer.create()
-    .appendString(request.transactionalId, true)
-    .appendInt64(request.producerId)
-    .appendInt16(request.producerEpoch)
-    .appendString(request.groupId, true)
+    .appendString(transactionalId, true)
+    .appendInt64(producerId)
+    .appendInt16(producerEpoch)
+    .appendString(groupId, true)
     .appendTaggedFields()
 }
 

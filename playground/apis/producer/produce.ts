@@ -5,7 +5,7 @@ import { performAPICallWithRetry } from '../../utils.ts'
 const connection = new Connection('123')
 await connection.connect('localhost', 9092)
 
-const NUM_RECORDS = 10
+const NUM_RECORDS = 1e4
 const prefix = Date.now().toString()
 
 for (let i = 0; i < NUM_RECORDS; i++) {
@@ -16,23 +16,23 @@ for (let i = 0; i < NUM_RECORDS; i++) {
       // {
       //   topic: 'temp',
       //   partition: 0,
-      //   key: 'aaa',
-      //   value: 'bbb',
-      //   headers: { ccc: 'ddd' }
+      //   key: Buffer.from('aaa'),
+      //   value: Buffer.from('bbb'),
+      //   headers: new Map([[Buffer.from('ccc'), Buffer.from('ddd')]])
       // }
       {
-        topic: 'temp',
+        topic: 'temp1',
         partition: 0,
-        key: key + '-1',
-        value: Math.floor(Math.random() * 1e5).toString(),
-        headers: { key: 'value' }
+        key: Buffer.from(key + '-1'),
+        value: Buffer.from(Math.floor(Math.random() * 1e5).toString()),
+        headers: new Map([[Buffer.from('key'), Buffer.from('value')]])
       },
       {
-        topic: 'temp',
+        topic: 'temp2',
         partition: 0,
-        key: key + '-2',
-        value: Math.floor(Math.random() * 1e5).toString(),
-        headers: { key: 'value' }
+        key: Buffer.from(key + '-2'),
+        value: Buffer.from(Math.floor(Math.random() * 1e5).toString()),
+        headers: new Map([[Buffer.from('key'), Buffer.from('value')]])
       }
     ])
   )

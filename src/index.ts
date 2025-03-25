@@ -2,10 +2,11 @@
 export * from './protocol/index.ts'
 
 // APIs
-export * from './apis/admin/index.ts'
-export * from './apis/consumer/index.ts'
 export * from './apis/definitions.ts'
 export * from './apis/enumerations.ts'
+
+export * from './apis/admin/index.ts'
+export * from './apis/consumer/index.ts'
 export * from './apis/metadata/index.ts'
 export * from './apis/producer/index.ts'
 export * from './apis/security/index.ts'

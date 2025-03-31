@@ -2,7 +2,7 @@ import { FetchIsolationLevels } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
-import { MessagesStreamModes, type ConsumerOptions } from './types.ts'
+import { MessagesStreamFallbackModes, MessagesStreamModes, type ConsumerOptions } from './types.ts'
 
 const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
@@ -46,6 +46,7 @@ export const consumeOptionsSchema = {
   properties: {
     topics: { type: 'array', items: idProperty },
     mode: { type: 'string', enum: Object.values(MessagesStreamModes) },
+    fallbackMode: { type: 'string', enum: Object.values(MessagesStreamFallbackModes) },
     offsets: {
       type: 'array',
       items: {

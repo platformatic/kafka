@@ -8,6 +8,7 @@ import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise }
 import { type Deserializer } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import {
+  MessagesStreamFallbackModes,
   MessagesStreamModes,
   type CommitOptionsPartition,
   type ConsumeOptions,
@@ -25,6 +26,7 @@ export function noopDeserializer (data?: Buffer): Buffer | undefined {
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
+  #fallbackMode: string
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
   #offsetsToFetch: Map<string, bigint>
@@ -45,7 +47,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   ) {
     super({ objectMode: true, highWaterMark: options.highWaterMark ?? 1024 })
 
-    const { autocommit, mode, offsets, deserializers, ..._options } = options
+    const { autocommit, mode, fallbackMode, offsets, deserializers, ..._options } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')
@@ -57,6 +59,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
+    this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
     this.#topics = structuredClone(options.topics)
     this.#inflightNodes = new Set()
@@ -188,8 +191,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       {
         topics: this.#topics,
         timestamp:
-          // This evaluates to LATEST in all other modes, ensuring that we always fetch the latest messages in COMMITTED or MANUAL mode
-          this.#mode === MessagesStreamModes.EARLIEST ? ListOffsetTimestamps.EARLIEST : ListOffsetTimestamps.LATEST
+          this.#mode === MessagesStreamModes.EARLIEST ||
+          (this.#mode !== MessagesStreamModes.LATEST && this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST)
+            ? ListOffsetTimestamps.EARLIEST
+            : ListOffsetTimestamps.LATEST
       },
       (error, offsets) => {
         if (error) {
@@ -425,6 +430,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
         if (offset >= 0n) {
           this.#offsetsToFetch.set(`${topic}:${i}`, offset + 1n)
+        } else if (this.#fallbackMode === MessagesStreamFallbackModes.FAIL) {
+          callback(
+            new UserError(
+              `Topic ${topic} has no committed offset on partition ${i} for group ${this.#consumer.groupId}.`,
+              { topic, partition: i, groupId: this.#consumer.groupId }
+            )
+          )
+          return
         }
       }
     }

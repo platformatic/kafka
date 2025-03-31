@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { Consumer, debugDump, MessagesStreamModes, stringDeserializers } from '../../src/index.ts'
+import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
 
 // const consumer = new Consumer({ groupId: 'id7', clientId: 'id', bootstrapBrokers: ['localhost:9092'], strict: true })
 const consumer = new Consumer({
@@ -15,8 +15,7 @@ const stream = await consumer.consume({
   topics: ['temp1', 'temp2'],
   sessionTimeout: 10000,
   heartbeatInterval: 500,
-  maxWaitTime: 500,
-  mode: MessagesStreamModes.EARLIEST
+  maxWaitTime: 500
 })
 
 // This is purposely not catched to show the error handling if we remove the force parameter

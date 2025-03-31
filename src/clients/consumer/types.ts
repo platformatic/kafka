@@ -30,6 +30,13 @@ export const MessagesStreamModes = {
 } as const
 export type MessagesStreamMode = keyof typeof MessagesStreamModes
 
+export const MessagesStreamFallbackModes = {
+  LATEST: 'latest',
+  EARLIEST: 'earliest',
+  FAIL: 'fail'
+} as const
+export type MessagesStreamFallbackMode = keyof typeof MessagesStreamFallbackModes
+
 export interface GroupOptions {
   sessionTimeout?: number
   rebalanceTimeout?: number
@@ -50,6 +57,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
 export interface StreamOptions {
   topics: string[]
   mode?: string
+  fallbackMode?: string
   offsets?: TopicWithPartitionAndOffset[]
 }
 

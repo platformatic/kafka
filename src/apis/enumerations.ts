@@ -16,6 +16,9 @@ export type ProduceAck = keyof typeof ProduceAcks
 export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }
 export type FetchIsolationLevel = keyof typeof FetchIsolationLevels
 
+export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n }
+export type ListOffsetTimestamp = keyof typeof ListOffsetTimestamps
+
 // Admin API
 // ./admin/*-acls.ts - See: https://cwiki.apache.org/confluence/display/KAFKA/KIP-140%3A+Add+administrative+RPCs+for+adding%2C+deleting%2C+and+listing+ACLs
 export const ResourceTypes = {

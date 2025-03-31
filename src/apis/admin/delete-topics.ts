@@ -31,7 +31,7 @@ export interface DeleteTopicsResponse {
       topic_id => UUID
     timeout_ms => INT32
 */
-function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): Writer {
+export function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): Writer {
   return Writer.create()
     .appendArray(topics, (w, topic) => {
       w.appendString(topic.name).appendUUID(topic.topicId)
@@ -49,7 +49,7 @@ function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): 
       error_code => INT16
       error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

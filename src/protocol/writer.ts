@@ -1,6 +1,6 @@
 import BufferList from 'bl'
 import { type BufferListAcceptedTypes } from 'bl/BufferList.js'
-import { inspectBuffer } from '../utils.ts'
+import { humanize } from '../utils.ts'
 import { EMPTY_UUID, INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, type NullableString } from './definitions.ts'
 import { writeUnsignedVarInt, writeVarInt } from './varint32.ts'
 import { writeUnsignedVarInt64, writeVarInt64 } from './varint64.ts'
@@ -8,7 +8,7 @@ import { writeUnsignedVarInt64, writeVarInt64 } from './varint64.ts'
 // Note that in this class "== null" is purposely used instead of "===" to check for both null and undefined
 
 export type ChildrenWriter = (w: Writer) => void
-export type EntryWriter<T> = (writer: Writer, entry: T, index: number) => void
+export type EntryWriter<InputType> = (writer: Writer, entry: InputType, index: number) => void
 
 export class Writer {
   context: Record<string, any>
@@ -27,6 +27,10 @@ export class Writer {
     return this.#bl
   }
 
+  get buffer (): Buffer {
+    return this.#bl.slice()
+  }
+
   get buffers (): Buffer[] {
     return this.#bl.getBuffers()
   }
@@ -36,7 +40,7 @@ export class Writer {
   }
 
   inspect (): string {
-    return this.buffers.map((buffer, i) => inspectBuffer(`Buffer ${i}`, buffer)).join('\n')
+    return this.buffers.map((buffer, i) => humanize(`Buffer ${i}`, buffer)).join('\n')
   }
 
   append (buffer: BufferListAcceptedTypes): this {
@@ -259,7 +263,7 @@ export class Writer {
     if (compact) {
       this.appendUnsignedVarInt(value.length + 1)
     } else {
-      this.appendInt16(value.length)
+      this.appendInt32(value.length)
     }
 
     this.#bl.append(value)
@@ -268,13 +272,9 @@ export class Writer {
   }
 
   // Note that this does not follow the wire protocol specification and thus the length is not +1ed
-  appendVarIntBytes (value: Buffer | NullableString, encoding: BufferEncoding = 'utf-8'): this {
+  appendVarIntBytes (value: Buffer | null | undefined): this {
     if (value == null) {
       return this.appendVarInt(0)
-    }
-
-    if (typeof value === 'string') {
-      value = Buffer.from(value, encoding)
     }
 
     this.appendVarInt(value.length)
@@ -283,9 +283,9 @@ export class Writer {
     return this
   }
 
-  appendArray<T>(
-    value: T[] | null,
-    entryWriter: EntryWriter<T>,
+  appendArray<InputType>(
+    value: InputType[] | null,
+    entryWriter: EntryWriter<InputType>,
     compact: boolean = true,
     appendTrailingTaggedFields = true
   ): this {
@@ -312,7 +312,37 @@ export class Writer {
     return this
   }
 
-  appendVarIntArray<T>(value: T[] | null, entryWriter: EntryWriter<T>): this {
+  appendMap<Key, Value>(
+    value: Map<Key, Value> | null,
+    entryWriter: EntryWriter<[Key, Value]>,
+    compact: boolean = true,
+    appendTrailingTaggedFields = true
+  ): this {
+    if (value == null) {
+      return compact ? this.appendUnsignedVarInt(0) : this.appendInt32(0)
+    }
+
+    const length = value.size
+
+    if (compact) {
+      this.appendUnsignedVarInt(length + 1)
+    } else {
+      this.appendInt32(length)
+    }
+
+    let i = 0
+    for (const entry of value) {
+      entryWriter(this, entry, i++)
+
+      if (appendTrailingTaggedFields) {
+        this.appendTaggedFields()
+      }
+    }
+
+    return this
+  }
+
+  appendVarIntArray<InputType>(value: InputType[] | null, entryWriter: EntryWriter<InputType>): this {
     if (value == null) {
       return this.appendVarInt(0)
     }
@@ -321,6 +351,21 @@ export class Writer {
 
     for (let i = 0; i < value.length; i++) {
       entryWriter(this, value![i], i)
+    }
+
+    return this
+  }
+
+  appendVarIntMap<Key, Value>(value: Map<Key, Value> | null | undefined, entryWriter: EntryWriter<[Key, Value]>): this {
+    if (value == null) {
+      return this.appendVarInt(0)
+    }
+
+    this.appendVarInt(value.size)
+
+    let i = 0
+    for (const entry of value) {
+      entryWriter(this, entry, i++)
     }
 
     return this

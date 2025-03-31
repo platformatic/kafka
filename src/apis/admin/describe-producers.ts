@@ -44,7 +44,7 @@ export interface DescribeProducersResponse {
       name => COMPACT_STRING
       partition_indexes => INT32
 */
-function createRequest (topics: DescribeProducersRequestTopic[]): Writer {
+export function createRequest (topics: DescribeProducersRequestTopic[]): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.name).appendArray(t.partitionIndexes, (w, p) => w.appendInt32(p), true, false)
@@ -69,7 +69,7 @@ function createRequest (topics: DescribeProducersRequestTopic[]): Writer {
           coordinator_epoch => INT32
           current_txn_start_offset => INT64
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

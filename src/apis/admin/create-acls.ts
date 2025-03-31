@@ -38,7 +38,7 @@ CreateAcls Request (Version: 3) => [creations] TAG_BUFFER
     operation => INT8
     permission_type => INT8
 */
-function createRequest (creations: CreateAclsRequestCreation[]): Writer {
+export function createRequest (creations: CreateAclsRequestCreation[]): Writer {
   return Writer.create()
     .appendArray(creations, (w, c) => {
       w.appendInt8(c.resourceType)
@@ -59,7 +59,7 @@ CreateAcls Response (Version: 3) => throttle_time_ms [results] TAG_BUFFER
     error_code => INT16
     error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

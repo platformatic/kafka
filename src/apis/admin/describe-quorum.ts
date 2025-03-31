@@ -65,7 +65,7 @@ export interface DescribeQuorumResponse {
       partitions => partition_index TAG_BUFFER
         partition_index => INT32
 */
-function createRequest (topics: DescribeQuorumRequestTopic[]): Writer {
+export function createRequest (topics: DescribeQuorumRequestTopic[]): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.topicName).appendArray(t.partitions, (w, p) => {
@@ -107,7 +107,7 @@ function createRequest (topics: DescribeQuorumRequestTopic[]): Writer {
         host => COMPACT_STRING
         port => UINT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

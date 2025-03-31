@@ -18,7 +18,7 @@ export interface SaslAuthenticateResponse {
   SaslAuthenticate Request (Version: 2) => auth_bytes TAG_BUFFER
     auth_bytes => COMPACT_BYTES
 */
-function createRequest (authBytes: Buffer): Writer {
+export function createRequest (authBytes: Buffer): Writer {
   return Writer.create().appendBytes(authBytes).appendTaggedFields()
 }
 
@@ -29,7 +29,7 @@ function createRequest (authBytes: Buffer): Writer {
     auth_bytes => COMPACT_BYTES
     session_lifetime_ms => INT64
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

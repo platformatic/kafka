@@ -25,7 +25,7 @@ export type ApiVersionsResponse = {
     client_software_name => COMPACT_STRING
     client_software_version => COMPACT_STRING
 */
-function createRequest (clientSoftwareName: string, clientSoftwareVersion: string): Writer {
+export function createRequest (clientSoftwareName: string, clientSoftwareVersion: string): Writer {
   return Writer.create().appendString(clientSoftwareName).appendString(clientSoftwareVersion).appendTaggedFields()
 }
 
@@ -38,7 +38,7 @@ function createRequest (clientSoftwareName: string, clientSoftwareVersion: strin
       max_version => INT16
     throttle_time_ms => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

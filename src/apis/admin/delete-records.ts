@@ -41,7 +41,7 @@ export interface DeleteRecordsResponse {
         offset => INT64
     timeout_ms => INT32
 */
-function createRequest (topics: DeleteRecordsRequestTopics[], timeoutMs: number): Writer {
+export function createRequest (topics: DeleteRecordsRequestTopics[], timeoutMs: number): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.name).appendArray(t.partitions, (w, p) => {
@@ -62,7 +62,7 @@ function createRequest (topics: DeleteRecordsRequestTopics[], timeoutMs: number)
         low_watermark => INT64
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

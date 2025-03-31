@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -17,16 +17,7 @@ export interface TxnOffsetCommitRequestTopic {
   partitions: TxnOffsetCommitRequestPartition[]
 }
 
-export interface TxnOffsetCommitRequest {
-  transactionalId: string
-  groupId: string
-  producerId: bigint
-  producerEpoch: number
-  generationId: number
-  memberId: string
-  groupInstanceId: NullableString
-  topics: TxnOffsetCommitRequestTopic[]
-}
+export type TxnOffsetCommitRequest = Parameters<typeof createRequest>
 
 export interface TxnOffsetCommitResponsePartition {
   partitionIndex: number
@@ -60,25 +51,45 @@ export interface TxnOffsetCommitResponse {
         committed_leader_epoch => INT32
         committed_metadata => COMPACT_NULLABLE_STRING
 */
-function createRequest (request: TxnOffsetCommitRequest): Writer {
+export function createRequest (
+  transactionalId: string,
+  groupId: string,
+  producerId: bigint,
+  producerEpoch: number,
+  generationId: number,
+  memberId: string,
+  groupInstanceId: NullableString,
+  topics: TxnOffsetCommitRequestTopic[]
+): Writer {
   return Writer.create()
-    .appendString(request.transactionalId, true)
-    .appendString(request.groupId, true)
-    .appendInt64(request.producerId)
-    .appendInt16(request.producerEpoch)
-    .appendInt32(request.generationId)
-    .appendString(request.memberId, true)
-    .appendString(request.groupInstanceId, true)
-    .appendArray(request.topics, (w, t) => {
-      w.appendString(t.name, true).appendArray(t.partitions, (w, p) => {
-        w.appendInt32(p.partitionIndex)
-          .appendInt64(p.committedOffset)
-          .appendInt32(p.committedLeaderEpoch)
-          .appendString(p.committedMetadata, true)
-          .appendTaggedFields() // Add tagged fields for partitions
-      }, true, true)
-      .appendTaggedFields() // Add tagged fields for topics
-    }, true, true)
+    .appendString(transactionalId, true)
+    .appendString(groupId, true)
+    .appendInt64(producerId)
+    .appendInt16(producerEpoch)
+    .appendInt32(generationId)
+    .appendString(memberId, true)
+    .appendString(groupInstanceId, true)
+    .appendArray(
+      topics,
+      (w, t) => {
+        w.appendString(t.name, true)
+          .appendArray(
+            t.partitions,
+            (w, p) => {
+              w.appendInt32(p.partitionIndex)
+                .appendInt64(p.committedOffset)
+                .appendInt32(p.committedLeaderEpoch)
+                .appendString(p.committedMetadata, true)
+                .appendTaggedFields() // Add tagged fields for partitions
+            },
+            true,
+            true
+          )
+          .appendTaggedFields() // Add tagged fields for topics
+      },
+      true,
+      true
+    )
     .appendTaggedFields()
 }
 
@@ -91,7 +102,7 @@ function createRequest (request: TxnOffsetCommitRequest): Writer {
         partition_index => INT32
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -1,7 +1,7 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
-import { readRecordsBatch, type KafkaRecordsBatch } from '../../protocol/records.ts'
+import { readRecordsBatch, type RecordsBatch } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
@@ -39,7 +39,7 @@ export interface FetchResponsePartition {
   logStartOffset: bigint
   abortedTransactions: FetchResponsePartitionAbortedTransaction[]
   preferredReadReplica: number
-  records?: KafkaRecordsBatch
+  records?: RecordsBatch
 }
 
 export interface FetchResponseTopic {
@@ -76,7 +76,7 @@ export type FetchResponse = {
     partitions => INT32
   rack_id => COMPACT_STRING
 */
-function createRequest (
+export function createRequest (
   maxWaitMs: number,
   minBytes: number,
   maxBytes: number,
@@ -137,7 +137,12 @@ function createRequest (
         preferred_read_replica => INT32
         records => COMPACT_RECORDS
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): FetchResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): FetchResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 
@@ -187,7 +192,6 @@ function parseResponse (_correlationId: number, apiKey: number, apiVersion: numb
             r.skip(recordsSize)
           }
 
-          r.readTaggedFields()
           return partition
         })!
       }

@@ -35,7 +35,7 @@ export interface CreateDelegationTokenResponse {
       principal_name => COMPACT_STRING
     max_lifetime_ms => INT64
 */
-function createRequest (
+export function createRequest (
   ownerPrincipalType: NullableString,
   ownerPrincipalName: NullableString,
   renewers: CreateDelegationTokenRequestRenewer[],
@@ -63,7 +63,7 @@ function createRequest (
     hmac => COMPACT_BYTES
     throttle_time_ms => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

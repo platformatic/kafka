@@ -44,7 +44,7 @@ export interface AlterPartitionReassignmentsResponse {
         partition_index => INT32
         replicas => INT32
 */
-function createRequest (timeoutMs: number, topics: AlterPartitionReassignmentsRequestTopic[]): Writer {
+export function createRequest (timeoutMs: number, topics: AlterPartitionReassignmentsRequestTopic[]): Writer {
   return Writer.create()
     .appendInt32(timeoutMs)
     .appendArray(topics, (w, t) => {
@@ -67,7 +67,7 @@ function createRequest (timeoutMs: number, topics: AlterPartitionReassignmentsRe
         error_code => INT16
         error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

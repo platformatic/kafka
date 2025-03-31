@@ -63,7 +63,7 @@ export interface CreateTopicsResponse {
     timeout_ms => INT32
     validate_only => BOOLEAN
 */
-function createRequest (topics: CreateTopicsRequestTopic[], timeoutMs: number, validateOnly: boolean): Writer {
+export function createRequest (topics: CreateTopicsRequestTopic[], timeoutMs: number, validateOnly: boolean): Writer {
   return Writer.create()
     .appendArray(topics, (w, topic) => {
       w.appendString(topic.name)
@@ -103,7 +103,7 @@ function createRequest (topics: CreateTopicsRequestTopic[], timeoutMs: number, v
         config_source => INT8
         is_sensitive => BOOLEAN
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

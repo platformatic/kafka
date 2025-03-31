@@ -52,7 +52,7 @@ export interface ConsumerGroupHeartbeatResponse {
       topic_id => UUID
       partitions => INT32
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   memberId: string,
   memberEpoch: number,
@@ -108,7 +108,7 @@ function createRequest (
         topic_id => UUID
         partitions => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

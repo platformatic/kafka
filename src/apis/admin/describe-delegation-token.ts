@@ -41,7 +41,7 @@ export interface DescribeDelegationTokenResponse {
       principal_type => COMPACT_STRING
       principal_name => COMPACT_STRING
 */
-function createRequest (owners: DescribeDelegationTokenRequestOwner[]): Writer {
+export function createRequest (owners: DescribeDelegationTokenRequestOwner[]): Writer {
   return Writer.create()
     .appendArray(owners, (w, r) => w.appendString(r.principalType).appendString(r.principalName))
     .appendTaggedFields()
@@ -65,7 +65,7 @@ DescribeDelegationToken Response (Version: 3) => error_code [tokens] throttle_ti
       principal_name => COMPACT_STRING
   throttle_time_ms => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

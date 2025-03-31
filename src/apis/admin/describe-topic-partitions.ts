@@ -57,7 +57,7 @@ export interface DescribeTopicPartitionsResponse {
       topic_name => COMPACT_STRING
       partition_index => INT32
 */
-function createRequest (
+export function createRequest (
   topics: DescribeTopicPartitionsRequestTopic[],
   responsePartitionLimit: number,
   cursor?: DescribeTopicPartitionsRequestCursor
@@ -98,7 +98,7 @@ function createRequest (
       topic_name => COMPACT_STRING
       partition_index => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

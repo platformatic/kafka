@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -48,7 +48,7 @@ export interface OffsetCommitResponse {
         committed_leader_epoch => INT32
         committed_metadata => COMPACT_NULLABLE_STRING
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   generationIdOrMemberEpoch: number,
   memberId: string,
@@ -80,7 +80,7 @@ function createRequest (
         partition_index => INT32
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

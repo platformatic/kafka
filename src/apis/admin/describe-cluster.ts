@@ -30,7 +30,7 @@ export interface DescribeClusterResponse {
     include_cluster_authorized_operations => BOOLEAN
     endpoint_type => INT8
 */
-function createRequest (includeClusterAuthorizedOperations: boolean, endpointType: number): Writer {
+export function createRequest (includeClusterAuthorizedOperations: boolean, endpointType: number): Writer {
   return Writer.create().appendBoolean(includeClusterAuthorizedOperations).appendInt8(endpointType).appendTaggedFields()
 }
 
@@ -49,7 +49,7 @@ function createRequest (includeClusterAuthorizedOperations: boolean, endpointTyp
       rack => COMPACT_NULLABLE_STRING
     cluster_authorized_operations => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

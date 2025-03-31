@@ -20,7 +20,7 @@ export interface DeleteGroupsResponse {
   DeleteGroups Request (Version: 2) => [groups_names] TAG_BUFFER
     groups_names => COMPACT_STRING
 */
-function createRequest (groupsNames: string[]): Writer {
+export function createRequest (groupsNames: string[]): Writer {
   return Writer.create()
     .appendArray(groupsNames, (w, r) => w.appendString(r), true, false)
     .appendTaggedFields()
@@ -33,7 +33,7 @@ function createRequest (groupsNames: string[]): Writer {
       group_id => COMPACT_STRING
       error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

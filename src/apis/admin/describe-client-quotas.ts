@@ -43,7 +43,7 @@ export interface DescribeClientQuotasResponse {
       match => COMPACT_NULLABLE_STRING
     strict => BOOLEAN
 */
-function createRequest (components: DescribeClientQuotasRequestComponent[], strict: boolean): Writer {
+export function createRequest (components: DescribeClientQuotasRequestComponent[], strict: boolean): Writer {
   return Writer.create()
     .appendArray(components, (w, c) => {
       w.appendString(c.entityType).appendInt8(c.matchType).appendString(c.match)
@@ -65,7 +65,7 @@ function createRequest (components: DescribeClientQuotasRequestComponent[], stri
         key => COMPACT_STRING
         value => FLOAT64
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

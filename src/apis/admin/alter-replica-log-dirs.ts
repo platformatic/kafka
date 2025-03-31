@@ -38,7 +38,7 @@ export interface AlterReplicaLogDirsResponse {
         name => COMPACT_STRING
         partitions => INT32
 */
-function createRequest (dirs: AlterReplicaLogDirsRequestDir[]): Writer {
+export function createRequest (dirs: AlterReplicaLogDirsRequestDir[]): Writer {
   return Writer.create()
     .appendArray(dirs, (w, d) => {
       w.appendString(d.path).appendArray(d.topics, (w, t) => {
@@ -57,7 +57,7 @@ function createRequest (dirs: AlterReplicaLogDirsRequestDir[]): Writer {
         partition_index => INT32
         error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

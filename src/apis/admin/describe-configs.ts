@@ -51,7 +51,7 @@ export interface DescribeConfigsResponse {
     include_synonyms => BOOLEAN
     include_documentation => BOOLEAN
 */
-function createRequest (
+export function createRequest (
   resources: DescribeConfigsRequestResource[],
   includeSynonyms: boolean,
   includeDocumentation: boolean
@@ -88,7 +88,7 @@ function createRequest (
         config_type => INT8
         documentation => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

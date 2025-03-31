@@ -3,30 +3,32 @@ import { promisify } from 'node:util'
 import { type Connection } from '../connection/connection.ts'
 import { type Writer } from '../protocol/writer.ts'
 
-export type Callback<T> = (error: Error | null, payload: T) => void
+export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
 
-export type CallbackArguments<T> = [cb: Callback<T>]
+export type CallbackArguments<ReturnType> = [cb: Callback<ReturnType>]
 
-export type ResponseParser<T> = (
+export type ResponseParser<ReturnType> = (
   correlationId: number,
   apiKey: number,
   apiVersion: number,
   raw: BufferList
-) => T | Promise<T>
+) => ReturnType | Promise<ReturnType>
 
 export type ResponseErrorWithLocation = [string, number]
 
 export type APIWithCallback<RequestArguments extends Array<unknown>, ResponseType> = (
   connection: Connection,
   ...args: [...RequestArguments, ...Partial<CallbackArguments<ResponseType>>]
-) => boolean
+) => void
 
 export type APIWithPromise<RequestArguments extends Array<unknown>, ResponseType> = (
   connection: Connection,
   ...args: RequestArguments
 ) => Promise<ResponseType>
 
-export type API<Q extends Array<unknown>, S> = APIWithCallback<Q, S> & { async: APIWithPromise<Q, S> }
+export type API<RequestType extends Array<unknown>, ResponseType> = APIWithCallback<RequestType, ResponseType> & {
+  async: APIWithPromise<RequestType, ResponseType>
+}
 
 export function createAPI<RequestArguments extends Array<unknown>, ResponseType> (
   apiKey: number,
@@ -39,9 +41,9 @@ export function createAPI<RequestArguments extends Array<unknown>, ResponseType>
   const api = function api (
     connection: Connection,
     ...args: [...RequestArguments, ...Partial<CallbackArguments<ResponseType>>]
-  ): boolean {
+  ): void {
     const cb = typeof args[args.length - 1] === 'function' ? (args.pop() as Callback<ResponseType>) : () => {}
-    return connection.send(
+    connection.send(
       apiKey,
       apiVersion,
       () => createRequest(...args),

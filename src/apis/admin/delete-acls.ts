@@ -49,7 +49,7 @@ export interface DeleteAclsResponse {
       operation => INT8
       permission_type => INT8
 */
-function createRequest (filters: DeleteAclsRequestFilter[]): Writer {
+export function createRequest (filters: DeleteAclsRequestFilter[]): Writer {
   return Writer.create()
     .appendArray(filters, (w, f) => {
       w.appendInt8(f.resourceTypeFilter)
@@ -80,7 +80,7 @@ function createRequest (filters: DeleteAclsRequestFilter[]): Writer {
         operation => INT8
         permission_type => INT8
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

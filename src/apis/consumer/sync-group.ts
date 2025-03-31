@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -9,6 +9,7 @@ export interface SyncGroupRequestAssignment {
   memberId: string
   assignment: Buffer
 }
+
 export type SyncGroupRequest = Parameters<typeof createRequest>
 
 export interface SyncGroupResponse {
@@ -32,7 +33,7 @@ export interface SyncGroupResponse {
       assignment => COMPACT_BYTES
 
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   generationId: number,
   memberId: string,
@@ -60,7 +61,12 @@ function createRequest (
     protocol_name => COMPACT_NULLABLE_STRING
     assignment => COMPACT_BYTES
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): SyncGroupResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): SyncGroupResponse {
   const reader = Reader.from(raw)
 
   const response: SyncGroupResponse = {

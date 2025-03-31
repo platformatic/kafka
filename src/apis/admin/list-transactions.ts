@@ -26,7 +26,7 @@ export interface ListTransactionsResponse {
     producer_id_filters => INT64
     duration_filter => INT64
 */
-function createRequest (stateFilters: TransactionState[], producerIdFilters: bigint[], durationFilter: bigint): Writer {
+export function createRequest (stateFilters: TransactionState[], producerIdFilters: bigint[], durationFilter: bigint): Writer {
   return Writer.create()
     .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)
@@ -44,7 +44,7 @@ function createRequest (stateFilters: TransactionState[], producerIdFilters: big
       producer_id => INT64
       transaction_state => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -19,7 +19,7 @@ export interface HeartbeatResponse {
     member_id => COMPACT_STRING
     group_instance_id => COMPACT_NULLABLE_STRING
 */
-function createRequest (
+export function createRequest (
   groupId: string,
   generationId: number,
   memberId: string,
@@ -38,7 +38,7 @@ function createRequest (
     throttle_time_ms => INT32
     error_code => INT16
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): HeartbeatResponse {
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): HeartbeatResponse {
   const reader = Reader.from(raw)
 
   const response: HeartbeatResponse = {

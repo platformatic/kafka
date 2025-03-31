@@ -38,7 +38,7 @@ export interface CreatePartitionsResponse {
     timeout_ms => INT32
     validate_only => BOOLEAN
 */
-function createRequest (topics: CreatePartitionsRequestTopic[], timeoutMs: number, validateOnly: boolean): Writer {
+export function createRequest (topics: CreatePartitionsRequestTopic[], timeoutMs: number, validateOnly: boolean): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.name)
@@ -58,7 +58,7 @@ function createRequest (topics: CreatePartitionsRequestTopic[], timeoutMs: numbe
       error_code => INT16
       error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

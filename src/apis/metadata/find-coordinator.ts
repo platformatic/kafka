@@ -26,7 +26,7 @@ export interface FindCoordinatorResponse {
     key_type => INT8
     coordinator_keys => COMPACT_STRING
 */
-function createRequest (keyType: number, coordinatorKeys: string[]): Writer {
+export function createRequest (keyType: number, coordinatorKeys: string[]): Writer {
   return Writer.create()
     .appendInt8(keyType)
     .appendArray(coordinatorKeys, (w, k) => w.appendString(k), true, false)
@@ -44,7 +44,7 @@ function createRequest (keyType: number, coordinatorKeys: string[]): Writer {
       error_code => INT16
       error_message => COMPACT_NULLABLE_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

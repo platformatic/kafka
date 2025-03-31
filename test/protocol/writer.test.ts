@@ -216,9 +216,9 @@ test('Write bytes', () => {
   strictEqual(buffer.readInt32BE(pos), -1)
   pos += 4
   
-  // Non-compact buffer [5, 6, 7] (length 3 as int16, then content)
-  strictEqual(buffer.readInt16BE(pos), 3)
-  pos += 2
+  // Non-compact buffer [5, 6, 7] (length 3 as int32, then content)
+  strictEqual(buffer.readInt32BE(pos), 3)
+  pos += 4
   deepStrictEqual(buffer.slice(pos, pos + 3), Buffer.from([5, 6, 7]))
 })
 
@@ -445,4 +445,179 @@ test('Inspect buffer contents', () => {
   const inspectResult = writer.inspect()
   strictEqual(typeof inspectResult, 'string')
   strictEqual(inspectResult.includes('Buffer'), true)
+})
+
+test('Write Map', () => {
+  const writer = Writer.create()
+  
+  // Compact format
+  writer.appendMap(null, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt32(value)
+  })  // null map
+  
+  const emptyMap = new Map()
+  writer.appendMap(emptyMap, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt32(value)
+  })  // empty map
+  
+  const testMap = new Map([
+    ['key1', 100],
+    ['key2', 200]
+  ])
+  writer.appendMap(testMap, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt32(value)
+  })  // normal map
+  
+  // Non-compact format
+  writer.appendMap(null, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt32(value)
+  }, false)  // null map
+  
+  const smallMap = new Map([
+    ['key3', 300]
+  ])
+  writer.appendMap(smallMap, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt32(value)
+  }, false)  // normal map, non-compact
+  
+  // Read the buffer to verify
+  const buffer = Buffer.concat(writer.buffers)
+  let pos = 0
+  
+  // Compact null (length 0)
+  strictEqual(buffer[pos++], 0)
+  
+  // Compact empty map (length 1, but no elements)
+  strictEqual(buffer[pos++], 1)
+  
+  // Compact map with two entries (length 3, 1 for length + 2 elements with tagged fields)
+  strictEqual(buffer[pos++], 3)
+  
+  // First entry - key1:100
+  strictEqual(buffer[pos++], 5) // string length (4+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 4), 'key1')
+  pos += 4
+  strictEqual(buffer.readInt32BE(pos), 100)
+  pos += 4
+  strictEqual(buffer[pos++], 0) // Tagged field
+  
+  // Second entry - key2:200
+  strictEqual(buffer[pos++], 5) // string length (4+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 4), 'key2')
+  pos += 4
+  strictEqual(buffer.readInt32BE(pos), 200)
+  pos += 4
+  strictEqual(buffer[pos++], 0) // Tagged field
+  
+  // Non-compact null map (length 0 as int32)
+  strictEqual(buffer.readInt32BE(pos), 0)
+  pos += 4
+  
+  // Non-compact map with one entry (length 1 as int32, then 1 element + tagged field)
+  strictEqual(buffer.readInt32BE(pos), 1)
+  pos += 4
+  
+  // Entry - key3:300
+  strictEqual(buffer[pos++], 5) // string length (4+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 4), 'key3')
+  pos += 4
+  strictEqual(buffer.readInt32BE(pos), 300)
+  pos += 4
+  strictEqual(buffer[pos++], 0) // Tagged field
+})
+
+test('Write Map without trailing tagged fields', () => {
+  const writer = Writer.create()
+  
+  const testMap = new Map([
+    ['a', 1],
+    ['b', 2]
+  ])
+  
+  writer.appendMap(testMap, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt8(value)
+  }, true, false)  // map without trailing tagged fields
+  
+  // Verify the buffer content
+  const buffer = Buffer.concat(writer.buffers)
+  
+  // Map with two entries (length 3, 1 for length + 2 elements without tagged fields)
+  strictEqual(buffer[0], 3)
+  
+  // First entry - a:1
+  let pos = 1
+  strictEqual(buffer[pos++], 2) // string length (1+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 1), 'a')
+  pos += 1
+  strictEqual(buffer[pos++], 1) // value
+  
+  // Second entry - b:2
+  strictEqual(buffer[pos++], 2) // string length (1+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 1), 'b')
+  pos += 1
+  strictEqual(buffer[pos++], 2) // value
+})
+
+test('Write VarIntMap', () => {
+  const writer = Writer.create()
+  
+  writer.appendVarIntMap(null, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt8(value)
+  })  // null map
+  
+  writer.appendVarIntMap(new Map(), (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt8(value)
+  })  // empty map
+  
+  const testMap = new Map([
+    ['x', 10],
+    ['y', 20]
+  ])
+  
+  writer.appendVarIntMap(testMap, (w, v) => {
+    const [key, value] = v
+    w.appendString(key)
+    w.appendInt8(value)
+  })  // normal map
+  
+  // Read the buffer to verify
+  const buffer = Buffer.concat(writer.buffers)
+  let pos = 0
+  
+  // VarInt null (length 0)
+  strictEqual(buffer[pos++], 0)
+  
+  // VarInt empty map (length 0)
+  strictEqual(buffer[pos++], 0)
+  
+  // VarInt map with two entries (length 2, using zigzag encoding which is 4)
+  strictEqual(buffer[pos++], 4)
+  
+  // First entry - x:10
+  strictEqual(buffer[pos++], 2) // string length (1+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 1), 'x')
+  pos += 1
+  strictEqual(buffer[pos++], 10) // value
+  
+  // Second entry - y:20
+  strictEqual(buffer[pos++], 2) // string length (1+1)
+  strictEqual(buffer.toString('utf-8', pos, pos + 1), 'y')
+  pos += 1
+  strictEqual(buffer[pos++], 20) // value
 })

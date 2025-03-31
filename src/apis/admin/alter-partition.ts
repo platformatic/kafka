@@ -60,7 +60,7 @@ export interface AlterPartitionResponse {
         leader_recovery_state => INT8
         partition_epoch => INT32
 */
-function createRequest (brokerId: number, brokerEpoch: bigint, topic: AlterPartitionRequestTopic[]): Writer {
+export function createRequest (brokerId: number, brokerEpoch: bigint, topic: AlterPartitionRequestTopic[]): Writer {
   return Writer.create()
     .appendInt32(brokerId)
     .appendInt64(brokerEpoch)
@@ -93,7 +93,7 @@ function createRequest (brokerId: number, brokerEpoch: bigint, topic: AlterParti
         leader_recovery_state => INT8
         partition_epoch => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

@@ -31,7 +31,7 @@ export interface DescribeTransactionsResponse {
 DescribeTransactions Request (Version: 0) => [transactional_ids] TAG_BUFFER
   transactional_ids => COMPACT_STRING
 */
-function createRequest (transactionalIds: string[]): Writer {
+export function createRequest (transactionalIds: string[]): Writer {
   return Writer.create()
     .appendArray(transactionalIds, (w, t) => w.appendString(t), true, false)
     .appendTaggedFields()
@@ -52,7 +52,7 @@ DescribeTransactions Response (Version: 0) => throttle_time_ms [transaction_stat
       topic => COMPACT_STRING
       partitions => INT32
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

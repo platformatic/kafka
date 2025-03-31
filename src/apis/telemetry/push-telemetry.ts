@@ -19,7 +19,7 @@ export interface PushTelemetryResponse {
     compression_type => INT8
     metrics => COMPACT_BYTES
 */
-function createRequest (
+export function createRequest (
   clientInstanceId: string,
   subscriptionId: number,
   terminating: boolean,
@@ -40,7 +40,7 @@ function createRequest (
     throttle_time_ms => INT32
     error_code => INT16
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

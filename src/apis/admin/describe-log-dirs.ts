@@ -43,7 +43,7 @@ export interface DescribeLogDirsResponse {
       topic => COMPACT_STRING
       partitions => INT32
 */
-function createRequest (topics: DescribeLogDirsRequestTopic[]): Writer {
+export function createRequest (topics: DescribeLogDirsRequestTopic[]): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.name).appendArray(t.partitions, (w, p) => w.appendInt32(p), true, false)
@@ -68,7 +68,7 @@ function createRequest (topics: DescribeLogDirsRequestTopic[]): Writer {
       total_bytes => INT64
       usable_bytes => INT64
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

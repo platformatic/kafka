@@ -40,7 +40,7 @@ export interface AlterConfigsResponse {
         value => COMPACT_NULLABLE_STRING
     validate_only => BOOLEAN
 */
-function createRequest (resources: AlterConfigsRequestResource[], validateOnly: boolean): Writer {
+export function createRequest (resources: AlterConfigsRequestResource[], validateOnly: boolean): Writer {
   return Writer.create()
     .appendArray(resources, (w, r) => {
       w.appendInt8(r.resourceType)
@@ -62,7 +62,7 @@ function createRequest (resources: AlterConfigsRequestResource[], validateOnly: 
       resource_type => INT8
       resource_name => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

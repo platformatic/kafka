@@ -1,20 +1,36 @@
-import type BufferList from 'bl'
+import BufferList from 'bl'
 import { INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
 import { readUnsignedVarInt, readVarInt } from './varint32.ts'
 import { readUnsignedVarInt64, readVarInt64 } from './varint64.ts'
 
-export type EntryReader<T> = (reader: Reader, index: number) => T
+export type EntryReader<OutputType> = (reader: Reader, index: number) => OutputType
 
 export class Reader {
   buffer: BufferList
   position: number
 
-  static from (buffer: BufferList): Reader {
+  static from (buffer: Buffer | BufferList): Reader {
+    if (Buffer.isBuffer(buffer)) {
+      buffer = new BufferList(buffer)
+    }
+
     return new Reader(buffer)
   }
 
   constructor (buffer: BufferList) {
     this.buffer = buffer
+    this.position = 0
+  }
+
+  reset (buffer?: Buffer | BufferList) {
+    if (buffer) {
+      if (Buffer.isBuffer(buffer)) {
+        buffer = new BufferList(buffer)
+      }
+
+      this.buffer = buffer
+    }
+
     this.position = 0
   }
 
@@ -233,7 +249,7 @@ export class Reader {
 
       length--
     } else {
-      length = this.readUnsignedInt32()
+      length = this.readInt32()
 
       if (length === -1) {
         return null
@@ -254,7 +270,11 @@ export class Reader {
     return value
   }
 
-  readArray<T>(reader: EntryReader<T>, compact: boolean = true, discardTrailingTaggedFields = true): T[] | null {
+  readArray<OutputType>(
+    reader: EntryReader<OutputType>,
+    compact: boolean = true,
+    discardTrailingTaggedFields = true
+  ): OutputType[] | null {
     let length: number
 
     if (compact) {
@@ -266,14 +286,14 @@ export class Reader {
 
       length--
     } else {
-      length = this.readUnsignedInt32()
+      length = this.readInt32()
 
       if (length === -1) {
         return null
       }
     }
 
-    const value: T[] = []
+    const value: OutputType[] = []
 
     for (let i = 0; i < length; i++) {
       value.push(reader(this, i))
@@ -286,9 +306,46 @@ export class Reader {
     return value
   }
 
-  readVarIntArray<T>(reader: EntryReader<T>): T[] {
+  readMap<Key, Value>(
+    reader: EntryReader<[Key, Value]>,
+    compact: boolean = true,
+    discardTrailingTaggedFields = true
+  ): Map<Key, Value> | null {
+    let length: number
+
+    if (compact) {
+      length = this.readUnsignedVarInt()
+
+      if (length === 0) {
+        return null
+      }
+
+      length--
+    } else {
+      length = this.readInt32()
+
+      if (length === -1) {
+        return null
+      }
+    }
+
+    const map: Map<Key, Value> = new Map()
+
+    for (let i = 0; i < length; i++) {
+      const [key, value] = reader(this, i)
+      map.set(key, value)
+
+      if (discardTrailingTaggedFields) {
+        this.readTaggedFields()
+      }
+    }
+
+    return map
+  }
+
+  readVarIntArray<OutputType>(reader: EntryReader<OutputType>): OutputType[] {
     const length = this.readVarInt()
-    const value: T[] = []
+    const value: OutputType[] = []
 
     for (let i = 0; i < length; i++) {
       value.push(reader(this, i))

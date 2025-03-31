@@ -23,7 +23,7 @@ export interface GetTelemetrySubscriptionsResponse {
   GetTelemetrySubscriptions Request (Version: 0) => client_instance_id TAG_BUFFER
     client_instance_id => UUID
 */
-function createRequest (clientInstanceId?: NullableString): Writer {
+export function createRequest (clientInstanceId?: NullableString): Writer {
   return Writer.create().appendUUID(clientInstanceId).appendTaggedFields()
 }
 
@@ -39,7 +39,7 @@ function createRequest (clientInstanceId?: NullableString): Writer {
     delta_temporality => BOOLEAN
     requested_metrics => COMPACT_STRING
 */
-function parseResponse (
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

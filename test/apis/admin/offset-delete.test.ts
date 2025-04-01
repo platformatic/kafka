@@ -9,9 +9,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API handlers
 function captureApiHandlers(apiFunction) {
   const mockConnection = {
-    send: (_apiKey, _apiVersion, createRequestFn, parseResponseFn) => {
+    send: (_apiKey, _apiVersion, createRequestFn, parseResponseFn, _hasRequestHeader, _hasResponseHeader, callback) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null,
@@ -203,7 +204,7 @@ test('parseResponse throws ResponseError with multiple errors', () => {
     parseResponse(1, 47, 0, writer.bufferList)
   }, (err) => {
     deepStrictEqual(err instanceof ResponseError, true)
-    deepStrictEqual(err.code, 'PLT_KFK_MULTIPLE')
+    deepStrictEqual(err.code, 'PLT_KFK_RESPONSE')
     
     // Verify there are exactly 2 errors
     deepStrictEqual(err.errors.length, 2)

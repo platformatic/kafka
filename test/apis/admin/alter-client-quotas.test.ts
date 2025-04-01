@@ -9,9 +9,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API functions
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null as any,

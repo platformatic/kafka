@@ -12,9 +12,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API functions
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null as any,
@@ -349,7 +350,7 @@ test('parseResponse throws ResponseError for result-level errors', () => {
 test('mock API request-response cycle', async () => {
   // Create a mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify apiKey and apiVersion
       deepStrictEqual(apiKey, 35)
       deepStrictEqual(apiVersion, 4)
@@ -400,16 +401,16 @@ test('mock API request-response cycle', async () => {
       // Top level tagged fields
       writer.appendUnsignedVarInt(0) // No tagged fields at top level
       
-      // Call parseResponse with the mock response
+      // Call parseResponse with the mock response and call the callback
       const response = parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
+      callback(null, response)
       
-      // Return the parsed response as a resolved promise
-      return Promise.resolve(response)
+      return true
     }
   }
   
-  // Call the API directly with the mock connection
-  const response = await describeLogDirsV4(mockConnection as any, {
+  // Call the API directly with the mock connection using async
+  const response = await describeLogDirsV4.async(mockConnection as any, {
     topics: [
       {
         name: 'test-topic',
@@ -445,7 +446,7 @@ test('mock API request-response cycle', async () => {
 test('mock API error response handling', async () => {
   // Create a mock connection that returns an error response
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Create a mock response with an error
       const writer = Writer.create()
         .appendInt32(100) // throttleTimeMs
@@ -470,18 +471,20 @@ test('mock API error response handling', async () => {
       
       try {
         // This should throw a ResponseError
-        parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-        return Promise.resolve('This should not resolve')
+        const response = parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
+        callback(null, response)
       } catch (error) {
-        // Return the error as a rejected promise
-        return Promise.reject(error)
+        // Return the error via callback
+        callback(error)
       }
+      
+      return true
     }
   }
   
   try {
-    // Call the API directly with the mock connection
-    await describeLogDirsV4(mockConnection as any, {
+    // Call the API directly with the mock connection using async
+    await describeLogDirsV4.async(mockConnection as any, {
       topics: [
         {
           name: 'test-topic',

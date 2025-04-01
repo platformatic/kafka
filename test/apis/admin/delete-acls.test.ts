@@ -317,7 +317,7 @@ test('parseResponse throws ResponseError for filter-level error', () => {
     parseResponse(1, 31, 3, writer.bufferList)
   }, (err: any) => {
     deepStrictEqual(err instanceof ResponseError, true)
-    deepStrictEqual(err.code, 'PLT_KFK_MULTIPLE')
+    deepStrictEqual(err.code, 'PLT_KFK_RESPONSE')
     
     // Verify the error location is correct
     const errorPath = '/filter_results/0'
@@ -374,7 +374,7 @@ test('parseResponse throws ResponseError for ACL-level error', () => {
     parseResponse(1, 31, 3, writer.bufferList)
   }, (err: any) => {
     deepStrictEqual(err instanceof ResponseError, true)
-    deepStrictEqual(err.code, 'PLT_KFK_MULTIPLE')
+    deepStrictEqual(err.code, 'PLT_KFK_RESPONSE')
     
     // Verify the error location is correct
     const errorPath = '/filter_results/0/matching_acls/0'
@@ -454,7 +454,7 @@ test('parseResponse handles multiple errors at different levels', () => {
     parseResponse(1, 31, 3, writer.bufferList)
   }, (err: any) => {
     deepStrictEqual(err instanceof ResponseError, true)
-    deepStrictEqual(err.code, 'PLT_KFK_MULTIPLE')
+    deepStrictEqual(err.code, 'PLT_KFK_RESPONSE')
     
     // Verify that there are two errors
     deepStrictEqual(err.errors.length, 2)

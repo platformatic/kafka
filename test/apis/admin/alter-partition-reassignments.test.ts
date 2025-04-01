@@ -176,9 +176,9 @@ test('parseResponse throws ResponseError for partition-level errors', () => {
 })
 
 test('mock API request-response cycle', async () => {
-  // Create a mock connection
+  // Create a mock connection with callback support
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify apiKey and apiVersion
       deepStrictEqual(apiKey, 45)
       deepStrictEqual(apiVersion, 0)
@@ -221,13 +221,15 @@ test('mock API request-response cycle', async () => {
       // Call parseResponse with the mock response
       const response = parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
       
-      // Return the parsed response as a resolved promise
-      return Promise.resolve(response)
+      // Call the callback with the response
+      callback(null, response)
+      
+      return true
     }
   }
   
-  // Call the API directly with the mock connection
-  const response = await alterPartitionReassignmentsV0(mockConnection as any, {
+  // Call the API using async property
+  const response = await alterPartitionReassignmentsV0.async(mockConnection as any, {
     timeoutMs: 30000,
     topics: [
       {
@@ -257,7 +259,7 @@ test('mock API request-response cycle', async () => {
 test('mock API error response handling', async () => {
   // Create a mock connection that returns an error response
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Create a mock response with an error
       const writer = Writer.create()
         .appendInt32(100) // throttleTimeMs
@@ -283,17 +285,20 @@ test('mock API error response handling', async () => {
       try {
         // This should throw a ResponseError
         parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-        return Promise.resolve('This should not resolve')
+        // We should never get here if parseResponse throws as expected
+        callback(null, 'This should not be called')
       } catch (error) {
-        // Return the error as a rejected promise
-        return Promise.reject(error)
+        // Call the callback with the error
+        callback(error, null)
       }
+      
+      return true
     }
   }
   
   try {
-    // Call the API directly with the mock connection
-    await alterPartitionReassignmentsV0(mockConnection as any, {
+    // Call the API using async property
+    await alterPartitionReassignmentsV0.async(mockConnection as any, {
       timeoutMs: 30000,
       topics: [
         {

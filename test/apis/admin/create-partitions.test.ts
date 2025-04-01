@@ -419,16 +419,17 @@ test('parseResponse with multiple error results', () => {
   deepStrictEqual(error.response.results[1].errorMessage, 'Error 2')
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 37) // CreatePartitions API
       deepStrictEqual(apiVersion, 3) // Version 3
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with the response
+      callback(null, { success: true })
+      return true
     }
   }
   
@@ -445,8 +446,8 @@ test('API mock simulation without callback', () => {
     }
   ]
   
-  // Verify the API can be called without errors
-  const result = createPartitionsV3(mockConnection as any, topics, 5000, false)
+  // Verify the API can be called using the async property
+  const result = await createPartitionsV3.async(mockConnection as any, topics, 5000, false)
   deepStrictEqual(result, { success: true })
 })
 

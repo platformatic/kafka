@@ -9,9 +9,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API functions
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null as any,
@@ -44,10 +45,10 @@ function directCreateRequest(topics: DescribeProducersRequestTopic[]): Writer {
     .appendTaggedFields()
 }
 
-test('createRequest via mockConnection', () => {
+test('createRequest via mockConnection', async () => {
   // Create a mock connection that intercepts the createRequest function
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Call the createRequest with our parameters
       const topics = [
         {
@@ -65,17 +66,19 @@ test('createRequest via mockConnection', () => {
         deepStrictEqual(typeof reqFn.length, 'number')
         deepStrictEqual(reqFn.length > 0, true)
         
-        // Return success
-        return { success: true }
+        // Return success via callback
+        callback(null, { success: true })
+        return true
       } catch (err) {
         console.error('Error in createRequest:', err)
-        throw err
+        callback(err)
+        return true
       }
     }
   }
   
-  // Call the API with our mock connection
-  const result = describeProducersV0(mockConnection as any, [
+  // Call the API with our mock connection using async
+  const result = await describeProducersV0.async(mockConnection as any, [
     {
       name: 'test-topic',
       partitionIndexes: [0, 1, 2]
@@ -231,16 +234,17 @@ test('parseResponse with partition-level error', () => {
   deepStrictEqual(hasErrors, true, 'Response error should have errors')
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 61) // DescribeProducers API
       deepStrictEqual(apiVersion, 0) // Version 0
       
-      // Return a predetermined response
-      return { success: true }
+      // Return a predetermined response via callback
+      callback(null, { success: true })
+      return true
     }
   }
   
@@ -250,8 +254,8 @@ test('API mock simulation without callback', () => {
     partitionIndexes: [0, 1, 2]
   }]
   
-  // Verify the API can be called without errors
-  const result = describeProducersV0(mockConnection as any, topics)
+  // Verify the API can be called without errors using async
+  const result = await describeProducersV0.async(mockConnection as any, topics)
   deepStrictEqual(result, { success: true })
 })
 

@@ -293,16 +293,19 @@ test('parseResponse with error response', () => {
   deepStrictEqual(error.response.transactionStates === null || Array.isArray(error.response.transactionStates), true)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 66) // ListTransactions API
       deepStrictEqual(apiVersion, 1) // Version 1
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with a predetermined response
+      if (callback) {
+        callback(null, { success: true })
+      }
+      return true
     }
   }
   
@@ -311,8 +314,8 @@ test('API mock simulation without callback', () => {
   const producerIdFilters: bigint[] = [10n]
   const durationFilter = 5000n
   
-  // Verify the API can be called without errors
-  const result = listTransactionsV1(mockConnection as any, stateFilters, producerIdFilters, durationFilter)
+  // Verify the API can be called without errors using async
+  const result = await listTransactionsV1.async(mockConnection as any, stateFilters, producerIdFilters, durationFilter)
   deepStrictEqual(result, { success: true })
 })
 

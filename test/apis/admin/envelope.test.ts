@@ -239,8 +239,8 @@ test('parseResponse throws ResponseError for non-zero errorCode', () => {
     parseResponse(1, 58, 0, writer.bufferList)
   }, (err: any) => {
     deepStrictEqual(err instanceof ResponseError, true)
-    // The code is PLT_KFK_MULTIPLE because ResponseError extends MultipleErrors
-    deepStrictEqual(err.code, 'PLT_KFK_MULTIPLE')
+    // The code is PLT_KFK_RESPONSE because ResponseError extends MultipleErrors with that code
+    deepStrictEqual(err.code, 'PLT_KFK_RESPONSE')
     
     // Verify the response included in the error
     deepStrictEqual(err.response.errorCode, 1)

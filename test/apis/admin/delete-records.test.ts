@@ -507,16 +507,17 @@ test('parseResponse with multiple partition errors', () => {
   deepStrictEqual(error.response.topics[1].partitions[0].errorCode, 29)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 21) // DeleteRecords API
       deepStrictEqual(apiVersion, 2) // Version 2
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with the response
+      callback(null, { success: true })
+      return true
     }
   }
   
@@ -533,8 +534,8 @@ test('API mock simulation without callback', () => {
     }
   ]
   
-  // Verify the API can be called without errors
-  const result = deleteRecordsV2(mockConnection as any, topics, 5000)
+  // Verify the API can be called using async
+  const result = await deleteRecordsV2.async(mockConnection as any, topics, 5000)
   deepStrictEqual(result, { success: true })
 })
 

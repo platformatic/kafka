@@ -397,16 +397,17 @@ test('parseResponse with multiple error results', () => {
   deepStrictEqual(error.response.results[1].errorCode, 38)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 30) // CreateAcls API
       deepStrictEqual(apiVersion, 3) // Version 3
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with the predetermined response
+      callback(null, { success: true })
+      return true
     }
   }
   
@@ -421,8 +422,8 @@ test('API mock simulation without callback', () => {
     permissionType: 3
   }]
   
-  // Verify the API can be called without errors
-  const result = createAclsV3(mockConnection as any, creations)
+  // Verify the API can be called with .async property
+  const result = await createAclsV3.async(mockConnection as any, creations)
   deepStrictEqual(result, { success: true })
 })
 

@@ -488,26 +488,29 @@ test('parseResponse throws on multiple error responses', () => {
   deepStrictEqual(error.response.responses[2].errorCode, 0)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 44) // IncrementalAlterConfigs API
       deepStrictEqual(apiVersion, 1) // Version 1
       
-      // Return a predetermined response
-      return { 
-        throttleTimeMs: 100,
-        responses: [
-          {
-            errorCode: 0,
-            errorMessage: null,
-            resourceType: 2,
-            resourceName: 'test-topic'
-          }
-        ]
+      // Call the callback with a predetermined response
+      if (callback) {
+        callback(null, { 
+          throttleTimeMs: 100,
+          responses: [
+            {
+              errorCode: 0,
+              errorMessage: null,
+              resourceType: 2,
+              resourceName: 'test-topic'
+            }
+          ]
+        })
       }
+      return true
     }
   }
   
@@ -527,8 +530,8 @@ test('API mock simulation without callback', () => {
   ]
   const validateOnly = false
   
-  // Verify the API can be called without errors
-  const result = incrementalAlterConfigsV1(mockConnection as any, resources, validateOnly)
+  // Verify the API can be called without errors using async
+  const result = await incrementalAlterConfigsV1.async(mockConnection as any, resources, validateOnly)
   deepStrictEqual(result, { 
     throttleTimeMs: 100,
     responses: [

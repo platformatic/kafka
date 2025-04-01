@@ -9,9 +9,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API functions
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null as any,
@@ -499,15 +500,12 @@ test('parseResponse throws on error response', () => {
     error = err
   }
   
-  // Print error structure for debugging
-  console.log('Error keys:', Object.keys(error.errors))
-  console.log('Error values:', Object.values(error.errors))
-  
   // Verify the error structure
   deepStrictEqual(error instanceof ResponseError, true)
+  deepStrictEqual(error.code, 'PLT_KFK_RESPONSE')
   
-  // Verify errors exist (check length only)
-  deepStrictEqual(Object.keys(error.errors).length > 0, true)
+  // Verify errors exist
+  deepStrictEqual(error.errors.length > 0, true)
   
   // Verify the response is still attached to the error
   deepStrictEqual(error.response.throttleTimeMs, 100)
@@ -564,15 +562,12 @@ test('parseResponse throws on multiple error responses', () => {
     error = err
   }
   
-  // Print error structure for debugging
-  console.log('Multiple error keys:', Object.keys(error.errors))
-  console.log('Multiple error values:', Object.values(error.errors))
-  
   // Verify the error structure
   deepStrictEqual(error instanceof ResponseError, true)
+  deepStrictEqual(error.code, 'PLT_KFK_RESPONSE')
   
-  // Verify errors exist (check length only)
-  deepStrictEqual(Object.keys(error.errors).length, 2)
+  // Verify errors exist and there are 2 of them
+  deepStrictEqual(error.errors.length, 2)
   
   // Verify the response is still attached to the error
   deepStrictEqual(error.response.entries.length, 3)
@@ -581,16 +576,16 @@ test('parseResponse throws on multiple error responses', () => {
   deepStrictEqual(error.response.entries[2].errorCode, 0)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 49) // AlterClientQuotas API
       deepStrictEqual(apiVersion, 1) // Version 1
       
-      // Return a predetermined response
-      return {
+      // Mock the response by calling the callback
+      const response = {
         throttleTimeMs: 100,
         entries: [
           {
@@ -602,6 +597,13 @@ test('API mock simulation without callback', () => {
           }
         ]
       }
+      
+      // Async simulate response
+      setTimeout(() => {
+        callback(null, response)
+      }, 0)
+      
+      return true
     }
   }
   
@@ -618,8 +620,8 @@ test('API mock simulation without callback', () => {
   ]
   const validateOnly = false
   
-  // Verify the API can be called without errors
-  const result = alterClientQuotasV1(mockConnection as any, entries, validateOnly)
+  // Verify the API can be called without errors using the async API
+  const result = await alterClientQuotasV1.async(mockConnection as any, entries, validateOnly)
   deepStrictEqual(result, {
     throttleTimeMs: 100,
     entries: [

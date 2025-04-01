@@ -152,20 +152,23 @@ test('parseResponse throws on error response', () => {
   deepStrictEqual(error.response.throttleTimeMs, 100)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 40) // ExpireDelegationToken API
       deepStrictEqual(apiVersion, 2) // Version 2
       
-      // Return a predetermined response
-      return { 
-        errorCode: 0,
-        expiryTimestampMs: 1656088800000n,
-        throttleTimeMs: 100
+      // Call the callback with a predetermined response
+      if (callback) {
+        callback(null, { 
+          errorCode: 0,
+          expiryTimestampMs: 1656088800000n,
+          throttleTimeMs: 100
+        })
       }
+      return true
     }
   }
   
@@ -173,8 +176,8 @@ test('API mock simulation without callback', () => {
   const hmac = Buffer.from('testHmacToken', 'utf-8')
   const expiryTimePeriodMs = 3600000n
   
-  // Verify the API can be called without errors
-  const result = expireDelegationTokenV2(mockConnection as any, hmac, expiryTimePeriodMs)
+  // Verify the API can be called without errors using async
+  const result = await expireDelegationTokenV2.async(mockConnection as any, hmac, expiryTimePeriodMs)
   deepStrictEqual(result, { 
     errorCode: 0,
     expiryTimestampMs: 1656088800000n,

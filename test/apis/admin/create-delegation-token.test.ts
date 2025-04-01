@@ -248,16 +248,16 @@ test('parseResponse throws on error response', () => {
   deepStrictEqual(error.response.expiryTimestampMs, 0n)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 38) // CreateDelegationToken API
       deepStrictEqual(apiVersion, 3) // Version 3
       
-      // Return a predetermined response
-      return { 
+      // Call the callback with the response
+      callback(null, { 
         errorCode: 0,
         principalType: 'User',
         principalName: 'admin',
@@ -269,7 +269,9 @@ test('API mock simulation without callback', () => {
         tokenId: 'token-123',
         hmac: Buffer.from('hmac-token-bytes', 'utf-8'),
         throttleTimeMs: 100
-      }
+      })
+      
+      return true
     }
   }
   
@@ -279,8 +281,8 @@ test('API mock simulation without callback', () => {
   const renewers = [{ principalType: 'User', principalName: 'user1' }]
   const maxLifetimeMs = 86400000n
   
-  // Verify the API can be called without errors
-  const result = createDelegationTokenV3(mockConnection as any, ownerPrincipalType, ownerPrincipalName, renewers, maxLifetimeMs)
+  // Verify the API can be called with .async
+  const result = await createDelegationTokenV3.async(mockConnection as any, ownerPrincipalType, ownerPrincipalName, renewers, maxLifetimeMs)
   deepStrictEqual(result, { 
     errorCode: 0,
     principalType: 'User',

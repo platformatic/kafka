@@ -290,10 +290,10 @@ test('parseResponse handles successful response with full structure', () => {
   deepStrictEqual(response.groups[0].authorizedOperations, 0)
 })
 
-test('full API end-to-end test with mock connection', () => {
+test('full API end-to-end test with mock connection', async () => {
   // Mock connection with a custom send method
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify API key and version
       deepStrictEqual(apiKey, 69)
       deepStrictEqual(apiVersion, 0)
@@ -368,34 +368,36 @@ test('full API end-to-end test with mock connection', () => {
         
         .appendInt8(0) // Empty tagged fields for groups array
       
-      // Parse the mock response and verify
+      // Parse the mock response and call the callback
       const result = parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-      return Promise.resolve(result)
+      callback(null, result)
+      
+      return true
     }
   }
   
-  // Execute the API with the mock connection
-  return consumerGroupDescribeV0(mockConnection as any, {
+  // Execute the API with the mock connection using async
+  const response = await consumerGroupDescribeV0.async(mockConnection as any, {
     groupIds: ['test-group'],
     includeAuthorizedOperations: true
-  }).then((response: ConsumerGroupDescribeResponse) => {
-    // Verify the response
-    deepStrictEqual(response.throttleTimeMs, 0)
-    deepStrictEqual(response.groups.length, 1)
-    deepStrictEqual(response.groups[0].errorCode, 0)
-    deepStrictEqual(response.groups[0].groupId, 'test-group')
-    deepStrictEqual(response.groups[0].members.length, 1)
-    deepStrictEqual(response.groups[0].members[0].memberId, 'consumer-1-uuid')
-    deepStrictEqual(Array.isArray(response.groups[0].members[0].assignment.topicPartitions[0].partitions), true)
-    deepStrictEqual(response.groups[0].members[0].assignment.topicPartitions[0].partitions.length, 2)
-    // Skip checking the exact value of authorizedOperations as it might vary
   })
+  
+  // Verify the response
+  deepStrictEqual(response.throttleTimeMs, 0)
+  deepStrictEqual(response.groups.length, 1)
+  deepStrictEqual(response.groups[0].errorCode, 0)
+  deepStrictEqual(response.groups[0].groupId, 'test-group')
+  deepStrictEqual(response.groups[0].members.length, 1)
+  deepStrictEqual(response.groups[0].members[0].memberId, 'consumer-1-uuid')
+  deepStrictEqual(Array.isArray(response.groups[0].members[0].assignment.topicPartitions[0].partitions), true)
+  deepStrictEqual(response.groups[0].members[0].assignment.topicPartitions[0].partitions.length, 2)
+  // Skip checking the exact value of authorizedOperations as it might vary
 })
 
-test('full API error response handling', () => {
+test('full API error response handling', async () => {
   // Mock connection with a custom send method that returns an error
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Create request
       const groupIds = ['test-group']
       const includeAuthorizedOperations = false
@@ -422,19 +424,27 @@ test('full API error response handling', () => {
       
       try {
         parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-        return Promise.resolve(null) // This should not happen
+        // Should not get here
+        callback(null, null)
       } catch (error) {
-        return Promise.reject(error)
+        callback(error, null)
       }
+      
+      return true
     }
   }
   
   // Execute the API with the mock connection and expect a ResponseError
-  return consumerGroupDescribeV0(mockConnection as any, {
-    groupIds: ['test-group'],
-    includeAuthorizedOperations: false
-  }).catch(error => {
+  try {
+    await consumerGroupDescribeV0.async(mockConnection as any, {
+      groupIds: ['test-group'],
+      includeAuthorizedOperations: false
+    })
+    
+    // Should not get here
+    throw new Error('Promise should have been rejected')
+  } catch (error) {
     deepStrictEqual(error instanceof ResponseError, true)
     deepStrictEqual(error.errors.length > 0, true)
-  })
+  }
 })

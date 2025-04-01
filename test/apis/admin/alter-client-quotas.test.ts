@@ -581,16 +581,16 @@ test('parseResponse throws on multiple error responses', () => {
   deepStrictEqual(error.response.entries[2].errorCode, 0)
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 49) // AlterClientQuotas API
       deepStrictEqual(apiVersion, 1) // Version 1
       
-      // Return a predetermined response
-      return {
+      // Mock the response by calling the callback
+      const response = {
         throttleTimeMs: 100,
         entries: [
           {
@@ -602,6 +602,13 @@ test('API mock simulation without callback', () => {
           }
         ]
       }
+      
+      // Async simulate response
+      setTimeout(() => {
+        callback(null, response)
+      }, 0)
+      
+      return true
     }
   }
   
@@ -618,8 +625,8 @@ test('API mock simulation without callback', () => {
   ]
   const validateOnly = false
   
-  // Verify the API can be called without errors
-  const result = alterClientQuotasV1(mockConnection as any, entries, validateOnly)
+  // Verify the API can be called without errors using the async API
+  const result = await alterClientQuotasV1.async(mockConnection as any, entries, validateOnly)
   deepStrictEqual(result, {
     throttleTimeMs: 100,
     entries: [

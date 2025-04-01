@@ -65,7 +65,7 @@ test('createRequest via mockConnection', () => {
   
   // Create a mock connection that intercepts the createRequest function
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Call the createRequest with our parameters, but don't verify its direct output
       // Instead just make sure the function runs without errors
       
@@ -100,18 +100,21 @@ test('createRequest via mockConnection', () => {
         deepStrictEqual(typeof reqFn.length, 'number')
         deepStrictEqual(reqFn.length > 0, true)
         
-        // Return success
-        return { success: true }
+        // Call callback with success
+        callback(null, { success: true })
+        return true
       } catch (err) {
         // If there's an error, show what went wrong
         console.error('Error in createRequest:', err)
-        throw err
+        callback(err, null)
+        return true
       }
     }
   }
   
-  // Call the API with our mock connection
-  const result = alterPartitionV3(mockConnection as any, 42, 123456789n, [
+  // Call the API with our mock connection using callback
+  let callbackCalled = false
+  alterPartitionV3(mockConnection as any, 42, 123456789n, [
     {
       topicId: '00112233-4455-6677-8899-aabbccddeeff',
       partitions: [
@@ -129,10 +132,14 @@ test('createRequest via mockConnection', () => {
         }
       ]
     }
-  ])
+  ], (error, result) => {
+    callbackCalled = true
+    deepStrictEqual(error, null)
+    deepStrictEqual(result, { success: true })
+  })
   
-  // Verify the result
-  deepStrictEqual(result, { success: true })
+  // Verify callback was called
+  deepStrictEqual(callbackCalled, true)
 })
 
 test('direct createRequest structure validation', () => {
@@ -333,20 +340,21 @@ test('parseResponse with partition-level error', () => {
   })
 })
 
-test('simplest API mock simulation without callback', () => {
+test('simplest API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version are used
       deepStrictEqual(apiKey, 56) // AlterPartition API
       deepStrictEqual(apiVersion, 3) // Version 3
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with a predetermined response
+      callback(null, { success: true })
+      return true
     }
   }
   
-  // Call the API with minimal required arguments
+  // Call the API with minimal required arguments using async
   const brokerId = 42
   const brokerEpoch = 123456789n
   const topics = [{
@@ -363,8 +371,8 @@ test('simplest API mock simulation without callback', () => {
     }]
   }]
   
-  // Just verify the API can be called without errors
-  const result = alterPartitionV3(mockConnection as any, brokerId, brokerEpoch, topics)
+  // Verify the API can be called with async
+  const result = await alterPartitionV3.async(mockConnection as any, brokerId, brokerEpoch, topics)
   deepStrictEqual(result, { success: true })
 })
 

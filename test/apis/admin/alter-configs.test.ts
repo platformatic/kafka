@@ -360,16 +360,20 @@ test('alterConfigsV2 works with API interface', () => {
   // Mock connection with a simpler approach
   const mockConnection = {
     send: function(apiKey: number, apiVersion: number, _createRequestFn: any, _parseResponseFn: any, _hasRequestHeaderTaggedFields: boolean, _hasResponseHeaderTaggedFields: boolean, callback: any) {
-      // Just return true without calling callback
+      // Just return true, and also call the callback with success
       strictEqual(apiKey, 33)
       strictEqual(apiVersion, 2)
       ok(typeof callback === 'function')
+      
+      // Simulate successful response
+      callback(null, true)
       return true
     }
   }
   
-  // Verify that calling the API returns true (synchronous version)
-  const result = alterConfigsV2(mockConnection, {
+  // Test with callback
+  let callbackCalled = false
+  alterConfigsV2(mockConnection as any, {
     resources: [
       {
         resourceType: 2,
@@ -378,8 +382,14 @@ test('alterConfigsV2 works with API interface', () => {
       }
     ],
     validateOnly: false
+  }, (error, result) => {
+    callbackCalled = true
+    strictEqual(error, null)
+    strictEqual(result, true)
   })
-  strictEqual(result, true)
+  
+  // Verify callback was called
+  strictEqual(callbackCalled, true)
   
   // Verify that we can access the async property
   ok(typeof alterConfigsV2.async === 'function')

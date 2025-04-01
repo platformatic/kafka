@@ -243,10 +243,10 @@ test('parseResponse handles empty results array', () => {
   deepStrictEqual(response.results.length, 0)
 })
 
-test('full API end-to-end test with mock connection', () => {
+test('full API end-to-end test with mock connection', async () => {
   // Mock connection with a custom send method
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify API key and version
       deepStrictEqual(apiKey, 34)
       deepStrictEqual(apiVersion, 2)
@@ -291,14 +291,16 @@ test('full API end-to-end test with mock connection', () => {
             })
         })
       
-      // Parse the mock response and verify
+      // Parse the mock response and call the callback
       const result = parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-      return Promise.resolve(result)
+      callback(null, result)
+      
+      return true
     }
   }
   
-  // Execute the API with the mock connection
-  return alterReplicaLogDirsV2(mockConnection as any, {
+  // Execute the API with the mock connection using async
+  const response = await alterReplicaLogDirsV2.async(mockConnection as any, {
     dirs: [
       {
         path: '/data/kafka/logs-1',
@@ -310,21 +312,21 @@ test('full API end-to-end test with mock connection', () => {
         ]
       }
     ]
-  }).then(response => {
-    // Verify the response
-    deepStrictEqual(response.throttleTimeMs, 0)
-    deepStrictEqual(response.results.length, 1)
-    deepStrictEqual(response.results[0].topicName, 'test-topic')
-    deepStrictEqual(response.results[0].partitions.length, 2)
-    deepStrictEqual(response.results[0].partitions[0].partitionIndex, 0)
-    deepStrictEqual(response.results[0].partitions[0].errorCode, 0)
   })
+  
+  // Verify the response
+  deepStrictEqual(response.throttleTimeMs, 0)
+  deepStrictEqual(response.results.length, 1)
+  deepStrictEqual(response.results[0].topicName, 'test-topic')
+  deepStrictEqual(response.results[0].partitions.length, 2)
+  deepStrictEqual(response.results[0].partitions[0].partitionIndex, 0)
+  deepStrictEqual(response.results[0].partitions[0].errorCode, 0)
 })
 
-test('full API error response handling', () => {
+test('full API error response handling', async () => {
   // Mock connection with a custom send method that returns an error
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Create request
       const dirs: AlterReplicaLogDirsRequestDir[] = [
         {
@@ -366,28 +368,33 @@ test('full API error response handling', () => {
       
       try {
         parseResponseFn(1, apiKey, apiVersion, writer.bufferList)
-        return Promise.resolve(null) // This should not happen
+        callback(null, null) // This should not happen
       } catch (error) {
-        return Promise.reject(error)
+        callback(error, null)
       }
+      
+      return true
     }
   }
   
   // Execute the API with the mock connection and expect a ResponseError
-  return alterReplicaLogDirsV2(mockConnection as any, {
-    dirs: [
-      {
-        path: '/data/kafka/logs-1',
-        topics: [
-          {
-            name: 'test-topic',
-            partitions: [0, 1]
-          }
-        ]
-      }
-    ]
-  }).catch(error => {
+  try {
+    await alterReplicaLogDirsV2.async(mockConnection as any, {
+      dirs: [
+        {
+          path: '/data/kafka/logs-1',
+          topics: [
+            {
+              name: 'test-topic',
+              partitions: [0, 1]
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Promise should have been rejected')
+  } catch (error) {
     deepStrictEqual(error instanceof ResponseError, true)
     deepStrictEqual(error.errors.length > 0, true)
-  })
+  }
 })

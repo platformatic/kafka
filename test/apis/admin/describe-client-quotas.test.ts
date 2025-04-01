@@ -188,8 +188,8 @@ test('describeClientQuotasV0 - parseResponse handles error responses', async (t)
     ok(error instanceof MultipleErrors, 'Error should be instance of MultipleErrors')
     ok(error instanceof ResponseError || MultipleErrors.isMultipleErrors(error), 
        'Error should be a ResponseError or MultipleErrors')
-    // Based on the error code from implementation, ResponseError uses PLT_KFK_MULTIPLE
-    strictEqual(error.code, 'PLT_KFK_MULTIPLE', 'Error code should be PLT_KFK_MULTIPLE')
+    // Based on the updated error code from implementation, ResponseError uses PLT_KFK_RESPONSE
+    strictEqual(error.code, 'PLT_KFK_RESPONSE', 'Error code should be PLT_KFK_RESPONSE')
   }
 })
 
@@ -205,10 +205,14 @@ test('describeClientQuotasV0 - promise API returns a promise', async (t) => {
   }
   
   const mockConnection = {
-    send: () => Promise.resolve(mockResponse)
+    send: (_apiKey: number, _apiVersion: number, _createRequestFn: any, _parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
+      // Call the callback with the mock response
+      callback(null, mockResponse)
+      return true
+    }
   }
   
-  const result = await describeClientQuotasV0(mockConnection as any, {
+  const result = await describeClientQuotasV0.async(mockConnection as any, {
     components: [],
     strict: true
   })

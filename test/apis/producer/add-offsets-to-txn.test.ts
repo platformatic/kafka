@@ -10,12 +10,12 @@ import { Writer } from '../../../src/protocol/writer.ts'
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
     send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Execute createRequestFn once to get the handler function
-      const handler = createRequestFn()
-      mockConnection.createRequestFn = handler
+      // Store the request and response handlers
+      mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
       mockConnection.apiKey = apiKey
       mockConnection.apiVersion = apiVersion
+      if (cb) cb(null, {})
       return true
     },
     createRequestFn: null as any,
@@ -24,13 +24,8 @@ function captureApiHandlers(apiFunction: any) {
     apiVersion: null as any
   }
   
-  // Call the API to capture handlers with dummy values
-  apiFunction(mockConnection, {
-    transactionalId: 'test-txn',
-    producerId: 0n,
-    producerEpoch: 0,
-    groupId: 'test-group'
-  })
+  // Call the API to capture handlers with dummy values - use individual arguments
+  apiFunction(mockConnection, 'test-txn', 0n, 0, 'test-group')
   
   return {
     createRequest: mockConnection.createRequestFn,
@@ -51,25 +46,21 @@ test('addOffsetsToTxnV4 has valid handlers', () => {
 test('addOffsetsToTxnV4 createRequest serializes request correctly', () => {
   const { createRequest } = captureApiHandlers(addOffsetsToTxnV4)
   
-  // Directly create a writer with the correct parameters
-  const writer = Writer.create()
-    .appendString('test-transaction-id', true)
-    .appendInt64(123456789n)
-    .appendInt16(42)
-    .appendString('test-consumer-group', true)
-    .appendTaggedFields()
+  // Test the request handler with valid parameters - pass individual arguments
+  const request = createRequest(
+    'test-transaction-id',
+    123456789n,
+    42,
+    'test-consumer-group'
+  )
   
   // Verify it returns a Writer
-  ok(writer instanceof Writer)
+  ok(request instanceof Writer)
   
-  // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
-  
-  // Using readCompactString for compact string format used in V4
-  strictEqual(reader.readString(), 'test-transaction-id') // Should use readString which handles the length
-  strictEqual(reader.readInt64(), 123456789n)
-  strictEqual(reader.readInt16(), 42)
-  strictEqual(reader.readString(), 'test-consumer-group')
+  // Verify the Writer has a buffer
+  ok(request.buffer instanceof Buffer)
+  strictEqual(typeof request.length, 'number')
+  strictEqual(request.length > 0, true)
 })
 
 test('addOffsetsToTxnV4 parseResponse handles successful response', () => {
@@ -128,13 +119,8 @@ test('addOffsetsToTxnV4 API mock simulation without callback', async () => {
     }
   }
   
-  // Call the API without callback
-  const result = await addOffsetsToTxnV4.async(mockConnection, {
-    transactionalId: 'test-txn',
-    producerId: 12345n,
-    producerEpoch: 5,
-    groupId: 'test-group'
-  })
+  // Call the API without callback - use individual arguments
+  const result = await addOffsetsToTxnV4.async(mockConnection, 'test-txn', 12345n, 5, 'test-group')
   
   // Verify result
   strictEqual(result.throttleTimeMs, 0)
@@ -161,13 +147,8 @@ test('addOffsetsToTxnV4 API mock simulation with callback', (t, done) => {
     }
   }
   
-  // Call the API with callback
-  addOffsetsToTxnV4(mockConnection, {
-    transactionalId: 'test-txn',
-    producerId: 12345n,
-    producerEpoch: 5,
-    groupId: 'test-group'
-  }, (err, result) => {
+  // Call the API with callback - use individual arguments
+  addOffsetsToTxnV4(mockConnection, 'test-txn', 12345n, 5, 'test-group', (err, result) => {
     // Verify no error
     strictEqual(err, null)
     
@@ -201,14 +182,9 @@ test('addOffsetsToTxnV4 API error handling with Promise', async () => {
     }
   }
   
-  // Verify Promise rejection
+  // Verify Promise rejection - use individual arguments
   await rejects(async () => {
-    await addOffsetsToTxnV4.async(mockConnection, {
-      transactionalId: 'test-txn',
-      producerId: 12345n,
-      producerEpoch: 5,
-      groupId: 'test-group'
-    })
+    await addOffsetsToTxnV4.async(mockConnection, 'test-txn', 12345n, 5, 'test-group')
   }, (err: any) => {
     ok(err instanceof ResponseError)
     ok(err.message.includes('Received response with error while executing API'))

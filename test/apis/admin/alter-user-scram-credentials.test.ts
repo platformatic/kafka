@@ -246,18 +246,20 @@ test('alterUserScramCredentialsV0 should throw ResponseError for error codes', a
 test('alterUserScramCredentialsV0 should execute the API call correctly', async () => {
   // Create a mock connection that simulates a successful response
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Store the functions for verification
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
       
-      // Return a promise that resolves with the mock response
-      return Promise.resolve({
+      // Call the callback with the mock response
+      callback(null, {
         throttleTimeMs: 0,
         results: [
           { user: 'user1', errorCode: 0, errorMessage: null }
         ]
       })
+      
+      return true
     },
     createRequestFn: null as any,
     parseResponseFn: null as any
@@ -275,8 +277,8 @@ test('alterUserScramCredentialsV0 should execute the API call correctly', async 
     saltedPassword: Buffer.from('password')
   }]
   
-  // Execute the API
-  const response = await alterUserScramCredentialsV0(
+  // Execute the API with .async
+  const response = await alterUserScramCredentialsV0.async(
     mockConnection as any,
     deletions,
     upsertions

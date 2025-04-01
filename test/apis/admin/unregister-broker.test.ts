@@ -9,9 +9,10 @@ import { Writer } from '../../../src/protocol/writer.ts'
 // Helper function to mock connection and capture API functions
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
+    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any, _hasRequestHeader: boolean, _hasResponseHeader: boolean, callback: any) => {
       mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
+      if (callback) callback(null, {})
       return true
     },
     createRequestFn: null as any,
@@ -144,28 +145,29 @@ test('parseResponse throws on error response', () => {
   deepStrictEqual(error.response.errorMessage, 'Broker still has active topics')
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 64) // UnregisterBroker API
       deepStrictEqual(apiVersion, 0) // Version 0
       
-      // Return a predetermined response
-      return { 
+      // Call the callback with a predetermined response
+      callback(null, { 
         throttleTimeMs: 100,
         errorCode: 0,
         errorMessage: null
-      }
+      })
+      return true
     }
   }
   
   // Call the API with minimal required arguments
   const brokerId = 42
   
-  // Verify the API can be called without errors
-  const result = unregisterBrokerV0(mockConnection as any, brokerId)
+  // Verify the API can be called without errors using async
+  const result = await unregisterBrokerV0.async(mockConnection as any, brokerId)
   deepStrictEqual(result, { 
     throttleTimeMs: 100,
     errorCode: 0,

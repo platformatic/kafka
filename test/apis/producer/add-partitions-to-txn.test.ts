@@ -10,12 +10,12 @@ import { Writer } from '../../../src/protocol/writer.ts'
 function captureApiHandlers(apiFunction: any) {
   const mockConnection = {
     send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Execute createRequestFn once to get the handler function
-      const handler = createRequestFn()
-      mockConnection.createRequestFn = handler
+      // Store the request and response handlers
+      mockConnection.createRequestFn = createRequestFn
       mockConnection.parseResponseFn = parseResponseFn
       mockConnection.apiKey = apiKey
       mockConnection.apiVersion = apiVersion
+      if (cb) cb(null, {})
       return true
     },
     createRequestFn: null as any,

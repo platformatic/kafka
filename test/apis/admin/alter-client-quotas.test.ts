@@ -500,15 +500,12 @@ test('parseResponse throws on error response', () => {
     error = err
   }
   
-  // Print error structure for debugging
-  console.log('Error keys:', Object.keys(error.errors))
-  console.log('Error values:', Object.values(error.errors))
-  
   // Verify the error structure
   deepStrictEqual(error instanceof ResponseError, true)
+  deepStrictEqual(error.code, 'PLT_KFK_RESPONSE')
   
-  // Verify errors exist (check length only)
-  deepStrictEqual(Object.keys(error.errors).length > 0, true)
+  // Verify errors exist
+  deepStrictEqual(error.errors.length > 0, true)
   
   // Verify the response is still attached to the error
   deepStrictEqual(error.response.throttleTimeMs, 100)
@@ -565,15 +562,12 @@ test('parseResponse throws on multiple error responses', () => {
     error = err
   }
   
-  // Print error structure for debugging
-  console.log('Multiple error keys:', Object.keys(error.errors))
-  console.log('Multiple error values:', Object.values(error.errors))
-  
   // Verify the error structure
   deepStrictEqual(error instanceof ResponseError, true)
+  deepStrictEqual(error.code, 'PLT_KFK_RESPONSE')
   
-  // Verify errors exist (check length only)
-  deepStrictEqual(Object.keys(error.errors).length, 2)
+  // Verify errors exist and there are 2 of them
+  deepStrictEqual(error.errors.length, 2)
   
   // Verify the response is still attached to the error
   deepStrictEqual(error.response.entries.length, 3)

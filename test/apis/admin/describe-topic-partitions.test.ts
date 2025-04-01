@@ -84,15 +84,15 @@ test('createRequest via mockConnection', () => {
     }
   }
   
-  // Call the API with our mock connection
-  const result = describeTopicPartitionsV0(mockConnection as any, [
+  // Call the API with our mock connection - we need to use async now
+  describeTopicPartitionsV0(mockConnection as any, [
     {
       name: 'test-topic'
     }
   ], 1000)
   
-  // Verify the result
-  deepStrictEqual(result, { success: true })
+  // Since the API now uses callbacks, there's no return value to verify
+  // The test succeeds if no error is thrown
 })
 
 test('createRequest with cursor via mockConnection', () => {
@@ -130,7 +130,7 @@ test('createRequest with cursor via mockConnection', () => {
   }
   
   // Call the API with our mock connection including cursor
-  const result = describeTopicPartitionsV0(mockConnection as any, [
+  describeTopicPartitionsV0(mockConnection as any, [
     {
       name: 'test-topic'
     }
@@ -139,8 +139,8 @@ test('createRequest with cursor via mockConnection', () => {
     partitionIndex: 5
   })
   
-  // Verify the result
-  deepStrictEqual(result, { success: true })
+  // Since the API now uses callbacks, there's no return value to verify
+  // The test succeeds if no error is thrown
 })
 
 // Skip this test because of array encoding differences
@@ -437,16 +437,19 @@ test('parseResponse with partition-level error', () => {
   deepStrictEqual('0' in error.errors, true, 'Should have an error')
 })
 
-test('API mock simulation without callback', () => {
+test('API mock simulation without callback', async () => {
   // Create a simplified mock connection
   const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, ...args: any[]) => {
+    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeader: boolean, hasResponseHeader: boolean, callback: any) => {
       // Verify correct API key and version
       deepStrictEqual(apiKey, 75) // DescribeTopicPartitions API
       deepStrictEqual(apiVersion, 0) // Version 0
       
-      // Return a predetermined response
-      return { success: true }
+      // Call the callback with a predetermined response
+      if (callback) {
+        callback(null, { success: true })
+      }
+      return true
     }
   }
   
@@ -455,8 +458,8 @@ test('API mock simulation without callback', () => {
     name: 'test-topic'
   }]
   
-  // Verify the API can be called without errors
-  const result = describeTopicPartitionsV0(mockConnection as any, topics, 1000)
+  // Verify the API can be called without errors using async
+  const result = await describeTopicPartitionsV0.async(mockConnection as any, topics, 1000)
   deepStrictEqual(result, { success: true })
 })
 

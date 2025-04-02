@@ -2,9 +2,10 @@
 
 services:
   controller-1:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: controller-1
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: controller
       KAFKA_LISTENERS: CONTROLLER://:9093
@@ -14,9 +15,10 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
   controller-2:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: controller-2
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 2
       KAFKA_PROCESS_ROLES: controller
       KAFKA_LISTENERS: CONTROLLER://:9093
@@ -26,9 +28,10 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
   controller-3:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: controller-3
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 3
       KAFKA_PROCESS_ROLES: controller
       KAFKA_LISTENERS: CONTROLLER://:9093
@@ -38,11 +41,12 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
   broker-1:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: broker-1
     ports:
       - 29092:9092
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 4
       KAFKA_PROCESS_ROLES: broker
       KAFKA_LISTENERS: 'PLAINTEXT://:19092,PLAINTEXT_HOST://:9092'
@@ -58,11 +62,12 @@ services:
       - controller-3
 
   broker-2:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: broker-2
     ports:
       - 39092:9092
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 5
       KAFKA_PROCESS_ROLES: broker
       KAFKA_LISTENERS: 'PLAINTEXT://:19092,PLAINTEXT_HOST://:9092'
@@ -78,11 +83,12 @@ services:
       - controller-3
 
   broker-3:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: broker-3
     ports:
       - 49092:9092
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 6
       KAFKA_PROCESS_ROLES: broker
       KAFKA_LISTENERS: 'PLAINTEXT://:19092,PLAINTEXT_HOST://:9092'

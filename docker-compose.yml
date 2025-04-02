@@ -2,15 +2,16 @@
 ---
 services:
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     ports:
       - '9092:9092' # PLAIN TEXT
       - '9093:9093' # SSL
       - '9094:9094' # SASL
     volumes:
       - ./ssl:/var/ssl/private
-      - ./playground/jaas.conf:/var/jaas/jaas.conf
+      - ./playground/jaas:/var/jaas
     environment:
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 1
       KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:19092,MAIN://localhost:9092'

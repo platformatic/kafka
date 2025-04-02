@@ -1,7 +1,5 @@
 dist/
 external/
-ssl/
-playground/jaas.conf
 node_modules
 coverage
 .eslintcache

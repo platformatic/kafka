@@ -1,6 +1,6 @@
 # How to enable SASL/SHA-256 or SASL/SHA-512
 
-Create a JAAS file, like `playground/sasl.conf` with the following contents:
+Create a JAAS file, like `data/jaas/sasl.conf` with the following contents:
 
 ```
 KafkaServer {
@@ -19,7 +19,7 @@ KafkaClient {
 Ensure the following mapping is enabled in the docker-compose volumes:
 
 ```
-- ./playground/jaas.conf:/var/jaas/jaas.conf
+- ./data/jaas:/var/jaas
 ```
 
 If you need to run the ACL tools within the docker container, you will need a `admin.conf` structured like this:

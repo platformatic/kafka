@@ -13,7 +13,7 @@ while (true) {
 
   try {
     debugDump(
-      'produce(forever)',
+      'produce',
       await producer.send({
         messages: [
           {

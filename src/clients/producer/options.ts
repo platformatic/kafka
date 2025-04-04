@@ -19,8 +19,7 @@ const produceOptionsProperties = {
     errorMessage: enumErrorMessage(compressionsAlgorithms, true)
   },
   partitioner: { function: true },
-  repeatOnStaleMetadata: { type: 'boolean' },
-  serializers: serdeProperties
+  repeatOnStaleMetadata: { type: 'boolean' }
 }
 
 export const produceOptionsSchema = {
@@ -30,7 +29,14 @@ export const produceOptionsSchema = {
 }
 
 export const produceOptionsValidator = ajv.compile(produceOptionsSchema)
-export const producerOptionsValidator = ajv.compile({ ...produceOptionsSchema, additionalProperties: true })
+export const producerOptionsValidator = ajv.compile({
+  type: 'object',
+  properties: {
+    ...produceOptionsProperties,
+    serializers: serdeProperties
+  },
+  additionalProperties: true
+})
 
 export const sendOptionsSchema = {
   type: 'object',

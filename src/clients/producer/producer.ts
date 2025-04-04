@@ -145,6 +145,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     options.idempotent ??= this.options.idempotent ?? false
     options.repeatOnStaleMetadata ??= this.options.repeatOnStaleMetadata ?? true
+    options.partitioner ??= this.options.partitioner
 
     const { idempotent, partitioner } = options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>
 
@@ -191,7 +192,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const produceOptions: Partial<CreateRecordsBatchOptions> = {
-      compression: options.compression,
+      compression: options.compression ?? this.options.compression,
       producerId: idempotent ? this.#producerInfo.producerId : options.producerId,
       producerEpoch: idempotent ? this.#producerInfo.producerEpoch : options.producerEpoch,
       sequences: idempotent ? this.#sequences : undefined

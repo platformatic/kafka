@@ -39,7 +39,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
 
     // Initialize connection pool
     this.connections = new ConnectionPool(this.clientId, this.options as ConnectionOptions)
-    for (const event of ['connect', 'disconnect', 'failed']) {
+    for (const event of ['connect', 'disconnect', 'failed', 'drain']) {
       this.connections.on(event, payload => this.emitWithDebug('client', `broker:${event}`, payload))
     }
     this.closed = false

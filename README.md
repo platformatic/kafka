@@ -1,0 +1,227 @@
+# @platformatic/kafka
+
+A modern, high-performance, pure JavaScript client for Apache Kafka.
+
+## Features
+
+- **High Performance**: Optimized for speed.
+- **Pure Modern JavaScript**: Built with the latest ECMAScript features, no native addon needed.
+- **Type Safety**: Full TypeScript support with strong typing.
+- **Flexible API**: You can use promises or callback on all APIs.
+- **Streaming or Event based Consumers**: Thanks to Node.js stream you can choose your preferred consuming method.
+- **Flexible Serialization**: Pluggable serializers and deserializers.
+- **Connection Management**: Automatic connection pooling and recovery.
+- **Low Dependencies**: Minimal external dependencies.
+
+## Installation
+
+```bash
+npm install @platformatic/kafka
+```
+
+## Getting Started
+
+### Producer
+
+```typescript
+import { Producer, stringSerializer } from '@platformatic/kafka'
+
+// Create a producer with string serializers
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializer
+})
+
+// Send messages
+await producer.send({
+  messages: [
+    {
+      topic: 'events',
+      key: 'user-123',
+      value: JSON.stringify({ name: 'John', action: 'login' }),
+      headers: new Map([['source', 'web-app']])
+    }
+  ]
+})
+
+// Close the producer when done
+await producer.close()
+```
+
+### Consumer
+
+```typescript
+import { Consumer, stringDeserializer } from '@platformatic/kafka'
+
+// Create a consumer with string deserializers
+const consumer = new Consumer({
+  groupId: 'my-consumer-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  deserializers: stringDeserializer
+})
+
+// Create a consumer stream
+const stream = await consumer.consume({
+  autocommit: true,
+  topics: ['my-topic'],
+  sessionTimeout: 10000,
+  heartbeatInterval: 500
+})
+
+// Option 1: Event-based consumption
+stream.on('data', message => {
+  console.log(`Received: ${message.key} -> ${message.value}`)
+})
+
+// Option 2: Async iterator consumption
+for await (const message of stream) {
+  console.log(`Received: ${message.key} -> ${message.value}`)
+  // Process message...
+}
+
+// Close the consumer when done
+await consumer.close()
+```
+
+### Admin
+
+```typescript
+import { Admin } from '@platformatic/kafka'
+
+// Create an admin client
+const admin = new Admin({
+  clientId: 'my-admin',
+  bootstrapBrokers: ['localhost:9092']
+})
+
+// Create topics
+await admin.createTopics({
+  topics: ['my-topic'],
+  partitions: 3,
+  replicas: 1
+})
+
+// Create topics with custom assignments
+await admin.createTopics({
+  topics: ['my-custom-topic'],
+  partitions: -1, // Use assignments instead
+  replicas: -1, // Use assignments instead
+  assignments: [
+    { partition: 0, brokers: [1] },
+    { partition: 1, brokers: [2] },
+    { partition: 2, brokers: [3] }
+  ]
+})
+
+// Get metadata
+const metadata = await admin.metadata({ topics: ['my-topic'] })
+console.log(metadata)
+
+// Delete topics
+await admin.deleteTopics({ topics: ['my-topic'] })
+
+// Close the admin client when done
+await admin.close()
+```
+
+## Serialization/Deserialization
+
+`@platformatic/kafka` supports customization of serialization out of the box.
+
+You can provide a different serializer or a deserializer for each of this part of a message:
+
+- Key
+- Value
+- Header Key
+- Header Value
+
+By default, it will use a no-operation serializers and deserializers, which means that all the parts above must be `Buffer`s.
+
+To provide a different serializer, simply pass in the `serializers` option of the producer or the `deserializers` option of the consumer.
+Both options accept an object with any of the `key`, `value`, `headerKey` and `headerValue` properties.
+
+```typescript
+import { Producer, Consumer } from '@platformatic/kafka'
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: {
+    key(object) {
+      return Buffer.from(JSON.stringify(object))
+    }
+  }
+})
+
+// ...
+
+const consumer = new Producer({
+  groupId: 'my-consumer-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  deserializers: {
+    key(buffer) {
+      return JSON.parse(buffer.toString('utf-8'))
+    }
+  }
+})
+```
+
+### Error Handling
+
+`@platformatic/kafka` defines its hierarchy of errors.
+All errors inherit from `GenericError` and have a `code` property starting with `PLT_KFK`.
+
+```typescript
+try {
+  await producer.send({
+    messages: [{ topic: 'my-topic', value: 'test' }]
+  })
+} catch (error) {
+  if (error.code === 'PLT_KFK_PRODUCER_ERROR') {
+    // Handle producer-specific errors
+  } else if (error.code === 'PLT_KFK_CONNECTION_ERROR') {
+    // Handle connection errors
+  } else {
+    // Handle other errors
+  }
+}
+```
+
+## Performance
+
+`@platformatic/kafka` is built with performance in mind, optimizing for high throughput and low latency.
+
+Internally it does not use a single promise to minimize event loop overheads.
+
+It also uses a higher watermark for consumer streams. This improves the throughput but it also impacts the memory usage.
+By default it uses a value of `1024` (while Node.js default value is `16`). This means that potentially each stream can put more than a thousand of objects in memory.
+If each object is 1MB, this means 1GB of RAM, per stream.
+
+This value can be changed using the `highWaterMark` option of the `Consumer`.
+
+## API Reference
+
+All the APIS support an optional Node.js style `callback` argument as the last argument.
+
+If the callback is provided then it will invoked, otherwise the method will behave as an `async function` and will resolve or reject when finished.
+
+In all the documentations below, when talking about a function accepting an optional `callback` parameter, the "return value" is considered to be either the resolved value or the result passed to the callback.
+
+Many of the methods accepts the same options of the client's constructors. The constructor's options should be considered as defaults for the respective in the various methods.
+
+- [Producer API](./docs/producer.md)
+- [Consumer API](./docs/consumer.md)
+- [Admin API](./docs/admin.md)
+- [Base Client](./docs/base.md)
+- [Other APIs and Types](./docs/other.md)
+
+## Requirements
+
+- Node.js >= 22.14.0
+
+## License
+
+Apache-2.0 - See [LICENSE](LICENSE) for more information.

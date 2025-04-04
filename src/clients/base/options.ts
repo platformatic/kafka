@@ -60,7 +60,7 @@ export const defaultBaseOptions: Partial<BaseOptions> = {
   maxInflights: 5,
   timeout: 5000,
   retries: 3,
-  retryDelay: 250,
+  retryDelay: 1000,
   metadataMaxAge: 5000, // 5 minutes
   autocreateTopics: false,
   strict: false

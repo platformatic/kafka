@@ -29,7 +29,7 @@ function callbackProduce (cb?: Function): void {
         return
       }
 
-      debugDump('produce(callbacks)', result)
+      debugDump('produce', result)
       cb?.()
     }
   )

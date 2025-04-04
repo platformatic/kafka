@@ -119,6 +119,8 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
+    options.types ??= ['consumer']
+
     this.#listGroups(options, callback)
     return callback[kCallbackPromise]
   }

@@ -8,7 +8,7 @@ const producer = new Producer({
 })
 
 debugDump(
-  'produce(promises)',
+  'produce',
   await Promise.all([
     producer.send({
       messages: [

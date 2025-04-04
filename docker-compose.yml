@@ -8,8 +8,8 @@ services:
       - '9093:9093' # SSL
       - '9094:9094' # SASL
     volumes:
-      - ./ssl:/var/ssl/private
-      - ./playground/jaas:/var/jaas
+      - ./data/ssl:/var/ssl/private
+      - ./data/jaas:/var/jaas
     environment:
       _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 1

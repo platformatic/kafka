@@ -84,7 +84,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Start the autocommit interval
     if (typeof autocommit === 'number' && autocommit > 0) {
-      this.#autocommitInterval = setInterval(this.#autocommit.bind(this), this.#options.autocommit as number)
+      this.#autocommitInterval = setInterval(this.#autocommit.bind(this), autocommit as number)
     }
   }
 
@@ -102,13 +102,34 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#shouldClose = true
 
-    this.once('error', (error: Error) => {
-      callback(error)
-    })
+    if (this.#offsetsToCommit.size > 0) {
+      let autoCommitResult: Error | null
+      let terminationResult: Error | null
 
-    this.once('close', () => {
-      callback(null)
-    })
+      if (this.#autocommitInterval) {
+        clearInterval(this.#autocommitInterval)
+      }
+
+      this.#autocommit(error => {
+        autoCommitResult = error
+
+        if (typeof terminationResult !== 'undefined' && typeof autoCommitResult !== 'undefined') {
+          callback(autoCommitResult ?? terminationResult)
+        }
+      })
+
+      this.#waitForTermination(error => {
+        terminationResult = error
+
+        if (typeof terminationResult !== 'undefined' && typeof autoCommitResult !== 'undefined') {
+          callback(autoCommitResult ?? terminationResult)
+        }
+      })
+
+      return callback[kCallbackPromise]
+    } else {
+      this.#waitForTermination(callback)
+    }
 
     return callback[kCallbackPromise]
   }
@@ -400,18 +421,27 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  #autocommit () {
+  #autocommit (callback?: CallbackWithPromise<void>): void {
     if (this.#offsetsToCommit.size === 0) {
       return
     }
 
     this.#consumer.commit({ offsets: Array.from(this.#offsetsToCommit.values()) }, error => {
       if (error) {
+        if (callback) {
+          callback(error)
+          return
+        }
+
         this.destroy(error)
         return
       }
 
       this.#offsetsToCommit.clear()
+
+      if (callback) {
+        callback(null)
+      }
     })
   }
 
@@ -457,5 +487,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#nullPushed = true
     this.push(null)
+  }
+
+  #waitForTermination (callback: CallbackWithPromise<void>) {
+    this.once('error', (error: Error) => {
+      callback(error)
+    })
+
+    this.once('close', () => {
+      callback(null)
+    })
   }
 }

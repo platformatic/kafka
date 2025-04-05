@@ -143,30 +143,66 @@ To provide a different serializer, simply pass in the `serializers` option of th
 Both options accept an object with any of the `key`, `value`, `headerKey` and `headerValue` properties.
 
 ```typescript
-import { Producer, Consumer } from '@platformatic/kafka'
+import {
+  Consumer,
+  jsonDeserializer,
+  jsonSerializer,
+  ProduceAcks,
+  Producer,
+  stringDeserializer,
+  stringSerializer
+} from '../src/index.ts'
+
+type Strings = string[]
 
 const producer = new Producer({
   clientId: 'my-producer',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: ['localhost:29092'],
   serializers: {
-    key(object) {
-      return Buffer.from(JSON.stringify(object))
-    }
+    key: stringSerializer,
+    value: jsonSerializer<Strings>
   }
 })
 
-// ...
-
-const consumer = new Producer({
+const consumer = new Consumer({
   groupId: 'my-consumer-group',
   clientId: 'my-consumer',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: ['localhost:29092'],
   deserializers: {
-    key(buffer) {
-      return JSON.parse(buffer.toString('utf-8'))
-    }
-  }
+    key: stringDeserializer,
+    value: jsonDeserializer<Strings>
+  },
+  maxWaitTime: 1000,
+  autocommit: 100
 })
+
+// Produce some messages
+let i = 0
+const timer = setTimeout(() => {
+  producer.send({
+    messages: [{ topic: 'temp', key: `key-${i++}`, value: ['first', 'second'] }],
+    acks: ProduceAcks.LEADER
+  })
+
+  if (i < 3) {
+    timer.refresh()
+  }
+}, 1000)
+
+const stream = await consumer.consume({ topics: ['temp'] })
+
+// Notice in your editor that message below is properly typed as Message<string, Strings, ...>
+for await (const message of stream) {
+  console.log(message)
+
+  if (message.key === 'key-2') {
+    break
+  }
+}
+
+await stream.close()
+await consumer.close()
+await producer.close()
 ```
 
 ### Error Handling

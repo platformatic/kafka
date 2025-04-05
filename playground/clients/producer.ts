@@ -17,7 +17,7 @@ debugDump(
           partition: 0,
           key: 'key1',
           value: 'value1',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey1', 'headerValue1']])
         },
         { topic: 'temp1', partition: 0, key: 'key2', value: 'value2' },
         {
@@ -25,7 +25,7 @@ debugDump(
           partition: 0,
           key: 'key3',
           value: 'value3',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey3', 'headerValue3']])
         },
         { topic: 'temp1', partition: 0, key: 'key4', value: 'value4' },
         {
@@ -33,7 +33,7 @@ debugDump(
           partition: 0,
           key: 'key5',
           value: 'value5',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: { headerKey5: 'headerValue5' }
         },
         { topic: 'temp1', partition: 0, key: 'key6', value: 'value6' }
       ],
@@ -47,7 +47,7 @@ debugDump(
           partition: 0,
           key: 'key1',
           value: 'value1',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey1', 'headerValue1']])
         },
         { topic: 'temp1', partition: 0, key: 'key2', value: 'value2' },
         {
@@ -55,7 +55,7 @@ debugDump(
           partition: 0,
           key: 'key3',
           value: 'value3',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey3', 'headerValue3']])
         },
         { topic: 'temp1', partition: 0, key: 'key4', value: 'value4' },
         {
@@ -63,7 +63,7 @@ debugDump(
           partition: 0,
           key: 'key5',
           value: 'value5',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: { headerKey5: 'headerValue5' }
         },
         { topic: 'temp1', partition: 0, key: 'key6', value: 'value6' }
       ],
@@ -77,7 +77,7 @@ debugDump(
           partition: 0,
           key: 'key1',
           value: 'value1',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey1', 'headerValue1']])
         },
         { topic: 'temp1', partition: 0, key: 'key2', value: 'value2' },
         {
@@ -85,7 +85,7 @@ debugDump(
           partition: 0,
           key: 'key3',
           value: 'value3',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: new Map([['headerKey3', 'headerValue3']])
         },
         { topic: 'temp1', partition: 0, key: 'key4', value: 'value4' },
         {
@@ -93,7 +93,7 @@ debugDump(
           partition: 0,
           key: 'key5',
           value: 'value5',
-          headers: new Map([['headerKey', 'headerValue']])
+          headers: { headerKey5: 'headerValue5' }
         },
         { topic: 'temp1', partition: 0, key: 'key6', value: 'value6' }
       ],

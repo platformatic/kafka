@@ -39,12 +39,53 @@ Metadata about the Kafka cluster. It is returned by [`Base`](./base.md) client, 
 
 ## Serialization and Deserialization
 
-### stringSerializer and destringSerializer
+### stringSerializer and stringDeserializer
 
 Courtesy string serializers implementing `Serializer<string>` and `Deserializer<string>`.
 
-### stringSerializers and destringSerializers
+### jsonSerializer and jsonDeserializer
+
+Courtesy JSON serializers implementing `Serializer<T = object>` and `Deserializer<T = object>`.
+
+### stringSerializers and stringDeserializers
 
 Courtesy serializers and deserializers object using `stringSerializer` or `destringSerializer` ready to be used in `Producer` or `Consumer`.
 
-                                                                        |
+### serializersFrom and deserializersFrom
+
+Courtesy methods to create a `Serializers<T, T, T, T>` out of a single `Serializer<T>` or a `Deserializers<T, T, T, T>` out of a single `Deserializer<T>`.
+
+For instance, the following two snippets are equivalent:
+
+```typescript
+import { Producer } from '@platformatic/kafka'
+
+function serialize(source: YourType): Buffer {
+  return Buffer.from(JSON.stringify(source))
+}
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: {
+    key: serialize,
+    value: serialize,
+    headerKey: serialize,
+    headerValue: serialize
+  }
+})
+```
+
+```typescript
+import { Producer, serializersFrom } from '@platformatic/kafka'
+
+function serialize(source: YourType): Buffer {
+  return Buffer.from(JSON.stringify(source))
+}
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: serializersFrom(serialize)
+})
+```

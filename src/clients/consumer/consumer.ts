@@ -120,8 +120,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       if (error) {
         const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
 
-        if (unknownMemberError) {
-          callback(unknownMemberError)
+        // This is to avoid throwin an error if a group join was cancelled.
+        if (!unknownMemberError) {
+          callback(error)
           return
         }
       }

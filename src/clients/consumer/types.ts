@@ -50,7 +50,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   maxBytes?: number
   maxWaitTime?: number
   isolationLevel?: FetchIsolationLevel
-  deserializers?: Deserializers<Key, Value, HeaderKey, HeaderValue>
+  deserializers?: Partial<Deserializers<Key, Value, HeaderKey, HeaderValue>>
   highWaterMark?: number
 }
 

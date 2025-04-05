@@ -219,8 +219,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       if (message.headers) {
-        for (const [key, value] of message.headers) {
-          headers.set(this.#headerKeySerializer(key)!, this.#headerValueSerializer(value)!)
+        const entries = message.headers instanceof Map ? message.headers : Object.entries(message.headers)
+
+        for (const [key, value] of entries) {
+          headers.set(this.#headerKeySerializer(key as HeaderKey)!, this.#headerValueSerializer(value)!)
         }
       }
 

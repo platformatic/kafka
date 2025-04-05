@@ -30,7 +30,9 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
 }
 
 export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
-  ProduceOptions<Key, Value, HeaderKey, HeaderValue> & { serializers?: Serializers<Key, Value, HeaderKey, HeaderValue> }
+  ProduceOptions<Key, Value, HeaderKey, HeaderValue> & {
+    serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
+  }
 
 export type SendOptions<Key, Value, HeaderKey, HeaderValue> = {
   messages: Message<Key, Value, HeaderKey, HeaderValue>[]

@@ -15,7 +15,7 @@ KafkaClient {
 };
 ```
 
-(`username/password` are used by the broker to connect to other brokers, while `user_*` define valid users).
+(`username/password` are used by the broker to connect to other brokers, while `user_*` defines valid users).
 
 Ensure the following mapping is enabled in the docker-compose volumes:
 

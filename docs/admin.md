@@ -2,7 +2,7 @@
 
 Client for administrative operations like creating/deleting topics and managing consumer groups.
 
-The consumer inherits from the [`Base`](./base.md) client.
+The admin inherits from the [`Base`](./base.md) client.
 
 ## Constructor
 
@@ -47,23 +47,23 @@ The return value is a list of groups, each containing the `id`, `state`, `groupT
 
 Options:
 
-| Property | Type                   | Description                                                                                                        |
-| -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are be defined in the `ConsumerGroupStates` enumeration. |
-| types    | `string[]`             | Types of the groups to return.<br/><br/>Default is `['consumer']`.                                                 |
+| Property | Type                   | Description                                                                                                     |
+| -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are defined in the `ConsumerGroupStates` enumeration. |
+| types    | `string[]`             | Types of the groups to return.<br/><br/>Default is `['consumer']`.                                              |
 
 ### `describeGroups(options[, callback])`
 
 Gets detailed information about consumer groups.
 
-The return value is is a map where keys are group names and values are the detailed group informations.
+The return value is a map where keys are group names and values are the detailed group information.
 
 Options:
 
-| Property | Type                          | Description                                                                              |
-| -------- | ----------------------------- | ---------------------------------------------------------------------------------------- |
-| groups   | `string[]`                    | Groups to describe.                                                                      |
-| types    | `includeAuthorizedOperations` | If to include authorizations informations in the response.<br/><br/> Default is `false`. |
+| Property | Type                          | Description                                                                                 |
+| -------- | ----------------------------- | ------------------------------------------------------------------------------------------- |
+| groups   | `string[]`                    | Groups to describe.                                                                         |
+| types    | `includeAuthorizedOperations` | Whether to include authorisation information in the response.<br/><br/> Default is `false`. |
 
 ### `deleteGroups(options[, callback])`
 

@@ -4,12 +4,12 @@ A modern, high-performance, pure JavaScript client for Apache Kafka.
 
 ## Features
 
-- **High Performance**: Optimized for speed.
+- **High Performance**: Optimised for speed.
 - **Pure Modern JavaScript**: Built with the latest ECMAScript features, no native addon needed.
 - **Type Safety**: Full TypeScript support with strong typing.
-- **Flexible API**: You can use promises or callback on all APIs.
-- **Streaming or Event based Consumers**: Thanks to Node.js stream you can choose your preferred consuming method.
-- **Flexible Serialization**: Pluggable serializers and deserializers.
+- **Flexible API**: You can use promises or callbacks on all APIs.
+- **Streaming or Event-based Consumers**: Thanks to Node.js streams, you can choose your preferred consuming method.
+- **Flexible Serialisation**: Pluggable serialisers and deserialisers.
 - **Connection Management**: Automatic connection pooling and recovery.
 - **Low Dependencies**: Minimal external dependencies.
 
@@ -26,7 +26,7 @@ npm install @platformatic/kafka
 ```typescript
 import { Producer, stringSerializer } from '@platformatic/kafka'
 
-// Create a producer with string serializers
+// Create a producer with string serialisers
 const producer = new Producer({
   clientId: 'my-producer',
   bootstrapBrokers: ['localhost:9092'],
@@ -54,7 +54,7 @@ await producer.close()
 ```typescript
 import { Consumer, stringDeserializer } from '@platformatic/kafka'
 
-// Create a consumer with string deserializers
+// Create a consumer with string deserialisers
 const consumer = new Consumer({
   groupId: 'my-consumer-group',
   clientId: 'my-consumer',
@@ -126,20 +126,20 @@ await admin.deleteTopics({ topics: ['my-topic'] })
 await admin.close()
 ```
 
-## Serialization/Deserialization
+## Serialisation/Deserialisation
 
-`@platformatic/kafka` supports customization of serialization out of the box.
+`@platformatic/kafka` supports customisation of serialisation out of the box.
 
-You can provide a different serializer or a deserializer for each of this part of a message:
+You can provide a different serialiser or deserialiser for each part of a message:
 
 - Key
 - Value
 - Header Key
 - Header Value
 
-By default, it will use a no-operation serializers and deserializers, which means that all the parts above must be `Buffer`s.
+By default, it will use no-operation serialisers and deserialisers, which means that all the parts above must be `Buffer`s.
 
-To provide a different serializer, simply pass in the `serializers` option of the producer or the `deserializers` option of the consumer.
+To provide a different serialiser, simply pass in the `serializers` option of the producer or the `deserializers` option of the consumer.
 Both options accept an object with any of the `key`, `value`, `headerKey` and `headerValue` properties.
 
 ```typescript
@@ -191,7 +191,7 @@ const timer = setTimeout(() => {
 
 const stream = await consumer.consume({ topics: ['temp'] })
 
-// Notice in your editor that message below is properly typed as Message<string, Strings, ...>
+// Notice in your editor that the message below is properly typed as Message<string, Strings, ...>
 for await (const message of stream) {
   console.log(message)
 
@@ -228,25 +228,25 @@ try {
 
 ## Performance
 
-`@platformatic/kafka` is built with performance in mind, optimizing for high throughput and low latency.
+`@platformatic/kafka` is built with performance in mind, optimising for high throughput and low latency.
 
-Internally it does not use a single promise to minimize event loop overheads.
+Internally, it does not use a single promise to minimise event loop overheads.
 
-It also uses a higher watermark for consumer streams. This improves the throughput but it also impacts the memory usage.
-By default it uses a value of `1024` (while Node.js default value is `16`). This means that potentially each stream can put more than a thousand of objects in memory.
-If each object is 1MB, this means 1GB of RAM, per stream.
+It also uses a higher watermark for consumer streams. This improves the throughput but also impacts the memory usage.
+By default, it uses a value of `1024` (while Node.js default value is `16`). This means that potentially each stream can put more than a thousand objects in memory.
+If each object is 1MB, this means 1GB of RAM per stream.
 
 This value can be changed using the `highWaterMark` option of the `Consumer`.
 
 ## API Reference
 
-All the APIS support an optional Node.js style `callback` argument as the last argument.
+All the APIs support an optional Node.js style `callback` argument as the last argument.
 
-If the callback is provided then it will invoked, otherwise the method will behave as an `async function` and will resolve or reject when finished.
+If the callback is provided, then it will be invoked; otherwise, the method will behave as an `async function` and will resolve or reject when finished.
 
-In all the documentations below, when talking about a function accepting an optional `callback` parameter, the "return value" is considered to be either the resolved value or the result passed to the callback.
+In all the documentation below, when discussing a function accepting an optional `callback` parameter, the "return value" is considered to be either the resolved value or the result passed to the callback.
 
-Many of the methods accepts the same options of the client's constructors. The constructor's options should be considered as defaults for the respective in the various methods.
+Many of the methods accept the same options as the client's constructors. The constructor's options should be considered as defaults for the respective options in the various methods.
 
 - [Producer API](./docs/producer.md)
 - [Consumer API](./docs/consumer.md)

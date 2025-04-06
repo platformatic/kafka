@@ -847,12 +847,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<HeartbeatResponse>(
       'heartbeat',
       (connection, groupCallback) => {
-        this.emitWithDebug('consumer:heartbeat', 'group:heartbeat:start')
+        this.emitWithDebug('consumer:heartbeat', 'start')
         heartbeatV4(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
       },
       error => {
         if (!error) {
-          this.emitWithDebug('consumer:heartbeat', 'group:heartbeat', eventPayload)
+          this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
           this.#heartbeatInterval?.refresh()
           return
         }
@@ -881,7 +881,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           return
         }
 
-        this.emitWithDebug('consumer:heartbeat', 'group:heartbeat:error', { ...eventPayload, error })
+        this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
       }
     )
   }

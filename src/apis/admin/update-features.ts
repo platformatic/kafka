@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -78,12 +78,12 @@ export function parseResponse (
   const response: UpdateFeaturesResponse = {
     throttleTimeMs,
     errorCode,
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     results: reader.readArray((r, i) => {
       const result = {
-        feature: r.readString()!,
+        feature: r.readString(),
         errorCode: r.readInt16(),
-        errorMessage: r.readString()
+        errorMessage: r.readNullableString()
       }
 
       if (result.errorCode !== 0) {
@@ -91,7 +91,7 @@ export function parseResponse (
       }
 
       return result
-    })!
+    })
   }
 
   if (errors.length) {
@@ -101,9 +101,4 @@ export function parseResponse (
   return response
 }
 
-export const updateFeaturesV1 = createAPI<UpdateFeaturesRequest, UpdateFeaturesResponse>(
-  57,
-  1,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<UpdateFeaturesRequest, UpdateFeaturesResponse>(57, 1, createRequest, parseResponse)

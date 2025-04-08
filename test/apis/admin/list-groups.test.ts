@@ -1,150 +1,328 @@
-import BufferList from 'bl'
-import { deepStrictEqual, doesNotThrow, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { listGroupsV5 } from '../../../src/apis/admin/list-groups.ts'
-import { ResponseError } from '../../../src/errors.ts'
-import { Writer } from '../../../src/protocol/writer.ts'
+import { ConsumerGroupStates } from '../../../src/apis/enumerations.ts'
+import { listGroupsV5, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-// Helper function to mock connection and capture API functions
-function captureApiHandlers(apiFunction: any) {
-  const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
-      mockConnection.createRequestFn = createRequestFn
-      mockConnection.parseResponseFn = parseResponseFn
-      return true
+const { createRequest, parseResponse } = listGroupsV5
+
+test('createRequest serializes states filter and types filter correctly', () => {
+  const typesFilter = ['consumer', 'static-consumer']
+
+  const writer = createRequest(['STABLE', 'EMPTY'], typesFilter)
+
+  // Verify it returns a Writer instance
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read states filter array
+  const serializedStates = reader.readArray(() => reader.readString(), true, false)
+
+  // Read types filter array
+  const serializedTypes = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      statesFilter: serializedStates,
+      typesFilter: serializedTypes
     },
-    createRequestFn: null as any,
-    parseResponseFn: null as any
-  }
-  
-  // Call the API to capture handlers
-  apiFunction(mockConnection, {})
-  
-  return {
-    createRequest: mockConnection.createRequestFn,
-    parseResponse: mockConnection.parseResponseFn
-  }
-}
-
-test('listGroupsV5 has valid handlers', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(listGroupsV5)
-  
-  // Verify both functions exist
-  deepStrictEqual(typeof createRequest, 'function')
-  deepStrictEqual(typeof parseResponse, 'function')
+    {
+      statesFilter: ['STABLE', 'EMPTY'],
+      typesFilter: ['consumer', 'static-consumer']
+    },
+    'Serialized data should match expected structure'
+  )
 })
 
-test('listGroupsV5 createRequest serializes request correctly', () => {
-  const { createRequest } = captureApiHandlers(listGroupsV5)
-  
-  // Create a test request
-  const statesFilter = ['Stable', 'PreparingRebalance']
-  const typesFilter = ['consumer']
-  
-  // Call the createRequest function
-  const writer = createRequest(statesFilter as any, typesFilter)
-  
-  // Verify it returns a Writer
-  ok(writer instanceof Writer)
-  
-  // Just check that some data was written
-  ok(writer.bufferList instanceof BufferList)
+test('createRequest with empty states and types filters', () => {
+  const writer = createRequest([], [])
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read states filter array
+  const serializedStates = reader.readArray(() => reader.readString(), true, false)
+
+  // Read types filter array
+  const serializedTypes = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      statesFilter: serializedStates,
+      typesFilter: serializedTypes
+    },
+    {
+      statesFilter: [],
+      typesFilter: []
+    },
+    'Serialized data with empty filter arrays should match expected structure'
+  )
 })
 
-test('listGroupsV5 validates parameters', () => {
-  // Mock direct function access
-  const mockAPI = ((conn: any, options: any) => {
-    return new Promise((resolve) => {
-      resolve({ groups: [] })
-    })
-  }) as any
-  
-  // Add the connection function to the mock API
-  mockAPI.connection = listGroupsV5.connection
-  
-  // Call the API with different parameter combinations
-  doesNotThrow(() => mockAPI({}, { statesFilter: ['Stable'], typesFilter: ['consumer'] }))
-  doesNotThrow(() => mockAPI({}, { statesFilter: [], typesFilter: [] }))
-  doesNotThrow(() => mockAPI({}, {})) // Default parameters
+test('createRequest with all possible consumer group states', () => {
+  const statesFilter = [...ConsumerGroupStates]
+  const typesFilter: string[] = []
+
+  const writer = createRequest(statesFilter, typesFilter)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read states filter array
+  const serializedStates = reader.readArray(() => reader.readString(), true, false)
+
+  // Read types filter array
+  const serializedTypes = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      statesFilter: serializedStates,
+      typesFilter: serializedTypes
+    },
+    {
+      statesFilter: ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'],
+      typesFilter: []
+    },
+    'All consumer group states should be serialized correctly'
+  )
 })
 
-test('listGroupsV5 parseResponse handles successful response', () => {
-  const { parseResponse } = captureApiHandlers(listGroupsV5)
-  
-  // Create a sample raw response buffer
+test('parseResponse correctly processes a successful response', () => {
+  // Create a successful response with groups data
   const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendInt16(0) // errorCode - No error
-    .appendArray([
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(0) // errorCode
+    // Groups array
+    .appendArray(
+      [
+        {
+          groupId: 'test-group-1',
+          protocolType: 'consumer',
+          groupState: 'STABLE',
+          groupType: 'CLASSIC'
+        },
+        {
+          groupId: 'test-group-2',
+          protocolType: 'consumer',
+          groupState: 'EMPTY',
+          groupType: 'CLASSIC'
+        }
+      ],
+      (w, group) => {
+        w.appendString(group.groupId)
+          .appendString(group.protocolType)
+          .appendString(group.groupState)
+          .appendString(group.groupType)
+      }
+    )
+
+  const response = parseResponse(1, 16, 5, writer.bufferList)
+
+  // Verify the main response structure
+  deepStrictEqual(
+    {
+      throttleTimeMs: response.throttleTimeMs,
+      errorCode: response.errorCode,
+      groupsLength: response.groups.length
+    },
+    {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      groupsLength: 2
+    },
+    'Response structure should match expected values'
+  )
+
+  // Verify the first group data
+  deepStrictEqual(
+    {
+      groupId: response.groups[0].groupId,
+      protocolType: response.groups[0].protocolType,
+      groupState: response.groups[0].groupState,
+      groupType: response.groups[0].groupType
+    },
+    {
+      groupId: 'test-group-1',
+      protocolType: 'consumer',
+      groupState: 'STABLE',
+      groupType: 'CLASSIC'
+    },
+    'First group data should match expected values'
+  )
+
+  // Verify the second group data
+  deepStrictEqual(
+    {
+      groupId: response.groups[1].groupId,
+      protocolType: response.groups[1].protocolType,
+      groupState: response.groups[1].groupState,
+      groupType: response.groups[1].groupType
+    },
+    {
+      groupId: 'test-group-2',
+      protocolType: 'consumer',
+      groupState: 'EMPTY',
+      groupType: 'CLASSIC'
+    },
+    'Second group data should match expected values'
+  )
+})
+
+test('parseResponse with empty groups array', () => {
+  // Create a response with an empty groups array
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(0) // errorCode
+    // Empty groups array
+    .appendArray([], () => {})
+
+  const response = parseResponse(1, 16, 5, writer.bufferList)
+
+  // Verify response with empty groups
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      groups: []
+    },
+    'Response with empty groups should be parsed correctly'
+  )
+})
+
+test('parseResponse handles throttling correctly', () => {
+  // Create a response with throttling
+  const writer = Writer.create()
+    .appendInt32(100) // throttleTimeMs (non-zero for throttling)
+    .appendInt16(0) // errorCode
+    // Empty groups array for simplicity
+    .appendArray([], () => {})
+
+  const response = parseResponse(1, 16, 5, writer.bufferList)
+
+  // Verify throttling is processed correctly
+  deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
+})
+
+test('parseResponse throws on error response', () => {
+  // Create an error response
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(41) // NOT_CONTROLLER (example error)
+    // Empty groups array
+    .appendArray([], () => {})
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 16, 5, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify it contains a ProtocolError
+      const protocolError = err.errors[0]
+      ok(protocolError, 'Should have at least one error')
+      deepStrictEqual(protocolError.apiCode, 41, 'Error code should be correctly captured')
+      deepStrictEqual(protocolError.apiId, 'NOT_CONTROLLER', 'Error ID should be correctly captured')
+
+      // Verify the response structure is preserved
+      deepStrictEqual(
+        err.response,
+        {
+          throttleTimeMs: 0,
+          errorCode: 41,
+          groups: []
+        },
+        'Error response should preserve the original response structure'
+      )
+
+      return true
+    }
+  )
+})
+
+test('parseResponse with different group types and states', () => {
+  // Create a response with different group types and states
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(0) // errorCode
+    // Groups array with different types and states
+    .appendArray(
+      [
+        {
+          groupId: 'classic-group',
+          protocolType: 'consumer',
+          groupState: 'STABLE',
+          groupType: 'CLASSIC'
+        },
+        {
+          groupId: 'high-level-group',
+          protocolType: 'consumer',
+          groupState: 'PREPARING_REBALANCE',
+          groupType: 'HIGH_LEVEL'
+        },
+        {
+          groupId: 'consumer-group',
+          protocolType: 'consumer',
+          groupState: 'DEAD',
+          groupType: 'CONSUMER'
+        }
+      ],
+      (w, group) => {
+        w.appendString(group.groupId)
+          .appendString(group.protocolType)
+          .appendString(group.groupState)
+          .appendString(group.groupType)
+      }
+    )
+
+  const response = parseResponse(1, 16, 5, writer.bufferList)
+
+  // Verify number of groups
+  deepStrictEqual(response.groups.length, 3, 'Response should have 3 groups')
+
+  // Verify each group has distinct type and state
+  const groupsData = response.groups.map(g => ({
+    groupId: g.groupId,
+    protocolType: g.protocolType,
+    groupState: g.groupState,
+    groupType: g.groupType
+  }))
+
+  deepStrictEqual(
+    groupsData,
+    [
       {
-        groupId: 'test-group-1',
+        groupId: 'classic-group',
         protocolType: 'consumer',
-        groupState: 'Stable',
-        groupType: 'consumer'
+        groupState: 'STABLE',
+        groupType: 'CLASSIC'
       },
       {
-        groupId: 'test-group-2',
+        groupId: 'high-level-group',
         protocolType: 'consumer',
-        groupState: 'Empty',
-        groupType: 'consumer'
+        groupState: 'PREPARING_REBALANCE',
+        groupType: 'HIGH_LEVEL'
+      },
+      {
+        groupId: 'consumer-group',
+        protocolType: 'consumer',
+        groupState: 'DEAD',
+        groupType: 'CONSUMER'
       }
-    ], (w, group) => {
-      w.appendString(group.groupId)
-        .appendString(group.protocolType)
-        .appendString(group.groupState)
-        .appendString(group.groupType)
-        .appendTaggedFields()
-    }, true, false)
-    .appendTaggedFields()
-  
-  // Parse the response
-  const response = parseResponse(1, 16, 5, writer.bufferList)
-  
-  // Check the response structure
-  deepStrictEqual(response.throttleTimeMs, 100)
-  deepStrictEqual(response.errorCode, 0)
-  deepStrictEqual(response.groups.length, 2)
-  
-  // Check first group
-  deepStrictEqual(response.groups[0].groupId, 'test-group-1')
-  deepStrictEqual(response.groups[0].protocolType, 'consumer')
-  deepStrictEqual(response.groups[0].groupState, 'Stable')
-  deepStrictEqual(response.groups[0].groupType, 'consumer')
-  
-  // Check second group
-  deepStrictEqual(response.groups[1].groupId, 'test-group-2')
-  deepStrictEqual(response.groups[1].protocolType, 'consumer')
-  deepStrictEqual(response.groups[1].groupState, 'Empty')
-  deepStrictEqual(response.groups[1].groupType, 'consumer')
-})
-
-test('listGroupsV5 parseResponse handles error response', () => {
-  const { parseResponse } = captureApiHandlers(listGroupsV5)
-  
-  // Create a sample error response buffer
-  const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendInt16(41) // errorCode - Group authorization failed
-    .appendArray([], (w, _group) => {
-      // No groups in error case
-    }, true, false)
-    .appendTaggedFields()
-  
-  // The parseResponse function should throw a ResponseError
-  throws(() => {
-    parseResponse(1, 16, 5, writer.bufferList)
-  }, (error) => {
-    ok(error instanceof ResponseError)
-    
-    // Check error message format
-    ok(error.message.includes('API'))
-    
-    // Check error properties
-    const responseData = error.response
-    deepStrictEqual(responseData.throttleTimeMs, 100)
-    deepStrictEqual(responseData.errorCode, 41)
-    deepStrictEqual(responseData.groups.length, 0)
-    
-    return true
-  })
+    ],
+    'Group data with different types and states should be parsed correctly'
+  )
 })

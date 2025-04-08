@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -96,10 +96,10 @@ export function parseResponse (
 
       return {
         errorCode,
-        logDir: r.readString()!,
+        logDir: r.readString(),
         topics: r.readArray(reader => {
           return {
-            name: reader.readString()!,
+            name: reader.readString(),
             partitions: reader.readArray(reader => {
               return {
                 partitionIndex: reader.readInt32(),
@@ -107,13 +107,13 @@ export function parseResponse (
                 offsetLag: reader.readInt64(),
                 isFutureKey: reader.readBoolean()
               }
-            })!
+            })
           }
-        })!,
+        }),
         totalBytes: r.readInt64(),
         usableBytes: r.readInt64()
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -123,9 +123,4 @@ export function parseResponse (
   return response
 }
 
-export const describeLogDirsV4 = createAPI<DescribeLogDirsRequest, DescribeLogDirsResponse>(
-  35,
-  4,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeLogDirsRequest, DescribeLogDirsResponse>(35, 4, createRequest, parseResponse)

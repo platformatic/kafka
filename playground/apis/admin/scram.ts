@@ -1,7 +1,7 @@
 import { alterUserScramCredentialsV0 } from '../../../src/apis/admin/alter-user-scram-credentials.ts'
 import { describeUserScramCredentialsV0 } from '../../../src/apis/admin/describe-user-scram-credentials.ts'
 import { ScramMechanisms } from '../../../src/apis/enumerations.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

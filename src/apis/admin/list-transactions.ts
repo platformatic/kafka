@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -26,7 +26,11 @@ export interface ListTransactionsResponse {
     producer_id_filters => INT64
     duration_filter => INT64
 */
-export function createRequest (stateFilters: TransactionState[], producerIdFilters: bigint[], durationFilter: bigint): Writer {
+export function createRequest (
+  stateFilters: TransactionState[],
+  producerIdFilters: bigint[],
+  durationFilter: bigint
+): Writer {
   return Writer.create()
     .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)
@@ -55,14 +59,14 @@ export function parseResponse (
   const response: ListTransactionsResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    unknownStateFilters: reader.readArray(r => r.readString()!, true, false)!,
+    unknownStateFilters: reader.readArray(r => r.readString(), true, false)!,
     transactionStates: reader.readArray(r => {
       return {
-        transactionalId: r.readString()!,
+        transactionalId: r.readString(),
         producerId: r.readInt64(),
-        transactionState: r.readString()!
+        transactionState: r.readString()
       }
-    })!
+    })
   }
 
   if (response.errorCode !== 0) {
@@ -72,9 +76,4 @@ export function parseResponse (
   return response
 }
 
-export const listTransactionsV1 = createAPI<ListTransactionsRequest, ListTransactionsResponse>(
-  66,
-  1,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<ListTransactionsRequest, ListTransactionsResponse>(66, 1, createRequest, parseResponse)

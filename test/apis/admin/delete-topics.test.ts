@@ -1,164 +1,456 @@
-import BufferList from 'bl'
-import { deepStrictEqual, doesNotThrow, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { deleteTopicsV6, type DeleteTopicsResponseResponse } from '../../../src/apis/admin/delete-topics.ts'
-import { ResponseError } from '../../../src/errors.ts'
-import { Reader } from '../../../src/protocol/reader.ts'
-import { Writer } from '../../../src/protocol/writer.ts'
+import { deleteTopicsV6, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-// Helper function to mock connection and capture API functions
-function captureApiHandlers(apiFunction: any) {
-  const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
-      mockConnection.createRequestFn = createRequestFn
-      mockConnection.parseResponseFn = parseResponseFn
-      return true
-    },
-    createRequestFn: null as any,
-    parseResponseFn: null as any
-  }
-  
-  // Call the API to capture handlers
-  apiFunction(mockConnection, {})
-  
-  return {
-    createRequest: mockConnection.createRequestFn,
-    parseResponse: mockConnection.parseResponseFn
-  }
-}
+const { createRequest, parseResponse } = deleteTopicsV6
 
-test('deleteTopicsV6 has valid handlers', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(deleteTopicsV6)
-  
-  // Verify both functions exist
-  deepStrictEqual(typeof createRequest, 'function')
-  deepStrictEqual(typeof parseResponse, 'function')
-})
-
-test('deleteTopicsV6 createRequest serializes request correctly', () => {
-  const { createRequest } = captureApiHandlers(deleteTopicsV6)
-  
-  // Create a test request
-  const topics = ['topic1', 'topic2']
-  const topicIds = ['12345678-1234-1234-1234-123456789012', '87654321-4321-4321-4321-210987654321']
+test('createRequest serializes topic names correctly', () => {
+  const topics = [{ name: 'topic-1' }, { name: 'topic-2' }]
   const timeoutMs = 30000
-  
-  // Call the createRequest function
-  const writer = createRequest(topics, topicIds, timeoutMs)
-  
-  // Verify it returns a Writer
-  ok(writer instanceof Writer)
-  
-  // Just check that some data was written
-  ok(writer.bufferList instanceof BufferList)
-})
 
-test('deleteTopicsV6 validates parameters', () => {
-  // Mock direct function access
-  const mockAPI = ((conn: any, options: any) => {
-    return new Promise((resolve) => {
-      resolve({ topics: [] })
-    })
-  }) as any
-  
-  // Add the connection function to the mock API
-  mockAPI.connection = deleteTopicsV6.connection
-  
-  // Call the API with different parameter combinations
-  doesNotThrow(() => mockAPI({}, { topics: ['topic1'], timeoutMs: 1000 }))
-  doesNotThrow(() => mockAPI({}, { topics: [] }))
-})
+  const writer = createRequest(topics, timeoutMs)
 
-test('deleteTopicsV6 parseResponse handles successful response', () => {
-  const { parseResponse } = captureApiHandlers(deleteTopicsV6)
-  
-  // Create a sample raw response buffer
-  const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendArray([ // responses array
-      {
-        name: 'topic1',
-        topicId: '01234567-89ab-cdef-0123-456789abcdef',
-        errorCode: 0,
-        errorMessage: null
-      },
-      {
-        name: 'topic2',
-        topicId: '87654321-4321-4321-4321-210987654321',
-        errorCode: 0,
-        errorMessage: null
-      }
-    ], (w, response) => {
-      w.appendString(response.name)
-        .appendUUID(response.topicId)
-        .appendInt16(response.errorCode)
-        .appendString(response.errorMessage)
-    })
-    .appendTaggedFields()
-  
-  // Parse the response
-  const response = parseResponse(1, 20, 6, writer.bufferList)
-  
-  // Check the response structure
-  deepStrictEqual(response.throttleTimeMs, 100)
-  deepStrictEqual(response.responses.length, 2)
-  
-  // Check first topic
-  deepStrictEqual(response.responses[0].name, 'topic1')
-  deepStrictEqual(response.responses[0].topicId, '01234567-89ab-cdef-0123-456789abcdef')
-  deepStrictEqual(response.responses[0].errorCode, 0)
-  deepStrictEqual(response.responses[0].errorMessage, null)
-  
-  // Check second topic
-  deepStrictEqual(response.responses[1].name, 'topic2')
-  deepStrictEqual(response.responses[1].topicId, '87654321-4321-4321-4321-210987654321')
-  deepStrictEqual(response.responses[1].errorCode, 0)
-  deepStrictEqual(response.responses[1].errorMessage, null)
-})
+  // Verify it returns a Writer instance
+  ok(writer instanceof Writer, 'Should return a Writer instance')
 
-test('deleteTopicsV6 parseResponse handles error response', () => {
-  const { parseResponse } = captureApiHandlers(deleteTopicsV6)
-  
-  // Create a sample error response buffer
-  const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendArray([ // responses array with error
-      {
-        name: 'topic1',
-        topicId: '01234567-89ab-cdef-0123-456789abcdef',
-        errorCode: 41, // Topic authorization failed error
-        errorMessage: 'Not authorized to delete topic'
-      },
-      {
-        name: 'topic2',
-        topicId: '87654321-4321-4321-4321-210987654321',
-        errorCode: 0,
-        errorMessage: null
-      }
-    ], (w, response) => {
-      w.appendString(response.name)
-        .appendUUID(response.topicId)
-        .appendInt16(response.errorCode)
-        .appendString(response.errorMessage)
-    })
-    .appendTaggedFields()
-  
-  // The response should throw a ResponseError
-  throws(() => {
-    parseResponse(1, 20, 6, writer.bufferList)
-  }, (error) => {
-    ok(error instanceof ResponseError)
-    const responseError = error as ResponseError
-    
-    // Check the error message
-    ok(responseError.message.includes('API'))
-    
-    // Check that the response is still included
-    ok('response' in responseError)
-    deepStrictEqual(responseError.response.throttleTimeMs, 100)
-    deepStrictEqual(responseError.response.responses[0].errorCode, 41)
-    deepStrictEqual(responseError.response.responses[0].errorMessage, 'Not authorized to delete topic')
-    deepStrictEqual(responseError.response.responses[1].errorCode, 0)
-    return true
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read topics array
+  const serializedTopics = reader.readArray(() => {
+    const name = reader.readString()
+    const topicId = reader.readUUID()
+    return { name, topicId }
   })
+
+  // Read timeout and tagged fields
+  const timeout = reader.readInt32()
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      topics: serializedTopics.map(t => ({
+        name: t.name,
+        hasNullTopicId: t.topicId === '00000000-0000-0000-0000-000000000000'
+      })),
+      timeout
+    },
+    {
+      topics: [
+        { name: 'topic-1', hasNullTopicId: true },
+        { name: 'topic-2', hasNullTopicId: true }
+      ],
+      timeout: 30000
+    },
+    'Serialized data should match expected structure'
+  )
+})
+
+test('createRequest serializes topic names and topic IDs correctly', () => {
+  const topics = [
+    {
+      name: 'topic-1',
+      topicId: '12345678-1234-1234-1234-123456789abc'
+    },
+    {
+      name: 'topic-2',
+      topicId: '87654321-4321-4321-4321-cba987654321'
+    }
+  ]
+  const timeoutMs = 30000
+
+  const writer = createRequest(topics, timeoutMs)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read topics array
+  const serializedTopics = reader.readArray(() => {
+    const name = reader.readString()
+    const topicId = reader.readUUID()
+    return { name, topicId }
+  })
+
+  // Read timeout and tagged fields
+  const timeout = reader.readInt32()
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      topics: serializedTopics,
+      timeout
+    },
+    {
+      topics: [
+        { name: 'topic-1', topicId: '12345678-1234-1234-1234-123456789abc' },
+        { name: 'topic-2', topicId: '87654321-4321-4321-4321-cba987654321' }
+      ],
+      timeout: 30000
+    },
+    'Serialized data with topic IDs should match expected structure'
+  )
+})
+
+test('createRequest serializes empty topics array correctly', () => {
+  const topics: Array<{ name: string; topicId?: string }> = []
+  const timeoutMs = 30000
+
+  const writer = createRequest(topics, timeoutMs)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read topics array
+  const serializedTopics = reader.readArray(() => {
+    const name = reader.readString()
+    const topicId = reader.readUUID()
+    return { name, topicId }
+  })
+
+  // Read timeout and tagged fields
+  const timeout = reader.readInt32()
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      topics: serializedTopics,
+      timeout
+    },
+    {
+      topics: [],
+      timeout: 30000
+    },
+    'Serialized data with empty topics should match expected structure'
+  )
+})
+
+test('createRequest serializes different timeout values correctly', () => {
+  const topics = [{ name: 'topic-1' }]
+  const timeoutMs = 5000 // Different timeout value
+
+  const writer = createRequest(topics, timeoutMs)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Skip topics array
+  reader.readArray(() => {
+    reader.readString()
+    reader.readUUID()
+    return {}
+  })
+
+  // Read timeout and tagged fields
+  const timeout = reader.readInt32()
+
+  // Verify timeout and tagged fields
+  deepStrictEqual(
+    {
+      timeout
+    },
+    {
+      timeout: 5000
+    },
+    'Timeout value should be correctly serialized'
+  )
+})
+
+test('parseResponse correctly processes a successful response', () => {
+  // Create a successful response
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Responses array
+    .appendArray(
+      [
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0, // Success
+          errorMessage: null
+        },
+        {
+          name: 'topic-2',
+          topicId: '87654321-4321-4321-4321-cba987654321',
+          errorCode: 0, // Success
+          errorMessage: null
+        }
+      ],
+      (w, response) => {
+        w.appendString(response.name)
+          .appendUUID(response.topicId)
+          .appendInt16(response.errorCode)
+          .appendString(response.errorMessage)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 20, 6, writer.bufferList)
+
+  // Verify response structure
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      responses: [
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0,
+          errorMessage: null
+        },
+        {
+          name: 'topic-2',
+          topicId: '87654321-4321-4321-4321-cba987654321',
+          errorCode: 0,
+          errorMessage: null
+        }
+      ]
+    },
+    'Response should match expected structure'
+  )
+})
+
+test('parseResponse handles throttling correctly', () => {
+  // Create a response with throttling
+  const writer = Writer.create()
+    .appendInt32(100) // throttleTimeMs (non-zero for throttling)
+    // Responses array - just one for simplicity
+    .appendArray(
+      [
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0, // Success
+          errorMessage: null
+        }
+      ],
+      (w, response) => {
+        w.appendString(response.name)
+          .appendUUID(response.topicId)
+          .appendInt16(response.errorCode)
+          .appendString(response.errorMessage)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 20, 6, writer.bufferList)
+
+  // Verify throttling is processed correctly
+  deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
+
+  // Verify the rest of the response is still correct
+  deepStrictEqual(
+    response.responses,
+    [
+      {
+        name: 'topic-1',
+        topicId: '12345678-1234-1234-1234-123456789abc',
+        errorCode: 0,
+        errorMessage: null
+      }
+    ],
+    'Responses should be correctly parsed even with throttling'
+  )
+})
+
+test('parseResponse handles single topic error correctly', () => {
+  // Create a response with one topic having an error
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Responses array with one error
+    .appendArray(
+      [
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 3, // UNKNOWN_TOPIC_OR_PARTITION
+          errorMessage: 'The topic does not exist'
+        }
+      ],
+      (w, response) => {
+        w.appendString(response.name)
+          .appendUUID(response.topicId)
+          .appendInt16(response.errorCode)
+          .appendString(response.errorMessage)
+      }
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 20, 6, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify the error object has the expected properties
+      ok(Array.isArray(err.errors) && err.errors.length === 1, 'Should have an array with 1 error for the failed topic')
+
+      // Verify the response structure is preserved
+      deepStrictEqual(
+        err.response,
+        {
+          throttleTimeMs: 0,
+          responses: [
+            {
+              name: 'topic-1',
+              topicId: '12345678-1234-1234-1234-123456789abc',
+              errorCode: 3,
+              errorMessage: 'The topic does not exist'
+            }
+          ]
+        },
+        'Error response should preserve the original response structure'
+      )
+
+      return true
+    }
+  )
+})
+
+test('parseResponse handles multiple topics with mixed errors', () => {
+  // Create a response with multiple topics and mixed results
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Responses array with mixed results
+    .appendArray(
+      [
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0, // Success
+          errorMessage: null
+        },
+        {
+          name: 'topic-2',
+          topicId: '87654321-4321-4321-4321-cba987654321',
+          errorCode: 3, // UNKNOWN_TOPIC_OR_PARTITION
+          errorMessage: 'The topic does not exist'
+        },
+        {
+          name: 'topic-3',
+          topicId: 'abcdef12-3456-7890-abcd-ef1234567890',
+          errorCode: 41, // TOPIC_AUTHORIZATION_FAILED
+          errorMessage: 'Authorization failed'
+        }
+      ],
+      (w, response) => {
+        w.appendString(response.name)
+          .appendUUID(response.topicId)
+          .appendInt16(response.errorCode)
+          .appendString(response.errorMessage)
+      }
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 20, 6, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify there are multiple errors
+      ok(
+        Array.isArray(err.errors) && err.errors.length === 2,
+        'Should have an array with 2 errors for the failed topics'
+      )
+
+      // Get error codes from the response
+      const errorCodes = err.response.responses
+        .filter((r: Record<string, number>) => r.errorCode !== 0)
+        .map((r: Record<string, number>) => r.errorCode)
+
+      // Verify we have both expected error codes
+      ok(
+        errorCodes.includes(3) && errorCodes.includes(41),
+        'Response should contain topics with expected error codes (3 and 41)'
+      )
+
+      // Verify all topics are preserved in the response
+      deepStrictEqual(err.response.responses.length, 3, 'Response should contain all 3 topics')
+
+      // Verify the successful topic data is preserved
+      deepStrictEqual(
+        err.response.responses.find((r: Record<string, number>) => r.errorCode === 0),
+        {
+          name: 'topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0,
+          errorMessage: null
+        },
+        'Successful topic should be preserved in the response'
+      )
+
+      return true
+    }
+  )
+})
+
+test('parseResponse handles response with null topic names', () => {
+  // Create a response with a null topic name (using topicId for deletion)
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Responses array with null name
+    .appendArray(
+      [
+        {
+          name: null,
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0, // Success
+          errorMessage: null
+        }
+      ],
+      (w, response) => {
+        w.appendString(response.name)
+          .appendUUID(response.topicId)
+          .appendInt16(response.errorCode)
+          .appendString(response.errorMessage)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 20, 6, writer.bufferList)
+
+  // Verify null name is handled correctly
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      responses: [
+        {
+          name: null,
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0,
+          errorMessage: null
+        }
+      ]
+    },
+    'Response with null topic name should be parsed correctly'
+  )
+})
+
+test('parseResponse with empty responses array', () => {
+  // Create a response with an empty responses array
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Empty responses array
+    .appendArray([], () => {})
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 20, 6, writer.bufferList)
+
+  // Verify response with empty results
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      responses: []
+    },
+    'Response with empty responses should be parsed correctly'
+  )
 })

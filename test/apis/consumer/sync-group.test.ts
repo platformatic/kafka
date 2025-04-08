@@ -1,349 +1,323 @@
-import BufferList from 'bl'
-import { deepStrictEqual, doesNotThrow, ok, rejects, strictEqual, throws } from 'node:assert'
+import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { syncGroupV5 } from '../../../src/apis/consumer/sync-group.ts'
-import { ResponseError } from '../../../src/errors.ts'
-import { Reader } from '../../../src/protocol/reader.ts'
-import { Writer } from '../../../src/protocol/writer.ts'
+import { Reader, ResponseError, syncGroupV5, Writer } from '../../../src/index.ts'
 
-// Helper function to mock connection and capture API functions
-function captureApiHandlers(apiFunction: any) {
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      mockConnection.createRequestFn = createRequestFn
-      mockConnection.parseResponseFn = parseResponseFn
-      mockConnection.apiKey = apiKey
-      mockConnection.apiVersion = apiVersion
-      return true
-    },
-    createRequestFn: null as any,
-    parseResponseFn: null as any,
-    apiKey: null as any,
-    apiVersion: null as any
-  }
-  
-  // Call the API to capture handlers with dummy values
-  apiFunction(mockConnection, {
-    groupId: 'test-group',
-    generationId: 1,
-    memberId: 'test-member',
-    groupInstanceId: null,
-    protocolType: 'consumer',
-    protocolName: 'range',
-    assignments: []
-  })
-  
-  return {
-    createRequest: mockConnection.createRequestFn,
-    parseResponse: mockConnection.parseResponseFn,
-    apiKey: mockConnection.apiKey,
-    apiVersion: mockConnection.apiVersion
-  }
-}
+const { createRequest, parseResponse } = syncGroupV5
 
-test('syncGroupV5 has valid handlers', () => {
-  const { createRequest, parseResponse, apiKey, apiVersion } = captureApiHandlers(syncGroupV5)
-  
-  // Verify both functions exist
-  deepStrictEqual(typeof createRequest, 'function')
-  deepStrictEqual(typeof parseResponse, 'function')
-  strictEqual(apiKey, 14) // SyncGroup API key is 14
-  strictEqual(apiVersion, 5) // Version 5
-})
+test('createRequest serializes basic parameters correctly', () => {
+  const groupId = 'test-group'
+  const generationId = 5
+  const memberId = 'test-member-1'
+  const groupInstanceId = null
+  const protocolType = 'consumer'
+  const protocolName = 'range'
+  const assignments: any[] = []
 
-test('syncGroupV5 createRequest serializes request correctly - basic structure', () => {
-  // Call the API function directly to get access to createRequest
-  const createRequest = function () {
-    // Use a dummy writer object to avoid the error in the original function
-    return Writer.create()
-  }
-  
-  // Create a test request with minimal required parameters
-  const writer = createRequest()
-  
+  const writer = createRequest(
+    groupId,
+    generationId,
+    memberId,
+    groupInstanceId,
+    protocolType,
+    protocolName,
+    assignments
+  )
+
   // Verify it returns a Writer
-  ok(writer instanceof Writer)
-  
-  // Check that we have a valid writer
-  ok(writer.bufferList instanceof BufferList)
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read and collect all basic parameters in a single object
+  const serializedParams = {
+    groupId: reader.readString(),
+    generationId: reader.readInt32(),
+    memberId: reader.readString(),
+    groupInstanceId: reader.readNullableString(),
+    protocolType: reader.readString(),
+    protocolName: reader.readString()
+  }
+
+  // Verify all parameters in a single assertion with descriptive message
+  deepStrictEqual(
+    serializedParams,
+    {
+      groupId,
+      generationId,
+      memberId,
+      groupInstanceId,
+      protocolType,
+      protocolName
+    },
+    'Serialized basic parameters should match input values'
+  )
+
+  // Get assignments array length
+  const assignmentsArrayLength = reader.readUnsignedVarInt()
+  deepStrictEqual(assignmentsArrayLength, 1, 'Empty assignments array should have length 1 for compact arrays')
 })
 
-test('syncGroupV5 parseResponse handles successful response', () => {
-  const { parseResponse } = captureApiHandlers(syncGroupV5)
-  
+test('createRequest with assignments', () => {
+  const groupId = 'test-group'
+  const generationId = 5
+  const memberId = 'test-member-1'
+  const groupInstanceId = null
+  const protocolType = 'consumer'
+  const protocolName = 'range'
+
+  // Define assignment data with clear test values
+  const member1Id = 'member-1'
+  const member2Id = 'member-2'
+  const assignment1Data = 'assignment-data-1'
+  const assignment2Data = 'assignment-data-2'
+
+  const assignments = [
+    {
+      memberId: member1Id,
+      assignment: Buffer.from(assignment1Data)
+    },
+    {
+      memberId: member2Id,
+      assignment: Buffer.from(assignment2Data)
+    }
+  ]
+
+  const writer = createRequest(
+    groupId,
+    generationId,
+    memberId,
+    groupInstanceId,
+    protocolType,
+    protocolName,
+    assignments
+  )
+
+  // Verify it returns a Writer
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read and collect all basic parameters in a single object
+  const serializedParams = {
+    groupId: reader.readString(),
+    generationId: reader.readInt32(),
+    memberId: reader.readString(),
+    groupInstanceId: reader.readNullableString(),
+    protocolType: reader.readString(),
+    protocolName: reader.readString()
+  }
+
+  // Verify all basic parameters in a single assertion with descriptive message
+  deepStrictEqual(
+    serializedParams,
+    {
+      groupId,
+      generationId,
+      memberId,
+      groupInstanceId,
+      protocolType,
+      protocolName
+    },
+    'Serialized basic parameters should match input values'
+  )
+
+  const serializedAssignments = reader.readArray(r => {
+    return {
+      memberId: r.readString(),
+      assignmentData: r.readBytes()
+    }
+  })
+
+  // The valid assignments we expected must be present
+  const member1Assignment = serializedAssignments.find(a => a.memberId === member1Id)!
+  const member2Assignment = serializedAssignments.find(a => a.memberId === member2Id)!
+
+  ok(
+    member1Assignment.assignmentData.toString('utf-8') === assignment1Data,
+    'Member 1 assignment data should match expected value'
+  )
+  ok(
+    member2Assignment.assignmentData.toString('utf-8') === assignment2Data,
+    'Member 2 assignment data should match expected value'
+  )
+})
+
+test('createRequest with group instance ID', () => {
+  const groupId = 'test-group'
+  const generationId = 5
+  const memberId = 'test-member-1'
+  const groupInstanceId = 'test-instance-id'
+  const protocolType = 'consumer'
+  const protocolName = 'range'
+  const assignments: any[] = []
+
+  const writer = createRequest(
+    groupId,
+    generationId,
+    memberId,
+    groupInstanceId,
+    protocolType,
+    protocolName,
+    assignments
+  )
+
+  // Verify it returns a Writer
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read all parameters into a single object
+  const serializedData = {
+    groupId: reader.readString(),
+    generationId: reader.readInt32(),
+    memberId: reader.readString(),
+    groupInstanceId: reader.readString(), // Read as string since we know it's not null
+    protocolType: reader.readString(),
+    protocolName: reader.readString()
+  }
+
+  // Verify all parameters including group instance ID in one assertion
+  deepStrictEqual(
+    serializedData,
+    {
+      groupId,
+      generationId,
+      memberId,
+      groupInstanceId,
+      protocolType,
+      protocolName
+    },
+    'Serialized parameters with group instance ID should match input values'
+  )
+
+  // Get assignments array length
+  const assignmentsArrayLength = reader.readUnsignedVarInt()
+  deepStrictEqual(assignmentsArrayLength, 1, 'Empty assignments array should have length 1 for compact arrays')
+})
+
+test('parseResponse correctly processes a successful response', () => {
   // Create a successful response
-  const assignment = Buffer.from(JSON.stringify({ 
-    version: 1, 
-    topics: [{ name: 'test-topic', partitions: [0, 1] }] 
-  }))
-  
+  const assignment = Buffer.from('test-assignment-data')
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    .appendInt16(0) // errorCode
+    .appendInt16(0) // errorCode (success)
     .appendString('consumer') // protocolType
     .appendString('range') // protocolName
     .appendBytes(assignment) // assignment
-    .appendTaggedFields()
-  
+    .appendInt8(0) // Root tagged fields
+
   const response = parseResponse(1, 14, 5, writer.bufferList)
-  
-  // Verify structure
-  deepStrictEqual(response, {
-    throttleTimeMs: 0,
-    errorCode: 0,
-    protocolType: 'consumer',
-    protocolName: 'range',
-    assignment: assignment
-  })
+
+  // Verify complete response structure in a single assertion
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      protocolType: 'consumer',
+      protocolName: 'range',
+      assignment
+    },
+    'Response object should match expected structure'
+  )
 })
 
-test('syncGroupV5 parseResponse handles response with error', () => {
-  const { parseResponse } = captureApiHandlers(syncGroupV5)
-  
+test('parseResponse handles throttling', () => {
+  // Create a response with throttling
+  const assignment = Buffer.from('test-assignment-data')
+  const writer = Writer.create()
+    .appendInt32(100) // throttleTimeMs (non-zero value for throttling)
+    .appendInt16(0) // errorCode (success)
+    .appendString('consumer') // protocolType
+    .appendString('range') // protocolName
+    .appendBytes(assignment) // assignment
+    .appendInt8(0) // Root tagged fields
+
+  const response = parseResponse(1, 14, 5, writer.bufferList)
+
+  // Verify response structure with throttling in a single assertion
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 100,
+      errorCode: 0,
+      protocolType: 'consumer',
+      protocolName: 'range',
+      assignment
+    },
+    'Response with throttling should match expected structure'
+  )
+})
+
+test('parseResponse with null protocol fields', () => {
+  // Create a response with null protocol fields
+  const assignment = Buffer.from('test-assignment-data')
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(0) // errorCode (success)
+    .appendString(null) // protocolType (null)
+    .appendString(null) // protocolName (null)
+    .appendBytes(assignment) // assignment
+    .appendInt8(0) // Root tagged fields
+
+  const response = parseResponse(1, 14, 5, writer.bufferList)
+
+  // Verify response structure with null protocol fields in a single assertion
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      protocolType: null,
+      protocolName: null,
+      assignment
+    },
+    'Response with null protocol fields should match expected structure'
+  )
+})
+
+test('parseResponse throws error on non-zero error code', () => {
   // Create a response with error
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    .appendInt16(25) // errorCode - UNKNOWN_MEMBER_ID
+    .appendInt16(16) // errorCode (e.g., UNKNOWN_MEMBER_ID)
     .appendString('consumer') // protocolType
     .appendString('range') // protocolName
-    .appendBytes(Buffer.alloc(0)) // empty assignment
-    .appendTaggedFields()
-  
-  // Verify the response throws a ResponseError with the correct error path
-  throws(() => {
-    parseResponse(1, 14, 5, writer.bufferList)
-  }, (err) => {
-    ok(err instanceof ResponseError, 'should be a ResponseError')
-    ok(err.message.includes('Received response with error while executing API'), 'should have proper error message')
-    return true
-  })
-})
+    .appendBytes(Buffer.from('')) // empty assignment
+    .appendInt8(0) // Root tagged fields
 
-test('syncGroupV5 parseResponse handles null protocol values', () => {
-  const { parseResponse } = captureApiHandlers(syncGroupV5)
-  
-  // Create a successful response with null protocol values
-  const assignment = Buffer.from(JSON.stringify({ 
-    version: 1, 
-    topics: [{ name: 'test-topic', partitions: [0, 1] }] 
-  }))
-  
-  const writer = Writer.create()
-    .appendInt32(0) // throttleTimeMs
-    .appendInt16(0) // errorCode
-    .appendString(null) // protocolType
-    .appendString(null) // protocolName
-    .appendBytes(assignment) // assignment
-    .appendTaggedFields()
-  
-  const response = parseResponse(1, 14, 5, writer.bufferList)
-  
-  // Verify structure
-  deepStrictEqual(response, {
-    throttleTimeMs: 0,
-    errorCode: 0,
-    protocolType: null,
-    protocolName: null,
-    assignment: assignment
-  })
-})
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 14, 5, writer.bufferList)
+    },
+    (err: any) => {
+      ok(err instanceof ResponseError, 'Error should be a ResponseError instance')
+      ok(
+        err.message.includes('Received response with error while executing API'),
+        'Error message should include API execution error description'
+      )
 
-test('syncGroupV5 API mock simulation without callback', async () => {
-  // Create a test assignment
-  const assignment = Buffer.from(JSON.stringify({ 
-    version: 1, 
-    topics: [{ name: 'test-topic', partitions: [0, 1] }] 
-  }))
-  
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 14)
-      strictEqual(apiVersion, 5)
-      
-      // Create a proper response directly
-      const response = {
-        throttleTimeMs: 0,
-        errorCode: 0,
-        protocolType: 'consumer',
-        protocolName: 'range',
-        assignment: assignment
-      }
-      
-      // Execute callback with the response directly
-      cb(null, response)
+      // Check that errors object exists and has the correct type
+      ok(err.errors && typeof err.errors === 'object', 'Error should have errors object')
+
+      // Verify that the response structure is preserved in one assertion
+      deepStrictEqual(
+        err.response,
+        {
+          throttleTimeMs: 0,
+          errorCode: 16,
+          protocolType: 'consumer',
+          protocolName: 'range',
+          assignment: Buffer.from('')
+        },
+        'Error response should preserve the original response structure'
+      )
+
       return true
     }
-  }
-  
-  // Call the API without callback
-  const result = await syncGroupV5.async(mockConnection, {
-    groupId: 'test-group',
-    generationId: 1,
-    memberId: 'test-member',
-    groupInstanceId: null,
-    protocolType: 'consumer',
-    protocolName: 'range',
-    assignments: [
-      {
-        memberId: 'test-member',
-        assignment: assignment
-      }
-    ]
-  })
-  
-  // Verify result
-  strictEqual(result.throttleTimeMs, 0)
-  strictEqual(result.errorCode, 0)
-  strictEqual(result.protocolType, 'consumer')
-  strictEqual(result.protocolName, 'range')
-  deepStrictEqual(result.assignment, assignment)
-})
-
-test('syncGroupV5 API mock simulation with callback', (t, done) => {
-  // Create a test assignment
-  const assignment = Buffer.from(JSON.stringify({ 
-    version: 1, 
-    topics: [{ name: 'test-topic', partitions: [0, 1] }] 
-  }))
-  
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 14)
-      strictEqual(apiVersion, 5)
-      
-      // Create a proper response directly
-      const response = {
-        throttleTimeMs: 0,
-        errorCode: 0,
-        protocolType: 'consumer',
-        protocolName: 'range',
-        assignment: assignment
-      }
-      
-      // Execute callback with the response
-      cb(null, response)
-      return true
-    }
-  }
-  
-  // Call the API with callback
-  syncGroupV5(mockConnection, {
-    groupId: 'test-group',
-    generationId: 1,
-    memberId: 'test-member',
-    groupInstanceId: null,
-    protocolType: 'consumer',
-    protocolName: 'range',
-    assignments: [
-      {
-        memberId: 'test-member',
-        assignment: assignment
-      }
-    ]
-  }, (err, result) => {
-    // Verify no error
-    strictEqual(err, null)
-    
-    // Verify result
-    strictEqual(result.throttleTimeMs, 0)
-    strictEqual(result.errorCode, 0)
-    strictEqual(result.protocolType, 'consumer')
-    strictEqual(result.protocolName, 'range')
-    deepStrictEqual(result.assignment, assignment)
-    
-    done()
-  })
-})
-
-test('syncGroupV5 API error handling with callback', (t, done) => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 14)
-      strictEqual(apiVersion, 5)
-      
-      // Create an error with the expected shape
-      const error = new ResponseError(apiKey, apiVersion, {
-        '': 25 // UNKNOWN_MEMBER_ID
-      }, {
-        throttleTimeMs: 0,
-        errorCode: 25,
-        protocolType: null,
-        protocolName: null,
-        assignment: Buffer.alloc(0)
-      })
-      
-      // Execute callback with the error
-      cb(error)
-      return true
-    }
-  }
-  
-  // Call the API with callback
-  syncGroupV5(mockConnection, {
-    groupId: 'test-group',
-    generationId: 1,
-    memberId: 'test-member',
-    groupInstanceId: null,
-    protocolType: 'consumer',
-    protocolName: 'range',
-    assignments: []
-  }, (err, result) => {
-    // Verify error
-    ok(err instanceof ResponseError)
-    ok(err.message.includes('Received response with error while executing API'))
-    
-    // Result should be undefined on error
-    strictEqual(result, undefined)
-    
-    done()
-  })
-})
-
-test('syncGroupV5 API error handling with Promise', async () => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 14)
-      strictEqual(apiVersion, 5)
-      
-      // Create an error with the expected shape
-      const error = new ResponseError(apiKey, apiVersion, {
-        '': 25 // UNKNOWN_MEMBER_ID
-      }, {
-        throttleTimeMs: 0,
-        errorCode: 25,
-        protocolType: null,
-        protocolName: null,
-        assignment: Buffer.alloc(0)
-      })
-      
-      // Execute callback with the error
-      cb(error)
-      return true
-    }
-  }
-  
-  // Verify Promise rejection
-  await rejects(async () => {
-    await syncGroupV5.async(mockConnection, {
-      groupId: 'test-group',
-      generationId: 1,
-      memberId: 'test-member',
-      groupInstanceId: null,
-      protocolType: 'consumer',
-      protocolName: 'range',
-      assignments: []
-    })
-  }, (err: any) => {
-    ok(err instanceof ResponseError)
-    ok(err.message.includes('Received response with error while executing API'))
-    return true
-  })
+  )
 })

@@ -1,5 +1,5 @@
 import { deleteRecordsV2 } from '../../../src/apis/admin/delete-records.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

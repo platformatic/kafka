@@ -1,10 +1,10 @@
 import { cronometro } from 'cronometro'
 import { once } from 'node:events'
 import { produceV11 } from '../src/apis/producer/produce.ts'
-import { Connection } from '../src/connection/connection.ts'
+import { Connection } from '../src/network/connection.ts'
 
 let connection: Connection
-let kafkajs
+// let kafkajs
 
 console.log(
   await cronometro(

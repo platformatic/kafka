@@ -1,1 +1,1 @@
-NODE_OPTIONS="--experimental-strip-types"
+NODE_OPTIONS="--experimental-strip-types --disable-warning=ExperimentalWarning"

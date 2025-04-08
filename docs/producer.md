@@ -21,7 +21,7 @@ Options:
 | `idempotent`            | `boolean`                                                          | Idempotency of the producer.                                                                                                                                         |
 | `acks`                  | `number`                                                           | Acknowledgement to wait before returning.<br/><br/>Valid values are defined in the `ProduceAcks` enumeration.                                                        |
 | `compression`           | `string`                                                           | Compression algorithm to use before sending messages to the broker.<br/><br/>Valid values are exported in the `CompressionAlgorithms` enumeration.                   |
-| `partitioner`           | `(message: Message<Key, Value, HeaderKey, HeaderValue>) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and should return the partition number.         |
+| `partitioner`           | `(message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and should return the partition number.         |
 | `repeatOnStaleMetadata` | `boolean`                                                          | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                       |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                  | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties. |
 
@@ -41,7 +41,7 @@ Options:
 
 | Property   | Type                                            | Description           |
 | ---------- | ----------------------------------------------- | --------------------- |
-| `messages` | `Message<Key, Value, HeaderKey, HeaderValue>[]` | The messages to send. |
+| `messages` | `MessageToProduce<Key, Value, HeaderKey, HeaderValue>[]` | The messages to send. |
 
 It also accepts all options of the constructor except `serializers`.
 

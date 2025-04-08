@@ -1,7 +1,7 @@
 import { inspect } from 'node:util'
 import { type JoinGroupResponse, joinGroupV9 } from '../src/apis/consumer/join-group.ts'
-import { type Connection } from '../src/connection/connection.ts'
 import { type ProtocolError, ResponseError } from '../src/errors.ts'
+import { type Connection } from '../src/network/connection.ts'
 import { sleep } from '../src/utils.ts'
 
 export async function invokeAPIWithRetry<ReturnType> (

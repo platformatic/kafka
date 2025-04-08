@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -76,20 +76,20 @@ export function parseResponse (
   const response: DescribeClientQuotasResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     entries: reader.readArray(r => {
       return {
         entity: r.readArray(r => {
-          return { entityType: r.readString()!, entityName: r.readString() }
-        })!,
+          return { entityType: r.readString(), entityName: r.readNullableString() }
+        }),
         values: r.readArray(r => {
           return {
-            key: r.readString()!,
+            key: r.readString(),
             value: r.readFloat64()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (response.errorCode !== 0) {
@@ -99,7 +99,7 @@ export function parseResponse (
   return response
 }
 
-export const describeClientQuotasV0 = createAPI<DescribeClientQuotasRequest, DescribeClientQuotasResponse>(
+export const api = createAPI<DescribeClientQuotasRequest, DescribeClientQuotasResponse>(
   48,
   1,
   createRequest,

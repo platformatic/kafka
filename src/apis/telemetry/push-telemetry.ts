@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -60,9 +60,4 @@ export function parseResponse (
   return response
 }
 
-export const pushTelemetryV0 = createAPI<PushTelemetryRequest, PushTelemetryResponse>(
-  72,
-  0,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<PushTelemetryRequest, PushTelemetryResponse>(72, 0, createRequest, parseResponse)

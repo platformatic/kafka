@@ -18,6 +18,7 @@ export interface CompressionAlgorithm {
   compressSync: SyncCompressionPhase
   decompressSync: SyncCompressionPhase
   bitmask: number
+  available?: boolean
 }
 
 function ensureBuffer (data: Buffer | BufferList): Buffer {
@@ -34,18 +35,20 @@ function loadSnappy () {
     const snappy = require('snappy')
     snappyCompressSync = snappy.compressSync
     snappyDecompressSync = snappy.uncompressSync
+    /* c8 ignore next 5 */
   } catch (e) {
     throw new UnsupportedCompressionError(
-      'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
+      'Cannot load snappy module, which is an optionalDependency. Please check your local installation.'
     )
   }
 }
 
 function loadLZ4 () {
   try {
-    const lz4 = require('lz4')
+    const lz4 = require('lz4-napi')
     lz4CompressSync = lz4.compressSync
     lz4DecompressSync = lz4.uncompressSync
+    /* c8 ignore next 5 */
   } catch (e) {
     throw new UnsupportedCompressionError(
       'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
@@ -54,6 +57,17 @@ function loadLZ4 () {
 }
 
 export const compressionsAlgorithms = {
+  /* c8 ignore next 8 - 'none' is actually never used but this is to please Typescript */
+  none: {
+    compressSync (data: Buffer | BufferList): Buffer {
+      return ensureBuffer(data)
+    },
+    decompressSync (data: Buffer | BufferList): Buffer {
+      return ensureBuffer(data)
+    },
+    bitmask: 0,
+    available: true
+  },
   gzip: {
     compressSync (data: Buffer | BufferList): Buffer {
       return gzipSync(ensureBuffer(data))
@@ -61,10 +75,12 @@ export const compressionsAlgorithms = {
     decompressSync (data: Buffer | BufferList): Buffer {
       return gunzipSync(ensureBuffer(data)) as Buffer
     },
-    bitmask: 1
+    bitmask: 1,
+    available: true
   },
   snappy: {
     compressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 4 */
       if (!snappyCompressSync) {
         loadSnappy()
       }
@@ -72,16 +88,19 @@ export const compressionsAlgorithms = {
       return snappyCompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 4 */
       if (!snappyDecompressSync) {
         loadSnappy()
       }
 
       return snappyDecompressSync!(ensureBuffer(data)) as Buffer
     },
-    bitmask: 2
+    bitmask: 2,
+    available: true
   },
   lz4: {
     compressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 4 */
       if (!lz4CompressSync) {
         loadLZ4()
       }
@@ -89,16 +108,19 @@ export const compressionsAlgorithms = {
       return lz4CompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 4 */
       if (!lz4DecompressSync) {
         loadLZ4()
       }
 
       return lz4DecompressSync!(ensureBuffer(data))
     },
-    bitmask: 3
+    bitmask: 3,
+    available: true
   },
   zstd: {
     compressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 3 */
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')
       }
@@ -106,13 +128,15 @@ export const compressionsAlgorithms = {
       return zstdCompressSync(ensureBuffer(data))
     },
     decompressSync (data: Buffer | BufferList): Buffer {
+      /* c8 ignore next 3 */
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')
       }
 
       return zstdDecompressSync(ensureBuffer(data))
     },
-    bitmask: 4
+    bitmask: 4,
+    available: typeof zstdCompressSync === 'function'
   }
 } as const
 
@@ -120,4 +144,4 @@ export const compressionsAlgorithmsByBitmask = Object.fromEntries(
   Object.values(compressionsAlgorithms).map(a => [a.bitmask, a])
 )
 
-export type CompressionAlgorithms = keyof typeof compressionsAlgorithms | 'none'
+export type CompressionAlgorithms = keyof typeof compressionsAlgorithms

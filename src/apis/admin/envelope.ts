@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -34,11 +34,16 @@ Envelope Response (Version: 0) => response_data error_code TAG_BUFFER
   response_data => COMPACT_NULLABLE_BYTES
   error_code => INT16
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): EnvelopeResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): EnvelopeResponse {
   const reader = Reader.from(raw)
 
   const response: EnvelopeResponse = {
-    responseData: reader.readBytes(),
+    responseData: reader.readNullableBytes(),
     errorCode: reader.readInt16()
   }
 
@@ -49,4 +54,4 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
   return response
 }
 
-export const envelopeV0 = createAPI<EnvelopeRequest, EnvelopeResponse>(58, 0, createRequest, parseResponse)
+export const api = createAPI<EnvelopeRequest, EnvelopeResponse>(58, 0, createRequest, parseResponse)

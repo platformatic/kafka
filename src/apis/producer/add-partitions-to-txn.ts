@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -103,10 +103,10 @@ export function parseResponse (
     errorCode,
     resultsByTransaction: reader.readArray((r, i) => {
       return {
-        transactionalId: r.readString()!,
+        transactionalId: r.readString(),
         topicResults: r.readArray((r, j) => {
           return {
-            name: r.readString()!,
+            name: r.readString(),
             resultsByPartition: r.readArray((r, k) => {
               const partition = {
                 partitionIndex: r.readInt32(),
@@ -121,11 +121,11 @@ export function parseResponse (
               }
 
               return partition
-            })!
+            })
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -135,9 +135,4 @@ export function parseResponse (
   return response
 }
 
-export const addPartitionsToTxnV5 = createAPI<AddPartitionsToTxnRequest, AddPartitionsToTxnResponse>(
-  24,
-  5,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<AddPartitionsToTxnRequest, AddPartitionsToTxnResponse>(24, 5, createRequest, parseResponse)

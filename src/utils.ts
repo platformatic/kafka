@@ -1,6 +1,8 @@
+import { Unpromise } from '@watchable/unpromise'
 import { Ajv } from 'ajv'
 import ajvErrors from 'ajv-errors'
 import type BufferList from 'bl'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { inspect } from 'node:util'
 
 export type DebugDumpLogger = (...args: any[]) => void
@@ -86,7 +88,7 @@ export function niceJoin (array: string[], lastSeparator: string = ' and ', sepa
 }
 
 export function listErrorMessage (type: string[]): string {
-  return `should be one of ${niceJoin(Object.keys(type), ' or ')}`
+  return `should be one of ${niceJoin(type, ' or ')}`
 }
 
 export function enumErrorMessage (type: Record<string, unknown>, keysOnly: boolean = false): string {
@@ -133,15 +135,19 @@ export function setDebugDumpLogger (logger: DebugDumpLogger) {
   debugDumpLogger = logger
 }
 
-export function debugDump (labelOrValue: string | unknown, value?: unknown) {
-  if (arguments.length === 1) {
-    value = labelOrValue
-    labelOrValue = undefined
-  }
+export function debugDump (...values: unknown[]) {
+  debugDumpLogger(...values.map(v => (typeof v === 'string' ? v : inspect(v, false, 10))))
+}
 
-  if (labelOrValue) {
-    debugDumpLogger(labelOrValue, inspect(value, false, 10))
-  } else {
-    debugDumpLogger(inspect(value, false, 10))
-  }
+export async function executeWithTimeout<T = unknown> (
+  promise: Promise<T>,
+  timeout: number,
+  timeoutValue = 'timeout'
+): Promise<T | string> {
+  const ac = new AbortController()
+
+  return Unpromise.race([promise, sleep(timeout, timeoutValue, { signal: ac.signal, ref: false })]).then((value: T) => {
+    ac.abort()
+    return value
+  })
 }

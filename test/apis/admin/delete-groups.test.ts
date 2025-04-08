@@ -1,137 +1,307 @@
-import BufferList from 'bl'
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { deleteGroupsV2 } from '../../../src/apis/admin/delete-groups.ts'
-import { ResponseError } from '../../../src/errors.ts'
-import { Writer } from '../../../src/protocol/writer.ts'
+import { deleteGroupsV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-// Helper function to mock connection and capture API functions
-function captureApiHandlers(apiFunction: any) {
-  const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
-      mockConnection.createRequestFn = createRequestFn
-      mockConnection.parseResponseFn = parseResponseFn
-      return true
+const { createRequest, parseResponse } = deleteGroupsV2
+
+test('createRequest serializes group names correctly', () => {
+  const groupNames = ['group-1', 'group-2', 'group-3']
+
+  const writer = createRequest(groupNames)
+
+  // Verify it returns a Writer instance
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroupNames = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      groupNames: serializedGroupNames
     },
-    createRequestFn: null as any,
-    parseResponseFn: null as any
-  }
-  
-  // Call the API to capture handlers
-  apiFunction(mockConnection, {})
-  
-  return {
-    createRequest: mockConnection.createRequestFn,
-    parseResponse: mockConnection.parseResponseFn
-  }
-}
-
-test('deleteGroupsV2 has valid handlers', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(deleteGroupsV2)
-  
-  // Verify both functions exist
-  deepStrictEqual(typeof createRequest, 'function')
-  deepStrictEqual(typeof parseResponse, 'function')
+    {
+      groupNames: ['group-1', 'group-2', 'group-3']
+    },
+    'Serialized data should match expected structure'
+  )
 })
 
-test('deleteGroupsV2 createRequest serializes request correctly', () => {
-  const { createRequest } = captureApiHandlers(deleteGroupsV2)
-  
-  // Test with valid parameters
-  const groupIds = ['group-1', 'group-2', 'group-3']
-  const request = createRequest(groupIds)
-  
-  // Verify the request is a Writer with a buffer
-  deepStrictEqual(request instanceof Writer, true)
-  deepStrictEqual(typeof request.buffer, 'object')
-  deepStrictEqual(request.buffer instanceof Buffer, true)
-  deepStrictEqual(request.buffer.length > 0, true)
+test('createRequest serializes empty group names array correctly', () => {
+  const groupNames: string[] = []
+
+  const writer = createRequest(groupNames)
+
+  // Verify it returns a Writer instance
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroupNames = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      groupNames: serializedGroupNames
+    },
+    {
+      groupNames: []
+    },
+    'Empty group names array should be serialized correctly'
+  )
 })
 
-test('deleteGroupsV2 parseResponse correctly parses successful response', () => {
-  const { parseResponse } = captureApiHandlers(deleteGroupsV2)
-  
-  // Create a sample successful response buffer
+test('createRequest serializes special characters in group names', () => {
+  const groupNames = ['group/1', 'group-with-hyphen', 'group.with.dots']
+
+  const writer = createRequest(groupNames)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroupNames = reader.readArray(() => reader.readString(), true, false)
+
+  // Read tagged fields count
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      groupNames: serializedGroupNames
+    },
+    {
+      groupNames: ['group/1', 'group-with-hyphen', 'group.with.dots']
+    },
+    'Group names with special characters should be serialized correctly'
+  )
+})
+
+test('parseResponse correctly processes a successful response', () => {
+  // Create a successful response
   const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendArray([
-      { groupId: 'group-1', errorCode: 0 },
-      { groupId: 'group-2', errorCode: 0 }
-    ], (w, r) => {
-      w.appendString(r.groupId)
-      w.appendInt16(r.errorCode)
-      w.appendTaggedFields()
-    }, true, false)
+    .appendInt32(0) // throttleTimeMs
+    // Results array
+    .appendArray(
+      [
+        {
+          groupId: 'group-1',
+          errorCode: 0 // Success
+        },
+        {
+          groupId: 'group-2',
+          errorCode: 0 // Success
+        }
+      ],
+      (w, result) => {
+        w.appendString(result.groupId).appendInt16(result.errorCode)
+      }
+    )
     .appendTaggedFields()
-  
-  // Parse the response
-  const result = parseResponse(1, 42, 2, writer.bufferList)
-  
-  // Verify the parsed response
-  deepStrictEqual(result, {
-    throttleTimeMs: 100,
-    results: [
-      { groupId: 'group-1', errorCode: 0 },
-      { groupId: 'group-2', errorCode: 0 }
-    ]
-  })
+
+  const response = parseResponse(1, 42, 2, writer.bufferList)
+
+  // Verify response structure
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      results: [
+        {
+          groupId: 'group-1',
+          errorCode: 0
+        },
+        {
+          groupId: 'group-2',
+          errorCode: 0
+        }
+      ]
+    },
+    'Response should match expected structure'
+  )
 })
 
-test('deleteGroupsV2 parseResponse throws ResponseError for error responses', () => {
-  const { parseResponse } = captureApiHandlers(deleteGroupsV2)
-  
-  // Create a sample error response buffer
+test('parseResponse handles throttling correctly', () => {
+  // Create a response with throttling
   const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    .appendArray([
-      { groupId: 'group-1', errorCode: 0 },
-      { groupId: 'group-2', errorCode: 41 }, // Group ID not found error (NOT_CONTROLLER)
-      { groupId: 'group-3', errorCode: 0 }
-    ], (w, r) => {
-      w.appendString(r.groupId)
-      w.appendInt16(r.errorCode)
-      w.appendTaggedFields()
-    }, true, false)
+    .appendInt32(100) // throttleTimeMs (non-zero for throttling)
+    // Results array - just one for simplicity
+    .appendArray(
+      [
+        {
+          groupId: 'group-1',
+          errorCode: 0 // Success
+        }
+      ],
+      (w, result) => {
+        w.appendString(result.groupId).appendInt16(result.errorCode)
+      }
+    )
     .appendTaggedFields()
-  
-  // Expect a ResponseError to be thrown
-  throws(() => {
-    parseResponse(1, 42, 2, writer.bufferList)
-  }, (error) => {
-    // Verify it's a ResponseError
-    ok(error instanceof ResponseError, 'Should throw a ResponseError')
-    
-    // Verify response data exists and has the right structure
-    ok('response' in error, 'Error should contain response data')
-    const responseData = error.response
-    deepStrictEqual(responseData.throttleTimeMs, 100)
-    deepStrictEqual(responseData.results.length, 3)
-    deepStrictEqual(responseData.results[1].errorCode, 41)
-    
-    // Verify the error array contains a ProtocolError for the specific path
-    ok(Array.isArray(error.errors), 'Errors should be an array')
-    ok(error.errors.length > 0, 'Error array should not be empty')
-    
-    // Check the first error corresponds to our expected path
-    const firstError = error.errors[0]
-    deepStrictEqual(firstError.path, '/results/1', 'Error should reference correct path')
-    deepStrictEqual(firstError.apiCode, 41, 'Error should have correct code')
-    
-    return true
-  })
+
+  const response = parseResponse(1, 42, 2, writer.bufferList)
+
+  // Verify throttling is processed correctly
+  deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
+
+  // Verify the rest of the response is still correct
+  deepStrictEqual(
+    response.results,
+    [
+      {
+        groupId: 'group-1',
+        errorCode: 0
+      }
+    ],
+    'Results should be correctly parsed even with throttling'
+  )
 })
 
-test('deleteGroupsV2 handles empty group list correctly', () => {
-  const { createRequest } = captureApiHandlers(deleteGroupsV2)
-  
-  // Test with empty array
-  const request = createRequest([])
-  
-  // Verify the request is a Writer with a buffer
-  deepStrictEqual(request instanceof Writer, true)
-  deepStrictEqual(typeof request.buffer, 'object')
-  deepStrictEqual(request.buffer instanceof Buffer, true)
-  
-  // Empty arrays should still produce a valid buffer
-  deepStrictEqual(request.buffer.length > 0, true)
+test('parseResponse handles single group error correctly', () => {
+  // Create a response with one group having an error
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Results array with one error
+    .appendArray(
+      [
+        {
+          groupId: 'group-1',
+          errorCode: 15 // NON_EXISTENT_GROUP
+        }
+      ],
+      (w, result) => {
+        w.appendString(result.groupId).appendInt16(result.errorCode)
+      }
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 42, 2, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify the error object has the expected properties
+      ok(Array.isArray(err.errors) && err.errors.length === 1, 'Should have an array with 1 error for the failed group')
+
+      // Verify the response structure is preserved
+      deepStrictEqual(
+        err.response,
+        {
+          throttleTimeMs: 0,
+          results: [
+            {
+              groupId: 'group-1',
+              errorCode: 15
+            }
+          ]
+        },
+        'Error response should preserve the original response structure'
+      )
+
+      return true
+    }
+  )
+})
+
+test('parseResponse handles multiple groups with mixed errors', () => {
+  // Create a response with multiple groups and mixed results
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Results array with mixed results
+    .appendArray(
+      [
+        {
+          groupId: 'group-1',
+          errorCode: 0 // Success
+        },
+        {
+          groupId: 'group-2',
+          errorCode: 15 // NON_EXISTENT_GROUP
+        },
+        {
+          groupId: 'group-3',
+          errorCode: 41 // GROUP_AUTHORIZATION_FAILED
+        }
+      ],
+      (w, result) => {
+        w.appendString(result.groupId).appendInt16(result.errorCode)
+      }
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 42, 2, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify there are multiple errors
+      ok(
+        Array.isArray(err.errors) && err.errors.length === 2,
+        'Should have an array with 2 errors for the failed groups'
+      )
+
+      // Get error codes from the response
+      const errorCodes = err.response.results
+        .filter((r: Record<string, number>) => r.errorCode !== 0)
+        .map((r: Record<string, number>) => r.errorCode)
+
+      // Verify we have both expected error codes
+      ok(
+        errorCodes.includes(15) && errorCodes.includes(41),
+        'Response should contain groups with expected error codes (15 and 41)'
+      )
+
+      // Verify all groups are preserved in the response
+      deepStrictEqual(err.response.results.length, 3, 'Response should contain all 3 groups')
+
+      // Verify the successful group data is preserved
+      deepStrictEqual(
+        err.response.results.find((r: Record<string, number>) => r.errorCode === 0),
+        {
+          groupId: 'group-1',
+          errorCode: 0
+        },
+        'Successful group should be preserved in the response'
+      )
+
+      return true
+    }
+  )
+})
+
+test('parseResponse with empty results array', () => {
+  // Create a response with an empty results array
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Empty results array
+    .appendArray([], () => {})
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 42, 2, writer.bufferList)
+
+  // Verify response with empty results
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      results: []
+    },
+    'Response with empty results should be parsed correctly'
+  )
 })

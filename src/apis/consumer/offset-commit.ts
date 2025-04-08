@@ -93,7 +93,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray((r, i) => {
       return {
-        name: r.readString()!,
+        name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
@@ -105,9 +105,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -117,4 +117,4 @@ export function parseResponse (
   return response
 }
 
-export const offsetCommitV9 = createAPI<OffsetCommitRequest, OffsetCommitResponse>(8, 9, createRequest, parseResponse)
+export const api = createAPI<OffsetCommitRequest, OffsetCommitResponse>(8, 9, createRequest, parseResponse)

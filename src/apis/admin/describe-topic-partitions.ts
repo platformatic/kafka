@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -118,7 +118,7 @@ export function parseResponse (
 
       return {
         errorCode,
-        name: r.readString(),
+        name: r.readNullableString(),
         topicId: r.readUUID(),
         isInternal: r.readBoolean(),
         partitions: r.readArray((r, j) => {
@@ -139,15 +139,15 @@ export function parseResponse (
             lastKnownElr: r.readArray(r => r.readInt32(), true, false)!,
             offlineReplicas: r.readArray(r => r.readInt32(), true, false)!
           }
-        })!,
+        }),
         topicAuthorizedOperations: r.readInt32()
       }
-    })!
+    })
   }
 
   if (reader.readInt8() === 1) {
     response.nextCursor = {
-      topicName: reader.readString()!,
+      topicName: reader.readString(),
       partitionIndex: reader.readInt32()
     }
   }
@@ -159,7 +159,7 @@ export function parseResponse (
   return response
 }
 
-export const describeTopicPartitionsV0 = createAPI<DescribeTopicPartitionsRequest, DescribeTopicPartitionsResponse>(
+export const api = createAPI<DescribeTopicPartitionsRequest, DescribeTopicPartitionsResponse>(
   75,
   0,
   createRequest,

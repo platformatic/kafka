@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -73,9 +73,9 @@ export function parseResponse (
   const response: DescribeUserScramCredentialsResponse = {
     throttleTimeMs,
     errorCode,
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     results: reader.readArray((r, i) => {
-      const user = r.readString()!
+      const user = r.readString()
       const errorCode = r.readInt16()
 
       if (errorCode !== 0) {
@@ -85,15 +85,15 @@ export function parseResponse (
       return {
         user,
         errorCode,
-        errorMessage: r.readString(),
+        errorMessage: r.readNullableString(),
         credentialInfos: r.readArray(r => {
           return {
             mechanism: r.readInt8(),
             iterations: r.readInt32()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -103,7 +103,9 @@ export function parseResponse (
   return response
 }
 
-export const describeUserScramCredentialsV0 = createAPI<
-  DescribeUserScramCredentialsRequest,
-  DescribeUserScramCredentialsResponse
->(50, 0, createRequest, parseResponse)
+export const api = createAPI<DescribeUserScramCredentialsRequest, DescribeUserScramCredentialsResponse>(
+  50,
+  0,
+  createRequest,
+  parseResponse
+)

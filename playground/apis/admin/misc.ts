@@ -9,7 +9,7 @@ import { listTransactionsV0 } from '../../../src/apis/admin/list-transactions.ts
 import { unregisterBrokerV0 } from '../../../src/apis/admin/unregister-broker.ts'
 import { updateFeaturesV1 } from '../../../src/apis/admin/update-features.ts'
 import { DescribeClusterEndpointTypes, FeatureUpgradeTypes } from '../../../src/apis/enumerations.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const performDescribeQuorum = false

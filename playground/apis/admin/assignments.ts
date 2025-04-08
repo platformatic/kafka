@@ -1,6 +1,6 @@
 import { alterPartitionReassignmentsV0 } from '../../../src/apis/admin/alter-partition-reassignments.ts'
 import { listPartitionReassignmentsV0 } from '../../../src/apis/admin/list-partition-reassignments.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

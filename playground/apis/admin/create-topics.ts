@@ -1,5 +1,5 @@
 import { createTopicsV7 } from '../../../src/apis/admin/create-topics.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

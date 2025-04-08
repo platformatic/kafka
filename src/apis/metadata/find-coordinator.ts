@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -57,12 +57,12 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     coordinators: reader.readArray((r, i) => {
       const coordinator = {
-        key: r.readString()!,
+        key: r.readString(),
         nodeId: r.readInt32(),
-        host: r.readString()!,
+        host: r.readString(),
         port: r.readInt32(),
         errorCode: r.readInt16(),
-        errorMessage: r.readString()
+        errorMessage: r.readNullableString()
       }
 
       if (coordinator.errorCode !== 0) {
@@ -70,7 +70,7 @@ export function parseResponse (
       }
 
       return coordinator
-    })!
+    })
   }
 
   if (errors.length) {
@@ -80,9 +80,4 @@ export function parseResponse (
   return response
 }
 
-export const findCoordinatorV6 = createAPI<FindCoordinatorRequest, FindCoordinatorResponse>(
-  10,
-  6,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<FindCoordinatorRequest, FindCoordinatorResponse>(10, 6, createRequest, parseResponse)

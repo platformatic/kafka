@@ -1,7 +1,7 @@
 import { alterClientQuotasV1 } from '../../../src/apis/admin/alter-client-quotas.ts'
 import { describeClientQuotasV0 } from '../../../src/apis/admin/describe-client-quotas.ts'
 import { ClientQuotaMatchTypes } from '../../../src/apis/enumerations.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

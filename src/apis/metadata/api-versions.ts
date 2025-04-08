@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { protocolAPIsById } from '../../protocol/apis.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -57,7 +57,7 @@ export function parseResponse (
         minVersion: r.readInt16(),
         maxVersion: r.readInt16()
       }
-    })!,
+    }),
     throttleTimeMs: reader.readInt32()
   }
 
@@ -68,11 +68,4 @@ export function parseResponse (
   return response
 }
 
-export const apiVersionsV4 = createAPI<ApiVersionsRequest, ApiVersionsResponse>(
-  18,
-  4,
-  createRequest,
-  parseResponse,
-  true,
-  false
-)
+export const api = createAPI<ApiVersionsRequest, ApiVersionsResponse>(18, 4, createRequest, parseResponse, true, false)

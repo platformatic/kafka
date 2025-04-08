@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -66,18 +66,18 @@ export function parseResponse (
     transactionStates: reader.readArray((r, i) => {
       const state = {
         errorCode: r.readInt16(),
-        transactionalId: r.readString()!,
-        transactionState: r.readString()!,
+        transactionalId: r.readString(),
+        transactionState: r.readString(),
         transactionTimeoutMs: r.readInt32(),
         transactionStartTimeMs: r.readInt64(),
         producerId: r.readInt64(),
         producerEpoch: r.readInt16(),
         topics: r.readArray(r => {
           return {
-            topic: r.readString()!,
+            topic: r.readString(),
             partitions: r.readArray(r => r.readInt32(), true, false)!
           }
-        })!
+        })
       }
 
       if (state.errorCode !== 0) {
@@ -85,7 +85,7 @@ export function parseResponse (
       }
 
       return state
-    })!
+    })
   }
 
   if (errors.length) {
@@ -95,7 +95,7 @@ export function parseResponse (
   return response
 }
 
-export const describeTransactionsV0 = createAPI<DescribeTransactionsRequest, DescribeTransactionsResponse>(
+export const api = createAPI<DescribeTransactionsRequest, DescribeTransactionsResponse>(
   65,
   0,
   createRequest,

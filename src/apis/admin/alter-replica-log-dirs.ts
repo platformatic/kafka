@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -70,7 +70,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     results: reader.readArray((r, i) => {
       return {
-        topicName: r.readString()!,
+        topicName: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
@@ -82,9 +82,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -94,7 +94,7 @@ export function parseResponse (
   return response
 }
 
-export const alterReplicaLogDirsV2 = createAPI<AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse>(
+export const api = createAPI<AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse>(
   34,
   2,
   createRequest,

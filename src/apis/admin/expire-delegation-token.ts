@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -48,7 +48,7 @@ export function parseResponse (
   return response
 }
 
-export const expireDelegationTokenV2 = createAPI<ExpireDelegationTokenRequest, ExpireDelegationTokenResponse>(
+export const api = createAPI<ExpireDelegationTokenRequest, ExpireDelegationTokenResponse>(
   40,
   2,
   createRequest,

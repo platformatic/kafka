@@ -8,14 +8,15 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 ## Events
 
-| Name                       | Description                            |
-| -------------------------- | -------------------------------------- |
-| `consumer:group:join`      | Emitted when joining a group.          |
-| `consumer:group:leave`     | Emitted when leaving a group.          |
-| `consumer:group:rebalance` | Emitted when group rebalancing occurs. |
-| `consumer:heartbeat:start` | Emitted when starting new heartbeats.  |
-| `consumer:heartbeat:end`   | Emitted during successful heartbeats.  |
-| `consumer:heartbeat:error` | Emitted during failed heartbeats.      |
+| Name                       | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `consumer:group:join`      | Emitted when joining a group.                      |
+| `consumer:group:leave`     | Emitted when leaving a group.                      |
+| `consumer:group:rejoin`    | Emitted when re-joining a group after a rebalance. |
+| `consumer:group:rebalance` | Emitted when group rebalancing occurs.             |
+| `consumer:heartbeat:start` | Emitted when starting new heartbeats.              |
+| `consumer:heartbeat:end`   | Emitted during successful heartbeats.              |
+| `consumer:heartbeat:error` | Emitted during failed heartbeats.                  |
 
 ## Constructor
 

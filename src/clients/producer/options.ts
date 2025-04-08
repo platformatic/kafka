@@ -19,6 +19,7 @@ const produceOptionsProperties = {
     errorMessage: enumErrorMessage(compressionsAlgorithms, true)
   },
   partitioner: { function: true },
+  autocreateTopics: { type: 'boolean' },
   repeatOnStaleMetadata: { type: 'boolean' }
 }
 

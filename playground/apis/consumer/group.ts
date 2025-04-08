@@ -4,7 +4,7 @@ import { leaveGroupV5 } from '../../../src/apis/consumer/leave-group.ts'
 import { syncGroupV5 } from '../../../src/apis/consumer/sync-group.ts'
 import { FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
 import { findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { joinGroup, performAPICallWithRetry } from '../../utils.ts'
 
 const performConsumerHeartbeat = false

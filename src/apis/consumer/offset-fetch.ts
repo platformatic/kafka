@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -96,16 +96,16 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     groups: reader.readArray((r, i) => {
       const group = {
-        groupId: r.readString()!,
+        groupId: r.readString(),
         topics: r.readArray((r, j) => {
           return {
-            name: r.readString()!,
+            name: r.readString(),
             partitions: r.readArray((r, k) => {
               const partition = {
                 partitionIndex: r.readInt32(),
                 committedOffset: r.readInt64(),
                 committedLeaderEpoch: r.readInt32(),
-                metadata: r.readString(),
+                metadata: r.readNullableString(),
                 errorCode: r.readInt16()
               }
 
@@ -114,9 +114,9 @@ export function parseResponse (
               }
 
               return partition
-            })!
+            })
           }
-        })!,
+        }),
         errorCode: r.readInt16()
       }
 
@@ -125,7 +125,7 @@ export function parseResponse (
       }
 
       return group
-    })!
+    })
   }
 
   if (errors.length) {
@@ -135,4 +135,4 @@ export function parseResponse (
   return response
 }
 
-export const offsetFetchV9 = createAPI<OffsetFetchRequest, OffsetFetchResponse>(9, 9, createRequest, parseResponse)
+export const api = createAPI<OffsetFetchRequest, OffsetFetchResponse>(9, 9, createRequest, parseResponse)

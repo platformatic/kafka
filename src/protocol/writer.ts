@@ -284,7 +284,7 @@ export class Writer {
   }
 
   appendArray<InputType>(
-    value: InputType[] | null,
+    value: InputType[] | null | undefined,
     entryWriter: EntryWriter<InputType>,
     compact: boolean = true,
     appendTrailingTaggedFields = true
@@ -313,7 +313,7 @@ export class Writer {
   }
 
   appendMap<Key, Value>(
-    value: Map<Key, Value> | null,
+    value: Map<Key, Value> | null | undefined,
     entryWriter: EntryWriter<[Key, Value]>,
     compact: boolean = true,
     appendTrailingTaggedFields = true
@@ -342,7 +342,7 @@ export class Writer {
     return this
   }
 
-  appendVarIntArray<InputType>(value: InputType[] | null, entryWriter: EntryWriter<InputType>): this {
+  appendVarIntArray<InputType>(value: InputType[] | null | undefined, entryWriter: EntryWriter<InputType>): this {
     if (value == null) {
       return this.appendVarInt(0)
     }

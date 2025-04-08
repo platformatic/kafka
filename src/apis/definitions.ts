@@ -1,6 +1,6 @@
 import type BufferList from 'bl'
 import { promisify } from 'node:util'
-import { type Connection } from '../connection/connection.ts'
+import { type Connection } from '../network/connection.ts'
 import { type Writer } from '../protocol/writer.ts'
 
 export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
@@ -28,6 +28,8 @@ export type APIWithPromise<RequestArguments extends Array<unknown>, ResponseType
 
 export type API<RequestType extends Array<unknown>, ResponseType> = APIWithCallback<RequestType, ResponseType> & {
   async: APIWithPromise<RequestType, ResponseType>
+  key: number
+  version: number
 }
 
 export function createAPI<RequestArguments extends Array<unknown>, ResponseType> (
@@ -42,7 +44,9 @@ export function createAPI<RequestArguments extends Array<unknown>, ResponseType>
     connection: Connection,
     ...args: [...RequestArguments, ...Partial<CallbackArguments<ResponseType>>]
   ): void {
+    /* c8 ignore next */
     const cb = typeof args[args.length - 1] === 'function' ? (args.pop() as Callback<ResponseType>) : () => {}
+
     connection.send(
       apiKey,
       apiVersion,
@@ -55,5 +59,8 @@ export function createAPI<RequestArguments extends Array<unknown>, ResponseType>
   }
 
   api.async = promisify(api) as APIWithPromise<RequestArguments, ResponseType>
+  api.key = apiKey
+  api.version = apiVersion
+
   return api
 }

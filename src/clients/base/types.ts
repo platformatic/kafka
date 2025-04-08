@@ -1,5 +1,4 @@
-import { type ConnectionOptions } from '../../connection/connection.ts'
-import { type Broker } from '../../connection/definitions.ts'
+import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
 
 export interface TopicWithPartitionAndOffset {
   topic: string

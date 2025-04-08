@@ -57,9 +57,4 @@ export function parseResponse (
   return response
 }
 
-export const addOffsetsToTxnV4 = createAPI<AddOffsetsToTxnRequest, AddOffsetsToTxnResponse>(
-  25,
-  4,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<AddOffsetsToTxnRequest, AddOffsetsToTxnResponse>(25, 4, createRequest, parseResponse)

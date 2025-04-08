@@ -2,7 +2,7 @@ import { cronometro } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
 import { fetchV17 } from '../src/apis/fetch.ts'
 import { metadataV12 } from '../src/apis/metadata.ts'
-import { Connection } from '../src/connection/connection.ts'
+import { Connection } from '../src/network/connection.ts'
 
 const THRESHOLD = 100
 

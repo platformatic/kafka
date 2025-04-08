@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -75,20 +75,20 @@ export function parseResponse (
     groups: reader.readArray((r, i) => {
       const group: DescribeGroupsResponseGroup = {
         errorCode: r.readInt16(),
-        groupId: r.readString()!,
-        groupState: r.readString()!,
-        protocolType: r.readString()!,
-        protocolData: r.readString()!,
+        groupId: r.readString(),
+        groupState: r.readString(),
+        protocolType: r.readString(),
+        protocolData: r.readString(),
         members: r.readArray(r => {
           return {
-            memberId: r.readString()!,
-            groupInstanceId: r.readString(),
-            clientId: r.readString()!,
-            clientHost: r.readString()!,
-            memberMetadata: r.readBytes()!,
-            memberAssignment: r.readBytes()!
+            memberId: r.readString(),
+            groupInstanceId: r.readNullableString(),
+            clientId: r.readString(),
+            clientHost: r.readString(),
+            memberMetadata: r.readBytes(),
+            memberAssignment: r.readBytes()
           }
-        })!,
+        }),
         authorizedOperations: r.readInt32()
       }
 
@@ -97,7 +97,7 @@ export function parseResponse (
       }
 
       return group
-    })!
+    })
   }
 
   if (errors.length) {
@@ -107,9 +107,4 @@ export function parseResponse (
   return response
 }
 
-export const describeGroupsV5 = createAPI<DescribeGroupsRequest, DescribeGroupsResponse>(
-  15,
-  5,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeGroupsRequest, DescribeGroupsResponse>(15, 5, createRequest, parseResponse)

@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -25,6 +25,7 @@ export interface DescribeConfigsResponseConfig {
   readOnly: boolean
   configSource: number
   isSensitive: boolean
+  synonyms: DescribeConfigsResponseSynonym[]
   configType: number
   documentation: NullableString
 }
@@ -108,21 +109,21 @@ export function parseResponse (
 
       return {
         errorCode,
-        errorMessage: r.readString(),
+        errorMessage: r.readNullableString(),
         resourceType: r.readInt8(),
-        resourceName: r.readString()!,
+        resourceName: r.readString(),
         configs: r.readArray(r => {
           return {
-            name: r.readString()!,
-            value: r.readString(),
+            name: r.readString(),
+            value: r.readNullableString(),
             readOnly: r.readBoolean(),
             configSource: r.readInt8(),
             isSensitive: r.readBoolean(),
             synonyms: r.readArray(
               r => {
                 return {
-                  name: r.readString()!,
-                  value: r.readString(),
+                  name: r.readString(),
+                  value: r.readNullableString(),
                   source: r.readInt8()
                 }
               },
@@ -130,11 +131,11 @@ export function parseResponse (
               false
             ),
             configType: r.readInt8(),
-            documentation: r.readString()
+            documentation: r.readNullableString()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -144,9 +145,4 @@ export function parseResponse (
   return response
 }
 
-export const describeConfigsV4 = createAPI<DescribeConfigsRequest, DescribeConfigsResponse>(
-  32,
-  4,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeConfigsRequest, DescribeConfigsResponse>(32, 4, createRequest, parseResponse)

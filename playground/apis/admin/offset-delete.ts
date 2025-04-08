@@ -1,5 +1,5 @@
 import { offsetDeleteV0 } from '../../../src/apis/admin/offset-delete.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

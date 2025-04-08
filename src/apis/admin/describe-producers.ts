@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -82,12 +82,12 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray(r => {
       return {
-        name: r.readString()!,
+        name: r.readString(),
         partitions: reader.readArray((r, i) => {
           const partition = {
             partitionIndex: r.readInt32(),
             errorCode: r.readInt16(),
-            errorMessage: r.readString(),
+            errorMessage: r.readNullableString(),
             activeProducers: r.readArray(r => {
               return {
                 producerId: r.readInt64(),
@@ -97,7 +97,7 @@ export function parseResponse (
                 coordinatorEpoch: r.readInt32(),
                 currentTxnStartOffset: r.readInt64()
               }
-            })!
+            })
           }
 
           if (partition.errorCode !== 0) {
@@ -105,9 +105,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -117,9 +117,4 @@ export function parseResponse (
   return response
 }
 
-export const describeProducersV0 = createAPI<DescribeProducersRequest, DescribeProducersResponse>(
-  61,
-  0,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeProducersRequest, DescribeProducersResponse>(61, 0, createRequest, parseResponse)

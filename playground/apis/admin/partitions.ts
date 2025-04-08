@@ -1,6 +1,6 @@
 import { alterPartitionV3 } from '../../../src/apis/admin/alter-partition.ts'
 import { createPartitionsV3 } from '../../../src/apis/admin/create-partitions.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const performCreatePartitions = false

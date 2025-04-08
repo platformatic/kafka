@@ -3,7 +3,7 @@ import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { createAPI } from '../definitions.ts'
+import { type API, createAPI } from '../definitions.ts'
 
 export type SaslAuthenticateRequest = Parameters<typeof createRequest>
 
@@ -13,6 +13,8 @@ export interface SaslAuthenticateResponse {
   authBytes: Buffer
   sessionLifetimeMs: bigint
 }
+
+export type SASLAuthenticationAPI = API<[Buffer], SaslAuthenticateResponse>
 
 /*
   SaslAuthenticate Request (Version: 2) => auth_bytes TAG_BUFFER
@@ -39,8 +41,8 @@ export function parseResponse (
 
   const response: SaslAuthenticateResponse = {
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString(),
-    authBytes: reader.readBytes()!,
+    errorMessage: reader.readNullableString(),
+    authBytes: reader.readBytes(),
     sessionLifetimeMs: reader.readInt64()
   }
 
@@ -51,9 +53,4 @@ export function parseResponse (
   return response
 }
 
-export const saslAuthenticateV2 = createAPI<SaslAuthenticateRequest, SaslAuthenticateResponse>(
-  36,
-  2,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<SaslAuthenticateRequest, SaslAuthenticateResponse>(36, 2, createRequest, parseResponse)

@@ -1,6 +1,6 @@
 import { metadataV12 } from '../../../src/apis/metadata/metadata.ts'
 import { saslHandshakeV1 } from '../../../src/apis/security/sasl-handshake.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { authenticate } from '../../../src/protocol/sasl/scram-sha.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

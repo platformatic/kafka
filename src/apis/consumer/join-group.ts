@@ -83,25 +83,30 @@ JoinGroup Response (Version: 9) => throttle_time_ms error_code generation_id pro
     metadata => COMPACT_BYTES
 
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): JoinGroupResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): JoinGroupResponse {
   const reader = Reader.from(raw)
 
   const response: JoinGroupResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
     generationId: reader.readInt32(),
-    protocolType: reader.readString(),
-    protocolName: reader.readString(),
-    leader: reader.readString()!,
+    protocolType: reader.readNullableString(),
+    protocolName: reader.readNullableString(),
+    leader: reader.readString(),
     skipAssignment: reader.readBoolean(),
-    memberId: reader.readString(),
+    memberId: reader.readNullableString(),
     members: reader.readArray(r => {
       return {
-        memberId: r.readString()!,
-        groupInstanceId: r.readString(),
-        metadata: r.readBytes()
+        memberId: r.readString(),
+        groupInstanceId: r.readNullableString(),
+        metadata: r.readNullableBytes()
       }
-    })!
+    })
   }
 
   if (response.errorCode !== 0) {
@@ -111,4 +116,4 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
   return response
 }
 
-export const joinGroupV9 = createAPI<JoinGroupRequest, JoinGroupResponse>(11, 9, createRequest, parseResponse)
+export const api = createAPI<JoinGroupRequest, JoinGroupResponse>(11, 9, createRequest, parseResponse)

@@ -1,11 +1,22 @@
 import { ProduceAcks } from '../../apis/enumerations.ts'
-import { type InitProducerIdResponse, initProducerIdV5 } from '../../apis/producer/init-producer-id.ts'
-import { type ProduceResponse, produceV11 } from '../../apis/producer/produce.ts'
+import { type InitProducerIdResponse, api as initProducerIdV5 } from '../../apis/producer/init-producer-id.ts'
+import { type ProduceResponse, api as produceV11 } from '../../apis/producer/produce.ts'
 import { type GenericError, UserError } from '../../errors.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
 import { type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
 import { NumericMap } from '../../utils.ts'
-import { Base } from '../base/base.ts'
+import {
+  Base,
+  kBootstrapBrokers,
+  kCheckNotClosed,
+  kClearMetadata,
+  kConnections,
+  kMetadata,
+  kOptions,
+  kPerformDeduplicated,
+  kPerformWithRetry,
+  kValidateOptions
+} from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import {
   type CallbackWithPromise,
@@ -59,7 +70,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#headerKeySerializer = options.serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = options.serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
 
-    this.validateOptions(options, producerOptionsValidator, '/options')
+    this[kValidateOptions](options, producerOptionsValidator, '/options')
+  }
+
+  get producerId (): bigint | undefined {
+    return this.#producerInfo?.producerId
+  }
+
+  get producerEpoch (): number | undefined {
+    return this.#producerInfo?.producerEpoch
   }
 
   initIdempotentProducer (
@@ -75,23 +94,23 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<ProducerInfo>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, produceOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, produceOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as ProducerInfo)
       return callback[kCallbackPromise]
     }
 
-    return this.performDeduplicated(
+    return this[kPerformDeduplicated](
       'initProducerId',
       deduplicateCallback => {
-        this.performWithRetry<InitProducerIdResponse>(
+        this[kPerformWithRetry]<InitProducerIdResponse>(
           'initProducerId',
           retryCallback => {
-            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
                 callback(error, undefined as unknown as ProducerInfo)
                 return
@@ -100,9 +119,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               initProducerIdV5(
                 connection,
                 null,
-                this.options.timeout!,
-                options.producerId ?? this.options.producerId ?? 0n,
-                options.producerEpoch ?? this.options.producerEpoch ?? 0,
+                this[kOptions].timeout!,
+                options.producerId ?? this[kOptions].producerId ?? 0n,
+                options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
                 retryCallback
               )
             })
@@ -133,19 +152,20 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<ProduceResult>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, sendOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, sendOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as ProduceResult)
       return callback[kCallbackPromise]
     }
 
-    options.idempotent ??= this.options.idempotent ?? false
-    options.repeatOnStaleMetadata ??= this.options.repeatOnStaleMetadata ?? true
-    options.partitioner ??= this.options.partitioner
+    options.idempotent ??= this[kOptions].idempotent ?? false
+    /* c8 ignore next */
+    options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata ?? true
+    options.partitioner ??= this[kOptions].partitioner
 
     const { idempotent, partitioner } = options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>
 
@@ -192,7 +212,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const produceOptions: Partial<CreateRecordsBatchOptions> = {
-      compression: options.compression ?? this.options.compression,
+      compression: options.compression ?? this[kOptions].compression,
       producerId: idempotent ? this.#producerInfo.producerId : options.producerId,
       producerEpoch: idempotent ? this.#producerInfo.producerEpoch : options.producerEpoch,
       sequences: idempotent ? this.#sequences : undefined
@@ -207,7 +227,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const headers = new Map<Buffer, Buffer>()
       let partition: number = 0
 
-      if (message.partition == null) {
+      if (typeof message.partition !== 'number') {
         if (partitioner) {
           partition = partitioner(message)
         } else if (key) {
@@ -256,93 +276,101 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<ProduceResult>
   ): void {
     // Get the metadata with the topic/partitions informations
-    this._metadata({ topics }, (error: Error | null, metadata: ClusterMetadata) => {
-      if (error) {
-        callback(error, undefined as unknown as ProduceResult)
-        return
-      }
-
-      const messagesByDestination = new Map<number, MessageRecord[]>()
-
-      // Track the number of messages per partition so we can update the sequence number
-      const messagesPerPartition = new NumericMap()
-
-      // Normalize the partition of all messages, then enqueue them to their destination
-      for (const message of messages) {
-        message.partition! %= metadata.topics.get(message.topic)!.partitionsCount
-
-        const { topic, partition } = message
-        const leader = metadata.topics.get(topic)!.partitions[partition!].leader
-
-        let destination = messagesByDestination.get(leader)
-        if (!destination) {
-          destination = []
-          messagesByDestination.set(leader, destination)
+    this[kMetadata](
+      { topics, autocreateTopics: sendOptions.autocreateTopics },
+      (error: Error | null, metadata: ClusterMetadata) => {
+        if (error) {
+          callback(error, undefined as unknown as ProduceResult)
+          return
         }
 
-        const messagePartitionKey = `${message.topic}:${partition}`
-        messagesPerPartition.postIncrement(messagePartitionKey, 1, 0)
-        destination.push(message)
-      }
+        const messagesByDestination = new Map<number, MessageRecord[]>()
 
-      // Track nodes so that we can get their ID for delayed write reporting
-      const nodes: number[] = []
+        // Track the number of messages per partition so we can update the sequence number
+        const messagesPerPartition = new NumericMap()
 
-      runConcurrentCallbacks<ProduceResponse | boolean>(
-        'Producing messages failed.',
-        messagesByDestination,
-        ([destination, messages], concurrentCallback) => {
-          nodes.push(destination)
+        // Normalize the partition of all messages, then enqueue them to their destination
+        for (const message of messages) {
+          message.partition! %= metadata.topics.get(message.topic)!.partitionsCount
 
-          this.#performSingleDestinationSend(
-            topics,
-            messages,
-            this.options.timeout!,
-            sendOptions.acks,
-            sendOptions.repeatOnStaleMetadata,
-            produceOptions,
-            concurrentCallback
-          )
-        },
-        (error, apiResults) => {
-          if (error) {
-            callback(error, undefined as unknown as ProduceResult)
-            return
+          const { topic, partition } = message
+          const leader = metadata.topics.get(topic)!.partitions[partition!].leader
+
+          let destination = messagesByDestination.get(leader)
+          if (!destination) {
+            destination = []
+            messagesByDestination.set(leader, destination)
           }
 
-          const results: ProduceResult = {}
+          const messagePartitionKey = `${message.topic}:${partition}`
+          messagesPerPartition.postIncrement(messagePartitionKey, 1, 0)
+          destination.push(message)
+        }
 
-          if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
-            const writeDelayedNodes = []
+        // Track nodes so that we can get their ID for delayed write reporting
+        const nodes: number[] = []
 
-            for (let i = 0; i < apiResults.length; i++) {
-              if (apiResults[i] === false) {
-                writeDelayedNodes.push(nodes[i])
-              }
+        runConcurrentCallbacks<ProduceResponse | boolean>(
+          'Producing messages failed.',
+          messagesByDestination,
+          ([destination, messages], concurrentCallback) => {
+            nodes.push(destination)
+
+            this.#performSingleDestinationSend(
+              topics,
+              messages,
+              this[kOptions].timeout!,
+              sendOptions.acks,
+              sendOptions.autocreateTopics,
+              sendOptions.repeatOnStaleMetadata,
+              produceOptions,
+              concurrentCallback
+            )
+          },
+          (error, apiResults) => {
+            if (error) {
+              callback(error, undefined as unknown as ProduceResult)
+              return
             }
 
-            results.unwritableNodes = writeDelayedNodes
-          } else {
-            const topics: ProduceResult['offsets'] = []
+            const results: ProduceResult = {}
 
-            for (const result of apiResults) {
-              for (const { name, partitionResponses } of (result as ProduceResponse).responses) {
-                for (const partitionResponse of partitionResponses) {
-                  topics.push({ topic: name, partition: partitionResponse.index, offset: partitionResponse.baseOffset })
+            if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
+              const unwritableNodes = []
 
-                  const partitionKey = `${name}:${partitionResponse.index}`
-                  this.#sequences.postIncrement(partitionKey, messagesPerPartition.get(partitionKey)!, 0)
+              for (let i = 0; i < apiResults.length; i++) {
+                if (apiResults[i] === false) {
+                  unwritableNodes.push(nodes[i])
                 }
               }
 
-              results.offsets = topics
-            }
-          }
+              results.unwritableNodes = unwritableNodes
+            } else {
+              const topics: ProduceResult['offsets'] = []
 
-          callback(null, results)
-        }
-      )
-    })
+              for (const result of apiResults) {
+                for (const { name, partitionResponses } of (result as ProduceResponse).responses) {
+                  for (const partitionResponse of partitionResponses) {
+                    topics.push({
+                      topic: name,
+                      partition: partitionResponse.index,
+                      offset: partitionResponse.baseOffset
+                    })
+
+                    const partitionKey = `${name}:${partitionResponse.index}`
+                    this.#sequences.postIncrement(partitionKey, messagesPerPartition.get(partitionKey)!, 0)
+                  }
+                }
+
+                results.offsets = topics
+              }
+            }
+
+            callback(null, results)
+          }
+        )
+      }
+    )
   }
 
   #performSingleDestinationSend (
@@ -350,12 +378,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     messages: MessageRecord[],
     timeout: number,
     acks: number,
+    autocreateTopics: boolean,
     repeatOnStaleMetadata: boolean,
     produceOptions: Partial<CreateRecordsBatchOptions>,
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
     // Get the metadata with the topic/partitions informations
-    this._metadata({ topics }, (error: Error | null, metadata: ClusterMetadata) => {
+    this[kMetadata]({ topics, autocreateTopics }, (error: Error | null, metadata: ClusterMetadata) => {
       if (error) {
         callback(error, undefined as unknown as ProduceResponse)
         return
@@ -364,10 +393,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const { topic, partition } = messages[0]
       const leader = metadata.topics.get(topic)!.partitions[partition!].leader
 
-      this.performWithRetry<boolean | ProduceResponse>(
+      this[kPerformWithRetry]<boolean | ProduceResponse>(
         'produce',
         retryCallback => {
-          this.connections.get(metadata.brokers.get(leader)!, (error, connection) => {
+          this[kConnections].get(metadata.brokers.get(leader)!, (error, connection) => {
             if (error) {
               retryCallback(error, undefined as unknown as ProduceResponse)
               return
@@ -383,8 +412,17 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
 
             if (hasStaleMetadata && repeatOnStaleMetadata) {
-              this.clearMetadata()
-              this.#performSingleDestinationSend(topics, messages, timeout, acks, false, produceOptions, callback)
+              this[kClearMetadata]()
+              this.#performSingleDestinationSend(
+                topics,
+                messages,
+                timeout,
+                acks,
+                autocreateTopics,
+                false,
+                produceOptions,
+                callback
+              )
               return
             }
 

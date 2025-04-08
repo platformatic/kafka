@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -82,7 +82,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray((r, i) => {
       return {
-        name: r.readString()!,
+        name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
@@ -94,9 +94,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -106,7 +106,7 @@ export function parseResponse (
   return response
 }
 
-export const offsetDeleteV0 = createAPI<OffsetDeleteRequest, OffsetDeleteResponse>(
+export const api = createAPI<OffsetDeleteRequest, OffsetDeleteResponse>(
   47,
   0,
   createRequest,

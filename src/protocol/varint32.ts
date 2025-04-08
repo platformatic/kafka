@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 
 const MOST_SIGNIFICANT_BIT_FLAG = 0x80 // 128 or 1000 0000
 const LEAST_SIGNIFICANT_7_BITS = 0x7f // 127 or 0111 1111

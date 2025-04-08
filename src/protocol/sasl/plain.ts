@@ -1,10 +1,11 @@
-import { type SaslAuthenticateResponse, saslAuthenticateV2 } from '../../apis/security/sasl-authenticate.ts'
-import { type Connection } from '../../connection/connection.ts'
+import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate.ts'
+import { type Connection } from '../../network/connection.ts'
 
 export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   username: string,
   password: string
 ): Promise<SaslAuthenticateResponse> {
-  return saslAuthenticateV2.async(connection, Buffer.from(['', username, password].join('\0')))
+  return authenticateAPI.async(connection, Buffer.from(['', username, password].join('\0')))
 }

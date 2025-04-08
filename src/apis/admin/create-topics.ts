@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -116,21 +116,21 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray((r, i) => {
       const topic: CreateTopicsResponseTopic = {
-        name: r.readString()!,
+        name: r.readString(),
         topicId: r.readUUID(),
         errorCode: r.readInt16(),
-        errorMessage: r.readString(),
+        errorMessage: r.readNullableString(),
         numPartitions: r.readInt32(),
         replicationFactor: r.readInt16(),
         configs: r.readArray(r => {
           return {
-            name: r.readString()!,
-            value: r.readString(),
+            name: r.readString(),
+            value: r.readNullableString(),
             readOnly: r.readBoolean(),
             configSource: r.readInt8(),
             isSensitive: r.readBoolean()
           }
-        })!
+        })
       }
 
       if (topic.errorCode !== 0) {
@@ -138,7 +138,7 @@ export function parseResponse (
       }
 
       return topic
-    })!
+    })
   }
 
   if (errors.length) {
@@ -148,4 +148,4 @@ export function parseResponse (
   return response
 }
 
-export const createTopicsV7 = createAPI<CreateTopicsRequest, CreateTopicsResponse>(19, 7, createRequest, parseResponse)
+export const api = createAPI<CreateTopicsRequest, CreateTopicsResponse>(19, 7, createRequest, parseResponse)

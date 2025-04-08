@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -77,23 +77,23 @@ export function parseResponse (
     errorCode: reader.readInt16(),
     tokens: reader.readArray(r => {
       return {
-        principalType: r.readString()!,
-        principalName: r.readString()!,
-        tokenRequesterPrincipalType: r.readString()!,
-        tokenRequesterPrincipalName: r.readString()!,
+        principalType: r.readString(),
+        principalName: r.readString(),
+        tokenRequesterPrincipalType: r.readString(),
+        tokenRequesterPrincipalName: r.readString(),
         issueTimestamp: r.readInt64(),
         expiryTimestamp: r.readInt64(),
         maxTimestamp: r.readInt64(),
-        tokenId: r.readString()!,
-        hmac: r.readBytes()!,
+        tokenId: r.readString(),
+        hmac: r.readBytes(),
         renewers: r.readArray(r => {
           return {
-            principalType: r.readString()!,
-            principalName: r.readString()!
+            principalType: r.readString(),
+            principalName: r.readString()
           }
-        })!
+        })
       }
-    })!,
+    }),
     throttleTimeMs: reader.readInt32()
   }
 
@@ -104,7 +104,7 @@ export function parseResponse (
   return response
 }
 
-export const describeDelegationTokenV3 = createAPI<DescribeDelegationTokenRequest, DescribeDelegationTokenResponse>(
+export const api = createAPI<DescribeDelegationTokenRequest, DescribeDelegationTokenResponse>(
   41,
   3,
   createRequest,

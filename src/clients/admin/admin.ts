@@ -1,23 +1,32 @@
 import {
-  createTopicsV7,
+  api as createTopicsV7,
   type CreateTopicsRequestTopic,
   type CreateTopicsRequestTopicAssignment,
   type CreateTopicsResponse
 } from '../../apis/admin/create-topics.ts'
-import { deleteGroupsV2 } from '../../apis/admin/delete-groups.ts'
+import { api as deleteGroupsV2 } from '../../apis/admin/delete-groups.ts'
 import {
-  deleteTopicsV6,
+  api as deleteTopicsV6,
   type DeleteTopicsRequestTopic,
   type DeleteTopicsResponse
 } from '../../apis/admin/delete-topics.ts'
-import { describeGroupsV5, type DescribeGroupsResponse } from '../../apis/admin/describe-groups.ts'
-import { listGroupsV5, type ListGroupsResponse } from '../../apis/admin/list-groups.ts'
+import { api as describeGroupsV5, type DescribeGroupsResponse } from '../../apis/admin/describe-groups.ts'
+import { api as listGroupsV5, type ListGroupsResponse } from '../../apis/admin/list-groups.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
-import { findCoordinatorV6, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator.ts'
+import { api as findCoordinatorV6, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator.ts'
 import { Reader } from '../../protocol/reader.ts'
-import { debugDump } from '../../utils.ts'
-import { Base } from '../base/base.ts'
+import {
+  Base,
+  kBootstrapBrokers,
+  kCheckNotClosed,
+  kConnections,
+  kMetadata,
+  kOptions,
+  kPerformDeduplicated,
+  kPerformWithRetry,
+  kValidateOptions
+} from '../base/base.ts'
 import { type BaseOptions } from '../base/types.ts'
 import {
   createPromisifiedCallback,
@@ -60,11 +69,11 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback<CreatedTopic[]>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, createTopicsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, createTopicsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as CreatedTopic[])
       return callback[kCallbackPromise]
@@ -81,11 +90,11 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, deleteTopicsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, deleteTopicsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as void)
       return callback[kCallbackPromise]
@@ -105,7 +114,7 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
@@ -113,13 +122,13 @@ export class Admin extends Base<AdminOptions> {
       options = {}
     }
 
-    const validationError = this.validateOptions(options, listGroupsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, listGroupsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as Map<string, GroupBase>)
       return callback[kCallbackPromise]
     }
 
-    options.types ??= ['consumer']
+    options.types ??= ['classic']
 
     this.#listGroups(options, callback)
     return callback[kCallbackPromise]
@@ -135,11 +144,11 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, describeGroupsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, describeGroupsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as Map<string, Group>)
       return callback[kCallbackPromise]
@@ -156,11 +165,11 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, deleteGroupsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, deleteGroupsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as void)
       return callback[kCallbackPromise]
@@ -190,13 +199,13 @@ export class Admin extends Base<AdminOptions> {
       })
     }
 
-    this.performDeduplicated(
+    this[kPerformDeduplicated](
       'createTopics',
       deduplicateCallback => {
-        this.performWithRetry(
+        this[kPerformWithRetry](
           'createTopics',
           retryCallback => {
-            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as CreateTopicsResponse)
                 return
@@ -205,7 +214,7 @@ export class Admin extends Base<AdminOptions> {
               createTopicsV7(
                 connection,
                 requests,
-                this.options.timeout!,
+                this[kOptions].timeout!,
                 false,
                 retryCallback as unknown as Callback<CreateTopicsResponse>
               )
@@ -245,13 +254,13 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #deleteTopics (options: DeleteTopicsOptions, callback: CallbackWithPromise<void>): void {
-    this.performDeduplicated(
+    this[kPerformDeduplicated](
       'deleteTopics',
       deduplicateCallback => {
-        this.performWithRetry(
+        this[kPerformWithRetry](
           'deleteTopics',
           retryCallback => {
-            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
                 retryCallback(error, undefined)
                 return
@@ -265,7 +274,7 @@ export class Admin extends Base<AdminOptions> {
               deleteTopicsV6(
                 connection,
                 requests,
-                this.options.timeout!,
+                this[kOptions].timeout!,
                 retryCallback as unknown as Callback<DeleteTopicsResponse>
               )
             })
@@ -280,7 +289,7 @@ export class Admin extends Base<AdminOptions> {
 
   #listGroups (options: ListGroupsOptions, callback: CallbackWithPromise<Map<string, GroupBase>>): void {
     // Find all the brokers in the cluster
-    this._metadata({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
       if (error) {
         callback(error, undefined as unknown as Map<string, GroupBase>)
         return
@@ -290,21 +299,16 @@ export class Admin extends Base<AdminOptions> {
         'Listing groups failed.',
         metadata.brokers,
         ([, broker], concurrentCallback) => {
-          this.connections.get(broker, (error, connection) => {
+          this[kConnections].get(broker, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as ListGroupsResponse)
               return
             }
 
-            this.performWithRetry<ListGroupsResponse>(
+            this[kPerformWithRetry]<ListGroupsResponse>(
               'listGroups',
               retryCallback => {
-                listGroupsV5(
-                  connection,
-                  (options.states as ConsumerGroupState[]) ?? [],
-                  options.types ?? [],
-                  retryCallback
-                )
+                listGroupsV5(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
               },
               concurrentCallback,
               0
@@ -336,7 +340,7 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #describeGroups (options: DescribeGroupsOptions, callback: CallbackWithPromise<Map<string, Group>>): void {
-    this._metadata({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
       if (error) {
         callback(error, undefined as unknown as Map<string, Group>)
         return
@@ -364,13 +368,13 @@ export class Admin extends Base<AdminOptions> {
           'Describing groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this.connections.get(metadata.brokers.get(node)!, (error, connection) => {
+            this[kConnections].get(metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined as unknown as DescribeGroupsResponse)
                 return
               }
 
-              this.performWithRetry<DescribeGroupsResponse>(
+              this[kPerformWithRetry]<DescribeGroupsResponse>(
                 'describeGroups',
                 retryCallback => {
                   describeGroupsV5(connection, groups, options.includeAuthorizedOperations ?? false, retryCallback)
@@ -403,21 +407,21 @@ export class Admin extends Base<AdminOptions> {
 
                   const memberMetadata = {
                     version: reader.readInt16(),
-                    topics: reader.readArray(r => r.readString(false)!, false, false)!,
-                    metadata: reader.readBytes(false)!
+                    topics: reader.readArray(r => r.readString(false), false, false),
+                    metadata: reader.readBytes(false)
                   }
 
                   reader.reset(member.memberAssignment)
-                  debugDump(member.memberAssignment)
+
                   const memberAssignments: Map<string, GroupAssignment> = reader.readMap(
                     r => {
-                      const topic = r.readString()!
+                      const topic = r.readString()
 
-                      return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), true, false)! }]
+                      return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), true, false) }]
                     },
                     true,
                     false
-                  )!
+                  )
 
                   group.members.set(member.memberId, {
                     id: member.memberId,
@@ -441,7 +445,7 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #deleteGroups (options: DeleteGroupsOptions, callback: CallbackWithPromise<void>): void {
-    this._metadata({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
       if (error) {
         callback(error)
         return
@@ -469,13 +473,13 @@ export class Admin extends Base<AdminOptions> {
           'Deleting groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this.connections.get(metadata.brokers.get(node)!, (error, connection) => {
+            this[kConnections].get(metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined)
                 return
               }
 
-              this.performWithRetry(
+              this[kPerformWithRetry](
                 'deleteGroups',
                 retryCallback => {
                   deleteGroupsV2(connection, groups, retryCallback)
@@ -494,10 +498,10 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #findGroupCoordinator (groups: string[], callback: CallbackWithPromise<FindCoordinatorResponse>): void {
-    this.performWithRetry<FindCoordinatorResponse>(
+    this[kPerformWithRetry]<FindCoordinatorResponse>(
       'findGroupCoordinator',
       retryCallback => {
-        this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+        this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
           if (error) {
             retryCallback(error, undefined as unknown as FindCoordinatorResponse)
             return

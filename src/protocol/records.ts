@@ -19,7 +19,7 @@ const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
 export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> {
   key?: Key
   value?: Value
-  headers?: Map<HeaderKey, HeaderValue>
+  headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
   topic: string
   partition?: number
   timestamp?: bigint
@@ -118,7 +118,16 @@ export const messageSchema = {
       oneOf: [{ type: 'string' }, { buffer: true }]
     },
     headers: {
-      map: true
+      // Note: we can't use oneOf here since a Map is also a 'object'. Thanks JS.
+      anyOf: [
+        {
+          map: true
+        },
+        {
+          type: 'object',
+          additionalProperties: true
+        }
+      ]
     },
     topic: { type: 'string' },
     partition: { type: 'integer' },

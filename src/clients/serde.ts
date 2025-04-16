@@ -31,6 +31,36 @@ export function stringDeserializer (data?: string | Buffer): string | undefined 
   return data.toString('utf-8')
 }
 
+export function jsonSerializer<T = Record<string, any>> (data?: T): Buffer | undefined {
+  return Buffer.from(JSON.stringify(data), 'utf-8')
+}
+
+export function jsonDeserializer<T = Record<string, any>> (data?: string | Buffer): T | undefined {
+  if (!Buffer.isBuffer(data)) {
+    return undefined
+  }
+
+  return JSON.parse(data.toString('utf-8')) as T
+}
+
+export function serializersFrom<T> (serializer: Serializer<T>): Serializers<T, T, T, T> {
+  return {
+    key: serializer,
+    value: serializer,
+    headerKey: serializer,
+    headerValue: serializer
+  }
+}
+
+export function deserializersFrom<T> (deserializer: Deserializer<T>): Deserializers<T, T, T, T> {
+  return {
+    key: deserializer,
+    value: deserializer,
+    headerKey: deserializer,
+    headerValue: deserializer
+  }
+}
+
 export const serdeProperties = {
   type: 'object',
   properties: {
@@ -42,16 +72,5 @@ export const serdeProperties = {
   additionalProperties: false
 }
 
-export const stringSerializers: Serializers<string, string, string, string> = {
-  key: stringSerializer,
-  value: stringSerializer,
-  headerKey: stringSerializer,
-  headerValue: stringSerializer
-}
-
-export const stringDeserializers: Deserializers<string, string, string, string> = {
-  key: stringDeserializer,
-  value: stringDeserializer,
-  headerKey: stringDeserializer,
-  headerValue: stringDeserializer
-}
+export const stringSerializers = serializersFrom(stringSerializer)
+export const stringDeserializers = deserializersFrom(stringDeserializer)

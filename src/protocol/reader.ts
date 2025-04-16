@@ -354,6 +354,18 @@ export class Reader {
     return value
   }
 
+  readVarIntMap<Key, Value>(reader: EntryReader<[Key, Value]>): Map<Key, Value> {
+    const length = this.readVarInt()
+    const map = new Map<Key, Value>()
+
+    for (let i = 0; i < length; i++) {
+      const [key, value] = reader(this, i)
+      map.set(key, value)
+    }
+
+    return map
+  }
+
   // TODO(ShogunPanda): Tagged fields are not supported yet
   readTaggedFields (): void {
     const length = this.readVarInt()

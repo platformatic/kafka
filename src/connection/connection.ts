@@ -460,6 +460,10 @@ export class ConnectionPool extends EventEmitter {
       this.#connections.delete(key)
     })
 
+    connection.on('drain', () => {
+      this.emit('drain', eventPayload)
+    })
+
     return callback[kCallbackPromise]
   }
 

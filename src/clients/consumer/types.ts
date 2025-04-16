@@ -50,7 +50,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   maxBytes?: number
   maxWaitTime?: number
   isolationLevel?: FetchIsolationLevel
-  deserializers?: Deserializers<Key, Value, HeaderKey, HeaderValue>
+  deserializers?: Partial<Deserializers<Key, Value, HeaderKey, HeaderValue>>
   highWaterMark?: number
 }
 
@@ -68,7 +68,10 @@ export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
 export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & { groupId: string } & GroupOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>
 
-export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> &
+export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = Omit<
+  ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>,
+  'deserializers'
+> &
   GroupOptions & {
     node: number
     topics: FetchRequestTopic[]

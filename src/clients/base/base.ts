@@ -4,10 +4,9 @@ import { type Callback } from '../../apis/definitions.ts'
 import { api as metadataV12, type MetadataResponse } from '../../apis/metadata/metadata.ts'
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UserError } from '../../errors.ts'
-import { loggers } from '../../logging.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
-import { ajv, debugDump } from '../../utils.ts'
+import { ajv, debugDump, loggers } from '../../utils.ts'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
 import { baseOptionsValidator, defaultBaseOptions, defaultPort, metadataOptionsValidator } from './options.ts'
 import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
@@ -82,7 +81,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     }
 
     /* c8 ignore next */
-    loggers[section]?.debug({ event: name, payload: args })
+    loggers[section]?.({ event: name, payload: args })
     return this.emit(`${section}:${name}`, ...args)
   }
 
@@ -330,8 +329,9 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     return null
   }
 
+  // This is a private API used to debug during development
   /* c8 ignore next 3 */
   [kInspect] (...args: unknown[]): void {
-    debugDump(Date.now() % 100000, `client:${this[kInstance]}`, ...args)
+    debugDump(`client:${this[kInstance]}`, ...args)
   }
 }

@@ -155,7 +155,7 @@ test('debugDump logs value correctly', () => {
   debugDump(testObject)
 
   strictEqual(logger.mock.calls.length, 1)
-  strictEqual(logger.mock.calls[0].arguments.length, 1)
+  strictEqual(logger.mock.calls[0].arguments.length, 2)
 
   logger.mock.resetCalls()
 
@@ -163,8 +163,8 @@ test('debugDump logs value correctly', () => {
   debugDump(label, testObject)
 
   strictEqual(logger.mock.calls.length, 1)
-  strictEqual(logger.mock.calls[0].arguments.length, 2)
-  strictEqual(logger.mock.calls[0].arguments[0], label)
+  strictEqual(logger.mock.calls[0].arguments.length, 3)
+  strictEqual(logger.mock.calls[0].arguments[1], label)
 })
 
 test('NumericMap.getWithDefault gets value or fallback', () => {

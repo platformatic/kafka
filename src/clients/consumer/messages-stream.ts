@@ -585,6 +585,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#closeCallbacks = []
   }
 
+  // This is a private API used to debug during development
   /* c8 ignore next 3 */
   [kInspect] (...args: unknown[]): void {
     this.#consumer[kInspect](...args)

@@ -6,11 +6,11 @@ import { connect as createTLSConnection, type ConnectionOptions as TLSConnection
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../clients/callbacks.ts'
 import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
-import { loggers } from '../logging.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { Reader } from '../protocol/reader.ts'
 import { Writer } from '../protocol/writer.ts'
+import { loggers } from '../utils.ts'
 
 export interface Broker {
   host: string
@@ -298,7 +298,7 @@ export class Connection extends EventEmitter {
     }
 
     /* c8 ignore next */
-    loggers.protocol?.debug({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
+    loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
 
     for (const buf of writer.buffers) {
       if (!this.#socket.write(buf)) {
@@ -375,15 +375,6 @@ export class Connection extends EventEmitter {
           apiVersion,
           this.#responseReader.buffer.shallowSlice(this.#responseReader.position, this.#nextMessage + INT32_SIZE)
         )
-
-        /* c8 ignore next */
-        loggers.protocol?.debug({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
-
-        // debugDump(Date.now() % 100000, 'receive', {
-        //   owner: this.#ownerId,
-        //   apiKey: protocolAPIsById[apiKey],
-        //   correlationId
-        // })
       } catch (error) {
         responseError = error
 
@@ -398,6 +389,14 @@ export class Connection extends EventEmitter {
         this.#nextMessage = -1
       }
 
+      // debugDump(Date.now() % 100000, 'receive', {
+      //   owner: this.#ownerId,
+      //   apiKey: protocolAPIsById[apiKey],
+      //   correlationId
+      // })
+
+      /* c8 ignore next */
+      loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
       callback(responseError, deserialized)
     }
   }

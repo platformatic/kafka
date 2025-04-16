@@ -1,6 +1,5 @@
 // General
 export * from './errors.ts'
-export * from './logging.ts'
 export * from './utils.ts'
 
 // Networking

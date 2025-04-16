@@ -5,11 +5,23 @@ import type BufferList from 'bl'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { inspect } from 'node:util'
 
+import debug from 'debug'
+
 export type DebugDumpLogger = (...args: any[]) => void
 
 export { setTimeout as sleep } from 'node:timers/promises'
 
 export const ajv = new Ajv({ allErrors: true, coerceTypes: false, strict: true })
+
+export const loggers: Record<string, debug.Debugger> = {
+  protocol: debug('plt:kafka:protocol'),
+  client: debug('plt:kafka:client'),
+  producer: debug('plt:kafka:producer'),
+  consumer: debug('plt:kafka:consumer'),
+  'consumer:heartbeat': debug('plt:kafka:consumer:heartbeat'),
+  admin: debug('plt:kafka:admin')
+}
+
 // @ts-ignore
 ajvErrors(ajv)
 
@@ -136,7 +148,7 @@ export function setDebugDumpLogger (logger: DebugDumpLogger) {
 }
 
 export function debugDump (...values: unknown[]) {
-  debugDumpLogger(...values.map(v => (typeof v === 'string' ? v : inspect(v, false, 10))))
+  debugDumpLogger(new Date().toISOString(), ...values.map(v => (typeof v === 'string' ? v : inspect(v, false, 10))))
 }
 
 export async function executeWithTimeout<T = unknown> (

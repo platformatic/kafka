@@ -12,4 +12,3 @@ export * as saslScramSha from './sasl/scram-sha.ts'
 export * from './varint32.ts'
 export * from './varint64.ts'
 export * from './writer.ts'
-

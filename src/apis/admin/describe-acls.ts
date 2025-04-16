@@ -83,22 +83,22 @@ export function parseResponse (
   const response: DescribeAclsResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     resources: reader.readArray(r => {
       return {
         resourceType: r.readInt8(),
-        resourceName: r.readString()!,
+        resourceName: r.readString(),
         patternType: r.readInt8(),
         acls: r.readArray(r => {
           return {
-            principal: r.readString()!,
-            host: r.readString()!,
+            principal: r.readString(),
+            host: r.readString(),
             operation: r.readInt8(),
             permissionType: r.readInt8()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (response.errorCode) {
@@ -108,4 +108,4 @@ export function parseResponse (
   return response
 }
 
-export const describeAclsV3 = createAPI<DescribeAclsRequest, DescribeAclsResponse>(29, 3, createRequest, parseResponse)
+export const api = createAPI<DescribeAclsRequest, DescribeAclsResponse>(29, 3, createRequest, parseResponse)

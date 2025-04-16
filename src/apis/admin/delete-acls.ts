@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -100,7 +100,7 @@ export function parseResponse (
 
       return {
         errorCode,
-        errorMessage: r.readString(),
+        errorMessage: r.readNullableString(),
         matchingAcls: r.readArray((r, j) => {
           const errorCode = r.readInt16()
 
@@ -110,18 +110,18 @@ export function parseResponse (
 
           return {
             errorCode,
-            errorMessage: r.readString(),
+            errorMessage: r.readNullableString(),
             resourceType: r.readInt8(),
-            resourceName: r.readString()!,
+            resourceName: r.readString(),
             patternType: r.readInt8(),
-            principal: r.readString()!,
-            host: r.readString()!,
+            principal: r.readString(),
+            host: r.readString(),
             operation: r.readInt8(),
             permissionType: r.readInt8()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -131,4 +131,4 @@ export function parseResponse (
   return response
 }
 
-export const deleteAclsV3 = createAPI<DeleteAclsRequest, DeleteAclsResponse>(31, 3, createRequest, parseResponse)
+export const api = createAPI<DeleteAclsRequest, DeleteAclsResponse>(31, 3, createRequest, parseResponse)

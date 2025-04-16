@@ -73,9 +73,4 @@ export function parseResponse (
   return response
 }
 
-export const initProducerIdV5 = createAPI<InitProducerIdRequest, InitProducerIdResponse>(
-  22,
-  5,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<InitProducerIdRequest, InitProducerIdResponse>(22, 5, createRequest, parseResponse)

@@ -57,4 +57,4 @@ export function parseResponse (
   return response
 }
 
-export const endTxnV4 = createAPI<EndTxnRequest, EndTxnResponse>(26, 4, createRequest, parseResponse)
+export const api = createAPI<EndTxnRequest, EndTxnResponse>(26, 4, createRequest, parseResponse)

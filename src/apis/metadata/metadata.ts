@@ -19,7 +19,7 @@ export interface MetadataResponsePartition {
 
 export interface MetadataResponseTopic {
   errorCode: number
-  name: string
+  name: NullableString
   topicId: string
   isInternal: boolean
   partitions: MetadataResponsePartition[]
@@ -86,7 +86,12 @@ export function createRequest (
         offline_replicas => INT32
       topic_authorized_operations => INT32
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): MetadataResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): MetadataResponse {
   const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 
@@ -95,12 +100,12 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
     brokers: reader.readArray(r => {
       return {
         nodeId: r.readInt32(),
-        host: r.readString()!,
+        host: r.readString(),
         port: r.readInt32(),
-        rack: r.readString()
+        rack: r.readNullableString()
       }
-    })!,
-    clusterId: reader.readString(),
+    }),
+    clusterId: reader.readNullableString(),
     controllerId: reader.readInt32(),
     topics: reader.readArray((r, i) => {
       const errorCode = r.readInt16()
@@ -111,7 +116,7 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
 
       return {
         errorCode,
-        name: r.readString()!,
+        name: r.readNullableString(),
         topicId: r.readUUID(),
         isInternal: r.readBoolean(),
         partitions: r.readArray((r, j) => {
@@ -130,10 +135,10 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
             isrNodes: r.readArray(() => r.readInt32(), true, false)!,
             offlineReplicas: r.readArray(() => r.readInt32(), true, false)!
           }
-        })!,
+        }),
         topicAuthorizedOperations: reader.readInt32()
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -143,4 +148,4 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
   return response
 }
 
-export const metadataV12 = createAPI<MetadataRequest, MetadataResponse>(3, 12, createRequest, parseResponse)
+export const api = createAPI<MetadataRequest, MetadataResponse>(3, 12, createRequest, parseResponse)

@@ -85,7 +85,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray((r, i) => {
       return {
-        name: r.readString()!,
+        name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
@@ -100,9 +100,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -112,4 +112,4 @@ export function parseResponse (
   return response
 }
 
-export const listOffsetsV9 = createAPI<ListOffsetsRequest, ListOffsetsResponse>(2, 9, createRequest, parseResponse)
+export const api = createAPI<ListOffsetsRequest, ListOffsetsResponse>(2, 9, createRequest, parseResponse)

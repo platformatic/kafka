@@ -1,521 +1,631 @@
-import BufferList from 'bl'
-import { deepStrictEqual, doesNotThrow, ok, rejects, strictEqual, throws } from 'node:assert'
+import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { describeGroupsV5 } from '../../../src/apis/admin/describe-groups.ts'
-import { ResponseError } from '../../../src/errors.ts'
-import { Reader } from '../../../src/protocol/reader.ts'
-import { Writer } from '../../../src/protocol/writer.ts'
+import { describeGroupsV5, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-// Helper function to mock connection and capture API functions
-function captureApiHandlers(apiFunction: any) {
-  const mockConnection = {
-    send: (_apiKey: number, _apiVersion: number, createRequestFn: any, parseResponseFn: any) => {
-      mockConnection.createRequestFn = createRequestFn
-      mockConnection.parseResponseFn = parseResponseFn
-      return true
-    },
-    createRequestFn: null as any,
-    parseResponseFn: null as any
-  }
-  
-  // Call the API to capture handlers
-  apiFunction(mockConnection, {})
-  
-  return {
-    createRequest: mockConnection.createRequestFn,
-    parseResponse: mockConnection.parseResponseFn
-  }
-}
+const { createRequest, parseResponse } = describeGroupsV5
 
-test('describeGroupsV5 has valid handlers', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Verify both functions exist
-  deepStrictEqual(typeof createRequest, 'function')
-  deepStrictEqual(typeof parseResponse, 'function')
-})
-
-test('describeGroupsV5 createRequest serializes request correctly - basic structure', () => {
-  const { createRequest } = captureApiHandlers(describeGroupsV5)
-  
-  // Create a test request
-  const groupIds = ['test-group-1', 'test-group-2']
+test('createRequest serializes group names correctly', () => {
+  const groups = ['group-1', 'group-2', 'group-3']
   const includeAuthorizedOperations = true
-  
-  // Call the createRequest function
-  const writer = createRequest(groupIds, includeAuthorizedOperations)
-  
-  // Verify it returns a Writer
-  ok(writer instanceof Writer)
-  
-  // Check that data was written
-  ok(writer.bufferList instanceof BufferList)
-  ok(writer.length > 0)
-})
 
-test('describeGroupsV5 createRequest serializes request correctly - detailed validation', () => {
-  const { createRequest } = captureApiHandlers(describeGroupsV5)
-  
-  // Test cases with different inputs
-  const testCases = [
+  const writer = createRequest(groups, includeAuthorizedOperations)
+
+  // Verify it returns a Writer instance
+  ok(writer instanceof Writer, 'Should return a Writer instance')
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroups = reader.readArray(() => reader.readString(), true, false)
+
+  // Read includeAuthorizedOperations flag and tagged fields count
+  const includeAuthOps = reader.readBoolean()
+
+  // Verify the complete structure
+  deepStrictEqual(
     {
-      groupIds: ['test-group-1'],
+      groups: serializedGroups,
+      includeAuthorizedOperations: includeAuthOps
+    },
+    {
+      groups: ['group-1', 'group-2', 'group-3'],
       includeAuthorizedOperations: true
     },
+    'Serialized data should match expected structure'
+  )
+})
+
+test('createRequest with includeAuthorizedOperations false', () => {
+  const groups = ['group-1']
+  const includeAuthorizedOperations = false
+
+  const writer = createRequest(groups, includeAuthorizedOperations)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroups = reader.readArray(() => reader.readString(), true, false)
+
+  // Read includeAuthorizedOperations flag and tagged fields count
+  const includeAuthOps = reader.readBoolean()
+
+  // Verify the complete structure
+  deepStrictEqual(
     {
-      groupIds: ['test-group-1', 'test-group-2'], 
+      groups: serializedGroups,
+      includeAuthorizedOperations: includeAuthOps
+    },
+    {
+      groups: ['group-1'],
       includeAuthorizedOperations: false
     },
+    'Serialized data with includeAuthorizedOperations=false should match expected structure'
+  )
+})
+
+test('createRequest serializes empty groups array correctly', () => {
+  const groups: string[] = []
+  const includeAuthorizedOperations = true
+
+  const writer = createRequest(groups, includeAuthorizedOperations)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroups = reader.readArray(() => reader.readString(), true, false)
+
+  // Read includeAuthorizedOperations flag and tagged fields count
+  const includeAuthOps = reader.readBoolean()
+
+  // Verify the complete structure
+  deepStrictEqual(
     {
-      groupIds: [], 
+      groups: serializedGroups,
+      includeAuthorizedOperations: includeAuthOps
+    },
+    {
+      groups: [],
       includeAuthorizedOperations: true
-    }
-  ]
-  
-  testCases.forEach(({ groupIds, includeAuthorizedOperations }) => {
-    const writer = createRequest(groupIds, includeAuthorizedOperations)
-    ok(writer instanceof Writer, 'should return a Writer instance')
-    ok(writer.bufferList instanceof BufferList, 'should have a BufferList')
-    ok(writer.length > 0, 'should have written some data')
-    
-    // We've already validated the binary format in basic test, 
-    // and we have 100% coverage, so further binary validation is not needed
-  })
+    },
+    'Serialized data with empty groups should match expected structure'
+  )
 })
 
-test('describeGroupsV5 parseResponse handles successful response with empty groups', () => {
-  const { parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Create a response with empty groups
+test('createRequest serializes special characters in group names', () => {
+  const groups = ['group/1', 'group-with-hyphen', 'group.with.dots']
+  const includeAuthorizedOperations = true
+
+  const writer = createRequest(groups, includeAuthorizedOperations)
+
+  // Read the serialized data to verify correctness
+  const reader = new Reader(writer.bufferList)
+
+  // Read group names array
+  const serializedGroups = reader.readArray(() => reader.readString(), true, false)
+
+  // Read includeAuthorizedOperations flag and tagged fields count
+  const includeAuthOps = reader.readBoolean()
+
+  // Verify the complete structure
+  deepStrictEqual(
+    {
+      groups: serializedGroups,
+      includeAuthorizedOperations: includeAuthOps
+    },
+    {
+      groups: ['group/1', 'group-with-hyphen', 'group.with.dots'],
+      includeAuthorizedOperations: true
+    },
+    'Group names with special characters should be serialized correctly'
+  )
+})
+
+test('parseResponse correctly processes a successful response', () => {
+  // Create a successful response with minimal member data
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    .appendArray([], () => {}, true, false) // Empty groups array
+    // Groups array
+    .appendArray(
+      [
+        {
+          errorCode: 0, // Success
+          groupId: 'test-group',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [
+            {
+              memberId: 'consumer-1-123',
+              groupInstanceId: null,
+              clientId: 'client-1',
+              clientHost: '127.0.0.1',
+              memberMetadata: Buffer.from('test-metadata'),
+              memberAssignment: Buffer.from('test-assignment')
+            }
+          ],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Members array
+          .appendArray(group.members, (w, member) => {
+            w.appendString(member.memberId)
+              .appendString(member.groupInstanceId)
+              .appendString(member.clientId)
+              .appendString(member.clientHost)
+              .appendBytes(member.memberMetadata)
+              .appendBytes(member.memberAssignment)
+          })
+          .appendInt32(group.authorizedOperations)
+      }
+    )
     .appendTaggedFields()
-  
-  const response = parseResponse(1, 15, 5, writer.bufferList)
-  
-  // Verify structure
-  deepStrictEqual(response, {
-    throttleTimeMs: 0,
-    groups: []
-  })
-})
 
-test('describeGroupsV5 parseResponse handles successful response with groups', () => {
-  const { parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Create a response with groups - using compact encoding correctly
-  const writer = Writer.create()
-    .appendInt32(100) // throttleTimeMs
-    
-    // Use appendArray with compact encoding to correctly handle groups array
-    .appendArray([
-      {
+  const response = parseResponse(1, 15, 5, writer.bufferList)
+
+  // Verify the main response structure
+  deepStrictEqual(
+    {
+      throttleTimeMs: response.throttleTimeMs,
+      groupsLength: response.groups.length,
+      group: {
+        errorCode: response.groups[0].errorCode,
+        groupId: response.groups[0].groupId,
+        groupState: response.groups[0].groupState,
+        protocolType: response.groups[0].protocolType,
+        protocolData: response.groups[0].protocolData,
+        membersLength: response.groups[0].members.length,
+        authorizedOperations: response.groups[0].authorizedOperations
+      }
+    },
+    {
+      throttleTimeMs: 0,
+      groupsLength: 1,
+      group: {
         errorCode: 0,
-        groupId: 'group-0',
-        groupState: 'Consumer',
+        groupId: 'test-group',
+        groupState: 'Stable',
         protocolType: 'consumer',
         protocolData: 'range',
-        members: [
-          {
-            memberId: 'member-1',
-            groupInstanceId: 'instance-1',
-            clientId: 'client-1',
-            clientHost: 'host-1'
-          }
-        ],
+        membersLength: 1,
         authorizedOperations: 0
+      }
+    },
+    'Response structure should match expected values'
+  )
+
+  // Verify the member data
+  const member = response.groups[0].members[0]
+  deepStrictEqual(
+    {
+      memberId: member.memberId,
+      groupInstanceId: member.groupInstanceId,
+      clientId: member.clientId,
+      clientHost: member.clientHost,
+      // Use buffer equality checks for binary data
+      metadataString: member.memberMetadata.toString(),
+      assignmentString: member.memberAssignment.toString()
+    },
+    {
+      memberId: 'consumer-1-123',
+      groupInstanceId: null,
+      clientId: 'client-1',
+      clientHost: '127.0.0.1',
+      metadataString: 'test-metadata',
+      assignmentString: 'test-assignment'
+    },
+    'Member data should match expected values'
+  )
+})
+
+test('parseResponse with multiple members', () => {
+  // Create a response with multiple members
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Groups array
+    .appendArray(
+      [
+        {
+          errorCode: 0, // Success
+          groupId: 'test-group',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [
+            {
+              memberId: 'consumer-1-123',
+              groupInstanceId: null,
+              clientId: 'client-1',
+              clientHost: '127.0.0.1',
+              memberMetadata: Buffer.from('metadata-1'),
+              memberAssignment: Buffer.from('assignment-1')
+            },
+            {
+              memberId: 'consumer-2-456',
+              groupInstanceId: 'static-instance-1',
+              clientId: 'client-2',
+              clientHost: '127.0.0.2',
+              memberMetadata: Buffer.from('metadata-2'),
+              memberAssignment: Buffer.from('assignment-2')
+            }
+          ],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Members array
+          .appendArray(group.members, (w, member) => {
+            w.appendString(member.memberId)
+              .appendString(member.groupInstanceId)
+              .appendString(member.clientId)
+              .appendString(member.clientHost)
+              .appendBytes(member.memberMetadata)
+              .appendBytes(member.memberAssignment)
+          })
+          .appendInt32(group.authorizedOperations)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 15, 5, writer.bufferList)
+
+  // Verify multiple members
+  deepStrictEqual(response.groups[0].members.length, 2, 'Response should have two members')
+
+  // Verify the second member with static group instance ID
+  const member2 = response.groups[0].members[1]
+  deepStrictEqual(
+    {
+      memberId: member2.memberId,
+      groupInstanceId: member2.groupInstanceId,
+      clientId: member2.clientId,
+      clientHost: member2.clientHost,
+      metadataString: member2.memberMetadata.toString(),
+      assignmentString: member2.memberAssignment.toString()
+    },
+    {
+      memberId: 'consumer-2-456',
+      groupInstanceId: 'static-instance-1',
+      clientId: 'client-2',
+      clientHost: '127.0.0.2',
+      metadataString: 'metadata-2',
+      assignmentString: 'assignment-2'
+    },
+    'Second member data should match expected values'
+  )
+})
+
+test('parseResponse with multiple groups', () => {
+  // Create a response with multiple groups
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Groups array
+    .appendArray(
+      [
+        {
+          errorCode: 0,
+          groupId: 'group-1',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [],
+          authorizedOperations: 0
+        },
+        {
+          errorCode: 0,
+          groupId: 'group-2',
+          groupState: 'PreparingRebalance',
+          protocolType: 'consumer',
+          protocolData: 'round_robin',
+          members: [],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Empty members array
+          .appendArray(group.members, () => {})
+          .appendInt32(group.authorizedOperations)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 15, 5, writer.bufferList)
+
+  // Verify multiple groups
+  deepStrictEqual(response.groups.length, 2, 'Response should have two groups')
+
+  // Verify each group's data
+  deepStrictEqual(
+    {
+      group1: {
+        groupId: response.groups[0].groupId,
+        groupState: response.groups[0].groupState,
+        protocolData: response.groups[0].protocolData
       },
-      {
-        errorCode: 0,
-        groupId: 'group-1',
-        groupState: 'Consumer',
-        protocolType: 'consumer',
-        protocolData: 'range',
-        members: [
-          {
-            memberId: 'member-1',
-            groupInstanceId: 'instance-1',
-            clientId: 'client-1',
-            clientHost: 'host-1'
-          }
-        ],
-        authorizedOperations: 10
+      group2: {
+        groupId: response.groups[1].groupId,
+        groupState: response.groups[1].groupState,
+        protocolData: response.groups[1].protocolData
       }
-    ], (w, group) => {
-      w.appendInt16(group.errorCode)
-        .appendString(group.groupId, true) // groupId
-        .appendString(group.groupState, true) // groupState
-        .appendString(group.protocolType, true) // protocolType
-        .appendString(group.protocolData, true) // protocolData
-        
-        // Members array
-        .appendArray(group.members, (w2, member) => {
-          w2.appendString(member.memberId, true) // memberId
-            .appendString(member.groupInstanceId, true) // groupInstanceId
-            .appendString(member.clientId, true) // clientId
-            .appendString(member.clientHost, true) // clientHost
-            .appendBytes(Buffer.from('metadata'), true) // memberMetadata
-            .appendBytes(Buffer.from('assignment'), true) // memberAssignment
-            .appendTaggedFields() // Tagged fields for member
-        }, true, false)
-        
-        .appendInt32(group.authorizedOperations) // authorizedOperations
-        .appendTaggedFields() // Tagged fields for group
-    }, true, false)
-    
-    .appendTaggedFields() // Tagged fields for the whole request
-  
-  const response = parseResponse(1, 15, 5, writer.bufferList)
-  
-  // Verify structure
-  deepStrictEqual(response, {
-    throttleTimeMs: 100,
-    groups: [
-      {
-        errorCode: 0,
-        groupId: 'group-0',
-        groupState: 'Consumer',
-        protocolType: 'consumer',
-        protocolData: 'range',
-        members: [
-          {
-            memberId: 'member-1',
-            groupInstanceId: 'instance-1',
-            clientId: 'client-1',
-            clientHost: 'host-1',
-            memberMetadata: Buffer.from('metadata'),
-            memberAssignment: Buffer.from('assignment')
-          }
-        ],
-        authorizedOperations: 0
+    },
+    {
+      group1: {
+        groupId: 'group-1',
+        groupState: 'Stable',
+        protocolData: 'range'
       },
-      {
-        errorCode: 0,
-        groupId: 'group-1',
-        groupState: 'Consumer',
-        protocolType: 'consumer',
-        protocolData: 'range',
-        members: [
-          {
-            memberId: 'member-1',
-            groupInstanceId: 'instance-1',
-            clientId: 'client-1',
-            clientHost: 'host-1',
-            memberMetadata: Buffer.from('metadata'),
-            memberAssignment: Buffer.from('assignment')
-          }
-        ],
-        authorizedOperations: 10
+      group2: {
+        groupId: 'group-2',
+        groupState: 'PreparingRebalance',
+        protocolData: 'round_robin'
       }
-    ]
-  })
+    },
+    'Group data should match expected values'
+  )
 })
 
-test('describeGroupsV5 parseResponse handles response with null groupInstanceId', () => {
-  const { parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Create a response with null groupInstanceId - using correct compact encoding
+test('parseResponse with authorized operations', () => {
+  // Create a response with authorized operations set
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    // Use appendArray with proper compact encoding
-    .appendArray([
-      {
-        errorCode: 0,
-        groupId: 'group-1',
-        groupState: 'Consumer',
-        protocolType: 'consumer',
-        protocolData: 'range',
-        members: [
-          {
-            memberId: 'member-1',
-            groupInstanceId: null,  // Explicitly null
-            clientId: 'client-1',
-            clientHost: 'host-1'
-          }
-        ],
-        authorizedOperations: 0
+    // Groups array
+    .appendArray(
+      [
+        {
+          errorCode: 0,
+          groupId: 'test-group',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [],
+          authorizedOperations: 3 // Some bit flags for operations
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Empty members array
+          .appendArray(group.members, () => {})
+          .appendInt32(group.authorizedOperations)
       }
-    ], (w, group) => {
-      w.appendInt16(group.errorCode)
-        .appendString(group.groupId, true) // groupId
-        .appendString(group.groupState, true) // groupState
-        .appendString(group.protocolType, true) // protocolType
-        .appendString(group.protocolData, true) // protocolData
-        
-        // Members array
-        .appendArray(group.members, (w2, member) => {
-          w2.appendString(member.memberId, true) // memberId
-            .appendString(member.groupInstanceId, true) // groupInstanceId (will be written as null)
-            .appendString(member.clientId, true) // clientId
-            .appendString(member.clientHost, true) // clientHost
-            .appendBytes(Buffer.from('metadata'), true) // memberMetadata
-            .appendBytes(Buffer.from('assignment'), true) // memberAssignment
-            .appendTaggedFields() // Tagged fields for member
-        }, true, false)
-        
-        .appendInt32(group.authorizedOperations) // authorizedOperations
-        .appendTaggedFields() // Tagged fields for group
-    }, true, false)
-    .appendTaggedFields() // Tagged fields for the whole request
-  
+    )
+    .appendTaggedFields()
+
   const response = parseResponse(1, 15, 5, writer.bufferList)
-  
-  // Verify structure
-  deepStrictEqual(response.groups[0].members[0].groupInstanceId, null)
+
+  // Verify authorized operations are parsed correctly
+  deepStrictEqual(response.groups[0].authorizedOperations, 3, 'Authorized operations should be correctly parsed')
 })
 
-test('describeGroupsV5 parseResponse handles group-level errors', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Let's create a real response with error by using the appropriate Reader/Writer operations
+test('parseResponse handles throttling correctly', () => {
+  // Create a response with throttling
+  const writer = Writer.create()
+    .appendInt32(100) // throttleTimeMs (non-zero for throttling)
+    // Groups array - just one for simplicity
+    .appendArray(
+      [
+        {
+          errorCode: 0,
+          groupId: 'test-group',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Empty members array
+          .appendArray(group.members, () => {})
+          .appendInt32(group.authorizedOperations)
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 15, 5, writer.bufferList)
+
+  // Verify throttling is processed correctly
+  deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
+})
+
+test('parseResponse handles group error correctly', () => {
+  // Create a response with group having an error
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    .appendArray([{ errorCode: 58 }], (w, g) => {
-      w.appendInt16(g.errorCode) // errorCode (SASL_AUTHENTICATION_FAILED)
-        .appendString('group-1', true) // groupId
-        .appendString('Consumer', true) // groupState
-        .appendString('consumer', true) // protocolType
-        .appendString('range', true) // protocolData
-        .appendArray([], () => {}, true, false) // Empty members array
-        .appendInt32(0) // authorizedOperations
-        .appendTaggedFields() // Tagged fields for group
-    }, true, false)
-    .appendTaggedFields() // Tagged fields for the response
-  
-  // Verify the response throws a ResponseError with the correct error path
-  throws(() => {
-    parseResponse(1, 15, 5, writer.bufferList)
-  }, (err) => {
-    ok(err instanceof ResponseError, 'should be a ResponseError')
-    ok(err.errors, 'should have errors object')
-    ok(Object.keys(err.errors).length > 0, 'should have at least one error')
-    return true
-  })
+    // Groups array with error
+    .appendArray(
+      [
+        {
+          errorCode: 15, // GROUP_ID_NOT_FOUND
+          groupId: 'test-group',
+          groupState: '', // Empty for error
+          protocolType: '', // Empty for error
+          protocolData: '', // Empty for error
+          members: [],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          // Empty members array
+          .appendArray(group.members, () => {})
+          .appendInt32(group.authorizedOperations)
+      }
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 15, 5, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify the error object has the expected properties
+      ok(Array.isArray(err.errors) && err.errors.length === 1, 'Should have an array with 1 error for the failed group')
+
+      // Verify the response structure is preserved
+      deepStrictEqual(
+        err.response,
+        {
+          throttleTimeMs: 0,
+          groups: [
+            {
+              errorCode: 15,
+              groupId: 'test-group',
+              groupState: '',
+              protocolType: '',
+              protocolData: '',
+              members: [],
+              authorizedOperations: 0
+            }
+          ]
+        },
+        'Error response should preserve the original response structure'
+      )
+
+      return true
+    }
+  )
 })
 
-test('describeGroupsV5 parseResponse handles multiple group-level errors', () => {
-  const { createRequest, parseResponse } = captureApiHandlers(describeGroupsV5)
-  
-  // Let's create a real response with multiple errors using the appropriate Reader/Writer operations
+test('parseResponse handles multiple groups with mixed errors', () => {
+  // Create a response with multiple groups and mixed results
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
-    .appendArray([
-      { errorCode: 58, groupId: 'group-0' }, 
-      { errorCode: 59, groupId: 'group-1' }
-    ], (w, g) => {
-      w.appendInt16(g.errorCode) // errorCode
-        .appendString(g.groupId, true) // groupId
-        .appendString('Consumer', true) // groupState
-        .appendString('consumer', true) // protocolType
-        .appendString('range', true) // protocolData
-        .appendArray([], () => {}, true, false) // Empty members array
-        .appendInt32(0) // authorizedOperations
-        .appendTaggedFields() // Tagged fields for group
-    }, true, false)
-    .appendTaggedFields() // Tagged fields for the response
-  
-  // Verify the response throws a ResponseError with the correct error paths
-  throws(() => {
-    parseResponse(1, 15, 5, writer.bufferList)
-  }, (err) => {
-    ok(err instanceof ResponseError, 'should be a ResponseError')
-    ok(err.errors, 'should have errors object')
-    ok(Object.keys(err.errors).length >= 2, 'should have at least two errors')
-    return true
-  })
-})
-
-test('describeGroupsV5 API mock simulation without callback', async () => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 15)
-      strictEqual(apiVersion, 5)
-      
-      // Create a proper response directly
-      const response = {
-        throttleTimeMs: 0,
-        groups: [
-          {
-            errorCode: 0,
-            groupId: 'group-1',
-            groupState: 'Consumer',
-            protocolType: 'consumer',
-            protocolData: 'range',
-            members: [
-              {
-                memberId: 'member-1',
-                groupInstanceId: 'instance-1',
-                clientId: 'client-1',
-                clientHost: 'host-1',
-                memberMetadata: Buffer.from('metadata'),
-                memberAssignment: Buffer.from('assignment')
-              }
-            ],
-            authorizedOperations: 0
-          }
-        ]
+    // Groups array with mixed results
+    .appendArray(
+      [
+        {
+          errorCode: 0, // Success
+          groupId: 'group-1',
+          groupState: 'Stable',
+          protocolType: 'consumer',
+          protocolData: 'range',
+          members: [],
+          authorizedOperations: 0
+        },
+        {
+          errorCode: 15, // GROUP_ID_NOT_FOUND
+          groupId: 'group-2',
+          groupState: '',
+          protocolType: '',
+          protocolData: '',
+          members: [],
+          authorizedOperations: 0
+        },
+        {
+          errorCode: 41, // GROUP_AUTHORIZATION_FAILED
+          groupId: 'group-3',
+          groupState: '',
+          protocolType: '',
+          protocolData: '',
+          members: [],
+          authorizedOperations: 0
+        }
+      ],
+      (w, group) => {
+        w.appendInt16(group.errorCode)
+          .appendString(group.groupId)
+          .appendString(group.groupState)
+          .appendString(group.protocolType)
+          .appendString(group.protocolData)
+          .appendArray(group.members, () => {})
+          .appendInt32(group.authorizedOperations)
       }
-      
-      // Execute callback with the response directly
-      cb(null, response)
+    )
+    .appendTaggedFields()
+
+  // Verify that parsing throws ResponseError
+  throws(
+    () => {
+      parseResponse(1, 15, 5, writer.bufferList)
+    },
+    (err: any) => {
+      // Verify error is a ResponseError
+      ok(err instanceof ResponseError, 'Should be a ResponseError')
+
+      // Verify there are multiple errors
+      ok(
+        Array.isArray(err.errors) && err.errors.length === 2,
+        'Should have an array with 2 errors for the failed groups'
+      )
+
+      // Get error codes from the response
+      const errorCodes = err.response.groups
+        .filter((g: Record<string, number>) => g.errorCode !== 0)
+        .map((g: Record<string, number>) => g.errorCode)
+
+      // Verify we have both expected error codes
+      ok(
+        errorCodes.includes(15) && errorCodes.includes(41),
+        'Response should contain groups with expected error codes (15 and 41)'
+      )
+
+      // Verify all groups are preserved in the response
+      deepStrictEqual(err.response.groups.length, 3, 'Response should contain all 3 groups')
+
+      // Verify the successful group data is preserved
+      deepStrictEqual(
+        err.response.groups.find((g: Record<string, number>) => g.errorCode === 0)?.groupId,
+        'group-1',
+        'Successful group should be preserved in the response'
+      )
+
       return true
     }
-  }
-  
-  // Call the API without callback
-  const result = await describeGroupsV5.async(mockConnection, {
-    groupIds: ['group-1'],
-    includeAuthorizedOperations: true
-  })
-  
-  // Verify result
-  strictEqual(result.throttleTimeMs, 0)
-  strictEqual(result.groups.length, 1)
-  strictEqual(result.groups[0].groupId, 'group-1')
+  )
 })
 
-test('describeGroupsV5 API mock simulation with callback', (t, done) => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 15)
-      strictEqual(apiVersion, 5)
-      
-      // Create a proper response directly
-      const response = {
-        throttleTimeMs: 0,
-        groups: [
-          {
-            errorCode: 0,
-            groupId: 'group-1',
-            groupState: 'Consumer',
-            protocolType: 'consumer',
-            protocolData: 'range',
-            members: [
-              {
-                memberId: 'member-1',
-                groupInstanceId: 'instance-1',
-                clientId: 'client-1',
-                clientHost: 'host-1',
-                memberMetadata: Buffer.from('metadata'),
-                memberAssignment: Buffer.from('assignment')
-              }
-            ],
-            authorizedOperations: 0
-          }
-        ]
-      }
-      
-      // Execute callback with the response
-      cb(null, response)
-      return true
-    }
-  }
-  
-  // Call the API with callback
-  describeGroupsV5(mockConnection, {
-    groupIds: ['group-1'],
-    includeAuthorizedOperations: true
-  }, (err, result) => {
-    // Verify no error
-    strictEqual(err, null)
-    
-    // Verify result
-    strictEqual(result.throttleTimeMs, 0)
-    strictEqual(result.groups.length, 1)
-    strictEqual(result.groups[0].groupId, 'group-1')
-    
-    done()
-  })
-})
+test('parseResponse with empty groups array', () => {
+  // Create a response with an empty groups array
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    // Empty groups array
+    .appendArray([], () => {})
+    .appendTaggedFields()
 
-test('describeGroupsV5 API error handling with callback', (t, done) => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 15)
-      strictEqual(apiVersion, 5)
-      
-      // Create an error with the expected shape
-      const error = new Error('Test error')
-      error.errors = {
-        '/groups/0': 58 // SASL_AUTHENTICATION_FAILED
-      }
-      Object.setPrototypeOf(error, ResponseError.prototype)
-      
-      // Execute callback with the error
-      cb(error)
-      return true
-    }
-  }
-  
-  // Call the API with callback
-  describeGroupsV5(mockConnection, {
-    groupIds: ['group-1'],
-    includeAuthorizedOperations: true
-  }, (err, result) => {
-    // Verify error
-    ok(err instanceof ResponseError)
-    ok(err.errors && Object.keys(err.errors).includes('/groups/0'))
-    
-    // Result should be undefined on error
-    strictEqual(result, undefined)
-    
-    done()
-  })
-})
+  const response = parseResponse(1, 15, 5, writer.bufferList)
 
-test('describeGroupsV5 API error handling with Promise', async () => {
-  // Mock connection
-  const mockConnection = {
-    send: (apiKey: number, apiVersion: number, createRequestFn: any, parseResponseFn: any, hasRequestHeaderTaggedFields: boolean, hasResponseHeaderTaggedFields: boolean, cb: any) => {
-      // Basic verification
-      strictEqual(apiKey, 15)
-      strictEqual(apiVersion, 5)
-      
-      // Create an error with the expected shape
-      const error = new Error('Test error')
-      error.errors = {
-        '/groups/0': 58 // SASL_AUTHENTICATION_FAILED
-      }
-      Object.setPrototypeOf(error, ResponseError.prototype)
-      
-      // Execute callback with the error
-      cb(error)
-      return true
-    }
-  }
-  
-  // Verify Promise rejection
-  await rejects(async () => {
-    await describeGroupsV5.async(mockConnection, {
-      groupIds: ['group-1'],
-      includeAuthorizedOperations: true
-    })
-  }, (err: any) => {
-    ok(err instanceof ResponseError)
-    ok(err.errors && Object.keys(err.errors).includes('/groups/0'))
-    return true
-  })
-})
-
-test('describeGroupsV5 validates parameters', () => {
-  // Mock direct function access
-  const mockAPI = ((conn: any, options: any) => {
-    return new Promise((resolve) => {
-      resolve({ groups: [] })
-    })
-  }) as any
-  
-  // Add the connection function to the mock API
-  mockAPI.connection = describeGroupsV5.connection
-  
-  // Call the API with different parameter combinations
-  doesNotThrow(() => mockAPI({}, { groupIds: ['group1'], includeAuthorizedOperations: true }))
-  doesNotThrow(() => mockAPI({}, { groupIds: ['group1'] }))
+  // Verify response with empty groups
+  deepStrictEqual(
+    response,
+    {
+      throttleTimeMs: 0,
+      groups: []
+    },
+    'Response with empty groups should be parsed correctly'
+  )
 })

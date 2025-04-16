@@ -5,7 +5,7 @@ import { syncGroupV5 } from '../../../src/apis/consumer/sync-group.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
 import { findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator.ts'
 import { metadataV12 } from '../../../src/apis/metadata/metadata.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { joinGroup, performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

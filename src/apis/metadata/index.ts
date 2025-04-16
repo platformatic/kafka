@@ -1,3 +1,3 @@
-export * from './api-versions.ts'
-export * from './find-coordinator.ts'
-export * from './metadata.ts'
+export * as apiVersionsV4 from './api-versions.ts'
+export * as findCoordinatorV6 from './find-coordinator.ts'
+export * as metadataV12 from './metadata.ts'

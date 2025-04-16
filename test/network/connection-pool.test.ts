@@ -1,0 +1,322 @@
+import { deepStrictEqual, ok, rejects } from 'node:assert'
+import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
+import { mock, test, type TestContext } from 'node:test'
+import {
+  type Broker,
+  type CallbackWithPromise,
+  Connection,
+  ConnectionPool,
+  ConnectionStatuses
+} from '../../src/index.ts'
+
+function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
+  const server = createNetworkServer()
+  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
+  const sockets: Socket[] = []
+
+  server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+  server.once('error', reject)
+  server.on('connection', socket => {
+    sockets.push(socket)
+  })
+
+  t.after((_, cb) => {
+    for (const socket of sockets) {
+      socket.end()
+    }
+    server.close(cb)
+  })
+
+  server.listen(0)
+  return promise
+}
+
+test('ConnectionPool.get should return a connection for a broker', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  const connection = await connectionPool.get(broker)
+  ok(connection instanceof Connection)
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  await connection.close()
+})
+
+test('ConnectionPool.get should return the same connection for the same broker', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  const connection1 = await connectionPool.get(broker)
+  const connection2 = await connectionPool.get(broker)
+
+  deepStrictEqual(connection1, connection2)
+})
+
+test('ConnectionPool.get should handle connecting status and return same connection', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // First call will start connecting
+  const connectionPromise1 = connectionPool.get(broker)
+
+  // Second call should return the same pending connection
+  const connectionPromise2 = connectionPool.get(broker)
+
+  // Both promises should resolve to the same connection
+  const connection1 = await connectionPromise1
+  const connection2 = await connectionPromise2
+
+  deepStrictEqual(connection1.socket, connection2.socket)
+
+  await connection1.close()
+})
+
+test('ConnectionPool.get should handle connecting error and return same error', (t, done) => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port: 100 }
+
+  // First call will start connecting
+  const errors: (Error | null)[] = []
+
+  function callback (error: Error | null) {
+    errors.push(error)
+
+    if (errors.length === 2) {
+      deepStrictEqual(errors[0], errors[1])
+      done()
+    }
+  }
+
+  connectionPool.get(broker, callback)
+  connectionPool.get(broker, callback)
+})
+
+test('ConnectionPool.get should handle connection drain events', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Create a spy for the drain event
+  const drainSpy = mock.fn()
+  connectionPool.on('drain', drainSpy)
+
+  const connection = await connectionPool.get(broker)
+
+  // Simulate a drain event
+  connection.emit('drain')
+
+  // Verify the pool emitted the drain event
+  deepStrictEqual(drainSpy.mock.calls.length, 1)
+
+  await connection.close()
+})
+
+test('ConnectionPool.get should handle connection disconnect event', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Create a spy for the disconnect event
+  const disconnectSpy = mock.fn()
+  connectionPool.on('disconnect', disconnectSpy)
+
+  const connection = await connectionPool.get(broker)
+
+  // Simulate a close event
+  await connection.close()
+
+  // Verify the pool emitted the disconnect event
+  deepStrictEqual(disconnectSpy.mock.calls.length, 1)
+
+  // Try to get the connection again - should create a new one
+  const newConnection = await connectionPool.get(broker)
+  ok(newConnection !== connection)
+
+  await newConnection.close()
+})
+
+test('ConnectionPool.get should handle errors and remove connection', async t => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port: 100 }
+
+  // Create a spy for the failed event
+  const failedSpy = mock.fn()
+  connectionPool.on('failed', failedSpy)
+
+  // First call should fail and the connection should be removed
+  await rejects(() => connectionPool.get(broker) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK'
+  })
+
+  // Verify the failed event was emitted
+  deepStrictEqual(failedSpy.mock.calls.length, 1)
+
+  // Second call should create a new connection (which will fail again)
+  await rejects(() => connectionPool.get(broker) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK'
+  })
+
+  // Verify the failed event was emitted again
+  deepStrictEqual(failedSpy.mock.calls.length, 2)
+})
+
+test('ConnectionPool.getFirstAvailable should try multiple brokers until one succeeds', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const brokers = [
+    { host: 'localhost', port: 100 },
+    { host: 'localhost', port: 200 },
+    { host: 'localhost', port }
+  ]
+
+  let connectionAttempt = 0
+  const originalGet = connectionPool.get.bind(connectionPool)
+  mock.method(connectionPool, 'get', (broker: Broker, callback: CallbackWithPromise<Connection>) => {
+    connectionAttempt++
+    return originalGet(broker, callback)
+  })
+
+  const connection = await connectionPool.getFirstAvailable(brokers)
+
+  ok(connection instanceof Connection)
+  deepStrictEqual(connectionAttempt, 3)
+
+  await connection.close()
+})
+
+test('ConnectionPool.getFirstAvailable should fail if all brokers fail', async t => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const brokers = [
+    { host: 'localhost', port: 100 },
+    { host: 'localhost', port: 200 },
+    { host: 'localhost', port: 300 }
+  ]
+
+  await rejects(() => connectionPool.getFirstAvailable(brokers) as Promise<unknown>, {
+    code: 'PLT_KFK_MULTIPLE',
+    message: 'Cannot connect to any broker.'
+  })
+})
+
+test('ConnectionPool.getFirstAvailable with callback parameter', async t => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const brokers = [
+    { host: 'localhost', port: 100 },
+    { host: 'localhost', port: 200 }
+  ]
+
+  // Mock get method to simulate failure
+  mock.method(connectionPool, 'get', (_: Broker, callback: CallbackWithPromise<Connection>) => {
+    if (callback) callback(new Error('Connection failed'), undefined as unknown as Connection)
+    return undefined
+  })
+
+  // Test with callback
+  let callbackCalled = false
+  connectionPool.getFirstAvailable(brokers, err => {
+    callbackCalled = true
+    ok(err instanceof Error)
+  })
+
+  // Give time for the callback to be processed
+  await new Promise(resolve => setTimeout(resolve, 10))
+
+  ok(callbackCalled, 'Callback should have been called')
+})
+
+test('ConnectionPool.close should close all connections', async t => {
+  const server1 = await createServer(t)
+  const server2 = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker1 = { host: 'localhost', port: server1.port }
+  const broker2 = { host: 'localhost', port: server2.port }
+
+  const connection1 = await connectionPool.get(broker1)
+  const connection2 = await connectionPool.get(broker2)
+
+  await connectionPool.close()
+
+  ok(connection1.socket.closed)
+  ok(connection2.socket.closed)
+})
+
+test('ConnectionPool.close should handle empty pool', async () => {
+  const connectionPool = new ConnectionPool('test-client')
+  await connectionPool.close()
+})
+
+test('ConnectionPool emits connecting and connect events', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Create spies for events
+  const connectStartSpy = mock.fn()
+  const connectSpy = mock.fn()
+  const failedSpy = mock.fn()
+
+  connectionPool.on('connecting', connectStartSpy)
+  connectionPool.on('connect', connectSpy)
+  connectionPool.on('failed', failedSpy)
+
+  const connection = await connectionPool.get(broker)
+
+  // Verify events were emitted in correct order
+  deepStrictEqual(connectStartSpy.mock.calls.length, 1)
+  deepStrictEqual(connectSpy.mock.calls.length, 1)
+  deepStrictEqual(failedSpy.mock.calls.length, 0)
+
+  await connection.close()
+})
+
+test('ConnectionPool emits failed event on connection failure', async t => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port: 100 }
+
+  // Create spy for failed event
+  const failedSpy = mock.fn()
+  connectionPool.on('failed', failedSpy)
+
+  await rejects(() => connectionPool.get(broker) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK'
+  })
+
+  // Verify failed event was emitted
+  deepStrictEqual(failedSpy.mock.calls.length, 1)
+})

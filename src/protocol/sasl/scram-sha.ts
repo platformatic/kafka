@@ -1,7 +1,7 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
-import { type SaslAuthenticateResponse, saslAuthenticateV2 } from '../../apis/security/sasl-authenticate.ts'
-import { type Connection } from '../../connection/connection.ts'
+import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate.ts'
 import { AuthenticationError } from '../../errors.ts'
+import { type Connection } from '../../network/connection.ts'
 
 const GS2_HEADER = 'n,,'
 const GS2_HEADER_BASE64 = Buffer.from(GS2_HEADER).toString('base64')
@@ -29,15 +29,15 @@ export const ScramAlgorithms = {
 } as const
 export type ScramAlgorithm = keyof typeof ScramAlgorithms
 
-function createNonce (): string {
+export function createNonce (): string {
   return randomBytes(16).toString('base64url')
 }
 
-function sanitizeString (str: string): string {
+export function sanitizeString (str: string): string {
   return str.replaceAll('=', '=3D').replace(',', '=2C')
 }
 
-function parseParameters (data: Buffer): Record<string, string> {
+export function parseParameters (data: Buffer): Record<string, string> {
   const original = data.toString('utf-8')
 
   return {
@@ -48,19 +48,19 @@ function parseParameters (data: Buffer): Record<string, string> {
 
 // h, hi, hmac and xor, are defined in https://datatracker.ietf.org/doc/html/rfc5802#section-2.2
 
-function h (definition: ScramAlgorithmDefinition, data: string | Buffer) {
+export function h (definition: ScramAlgorithmDefinition, data: string | Buffer) {
   return createHash(definition.algorithm).update(data).digest()
 }
 
-function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) {
+export function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) {
   return pbkdf2Sync(password, salt, iterations, definition.keyLength, definition.algorithm)
 }
 
-function hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer): Buffer {
+export function hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer): Buffer {
   return createHmac(definition.algorithm, key).update(data).digest()
 }
 
-function xor (a: Buffer, b: Buffer): Buffer {
+export function xor (a: Buffer, b: Buffer): Buffer {
   if (a.byteLength !== b.byteLength) {
     throw new AuthenticationError('Buffers must have the same length.')
   }
@@ -76,6 +76,7 @@ function xor (a: Buffer, b: Buffer): Buffer {
 
 // Implements https://datatracker.ietf.org/doc/html/rfc5802#section-9
 export async function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
   username: string,
@@ -91,10 +92,7 @@ export async function authenticate (
   const clientFirstMessageBare = `n=${sanitizeString(username)},r=${clientNonce}`
 
   // First of all, send the first message
-  const firstResponse = await saslAuthenticateV2.async(
-    connection,
-    Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`)
-  )
+  const firstResponse = await authenticateAPI.async(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`))
   const firstData = parseParameters(firstResponse.authBytes)
 
   // Extract some parameters
@@ -133,7 +131,7 @@ export async function authenticate (
   const serverSignature = hmac(definition, serverKey, authMessage)
 
   // Send the last message to the server
-  const lastResponse = await saslAuthenticateV2.async(
+  const lastResponse = await authenticateAPI.async(
     connection,
     Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`)
   )
@@ -144,6 +142,7 @@ export async function authenticate (
   } else if (lastData.v !== serverSignature.toString('base64')) {
     throw new AuthenticationError('Invalid server signature.')
   }
+  /* c8 ignore next 2 */
 
   return lastResponse
 }

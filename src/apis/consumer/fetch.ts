@@ -172,7 +172,7 @@ export function parseResponse (
                 producerId: r.readInt64(),
                 firstOffset: r.readInt64()
               }
-            })!,
+            }),
             preferredReadReplica: r.readInt32()
           }
 
@@ -193,9 +193,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -205,4 +205,4 @@ export function parseResponse (
   return response
 }
 
-export const fetchV17 = createAPI<FetchRequest, FetchResponse>(1, 17, createRequest, parseResponse)
+export const api = createAPI<FetchRequest, FetchResponse>(1, 17, createRequest, parseResponse)

@@ -1,30 +1,51 @@
-import { type FetchResponse, fetchV17 } from '../../apis/consumer/fetch.ts'
-import { type HeartbeatResponse, heartbeatV4 } from '../../apis/consumer/heartbeat.ts'
-import { type JoinGroupRequestProtocol, type JoinGroupResponse, joinGroupV9 } from '../../apis/consumer/join-group.ts'
-import { type LeaveGroupResponse, leaveGroupV5 } from '../../apis/consumer/leave-group.ts'
+import { type FetchResponse, api as fetchV17 } from '../../apis/consumer/fetch.ts'
+import { type HeartbeatResponse, api as heartbeatV4 } from '../../apis/consumer/heartbeat.ts'
+import {
+  type JoinGroupRequestProtocol,
+  type JoinGroupResponse,
+  api as joinGroupV9
+} from '../../apis/consumer/join-group.ts'
+import { type LeaveGroupResponse, api as leaveGroupV5 } from '../../apis/consumer/leave-group.ts'
 import {
   type ListOffsetsRequestTopic,
   type ListOffsetsResponse,
-  listOffsetsV9
+  api as listOffsetsV9
 } from '../../apis/consumer/list-offsets.ts'
 import {
   type OffsetCommitRequestTopic,
   type OffsetCommitResponse,
-  offsetCommitV9
+  api as offsetCommitV9
 } from '../../apis/consumer/offset-commit.ts'
 import {
   type OffsetFetchRequestTopic,
   type OffsetFetchResponse,
-  offsetFetchV9
+  api as offsetFetchV9
 } from '../../apis/consumer/offset-fetch.ts'
-import { type SyncGroupRequestAssignment, type SyncGroupResponse, syncGroupV5 } from '../../apis/consumer/sync-group.ts'
+import {
+  type SyncGroupRequestAssignment,
+  type SyncGroupResponse,
+  api as syncGroupV5
+} from '../../apis/consumer/sync-group.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
-import { type FindCoordinatorResponse, findCoordinatorV6 } from '../../apis/metadata/find-coordinator.ts'
-import { type Connection } from '../../connection/connection.ts'
+import { type FindCoordinatorResponse, api as findCoordinatorV6 } from '../../apis/metadata/find-coordinator.ts'
 import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { type ConnectionPool } from '../../network/connection-pool.ts'
+import { type Connection } from '../../network/connection.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { Base } from '../base/base.ts'
+import {
+  Base,
+  kBootstrapBrokers,
+  kCheckNotClosed,
+  kClosed,
+  kConnections,
+  kCreateConnectionPool,
+  kMetadata,
+  kOptions,
+  kPerformDeduplicated,
+  kPerformWithRetry,
+  kValidateOptions
+} from '../base/base.ts'
 import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import {
@@ -44,6 +65,7 @@ import {
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
 } from './options.ts'
+import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
   type ConsumeOptions,
@@ -57,7 +79,6 @@ import {
   type ListOffsetsOptions,
   type Offsets
 } from './types.ts'
-import { TopicsMap } from './utils.ts'
 
 interface GroupRequestAssignment {
   memberId: string
@@ -69,32 +90,58 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 > {
   groupId: string
   generationId: number
-  memberId: string | undefined
+  memberId: string | null
   topics: TopicsMap
-  assignments: GroupAssignment[] | undefined
+  assignments: GroupAssignment[] | null
 
-  #members: Map<string, ExtendedGroupProtocolSubscription> | undefined
-  #isLeader: boolean | undefined
-  #protocol: string | undefined
-  #coordinatorId: number | undefined
-  #heartbeatInterval: NodeJS.Timeout | undefined
+  #members: Map<string, ExtendedGroupProtocolSubscription>
+  #membershipActive: boolean
+  #isLeader: boolean
+  #protocol: string | null
+  #coordinatorId: number | null
+  #heartbeatInterval: NodeJS.Timeout | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  /*
+    The following requests are blocking in Kafka:
+
+    FetchRequest (soprattutto con maxWaitMs)
+    JoinGroupRequest
+    SyncGroupRequest
+    OffsetCommitRequest
+    ProduceRequest
+    ListOffsetsRequest
+    ListGroupsRequest
+    DescribeGroupsRequest
+
+    In order to avoid consumer group problems, we separate FetchRequest only on a separate connection.
+  */
+  #fetchConnectionPool: ConnectionPool
 
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
     super(options)
 
-    this.options = Object.assign({}, defaultBaseOptions, defaultConsumerOptions, options)
-    this.validateOptions(options, consumerOptionsValidator, '/options')
+    this[kOptions] = Object.assign({}, defaultBaseOptions, defaultConsumerOptions, options)
+    this[kValidateOptions](options, consumerOptionsValidator, '/options')
 
     this.groupId = options.groupId
-    this.topics = new TopicsMap()
     this.generationId = 0
+    this.memberId = null
+    this.topics = new TopicsMap()
+    this.assignments = null
+
+    this.#members = new Map()
+    this.#membershipActive = false
+    this.#isLeader = false
+    this.#protocol = null
+    this.#coordinatorId = null
+    this.#heartbeatInterval = null
 
     this.#streams = new Set()
 
-    if (this.options.heartbeatInterval! > this.options.sessionTimeout!) {
-      throw new UserError('/options/heartbeatInterval must be less than or equal to /options/sessionTimeout.')
-    }
+    this.#validateGroupOptions(this[kOptions])
+
+    // Initialize connection pool
+    this.#fetchConnectionPool = this[kCreateConnectionPool]()
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -109,25 +156,33 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<void>()
     }
 
-    if (this.closed) {
+    if (this[kClosed]) {
       callback(null)
       return callback[kCallbackPromise]
     }
 
-    this.closed = true
+    this[kClosed] = true
 
-    this.#leaveGroup(force as boolean, error => {
+    const closer = this.#membershipActive
+      ? this.#leaveGroup.bind(this)
+      : function (_: boolean, callback: CallbackWithPromise<void>) {
+        callback(null)
+      }
+
+    closer(force as boolean, error => {
       if (error) {
-        const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
+        callback(error)
+        return
+      }
 
-        // This is to avoid throwin an error if a group join was cancelled.
-        if (!unknownMemberError) {
+      this.#fetchConnectionPool.close(error => {
+        if (error) {
           callback(error)
           return
         }
-      }
 
-      super.close(callback)
+        super.close(callback)
+      })
     })
 
     return callback[kCallbackPromise]
@@ -148,20 +203,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<MessagesStream<Key, Value, HeaderKey, HeaderValue>>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, consumeOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, consumeOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
       return callback[kCallbackPromise]
     }
 
-    options.autocommit ??= this.options.autocommit! ?? true
-    options.maxBytes ??= this.options.maxBytes!
-    options.deserializers = Object.assign({}, options.deserializers, this.options.deserializers)
-    options.highWaterMark ??= this.options.highWaterMark!
+    options.autocommit ??= this[kOptions].autocommit! ?? true
+    options.maxBytes ??= this[kOptions].maxBytes!
+    options.deserializers = Object.assign({}, options.deserializers, this[kOptions].deserializers)
+    options.highWaterMark ??= this[kOptions].highWaterMark!
 
     this.#consume(options, callback)
     return callback![kCallbackPromise]
@@ -177,11 +232,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<FetchResponse>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, fetchOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, fetchOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as FetchResponse)
       return callback[kCallbackPromise]
@@ -198,11 +253,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<void>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, commitOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, commitOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError)
       return callback[kCallbackPromise]
@@ -219,11 +274,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<Offsets>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, listOffsetsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as Offsets)
       return callback[kCallbackPromise]
@@ -240,11 +295,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<Offsets>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, listCommitsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, listCommitsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as Offsets)
       return callback[kCallbackPromise]
@@ -261,7 +316,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<number>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
@@ -281,25 +336,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<string>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this.validateOptions(options, groupOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, groupOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as string)
       return callback[kCallbackPromise]
     }
 
-    options.sessionTimeout ??= this.options.sessionTimeout!
-    options.rebalanceTimeout ??= this.options.rebalanceTimeout!
-    options.heartbeatInterval ??= this.options.heartbeatInterval!
-    options.protocols ??= this.options.protocols!
+    options.sessionTimeout ??= this[kOptions].sessionTimeout!
+    options.rebalanceTimeout ??= this[kOptions].rebalanceTimeout!
+    options.heartbeatInterval ??= this[kOptions].heartbeatInterval!
+    options.protocols ??= this[kOptions].protocols!
 
-    if (options.heartbeatInterval > options.sessionTimeout) {
-      throw new UserError('/options/heartbeatInterval must be less than or equal to the current sessionTimeout.')
-    }
+    this.#validateGroupOptions(options)
 
+    this.#membershipActive = true
     this.#joinGroup(options as Required<GroupOptions>, callback)
     return callback[kCallbackPromise]
   }
@@ -316,10 +370,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       callback = createPromisifiedCallback<void>()
     }
 
-    if (this.checkNotClosed(callback)) {
+    if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
 
+    this.#membershipActive = false
     this.#leaveGroup(force as boolean, callback)
     return callback[kCallbackPromise]
   }
@@ -329,7 +384,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   ): void | Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>> {
     // Subscribe all topics
-    let joinNeeded = this.memberId === undefined
+    let joinNeeded = this.memberId === null
+
     for (const topic of options.topics) {
       if (this.topics.track(topic)) {
         joinNeeded = true
@@ -370,16 +426,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: FetchOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<FetchResponse>
   ): void {
-    this.performWithRetry<FetchResponse>(
+    this[kPerformWithRetry]<FetchResponse>(
       'fetch',
       retryCallback => {
-        this._metadata({ topics: this.topics.current }, (error, metadata) => {
+        this[kMetadata]({ topics: this.topics.current }, (error, metadata: ClusterMetadata) => {
           if (error) {
             retryCallback(error, undefined as unknown as FetchResponse)
             return
           }
 
-          const broker = metadata.brokers!.get(options.node)!
+          const broker = metadata.brokers.get(options.node)
 
           if (!broker) {
             retryCallback(
@@ -389,7 +445,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.connections.get(broker, (error, connection) => {
+          this.#fetchConnectionPool.get(broker, (error, connection) => {
             if (error) {
               retryCallback(error, undefined as unknown as FetchResponse)
               return
@@ -397,10 +453,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
             fetchV17(
               connection,
-              options.maxWaitTime ?? this.options.maxWaitTime!,
-              options.minBytes ?? this.options.minBytes!,
-              options.maxBytes ?? this.options.maxBytes!,
-              FetchIsolationLevels[options.isolationLevel ?? this.options.isolationLevel!],
+              options.maxWaitTime ?? this[kOptions].maxWaitTime!,
+              options.minBytes ?? this[kOptions].minBytes!,
+              options.maxBytes ?? this[kOptions].maxBytes!,
+              FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
               0,
               0,
               options.topics,
@@ -454,7 +510,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<Offsets>): void {
-    this._metadata({ topics: options.topics }, (error, metadata) => {
+    this[kMetadata]({ topics: options.topics }, (error, metadata) => {
       if (error) {
         callback(error, undefined as unknown as Offsets)
         return
@@ -493,10 +549,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         'Listing offsets failed.',
         requests,
         ([leader, requests], concurrentCallback) => {
-          this.performWithRetry<ListOffsetsResponse>(
+          this[kPerformWithRetry]<ListOffsetsResponse>(
             'listOffsets',
             retryCallback => {
-              this.connections.get(metadata.brokers!.get(leader)!, (error, connection) => {
+              this[kConnections].get(metadata.brokers.get(leader)!, (error, connection) => {
                 if (error) {
                   retryCallback(error, undefined as unknown as ListOffsetsResponse)
                   return
@@ -505,7 +561,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 listOffsetsV9(
                   connection,
                   -1,
-                  FetchIsolationLevels[options.isolationLevel ?? this.options.isolationLevel!],
+                  FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
                   Array.from(requests.values()),
                   retryCallback
                 )
@@ -593,13 +649,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
-    this.performDeduplicated(
+    this[kPerformDeduplicated](
       'findGroupCoordinator',
       deduplicateCallback => {
-        this.performWithRetry<FindCoordinatorResponse>(
+        this[kPerformWithRetry]<FindCoordinatorResponse>(
           'findGroupCoordinator',
           retryCallback => {
-            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as FindCoordinatorResponse)
                 return
@@ -626,7 +682,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
-    clearTimeout(this.#heartbeatInterval)
+    if (!this.#membershipActive) {
+      callback(null, undefined as unknown as string)
+      return
+    }
+
+    this.#cancelHeartbeat()
 
     const protocols: JoinGroupRequestProtocol[] = []
     for (const protocol of options.protocols) {
@@ -653,6 +714,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         )
       },
       (error, response) => {
+        if (!this.#membershipActive) {
+          callback(null, undefined as unknown as string)
+          return
+        }
+
         if (error) {
           if (this.#getRejoinError(error)) {
             this.#joinGroup(options, callback)
@@ -677,6 +743,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         // Send a syncGroup request
         this.#syncGroup(null, (error, response) => {
+          if (!this.#membershipActive) {
+            callback(null, undefined as unknown as string)
+            return
+          }
+
           if (error) {
             if (this.#getRejoinError(error)) {
               this.#joinGroup(options, callback)
@@ -689,7 +760,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           this.assignments = response
 
-          clearTimeout(this.#heartbeatInterval)
+          this.#cancelHeartbeat()
           this.#heartbeatInterval = setTimeout(() => {
             this.#heartbeat(options)
           }, options.heartbeatInterval)
@@ -714,6 +785,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    // Remove streams that might have been exited in the meanwhile
+    for (const stream of this.#streams) {
+      if (stream.closed || stream.destroyed) {
+        this.#streams.delete(stream)
+      }
+    }
+
     if (this.#streams.size) {
       if (!force) {
         callback(new UserError('Cannot leave group while consuming messages.'))
@@ -732,44 +810,55 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          // All streams are closed, try the operation again
-          this.#leaveGroup(force, callback)
+          // All streams are closed, try the operation again without force
+          this.#leaveGroup(false, callback)
         }
       )
 
       return
     }
 
-    const memberId = this.memberId
-    this.memberId = undefined
-    clearTimeout(this.#heartbeatInterval)
+    this.#cancelHeartbeat()
 
     this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
       'leaveGroup',
       (connection, groupCallback) => {
-        leaveGroupV5(connection, this.groupId, [{ memberId }], groupCallback)
+        leaveGroupV5(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
       },
       error => {
-        if (!error) {
-          this.emitWithDebug('consumer', 'group:leave', {
-            groupId: this.groupId,
-            memberId: this.memberId,
-            generationId: this.generationId
-          })
+        if (error) {
+          const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
+
+          // This is to avoid throwing an error if a group join was cancelled.
+          if (!unknownMemberError) {
+            callback(error)
+            return
+          }
         }
 
-        callback(error)
+        this.emitWithDebug('consumer', 'group:leave', {
+          groupId: this.groupId,
+          memberId: this.memberId,
+          generationId: this.generationId
+        })
+
+        callback(null)
       }
     )
   }
 
   #syncGroup (assignments: SyncGroupRequestAssignment[] | null, callback: CallbackWithPromise<GroupAssignment[]>): void {
-    if (assignments == null) {
+    if (!this.#membershipActive) {
+      callback(null, undefined as unknown as GroupAssignment[])
+      return
+    }
+
+    if (!Array.isArray(assignments)) {
       if (this.#isLeader) {
         // Get all the metadata for  the topics the consumer are listening to, then compute the assignments
         const topicsSubscriptions = new Map<string, ExtendedGroupProtocolSubscription[]>()
 
-        for (const subscription of this.#members!.values()) {
+        for (const subscription of this.#members.values()) {
           for (const topic of subscription.topics!) {
             let topicSubscriptions = topicsSubscriptions.get(topic)
 
@@ -782,9 +871,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
         }
 
-        this._metadata({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
+        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
           if (error) {
             callback(error, undefined as unknown as GroupAssignment[])
+            return
+          }
+
+          if (!this.#membershipActive) {
+            callback(null, undefined as unknown as GroupAssignment[])
             return
           }
 
@@ -814,6 +908,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         )
       },
       (error, response) => {
+        if (!this.#membershipActive) {
+          callback(null, undefined as unknown as GroupAssignment[])
+          return
+        }
+
         if (error) {
           callback(error, undefined as unknown as GroupAssignment[])
           return
@@ -828,13 +927,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         const assignments: GroupAssignment[] = reader.readArray(
           r => {
             return {
-              topic: r.readString()!,
-              partitions: r.readArray(r => r.readInt32(), true, false)!
+              topic: r.readString(),
+              partitions: r.readArray(r => r.readInt32(), true, false)
             }
           },
           true,
           false
-        )!
+        )
 
         callback(error, assignments)
       }
@@ -847,43 +946,57 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<HeartbeatResponse>(
       'heartbeat',
       (connection, groupCallback) => {
+        // We have left the group in the meanwhile, abort
+        if (!this.#membershipActive) {
+          return
+        }
+
         this.emitWithDebug('consumer:heartbeat', 'start')
         heartbeatV4(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
       },
       error => {
-        if (!error) {
-          this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
-          this.#heartbeatInterval?.refresh()
+        // The heartbeat has been aborted elsewhere, ignore the response
+        if (this.#heartbeatInterval === null || !this.#membershipActive) {
           return
         }
 
-        clearTimeout(this.#heartbeatInterval)
+        if (error) {
+          this.#cancelHeartbeat()
 
-        if (this.#getRejoinError(error)) {
-          // We have left the group in the meanwhile, abort
-          if (!this.memberId) {
+          if (this.#getRejoinError(error)) {
+            this[kPerformWithRetry](
+              'rejoinGroup',
+              retryCallback => {
+                this.#joinGroup(options, retryCallback)
+              },
+              error => {
+                if (error) {
+                  this.emitWithDebug(null, 'error', error)
+                }
+
+                this.emitWithDebug('consumer', 'rejoin')
+              },
+              0
+            )
+
             return
           }
 
-          this.performWithRetry(
-            'rejoinGroup',
-            retryCallback => {
-              this.#joinGroup(options, retryCallback)
-            },
-            error => {
-              if (error) {
-                this.emitWithDebug(null, 'error', error)
-              }
-            },
-            0
-          )
+          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
 
-          return
+          // Note that here we purposely do not return, since it was not a group related problem we schedule another heartbeat
+        } else {
+          this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
         }
 
-        this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+        this.#heartbeatInterval?.refresh()
       }
     )
+  }
+
+  #cancelHeartbeat (): void {
+    clearTimeout(this.#heartbeatInterval!)
+    this.#heartbeatInterval = null
   }
 
   #performDeduplicateGroupOperaton<ReturnType>(
@@ -891,7 +1004,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
   ): void | Promise<ReturnType> {
-    return this.performDeduplicated(
+    return this[kPerformDeduplicated](
       operationId,
       deduplicateCallback => {
         this.#performGroupOperation<ReturnType>(operationId, operation, deduplicateCallback)
@@ -911,16 +1024,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      this._metadata({ topics: this.topics.current }, (error: Error | null, metadata: ClusterMetadata) => {
+      this[kMetadata]({ topics: this.topics.current }, (error: Error | null, metadata: ClusterMetadata) => {
         if (error) {
           callback(error, undefined as unknown as ReturnType)
           return
         }
 
-        this.performWithRetry<ReturnType>(
+        this[kPerformWithRetry]<ReturnType>(
           operationId,
           retryCallback => {
-            this.connections.get(metadata.brokers.get(coordinatorId)!, (error, connection) => {
+            this[kConnections].get(metadata.brokers.get(coordinatorId)!, (error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as ReturnType)
                 return
@@ -933,6 +1046,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         )
       })
     })
+  }
+
+  #validateGroupOptions (options: GroupOptions): void {
+    if (options.rebalanceTimeout! < options.sessionTimeout!) {
+      throw new UserError('/options/rebalanceTimeout must be greater than or equal to /options/sessionTimeout.')
+    }
+
+    if (options.heartbeatInterval! > options.sessionTimeout!) {
+      throw new UserError('/options/heartbeatInterval must be less than or equal to /options/sessionTimeout.')
+    }
+
+    if (options.heartbeatInterval! > options.rebalanceTimeout!) {
+      throw new UserError('/options/heartbeatInterval must be less than or equal to /options/rebalanceTimeout.')
+    }
   }
 
   /*
@@ -953,8 +1080,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return {
       memberId,
       version: reader.readInt16(),
-      topics: reader.readArray(r => r.readString(false)!, false, false)!,
-      metadata: reader.readBytes(false)!
+      topics: reader.readArray(r => r.readString(false), false, false),
+      metadata: reader.readBytes(false)
     }
   }
 
@@ -982,7 +1109,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     // We are the only member of the group, assign all partitions to us
-    const membersSize = this.#members!.size
+    const membersSize = this.#members.size
     if (membersSize === 1) {
       const assignments: GroupAssignment[] = []
 
@@ -1002,7 +1129,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // Flat the list of members and subscribed topics
     const members: GroupRequestAssignment[] = []
     const subscribedTopics = new Set<string>()
-    for (const [memberId, subscription] of this.#members!) {
+    for (const [memberId, subscription] of this.#members) {
       members.push({ memberId, assignments: new Map() })
 
       for (const topic of subscription.topics!) {
@@ -1050,7 +1177,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
     }
 
-    if (!this.memberId) {
+    if (protocolError.unknownMemberId) {
+      this.memberId = null
+    } else if (protocolError.memberId! && !this.memberId) {
       this.memberId = protocolError.memberId!
     }
 

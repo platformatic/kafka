@@ -4,21 +4,37 @@
 
 ### `Message<Key, Value, HeaderKey, HeaderValue>`
 
-Represents a message that can be either:
-
-- One being produced to Kafka by using a [`Producer`](./producer.md). All fields, except `topic` and `value`, are optional.
-- Having been consumed from Kafka by using a [`Consumer`](./consumer.md).
+Represents a message that been consumed from Kafka by using a [`Consumer`](./consumer.md).
 
 The types of the `key`, `value` and `headers` fields are determined by the current serialisation settings of the `Producer` or the `Consumer`.
 
-| Property    | Type                          | Description                                                                         |
-| ----------- | ----------------------------- | ----------------------------------------------------------------------------------- |
-| `topic`     | `string`                      | The topic of the message.                                                           |
-| `partition` | `number`                      | The topic's partition of the message.                                               |
-| `key`       | `Key`                         | The key of the message.                                                             |
-| `value`     | `Value`                       | The value of the message.                                                           |
-| `timestamp` | `bigint`                      | The timestamp of the message. When producing, it defaults to the current timestamp. |
-| `headers`   | `Map<HeaderKey, HeaderValue>` | A map with the message headers.                                                     |
+| Property    | Type                          | Description                                                                                         |
+| ----------- | ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `topic`     | `string`                      | The topic of the message.                                                                           |
+| `partition` | `number`                      | The topic's partition of the message.                                                               |
+| `key`       | `Key`                         | The key of the message.                                                                             |
+| `value`     | `Value`                       | The value of the message.                                                                           |
+| `timestamp` | `bigint`                      | The timestamp of the message. When producing, it defaults to the current timestamp.                 |
+| `headers`   | `Map<HeaderKey, HeaderValue>` | A map with the message headers.                                                                     |
+| `offset`    | `bigint`                      | The message offset                                                                                  |
+| `commit`    | () => Promise<void>           | A function to commit the offset. This is a no-op if consumer's `autocommit` option was not `false`. |
+
+### `MessageToProduce<Key, Value, HeaderKey, HeaderValue>`
+
+Represents a message that is being produced to Kafka via using a [`Producer`](./producer.md).
+
+All fields, except `topic` and `value`, are optional.
+
+The types of the `key`, `value` and `headers` fields are determined by the current serialisation settings of the `Producer` or the `Consumer`.
+
+| Property    | Type                                                              | Description                                                                         |
+| ----------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `topic`     | `string`                                                          | The topic of the message.                                                           |
+| `partition` | `number`                                                          | The topic's partition of the message.                                               |
+| `key`       | `Key`                                                             | The key of the message.                                                             |
+| `value`     | `Value`                                                           | The value of the message.                                                           |
+| `timestamp` | `bigint`                                                          | The timestamp of the message. When producing, it defaults to the current timestamp. |
+| `headers`   | `Map<HeaderKey, HeaderValue>` \| `Record<HeaderKey, HeaderValue>` | A map or plain Javascript object with the message headers.                          |
 
 ### `MessageStream<Key, Value, HeaderKey, HeaderValue>`
 
@@ -60,7 +76,7 @@ For instance, the following two snippets are equivalent:
 ```typescript
 import { Producer } from '@platformatic/kafka'
 
-function serialize (source: YourType): Buffer {
+function serialize(source: YourType): Buffer {
   return Buffer.from(JSON.stringify(source))
 }
 
@@ -79,7 +95,7 @@ const producer = new Producer({
 ```typescript
 import { Producer, serializersFrom } from '@platformatic/kafka'
 
-function serialize (source: YourType): Buffer {
+function serialize(source: YourType): Buffer {
   return Buffer.from(JSON.stringify(source))
 }
 

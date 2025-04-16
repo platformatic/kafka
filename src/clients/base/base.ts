@@ -1,50 +1,79 @@
 import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
 import { type Callback } from '../../apis/definitions.ts'
-import type { MetadataResponse } from '../../apis/metadata/metadata.ts'
-import { metadataV12 } from '../../apis/metadata/metadata.ts'
-import { ConnectionPool, type Broker, type ConnectionOptions } from '../../connection/index.ts'
+import { api as metadataV12, type MetadataResponse } from '../../apis/metadata/metadata.ts'
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UserError } from '../../errors.ts'
 import { loggers } from '../../logging.ts'
-import { ajv } from '../../utils.ts'
+import { ConnectionPool } from '../../network/connection-pool.ts'
+import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
+import { ajv, debugDump } from '../../utils.ts'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
 import { baseOptionsValidator, defaultBaseOptions, defaultPort, metadataOptionsValidator } from './options.ts'
 import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
 
-export class Base<OptionsType extends BaseOptions> extends EventEmitter {
-  // General status
-  protected clientId: string
-  protected bootstrapBrokers: Broker[]
-  protected options: OptionsType
-  protected connections: ConnectionPool
-  protected closed: boolean = false
+export const kClientId = Symbol('plt.kafka.base.clientId')
+export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
+export const kOptions = Symbol('plt.kafka.base.options')
+export const kConnections = Symbol('plt.kafka.base.kConnections')
+export const kCreateConnectionPool = Symbol('plt.kafka.base.kCreateConnectionPool')
+export const kClosed = Symbol('plt.kafka.base.kClosed')
+export const kMetadata = Symbol('plt.kafka.base.metadata')
+export const kCheckNotClosed = Symbol('plt.kafka.base.checkNotClosed')
+export const kClearMetadata = Symbol('plt.kafka.base.clearMetadata')
+export const kParseBroker = Symbol('plt.kafka.base.parseBroker')
+export const kPerformWithRetry = Symbol('plt.kafka.base.performWithRetry')
+export const kPerformDeduplicated = Symbol('plt.kafka.base.performDeduplicated')
+export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
+export const kInspect = Symbol('plt.kafka.base.inspect')
+export const kInstance = Symbol('plt.kafka.base.instance')
 
-  #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
+let currentInstance = 0
+
+export class Base<OptionsType extends BaseOptions> extends EventEmitter {
+  // This is just used for debugging
+  [kInstance]: number;
+
+  // General status - Use symbols rather than JS private property to make them "protected" as in C++
+  [kClientId]: string;
+  [kBootstrapBrokers]: Broker[];
+  [kOptions]: OptionsType;
+  [kConnections]: ConnectionPool;
+  [kClosed]: boolean
+
   #metadata: ClusterMetadata | undefined
+  #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
 
   constructor (options: OptionsType) {
     super()
+    this[kInstance] = currentInstance++
 
     // Validate options
-    this.options = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
-    this.validateOptions(this.options, baseOptionsValidator, '/options')
-    this.clientId = options.clientId
+    this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
+    this[kValidateOptions](this[kOptions], baseOptionsValidator, '/options')
+    this[kClientId] = options.clientId
 
     // Initialize bootstrap brokers
-    this.bootstrapBrokers = []
+    this[kBootstrapBrokers] = []
     for (const broker of options.bootstrapBrokers) {
-      this.bootstrapBrokers.push(this.parseBroker(broker))
+      this[kBootstrapBrokers].push(this[kParseBroker](broker))
     }
 
-    // Initialize connection pool
-    this.connections = new ConnectionPool(this.clientId, this.options as ConnectionOptions)
-    for (const event of ['connect', 'disconnect', 'failed', 'drain']) {
-      this.connections.on(event, payload => this.emitWithDebug('client', `broker:${event}`, payload))
-    }
-    this.closed = false
+    // Initialize main connection pool
+    this[kConnections] = this[kCreateConnectionPool]()
+    this[kClosed] = false
 
     this.#inflightDeduplications = new Map()
+  }
+
+  /* c8 ignore next 3 */
+  get clientId (): string {
+    return this[kClientId]
+  }
+
+  /* c8 ignore next 3 */
+  get closed (): boolean {
+    return this[kClosed] === true
   }
 
   emitWithDebug (section: string | null, name: string, ...args: any[]): boolean {
@@ -52,6 +81,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
       return this.emit(name, ...args)
     }
 
+    /* c8 ignore next */
     loggers[section]?.debug({ event: name, payload: args })
     return this.emit(`${section}:${name}`, ...args)
   }
@@ -63,8 +93,8 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
       callback = createPromisifiedCallback<void>()
     }
 
-    this.closed = true
-    this.connections.disconnect(callback)
+    this[kClosed] = true
+    this[kConnections].close(callback)
 
     return callback[kCallbackPromise]
   }
@@ -76,18 +106,30 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
       callback = createPromisifiedCallback<ClusterMetadata>()
     }
 
-    const validationError = this.validateOptions(options, metadataOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, metadataOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as ClusterMetadata)
       return callback[kCallbackPromise]
     }
 
-    this._metadata(options, callback)
+    this[kMetadata](options, callback)
     return callback[kCallbackPromise]
   }
 
-  protected _metadata (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
-    const metadataMaxAge = options.metadataMaxAge ?? this.options.metadataMaxAge!
+  [kCreateConnectionPool] (): ConnectionPool {
+    const pool = new ConnectionPool(this[kClientId], {
+      ownerId: this[kInstance],
+      ...(this[kOptions] as ConnectionOptions)
+    })
+    for (const event of ['connect', 'disconnect', 'failed', 'drain']) {
+      pool.on(event, payload => this.emitWithDebug('client', `broker:${event}`, payload))
+    }
+
+    return pool
+  }
+
+  [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
+    const metadataMaxAge = options.metadataMaxAge ?? this[kOptions].metadataMaxAge!
 
     const isStale =
       options.forceUpdate ||
@@ -100,15 +142,15 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
       return
     }
 
-    const autocreateTopics = options.autocreateTopics ?? this.options.autocreateTopics
+    const autocreateTopics = options.autocreateTopics ?? this[kOptions].autocreateTopics
 
-    this.performDeduplicated(
+    this[kPerformDeduplicated](
       'metadata',
       deduplicateCallback => {
-        this.performWithRetry<MetadataResponse>(
+        this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
           retryCallback => {
-            this.connections.getFromMultiple(this.bootstrapBrokers, (error, connection) => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as MetadataResponse)
                 return
@@ -132,6 +174,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
             }
 
             for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
+              /* c8 ignore next 3 */
               if (isInternal) {
                 continue
               }
@@ -146,7 +189,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
                 }
               }
 
-              topics.set(name, { id, partitions, partitionsCount: rawPartitions.length })
+              topics.set(name!, { id, partitions, partitionsCount: rawPartitions.length })
             }
 
             this.#metadata = {
@@ -166,9 +209,9 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     )
   }
 
-  protected checkNotClosed (callback: CallbackWithPromise<any>): boolean {
-    if (this.closed) {
-      const error = new UserError('Client is closed.')
+  [kCheckNotClosed] (callback: CallbackWithPromise<any>): boolean {
+    if (this[kClosed]) {
+      const error = new NetworkError('Client is closed.', { closed: true, instance: this[kInstance] })
       callback(error, undefined)
       return true
     }
@@ -176,11 +219,11 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     return false
   }
 
-  protected clearMetadata (): void {
+  [kClearMetadata] (): void {
     this.#metadata = undefined
   }
 
-  protected parseBroker (broker: Broker | string): Broker {
+  [kParseBroker] (broker: Broker | string): Broker {
     if (typeof broker === 'string') {
       if (broker.includes(':')) {
         const [host, port] = broker.split(':')
@@ -193,7 +236,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     return broker
   }
 
-  protected performWithRetry<ReturnType>(
+  [kPerformWithRetry]<ReturnType>(
     operationId: string,
     operation: (callback: Callback<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>,
@@ -201,7 +244,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean
   ): void | Promise<ReturnType> {
-    const retries = this.options.retries!
+    const retries = this[kOptions].retries!
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {
@@ -212,11 +255,12 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
           setTimeout(() => {
-            this.performWithRetry(operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
-          }, this.options.retryDelay)
+            this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+          }, this[kOptions].retryDelay)
         } else {
           if (attempt === 0) {
             callback(error, undefined as ReturnType)
+            return
           }
 
           callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors), undefined as ReturnType)
@@ -231,7 +275,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
-  protected performDeduplicated<ReturnType>(
+  [kPerformDeduplicated]<ReturnType>(
     operationId: string,
     operation: (callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
@@ -261,13 +305,13 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
-  protected validateOptions (
+  [kValidateOptions] (
     target: unknown,
     validator: ValidateFunction<unknown>,
     targetName: string,
     throwOnErrors: boolean = true
   ): Error | null {
-    if (!this.options.strict) {
+    if (!this[kOptions].strict) {
       return null
     }
 
@@ -284,5 +328,10 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     }
 
     return null
+  }
+
+  /* c8 ignore next 3 */
+  [kInspect] (...args: unknown[]): void {
+    debugDump(Date.now() % 100000, `client:${this[kInstance]}`, ...args)
   }
 }

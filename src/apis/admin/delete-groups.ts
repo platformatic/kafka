@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -46,7 +46,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     results: reader.readArray((r, i) => {
       const group = {
-        groupId: r.readString()!,
+        groupId: r.readString(),
         errorCode: r.readInt16()
       }
 
@@ -55,7 +55,7 @@ export function parseResponse (
       }
 
       return group
-    })!
+    })
   }
 
   if (errors.length) {
@@ -65,4 +65,4 @@ export function parseResponse (
   return response
 }
 
-export const deleteGroupsV2 = createAPI<DeleteGroupsRequest, DeleteGroupsResponse>(42, 2, createRequest, parseResponse)
+export const api = createAPI<DeleteGroupsRequest, DeleteGroupsResponse>(42, 2, createRequest, parseResponse)

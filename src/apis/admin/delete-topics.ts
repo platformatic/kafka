@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -62,10 +62,10 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     responses: reader.readArray((r, i) => {
       const topicResponse = {
-        name: r.readString(),
+        name: r.readNullableString(),
         topicId: r.readUUID(),
         errorCode: r.readInt16(),
-        errorMessage: r.readString()
+        errorMessage: r.readNullableString()
       }
 
       if (topicResponse.errorCode !== 0) {
@@ -73,7 +73,7 @@ export function parseResponse (
       }
 
       return topicResponse
-    })!
+    })
   }
 
   if (errors.length) {
@@ -83,4 +83,4 @@ export function parseResponse (
   return response
 }
 
-export const deleteTopicsV6 = createAPI<DeleteTopicsRequest, DeleteTopicsResponse>(20, 6, createRequest, parseResponse)
+export const api = createAPI<DeleteTopicsRequest, DeleteTopicsResponse>(20, 6, createRequest, parseResponse)

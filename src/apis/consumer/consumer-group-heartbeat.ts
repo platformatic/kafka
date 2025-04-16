@@ -63,23 +63,6 @@ export function createRequest (
   serverAssignor: NullableString,
   topicPartitions: ConsumerGroupHeartbeatRequestTopicPartition[]
 ): Writer {
-  process._rawDebug(
-    Writer.create()
-      .appendString(groupId)
-      .appendString(memberId)
-      .appendInt32(memberEpoch)
-      .appendString(instanceId)
-      .appendString(rackId)
-      .appendInt32(rebalanceTimeoutMs)
-      .appendArray(subscribedTopicNames, (w, t) => w.appendString(t), true, false)
-      .appendString(serverAssignor)
-      .appendArray(topicPartitions, (w, t) => {
-        return w.appendUUID(t.topicId).appendArray(t.partitions, (w, p) => w.appendInt32(p), true, false)
-      })
-      .appendTaggedFields()
-      .inspect()
-  )
-
   return Writer.create()
     .appendString(groupId)
     .appendString(memberId)
@@ -119,8 +102,8 @@ export function parseResponse (
   const response: ConsumerGroupHeartbeatResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString(),
-    memberId: reader.readString(),
+    errorMessage: reader.readNullableString(),
+    memberId: reader.readNullableString(),
     memberEpoch: reader.readInt32(),
     heartbeatIntervalMs: reader.readInt32(),
     assignment: reader.readArray(r => {
@@ -132,7 +115,7 @@ export function parseResponse (
           }
         })
       } as ConsumerGroupHeartbeatResponseAssignment
-    })!
+    })
   }
 
   if (response.errorCode !== 0) {
@@ -142,7 +125,7 @@ export function parseResponse (
   return response
 }
 
-export const consumerGroupHeartbeatV0 = createAPI<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>(
+export const api = createAPI<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>(
   68,
   0,
   createRequest,

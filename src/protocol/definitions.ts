@@ -1,7 +1,5 @@
 import type BufferList from 'bl'
 
-// Note that in this file "== null" is purposely used instead of "===" to check for both null and undefined
-
 export const INT8_SIZE = 1
 export const INT16_SIZE = 2
 export const INT32_SIZE = 4

@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -73,8 +73,8 @@ export function parseResponse (
     errorCode,
     members: reader.readArray((r, i) => {
       const member: LeaveGroupResponseMember = {
-        memberId: r.readString(),
-        groupInstanceId: r.readString(),
+        memberId: r.readNullableString(),
+        groupInstanceId: r.readNullableString(),
         errorCode: r.readInt16()
       }
 
@@ -83,7 +83,7 @@ export function parseResponse (
       }
 
       return member
-    })!
+    })
   }
 
   if (errors.length) {
@@ -93,4 +93,4 @@ export function parseResponse (
   return response
 }
 
-export const leaveGroupV5 = createAPI<LeaveGroupRequest, LeaveGroupResponse>(13, 5, createRequest, parseResponse)
+export const api = createAPI<LeaveGroupRequest, LeaveGroupResponse>(13, 5, createRequest, parseResponse)

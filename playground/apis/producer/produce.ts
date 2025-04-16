@@ -1,5 +1,5 @@
 import { produceV11 } from '../../../src/apis/producer/produce.ts'
-import { Connection } from '../../../src/connection/connection.ts'
+import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
 const connection = new Connection('123')

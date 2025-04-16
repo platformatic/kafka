@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -60,18 +60,18 @@ export function parseResponse (
   const response: DescribeClusterResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     endpointType: reader.readInt8(),
-    clusterId: reader.readString()!,
+    clusterId: reader.readString(),
     controllerId: reader.readInt32(),
     brokers: reader.readArray(r => {
       return {
         brokerId: r.readInt32(),
-        host: r.readString()!,
+        host: r.readString(),
         port: r.readInt32(),
-        rack: r.readString()
+        rack: r.readNullableString()
       }
-    })!,
+    }),
     clusterAuthorizedOperations: reader.readInt32()
   }
 
@@ -82,9 +82,4 @@ export function parseResponse (
   return response
 }
 
-export const describeClusterV1 = createAPI<DescribeClusterRequest, DescribeClusterResponse>(
-  60,
-  1,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeClusterRequest, DescribeClusterResponse>(60, 1, createRequest, parseResponse)

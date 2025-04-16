@@ -72,9 +72,9 @@ export function parseResponse (
   const response: SyncGroupResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    protocolType: reader.readString(),
-    protocolName: reader.readString(),
-    assignment: reader.readBytes()!
+    protocolType: reader.readNullableString(),
+    protocolName: reader.readNullableString(),
+    assignment: reader.readBytes()
   }
 
   if (response.errorCode !== 0) {
@@ -84,4 +84,4 @@ export function parseResponse (
   return response
 }
 
-export const syncGroupV5 = createAPI<SyncGroupRequest, SyncGroupResponse>(14, 5, createRequest, parseResponse)
+export const api = createAPI<SyncGroupRequest, SyncGroupResponse>(14, 5, createRequest, parseResponse)

@@ -1,0 +1,33 @@
+---
+name: Run Tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  ci:
+    strategy:
+      matrix:
+        node-version: [22, 23]
+        os: [ubuntu-latest]
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Restore cached dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: node-modules-${{ hashFiles('package.json') }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install
+      - name: Start Kafka Cluster
+        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:29092 tcp:39092 tcp:49092
+      - name: Run Tests
+        run: pnpm run ci

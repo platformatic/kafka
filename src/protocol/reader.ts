@@ -1,5 +1,5 @@
 import BufferList from 'bl'
-import { INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
+import { EMPTY_BUFFER, INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
 import { readUnsignedVarInt, readVarInt } from './varint32.ts'
 import { readUnsignedVarInt64, readVarInt64 } from './varint64.ts'
 
@@ -205,7 +205,7 @@ export class Reader {
     return value === 1
   }
 
-  readString (compact: boolean = true, encoding: BufferEncoding = 'utf-8'): string | null {
+  readNullableString (compact: boolean = true, encoding: BufferEncoding = 'utf-8'): string | null {
     let length: number
 
     if (compact) {
@@ -217,7 +217,7 @@ export class Reader {
 
       length--
     } else {
-      length = this.readUnsignedInt16()
+      length = this.readInt16()
 
       if (length === -1) {
         return null
@@ -230,6 +230,10 @@ export class Reader {
     return value
   }
 
+  readString (compact: boolean = true, encoding: BufferEncoding = 'utf-8'): string {
+    return this.readNullableString(compact, encoding) || ''
+  }
+
   readUUID (): string {
     const value = this.peekUUID()
     this.position += UUID_SIZE
@@ -237,7 +241,7 @@ export class Reader {
     return value.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5')
   }
 
-  readBytes (compact: boolean = true): Buffer | null {
+  readNullableBytes (compact: boolean = true): Buffer | null {
     let length: number
 
     if (compact) {
@@ -262,6 +266,11 @@ export class Reader {
     return value
   }
 
+  readBytes (compact: boolean = true): Buffer {
+    /* c8 ignore next */
+    return this.readNullableBytes(compact) || EMPTY_BUFFER
+  }
+
   readVarIntBytes (): Buffer {
     const length = this.readVarInt()
     const value = this.buffer.slice(this.position, this.position + length)
@@ -270,7 +279,7 @@ export class Reader {
     return value
   }
 
-  readArray<OutputType>(
+  readNullableArray<OutputType>(
     reader: EntryReader<OutputType>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -306,7 +315,7 @@ export class Reader {
     return value
   }
 
-  readMap<Key, Value>(
+  readNullableMap<Key, Value>(
     reader: EntryReader<[Key, Value]>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -341,6 +350,22 @@ export class Reader {
     }
 
     return map
+  }
+
+  readArray<OutputType>(
+    reader: EntryReader<OutputType>,
+    compact: boolean = true,
+    discardTrailingTaggedFields = true
+  ): OutputType[] {
+    return this.readNullableArray(reader, compact, discardTrailingTaggedFields) || []
+  }
+
+  readMap<Key, Value>(
+    reader: EntryReader<[Key, Value]>,
+    compact: boolean = true,
+    discardTrailingTaggedFields = true
+  ): Map<Key, Value> {
+    return this.readNullableMap(reader, compact, discardTrailingTaggedFields) ?? new Map()
   }
 
   readVarIntArray<OutputType>(reader: EntryReader<OutputType>): OutputType[] {

@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -43,9 +43,9 @@ export function parseResponse (
     errorCode: reader.readInt16(),
     clientMetricsResources: reader.readArray(r => {
       return {
-        name: r.readString()!
+        name: r.readString()
       }
-    })!
+    })
   }
 
   if (response.errorCode !== 0) {
@@ -55,7 +55,9 @@ export function parseResponse (
   return response
 }
 
-export const listClientMetricsResourcesV0 = createAPI<
-  ListClientMetricsResourcesRequest,
-  ListClientMetricsResourcesResponse
->(74, 0, createRequest, parseResponse)
+export const api = createAPI<ListClientMetricsResourcesRequest, ListClientMetricsResourcesResponse>(
+  74,
+  0,
+  createRequest,
+  parseResponse
+)

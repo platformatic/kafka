@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -123,15 +123,15 @@ export function parseResponse (
   }
   const response: DescribeQuorumResponse = {
     errorCode,
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     topics: reader.readArray((r, i) => {
       return {
-        topicName: r.readString()!,
+        topicName: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
             errorCode: r.readInt16(),
-            errorMessage: r.readString(),
+            errorMessage: r.readNullableString(),
             leaderId: r.readInt32(),
             leaderEpoch: r.readInt32(),
             highWatermark: r.readInt64(),
@@ -143,7 +143,7 @@ export function parseResponse (
                 lastFetchTimestamp: r.readInt64(),
                 lastCaughtUpTimestamp: r.readInt64()
               }
-            })!,
+            }),
             observers: r.readArray(r => {
               return {
                 replicaId: r.readInt32(),
@@ -152,7 +152,7 @@ export function parseResponse (
                 lastFetchTimestamp: r.readInt64(),
                 lastCaughtUpTimestamp: r.readInt64()
               }
-            })!
+            })
           }
 
           if (partition.errorCode !== 0) {
@@ -160,21 +160,21 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!,
+    }),
     nodes: reader.readArray(r => {
       return {
         nodeId: r.readInt32(),
         listeners: r.readArray(r => {
           return {
-            name: r.readString()!,
-            host: r.readString()!,
+            name: r.readString(),
+            host: r.readString(),
             port: r.readUnsignedInt16()
           }
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -184,9 +184,4 @@ export function parseResponse (
   return response
 }
 
-export const describeQuorumV2 = createAPI<DescribeQuorumRequest, DescribeQuorumResponse>(
-  55,
-  2,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<DescribeQuorumRequest, DescribeQuorumResponse>(55, 2, createRequest, parseResponse)

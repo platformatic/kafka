@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -38,7 +38,7 @@ export function parseResponse (
   const response: UnregisterBrokerResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readString()
+    errorMessage: reader.readNullableString()
   }
 
   if (response.errorCode !== 0) {
@@ -48,9 +48,4 @@ export function parseResponse (
   return response
 }
 
-export const unregisterBrokerV0 = createAPI<UnregisterBrokerRequest, UnregisterBrokerResponse>(
-  64,
-  0,
-  createRequest,
-  parseResponse
-)
+export const api = createAPI<UnregisterBrokerRequest, UnregisterBrokerResponse>(64, 0, createRequest, parseResponse)

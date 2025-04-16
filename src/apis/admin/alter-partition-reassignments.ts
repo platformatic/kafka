@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -86,15 +86,15 @@ export function parseResponse (
   const response: AlterPartitionReassignmentsResponse = {
     throttleTimeMs,
     errorCode,
-    errorMessage: reader.readString(),
+    errorMessage: reader.readNullableString(),
     responses: reader.readArray((r, i) => {
       return {
-        name: r.readString()!,
+        name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
             errorCode: r.readInt16(),
-            errorMessage: r.readString()
+            errorMessage: r.readNullableString()
           }
 
           if (partition.errorCode !== 0) {
@@ -102,9 +102,9 @@ export function parseResponse (
           }
 
           return partition
-        })!
+        })
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -114,7 +114,9 @@ export function parseResponse (
   return response
 }
 
-export const alterPartitionReassignmentsV0 = createAPI<
-  AlterPartitionReassignmentsRequest,
-  AlterPartitionReassignmentsResponse
->(45, 0, createRequest, parseResponse)
+export const api = createAPI<AlterPartitionReassignmentsRequest, AlterPartitionReassignmentsResponse>(
+  45,
+  0,
+  createRequest,
+  parseResponse
+)

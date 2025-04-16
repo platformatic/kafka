@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -38,7 +38,12 @@ export function createRequest (
     throttle_time_ms => INT32
     error_code => INT16
 */
-export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): HeartbeatResponse {
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  raw: BufferList
+): HeartbeatResponse {
   const reader = Reader.from(raw)
 
   const response: HeartbeatResponse = {
@@ -53,4 +58,4 @@ export function parseResponse (_correlationId: number, apiKey: number, apiVersio
   return response
 }
 
-export const heartbeatV4 = createAPI<HeartbeatRequest, HeartbeatResponse>(12, 4, createRequest, parseResponse)
+export const api = createAPI<HeartbeatRequest, HeartbeatResponse>(12, 4, createRequest, parseResponse)

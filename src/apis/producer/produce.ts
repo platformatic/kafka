@@ -1,5 +1,6 @@
 import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
+import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { createRecordsBatch, type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -11,7 +12,7 @@ export type ProduceRequest = Parameters<typeof createRequest>
 
 export interface ProduceResponsePartitionRecordError {
   batchIndex: number
-  batchIndexErrorMessage: string
+  batchIndexErrorMessage: NullableString
 }
 
 export interface ProduceResponsePartition {
@@ -21,6 +22,7 @@ export interface ProduceResponsePartition {
   logAppendTimeMs: bigint
   logStartOffset: bigint
   recordErrors: ProduceResponsePartitionRecordError[]
+  errorMessage: NullableString
 }
 
 export interface ProduceResponseTopic {
@@ -115,7 +117,7 @@ export function parseResponse (
   const response: ProduceResponse = {
     responses: reader.readArray((r, i) => {
       const topicResponse = {
-        name: r.readString()!,
+        name: r.readString(),
         partitionResponses: r.readArray((r, j) => {
           const index = r.readInt32()
           const errorCode = r.readInt16()
@@ -133,7 +135,7 @@ export function parseResponse (
             recordErrors: r.readArray((r, k) => {
               const recordError = {
                 batchIndex: r.readInt32(),
-                batchIndexErrorMessage: r.readString()!
+                batchIndexErrorMessage: r.readNullableString()
               }
 
               if (recordError.batchIndexErrorMessage) {
@@ -141,13 +143,14 @@ export function parseResponse (
               }
 
               return recordError
-            })!
+            }),
+            errorMessage: r.readNullableString()
           }
-        })!
+        })
       }
 
       return topicResponse
-    })!,
+    }),
     throttleTimeMs: reader.readInt32()
   }
 
@@ -158,4 +161,4 @@ export function parseResponse (
   return response
 }
 
-export const produceV11 = createAPI<ProduceRequest, ProduceResponse | boolean>(0, 11, createRequest, parseResponse)
+export const api = createAPI<ProduceRequest, ProduceResponse | boolean>(0, 11, createRequest, parseResponse)

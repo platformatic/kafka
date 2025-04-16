@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -110,45 +110,45 @@ export function parseResponse (
 
       return {
         errorCode,
-        errorMessage: r.readString(),
-        groupId: r.readString()!,
-        groupState: r.readString()!,
+        errorMessage: r.readNullableString(),
+        groupId: r.readString(),
+        groupState: r.readString(),
         groupEpoch: r.readInt32(),
         assignmentEpoch: r.readInt32(),
-        assignorName: r.readString()!,
+        assignorName: r.readString(),
         members: r.readArray(r => {
           return {
-            memberId: r.readString()!,
-            instanceId: r.readString(),
-            rackId: r.readString(),
+            memberId: r.readString(),
+            instanceId: r.readNullableString(),
+            rackId: r.readNullableString(),
             memberEpoch: r.readInt32(),
-            clientId: r.readString()!,
-            clientHost: r.readString()!,
-            subscribedTopicNames: r.readString()!,
-            subscribedTopicRegex: r.readString(),
+            clientId: r.readString(),
+            clientHost: r.readString(),
+            subscribedTopicNames: r.readString(),
+            subscribedTopicRegex: r.readNullableString(),
             assignment: {
               topicPartitions: r.readArray(r => {
                 return {
                   topicId: r.readUUID(),
-                  topicName: r.readString()!,
-                  partitions: r.readArray(() => r.readInt32())!
+                  topicName: r.readString(),
+                  partitions: r.readArray(() => r.readInt32())
                 }
-              })!
+              })
             },
             targetAssignment: {
               topicPartitions: r.readArray(r => {
                 return {
                   topicId: r.readUUID(),
-                  topicName: r.readString()!,
-                  partitions: r.readArray(() => r.readInt32())!
+                  topicName: r.readString(),
+                  partitions: r.readArray(() => r.readInt32())
                 }
-              })!
+              })
             }
           }
-        })!,
+        }),
         authorizedOperations: r.readInt32()
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -158,7 +158,7 @@ export function parseResponse (
   return response
 }
 
-export const consumerGroupDescribeV0 = createAPI<ConsumerGroupDescribeRequest, ConsumerGroupDescribeResponse>(
+export const api = createAPI<ConsumerGroupDescribeRequest, ConsumerGroupDescribeResponse>(
   69,
   0,
   createRequest,

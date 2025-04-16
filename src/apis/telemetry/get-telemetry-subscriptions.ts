@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -64,7 +64,7 @@ export function parseResponse (
     pushIntervalMs: reader.readInt32(),
     telemetryMaxBytes: reader.readInt32(),
     deltaTemporality: reader.readBoolean(),
-    requestedMetrics: reader.readArray(r => r.readString()!, true, false)!
+    requestedMetrics: reader.readArray(r => r.readString(), true, false)!
   }
 
   if (errors.length) {
@@ -74,7 +74,9 @@ export function parseResponse (
   return response
 }
 
-export const getTelemetrySubscriptionsV0 = createAPI<
-  GetTelemetrySubscriptionsRequest,
-  GetTelemetrySubscriptionsResponse
->(71, 0, createRequest, parseResponse)
+export const api = createAPI<GetTelemetrySubscriptionsRequest, GetTelemetrySubscriptionsResponse>(
+  71,
+  0,
+  createRequest,
+  parseResponse
+)

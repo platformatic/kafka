@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -44,13 +44,13 @@ export function parseResponse (
   }
 
   if (response.errorCode !== 0) {
-    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode }, response)
+    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode! }, response)
   }
 
   return response
 }
 
-export const saslHandshakeV1 = createAPI<SaslHandshakeRequest, SaslHandshakeResponse>(
+export const api = createAPI<SaslHandshakeRequest, SaslHandshakeResponse>(
   17,
   1,
   createRequest,

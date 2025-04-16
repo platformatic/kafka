@@ -1,4 +1,4 @@
-import BufferList from 'bl'
+import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
@@ -82,11 +82,11 @@ export function parseResponse (
 
       return {
         errorCode,
-        errorMessage: r.readString(),
+        errorMessage: r.readNullableString(),
         resourceType: r.readInt8(),
-        resourceName: r.readString()!
+        resourceName: r.readString()
       }
-    })!
+    })
   }
 
   if (errors.length) {
@@ -96,4 +96,4 @@ export function parseResponse (
   return response
 }
 
-export const alterConfigsV2 = createAPI<AlterConfigsRequest, AlterConfigsResponse>(33, 2, createRequest, parseResponse)
+export const api = createAPI<AlterConfigsRequest, AlterConfigsResponse>(33, 2, createRequest, parseResponse)

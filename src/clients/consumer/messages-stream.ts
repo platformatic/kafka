@@ -1,10 +1,12 @@
 import { Readable } from 'node:stream'
 import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
 import { UserError } from '../../errors.ts'
 import { type Message } from '../../protocol/records.ts'
+import { kInspect } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
-import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
+import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../callbacks.ts'
 import { type Deserializer } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import {
@@ -18,11 +20,11 @@ import {
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
+/* c8 ignore next 3 */
 export function noopDeserializer (data?: Buffer): Buffer | undefined {
   return data
 }
 
-// TODO(ShogunPanda): Document the impact of HighWaterMark
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
@@ -39,14 +41,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #autocommitEnabled: boolean
   #autocommitInterval: NodeJS.Timeout | null = null
   #shouldClose: boolean
-  #nullPushed: boolean
+  #closeCallbacks: Callback<void>[]
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   ) {
-    super({ objectMode: true, highWaterMark: options.highWaterMark ?? 1024 })
-
     const { autocommit, mode, fallbackMode, offsets, deserializers, ..._options } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
@@ -57,6 +57,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       throw new UserError('Must specify offsets when the stream mode is MANUAL.')
     }
 
+    /* c8 ignore next 14 */
+    super({ objectMode: true, highWaterMark: options.highWaterMark ?? 1024 })
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
@@ -69,7 +71,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
     this.#autocommitEnabled = !!options.autocommit
     this.#shouldClose = false
-    this.#nullPushed = false
+    this.#closeCallbacks = []
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
@@ -83,52 +85,77 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#options = structuredClone(_options)
 
     // Start the autocommit interval
+    /* c8 ignore next */
     if (typeof autocommit === 'number' && autocommit > 0) {
       this.#autocommitInterval = setInterval(this.#autocommit.bind(this), autocommit as number)
     }
+
+    // When the consumer joins a group, we need to fetch again as the assignments
+    // will have changed so we may have gone from last  with no assignments to
+    // having some.
+    this.#consumer.on('consumer:group:join', () => {
+      this.#refreshOffsets((error: Error | null) => {
+        /* c8 ignore next 4 */
+        if (error) {
+          this.destroy(error)
+          return
+        }
+
+        this.#fetch()
+      })
+    })
   }
 
-  close (callback: CallbackWithPromise<void>): void
+  close (callback?: CallbackWithPromise<void>): void
   close (): Promise<void>
   close (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback<void>()
     }
 
-    if (this.#shouldClose) {
+    if (this.closed || this.destroyed) {
       callback(null)
       return callback[kCallbackPromise]
     }
 
-    this.#shouldClose = true
+    this.#closeCallbacks.push(callback)
 
+    if (this.#shouldClose) {
+      this.#invokeCloseCallbacks(null)
+      return callback[kCallbackPromise]
+    }
+
+    this.#shouldClose = true
+    this.push(null)
+
+    if (this.#autocommitInterval) {
+      clearInterval(this.#autocommitInterval)
+    }
+
+    // We have offsets that are being committed. These are awaited despite of the force parameters
     if (this.#offsetsToCommit.size > 0) {
       let autoCommitResult: Error | null
       let terminationResult: Error | null
 
-      if (this.#autocommitInterval) {
-        clearInterval(this.#autocommitInterval)
+      function terminationCallback (this: MessagesStream<Key, Value, HeaderKey, HeaderValue>) {
+        if (typeof autoCommitResult !== 'undefined' && typeof terminationResult !== 'undefined') {
+          this.#invokeCloseCallbacks(autoCommitResult ?? terminationResult)
+        }
       }
 
       this.#autocommit(error => {
         autoCommitResult = error
-
-        if (typeof terminationResult !== 'undefined' && typeof autoCommitResult !== 'undefined') {
-          callback(autoCommitResult ?? terminationResult)
-        }
+        terminationCallback.call(this)
       })
 
       this.#waitForTermination(error => {
         terminationResult = error
-
-        if (typeof terminationResult !== 'undefined' && typeof autoCommitResult !== 'undefined') {
-          callback(autoCommitResult ?? terminationResult)
-        }
+        terminationCallback.call(this)
       })
-
-      return callback[kCallbackPromise]
     } else {
-      this.#waitForTermination(callback)
+      this.#waitForTermination(error => {
+        this.#invokeCloseCallbacks(error)
+      })
     }
 
     return callback[kCallbackPromise]
@@ -154,6 +181,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   addListener (event: 'pause', listener: () => void): this
   addListener (event: 'readable', listener: () => void): this
   addListener (event: 'resume', listener: () => void): this
+  /* c8 ignore next 3 */
   addListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.addListener(event, listener)
   }
@@ -165,6 +193,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   on (event: 'pause', listener: () => void): this
   on (event: 'readable', listener: () => void): this
   on (event: 'resume', listener: () => void): this
+  /* c8 ignore next 3 */
   on (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener)
   }
@@ -176,6 +205,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   once (event: 'pause', listener: () => void): this
   once (event: 'readable', listener: () => void): this
   once (event: 'resume', listener: () => void): this
+  /* c8 ignore next 3 */
   once (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.once(event, listener)
   }
@@ -187,6 +217,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependListener (event: 'pause', listener: () => void): this
   prependListener (event: 'readable', listener: () => void): this
   prependListener (event: 'resume', listener: () => void): this
+  /* c8 ignore next 3 */
   prependListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.prependListener(event, listener)
   }
@@ -198,6 +229,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependOnceListener (event: 'pause', listener: () => void): this
   prependOnceListener (event: 'readable', listener: () => void): this
   prependOnceListener (event: 'resume', listener: () => void): this
+  /* c8 ignore next 3 */
   prependOnceListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.prependOnceListener(event, listener)
   }
@@ -207,43 +239,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   _construct (callback: (error?: Error) => void) {
-    // List topic offsets
-    this.#consumer.listOffsets(
-      {
-        topics: this.#topics,
-        timestamp:
-          this.#mode === MessagesStreamModes.EARLIEST ||
-          (this.#mode !== MessagesStreamModes.LATEST && this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST)
-            ? ListOffsetTimestamps.EARLIEST
-            : ListOffsetTimestamps.LATEST
-      },
-      (error, offsets) => {
-        if (error) {
-          callback(error)
-          return
-        }
-
-        if (this.#mode !== MessagesStreamModes.COMMITTED) {
-          this.#restoreOffsets(offsets, new Map(), callback)
-          return
-        }
-
-        // Now restore group offsets
-        const topics: GroupAssignment[] = []
-        for (const topic of this.#topics) {
-          topics.push(this.#assignmentsForTopic(topic)!)
-        }
-
-        this.#consumer.listCommittedOffsets({ topics }, (error, commits) => {
-          if (error) {
-            callback(error)
-            return
-          }
-
-          this.#restoreOffsets(offsets, commits, callback)
-        })
-      }
-    )
+    this.#refreshOffsets(callback as Callback<void>)
   }
 
   _destroy (error: Error | null, callback: (error?: Error | null) => void): void {
@@ -259,19 +255,28 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #fetch () {
+    /* c8 ignore next 4 */
     if (this.#shouldClose || this.closed || this.destroyed) {
-      this.#handlePostCloseCallback()
+      this.push(null)
       return
     }
 
     this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
       if (error) {
+        // The stream has been closed, ignore any error
+        /* c8 ignore next 4 */
+        if (this.#shouldClose) {
+          this.push(null)
+          return
+        }
+
         this.destroy(error)
         return
       }
 
+      /* c8 ignore next 4 */
       if (this.#shouldClose || this.closed || this.destroyed) {
-        this.#handlePostCloseCallback()
+        this.push(null)
         return
       }
 
@@ -280,7 +285,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       // Group topic-partitions by the destination broker
       for (const topic of this.#topics) {
-        const partitions = this.#assignmentsForTopic(topic)!.partitions
+        const assignment = this.#assignmentsForTopic(topic)
+
+        // This consumer has no assignment for the topic, continue
+        if (!assignment) {
+          continue
+        }
+
+        const partitions = assignment.partitions
 
         for (const partition of partitions) {
           const leader = metadata.topics.get(topic)!.partitions[partition].leader
@@ -303,6 +315,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             partitions: [
               {
                 partition,
+                /* c8 ignore next */
                 fetchOffset: this.#offsetsToFetch.get(`${topic}:${partition}`) ?? 0n,
                 partitionMaxBytes: this.#options.maxBytes!,
                 currentLeaderEpoch: -1,
@@ -319,6 +332,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           this.#inflightNodes.delete(leader)
 
           if (error) {
+            // The stream has been closed, ignore the error
+            /* c8 ignore next 4 */
+            if (this.#shouldClose) {
+              this.push(null)
+              return
+            }
+
             this.destroy(error)
             return
           }
@@ -327,19 +347,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             // When it's the last inflight, we finally close the stream.
             // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
             if (this.#inflightNodes.size === 0) {
-              this.#handlePostCloseCallback()
+              this.push(null)
             }
 
             return
           }
 
-          this.#push(metadata, topicIds, response)
+          this.#pushRecords(metadata, topicIds, response)
         })
       }
     })
   }
 
-  #push (metadata: ClusterMetadata, topicIds: Map<string, string>, response: FetchResponse) {
+  #pushRecords (metadata: ClusterMetadata, topicIds: Map<string, string>, response: FetchResponse) {
     const autocommit = this.#autocommitEnabled
     let canPush = true
 
@@ -377,7 +397,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             timestamp: firstTimestamp + record.timestampDelta,
             offset: records.firstOffset + BigInt(record.offsetDelta),
             commit: autocommit
-              ? null
+              ? noopCallback
               : this.#commit.bind(this, topic, partition, records.firstOffset + BigInt(record.offsetDelta), leaderEpoch)
           } as Message)
         }
@@ -421,13 +441,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  #autocommit (callback?: CallbackWithPromise<void>): void {
+  #autocommit (callback?: Callback<void>): void {
     if (this.#offsetsToCommit.size === 0) {
       return
     }
 
-    this.#consumer.commit({ offsets: Array.from(this.#offsetsToCommit.values()) }, error => {
+    const offsets = Array.from(this.#offsetsToCommit.values())
+    this.#offsetsToCommit.clear()
+
+    this.#consumer.commit({ offsets }, error => {
       if (error) {
+        this.emit('autocommit:error', error)
+
+        /* c8 ignore next 4 */
         if (callback) {
           callback(error)
           return
@@ -437,7 +463,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
-      this.#offsetsToCommit.clear()
+      this.emit('autocommit')
 
       if (callback) {
         callback(null)
@@ -445,7 +471,58 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     })
   }
 
-  #restoreOffsets (offsets: Offsets, commits: Offsets, callback: (error?: Error) => void) {
+  #refreshOffsets (callback: Callback<void>) {
+    // List topic offsets
+    this.#consumer.listOffsets(
+      {
+        topics: this.#topics,
+        timestamp:
+          this.#mode === MessagesStreamModes.EARLIEST ||
+          (this.#mode !== MessagesStreamModes.LATEST && this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST)
+            ? ListOffsetTimestamps.EARLIEST
+            : ListOffsetTimestamps.LATEST
+      },
+      (error, offsets) => {
+        if (error) {
+          callback(error)
+          return
+        }
+
+        if (this.#mode !== MessagesStreamModes.COMMITTED) {
+          this.#assignOffsets(offsets, new Map(), callback)
+          return
+        }
+
+        // Now restore group offsets
+        const topics: GroupAssignment[] = []
+        for (const topic of this.#topics) {
+          const assignment = this.#assignmentsForTopic(topic)
+
+          if (!assignment) {
+            continue
+          }
+
+          topics.push(assignment)
+        }
+
+        if (!topics.length) {
+          this.#assignOffsets(offsets, new Map(), callback)
+          return
+        }
+
+        this.#consumer.listCommittedOffsets({ topics }, (error, commits) => {
+          if (error) {
+            callback(error)
+            return
+          }
+
+          this.#assignOffsets(offsets, commits, callback)
+        })
+      }
+    )
+  }
+
+  #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {
     for (const [topic, partitions] of offsets) {
       for (let i = 0; i < partitions.length; i++) {
         if (!this.#offsetsToFetch.has(`${topic}:${i}`)) {
@@ -472,24 +549,25 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
-    callback()
+    callback(null)
   }
 
   #assignmentsForTopic (topic: string): GroupAssignment | undefined {
     return this.#consumer.assignments!.find(assignment => assignment.topic === topic)
   }
 
-  // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
-  #handlePostCloseCallback () {
-    if (this.#nullPushed) {
-      return
+  #waitForTermination (callback: Callback<void>) {
+    // No need to check for this.closed || this.destroyed - It happens in close
+
+    if (this.#inflightNodes.size === 0) {
+      this.push(null)
     }
 
-    this.#nullPushed = true
-    this.push(null)
-  }
+    if (this.readableFlowing === null) {
+      this.resume()
+    }
 
-  #waitForTermination (callback: CallbackWithPromise<void>) {
+    /* c8 ignore next 3 */
     this.once('error', (error: Error) => {
       callback(error)
     })
@@ -497,5 +575,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.once('close', () => {
       callback(null)
     })
+  }
+
+  #invokeCloseCallbacks (error: Error | null) {
+    for (const callback of this.#closeCallbacks) {
+      callback(error)
+    }
+
+    this.#closeCallbacks = []
+  }
+
+  /* c8 ignore next 3 */
+  [kInspect] (...args: unknown[]): void {
+    this.#consumer[kInspect](...args)
   }
 }

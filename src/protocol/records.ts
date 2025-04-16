@@ -16,16 +16,26 @@ const CURRENT_RECORD_VERSION = 2
 const IS_TRANSACTIONAL = 0b10000 // Bit 4 set
 const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
 
-export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> {
+export interface MessageBase<Key = Buffer, Value = Buffer> {
   key?: Key
   value?: Value
-  headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
   topic: string
   partition?: number
   timestamp?: bigint
-  // These are only populated and used in responses
-  offset?: bigint
-  commit?(callback?: (error?: Error) => void): void | Promise<void>
+}
+
+// This is used in produce
+export interface MessageToProduce<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer>
+  extends MessageBase<Key, Value> {
+  headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
+}
+
+// This is used in consume
+export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer>
+  extends Required<MessageBase<Key, Value>> {
+  headers: Map<HeaderKey, HeaderValue>
+  offset: bigint
+  commit(callback?: (error?: Error) => void): void | Promise<void>
 }
 
 export interface MessageRecord {
@@ -199,6 +209,7 @@ export function createRecordsBatch (
   }
 
   // Set the compression, if any
+  /* c8 ignore next */
   if ((options.compression ?? 'none') !== 'none') {
     const algorithm = compressionsAlgorithms[
       options.compression as keyof typeof compressionsAlgorithms
@@ -221,7 +232,9 @@ export function createRecordsBatch (
     .appendInt32(messages.length - 1)
     .appendInt64(BigInt(firstTimestamp))
     .appendInt64(BigInt(maxTimestamp))
+    /* c8 ignore next */
     .appendInt64(options.producerId ?? -1n)
+    /* c8 ignore next */
     .appendInt16(options.producerEpoch ?? 0)
     .appendInt32(firstSequence)
     .appendInt32(messages.length) // Number of records

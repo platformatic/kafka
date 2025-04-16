@@ -2,7 +2,11 @@ import { type Callback } from '../apis/definitions.ts'
 import { MultipleErrors } from '../errors.ts'
 
 export const kCallbackPromise = Symbol('plt.kafka.callbackPromise')
-export const noopCallback: CallbackWithPromise<any> = () => {}
+
+/* c8 ignore next 3 */
+export const noopCallback: CallbackWithPromise<any> = () => {
+  return Promise.resolve()
+}
 
 export type CallbackWithPromise<ReturnType> = Callback<ReturnType> & { [kCallbackPromise]?: Promise<ReturnType> }
 

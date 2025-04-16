@@ -1,6 +1,6 @@
 # @platformatic/kafka
 
-A modern, high-performance, pure JavaScript client for Apache Kafka.
+A modern, high-performance, pure TypeScript/JavaScript type safe client for Apache Kafka.
 
 ## Features
 
@@ -40,7 +40,7 @@ await producer.send({
       topic: 'events',
       key: 'user-123',
       value: JSON.stringify({ name: 'John', action: 'login' }),
-      headers: new Map([['source', 'web-app']])
+      headers: { source: 'web-app' }
     }
   ]
 })
@@ -151,7 +151,7 @@ import {
   Producer,
   stringDeserializer,
   stringSerializer
-} from '../src/index.ts'
+} from '@platformatic/kafka'
 
 type Strings = string[]
 
@@ -234,7 +234,7 @@ Internally, it does not use a single promise to minimise event loop overheads.
 
 It also uses a higher watermark for consumer streams. This improves the throughput but also impacts the memory usage.
 By default, it uses a value of `1024` (while Node.js default value is `16`). This means that potentially each stream can put more than a thousand objects in memory.
-If each object is 1MB, this means 1GB of RAM per stream.
+If each object is 1MB, this means 1GB of RAM per stream. Tune this accordingly.
 
 This value can be changed using the `highWaterMark` option of the `Consumer`.
 

@@ -1,11 +1,11 @@
 import { Unpromise } from '@watchable/unpromise'
 import { Ajv } from 'ajv'
 import ajvErrors from 'ajv-errors'
-import type BufferList from 'bl'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { inspect } from 'node:util'
 
 import debug from 'debug'
+import { type DynamicBuffer } from './protocol/dynamic-buffer.ts'
 
 export type DebugDumpLogger = (...args: any[]) => void
 
@@ -134,7 +134,7 @@ export function groupByProperty<Key, Value> (entries: Value[], property: keyof V
   return result
 }
 
-export function humanize (label: string, buffer: Buffer | BufferList): string {
+export function humanize (label: string, buffer: Buffer | DynamicBuffer): string {
   const formatted = buffer
     .toString('hex')
     .replaceAll(/(.{4})/g, '$1 ')

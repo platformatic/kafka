@@ -17,7 +17,7 @@ test('createRequest serializes parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all the values
   const readValues = {
@@ -55,7 +55,7 @@ test('createRequest with terminating flag true', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all the values
   const readValues = {
@@ -93,7 +93,7 @@ test('createRequest with empty metrics', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all the values
   const readValues = {
@@ -125,7 +125,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 72, 0, writer.bufferList)
+  const response = parseResponse(1, 72, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -141,7 +141,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 72, 0, writer.bufferList)
+  const response = parseResponse(1, 72, 0, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -159,7 +159,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 72, 0, writer.bufferList)
+      parseResponse(1, 72, 0, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

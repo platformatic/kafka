@@ -16,7 +16,7 @@ test('createRequest serializes parameters correctly for commit', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all values and verify them at once
   deepStrictEqual(
@@ -47,7 +47,7 @@ test('createRequest serializes parameters correctly for abort', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all values and verify them at once
   deepStrictEqual(
@@ -73,7 +73,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 26, 4, writer.bufferList)
+  const response = parseResponse(1, 26, 4, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -89,7 +89,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 26, 4, writer.bufferList)
+  const response = parseResponse(1, 26, 4, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -107,7 +107,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 26, 4, writer.bufferList)
+      parseResponse(1, 26, 4, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

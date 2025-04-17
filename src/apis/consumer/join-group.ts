@@ -1,7 +1,6 @@
-import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { EMPTY_BUFFER, type NullableString } from '../../protocol/definitions.ts'
-import { Reader } from '../../protocol/reader.ts'
+import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
@@ -87,10 +86,8 @@ export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ): JoinGroupResponse {
-  const reader = Reader.from(raw)
-
   const response: JoinGroupResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),

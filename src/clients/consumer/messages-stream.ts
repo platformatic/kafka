@@ -39,7 +39,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #headerKeyDeserializer: Deserializer<HeaderKey>
   #headerValueDeserializer: Deserializer<HeaderValue>
   #autocommitEnabled: boolean
-  #autocommitInterval: NodeJS.Timeout | null = null
+  #autocommitInterval: NodeJS.Timeout | null
+  #autocommitInflight: boolean
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
 
@@ -70,6 +71,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#headerKeyDeserializer = deserializers?.headerKey ?? (noopDeserializer as Deserializer<HeaderKey>)
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
     this.#autocommitEnabled = !!options.autocommit
+    this.#autocommitInflight = false
     this.#shouldClose = false
     this.#closeCallbacks = []
 
@@ -88,6 +90,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     /* c8 ignore next */
     if (typeof autocommit === 'number' && autocommit > 0) {
       this.#autocommitInterval = setInterval(this.#autocommit.bind(this), autocommit as number)
+    } else {
+      this.#autocommitInterval = null
     }
 
     // When the consumer joins a group, we need to fetch again as the assignments
@@ -132,31 +136,34 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       clearInterval(this.#autocommitInterval)
     }
 
-    // We have offsets that are being committed. These are awaited despite of the force parameters
-    if (this.#offsetsToCommit.size > 0) {
-      let autoCommitResult: Error | null
-      let terminationResult: Error | null
+    if (this.readableFlowing === null || this.isPaused()) {
+      this.removeAllListeners('data')
+      this.removeAllListeners('readable')
+      this.resume()
+    }
 
-      function terminationCallback (this: MessagesStream<Key, Value, HeaderKey, HeaderValue>) {
-        if (typeof autoCommitResult !== 'undefined' && typeof terminationResult !== 'undefined') {
-          this.#invokeCloseCallbacks(autoCommitResult ?? terminationResult)
-        }
+    /* c8 ignore next 3 */
+    this.once('error', (error: Error) => {
+      callback(error)
+    })
+
+    this.once('close', () => {
+      // We have offsets that were enqueued to be committed. Perform the operation
+      if (this.#offsetsToCommit.size > 0) {
+        this.#autocommit()
       }
 
-      this.#autocommit(error => {
-        autoCommitResult = error
-        terminationCallback.call(this)
-      })
+      // We have offsets that are being committed. These are awaited despite of the force parameters
+      if (this.#autocommitInflight) {
+        this.once('autocommit', error => {
+          this.#invokeCloseCallbacks(error)
+        })
 
-      this.#waitForTermination(error => {
-        terminationResult = error
-        terminationCallback.call(this)
-      })
-    } else {
-      this.#waitForTermination(error => {
-        this.#invokeCloseCallbacks(error)
-      })
-    }
+        return
+      }
+
+      this.#invokeCloseCallbacks(null)
+    })
 
     return callback[kCallbackPromise]
   }
@@ -166,14 +173,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     * Event emitter
     * The defined events on documents including:
-    * 1. close
-    * 2. data
-    * 3. end
-    * 4. error
-    * 5. pause
-    * 6. readable
-    * 7. resume
+    *
+    * Readable:
+    *   1. close
+    *   2. data
+    *   3. end
+    *   4. error
+    *   5. pause
+    *   6. readable
+    *   7. resume
+    * Custom:
+    *   8. autocommit
   */
+  addListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   addListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   addListener (event: 'close', listener: () => void): this
   addListener (event: 'end', listener: () => void): this
@@ -186,6 +198,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super.addListener(event, listener)
   }
 
+  on (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   on (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   on (event: 'close', listener: () => void): this
   on (event: 'end', listener: () => void): this
@@ -198,6 +211,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super.on(event, listener)
   }
 
+  once (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   once (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   once (event: 'close', listener: () => void): this
   once (event: 'end', listener: () => void): this
@@ -441,33 +455,25 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  #autocommit (callback?: Callback<void>): void {
+  #autocommit (): void {
     if (this.#offsetsToCommit.size === 0) {
       return
     }
 
+    this.#autocommitInflight = true
     const offsets = Array.from(this.#offsetsToCommit.values())
     this.#offsetsToCommit.clear()
 
     this.#consumer.commit({ offsets }, error => {
+      this.#autocommitInflight = false
+
       if (error) {
-        this.emit('autocommit:error', error)
-
-        /* c8 ignore next 4 */
-        if (callback) {
-          callback(error)
-          return
-        }
-
+        this.emit('autocommit', error)
         this.destroy(error)
         return
       }
 
-      this.emit('autocommit')
-
-      if (callback) {
-        callback(null)
-      }
+      this.emit('autocommit', null, offsets)
     })
   }
 
@@ -554,27 +560,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   #assignmentsForTopic (topic: string): GroupAssignment | undefined {
     return this.#consumer.assignments!.find(assignment => assignment.topic === topic)
-  }
-
-  #waitForTermination (callback: Callback<void>) {
-    // No need to check for this.closed || this.destroyed - It happens in close
-
-    if (this.#inflightNodes.size === 0) {
-      this.push(null)
-    }
-
-    if (this.readableFlowing === null) {
-      this.resume()
-    }
-
-    /* c8 ignore next 3 */
-    this.once('error', (error: Error) => {
-      callback(error)
-    })
-
-    this.once('close', () => {
-      callback(null)
-    })
   }
 
   #invokeCloseCallbacks (error: Error | null) {

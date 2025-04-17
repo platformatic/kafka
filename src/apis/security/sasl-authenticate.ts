@@ -1,7 +1,6 @@
-import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
-import { Reader } from '../../protocol/reader.ts'
+import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { type API, createAPI } from '../definitions.ts'
 
@@ -35,10 +34,8 @@ export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ): SaslAuthenticateResponse {
-  const reader = Reader.from(raw)
-
   const response: SaslAuthenticateResponse = {
     errorCode: reader.readInt16(),
     errorMessage: reader.readNullableString(),

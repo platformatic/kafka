@@ -1,6 +1,6 @@
 // Based on the work from: https://github.com/tulios/kafkajs/blob/master/src/protocol/recordBatch/crc32C/crc32C.js
 
-import BufferList from 'bl'
+import { DynamicBuffer } from './dynamic-buffer.ts'
 
 /* prettier-ignore */
 const CRC: number[] = [
@@ -70,12 +70,12 @@ const CRC: number[] = [
   0xbe2da0a5, 0x4c4623a6, 0x5f16d052, 0xad7d5351
 ]
 
-export function crc32c (data: Buffer | BufferList): number {
+export function crc32c (data: Buffer | DynamicBuffer): number {
   let crc = 0 ^ -1
 
-  if (BufferList.isBufferList(data)) {
+  if (DynamicBuffer.isDynamicBuffer(data)) {
     for (let i = 0; i < data.length; i++) {
-      crc = CRC[(crc ^ (data as BufferList).get(i)) & 0xff] ^ (crc >>> 8)
+      crc = CRC[(crc ^ (data as DynamicBuffer).get(i)) & 0xff] ^ (crc >>> 8)
     }
   } else {
     for (let i = 0; i < data.length; i++) {

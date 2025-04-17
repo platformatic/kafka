@@ -12,7 +12,7 @@ test('createRequest with client instance ID', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify values
   deepStrictEqual(
@@ -33,7 +33,7 @@ test('createRequest without client instance ID uses default UUID', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify values
   deepStrictEqual(
@@ -77,7 +77,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 71, 0, writer.bufferList)
+  const response = parseResponse(1, 71, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -119,7 +119,7 @@ test('parseResponse handles response with empty arrays', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 71, 0, writer.bufferList)
+  const response = parseResponse(1, 71, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -165,7 +165,7 @@ test('parseResponse handles response with throttling', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 71, 0, writer.bufferList)
+  const response = parseResponse(1, 71, 0, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -209,7 +209,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 71, 0, writer.bufferList)
+      parseResponse(1, 71, 0, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

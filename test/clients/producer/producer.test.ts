@@ -15,6 +15,7 @@ import {
   produceV11,
   ProtocolError,
   type ResponseParser,
+  stringSerializer,
   stringSerializers,
   UserError,
   type Writer
@@ -388,11 +389,11 @@ test('send should support messages with keys', async t => {
 })
 
 test('send should support messages with headers', async t => {
-  const client = createTestProducer(t)
   const testTopic = getTestTopicName()
 
   // Produce a message with headers using Map
-  const result1 = await client.send({
+  const client1 = createTestProducer(t)
+  const result1 = await client1.send({
     messages: [
       {
         topic: testTopic,
@@ -411,14 +412,18 @@ test('send should support messages with headers', async t => {
   strictEqual(result1.offsets?.length, 1)
 
   // Produce a message with headers using object
-  const result2 = await client.send({
+  const client2 = createTestProducer(t, {
+    serializers: { headerKey: stringSerializer }
+  })
+
+  const result2 = await client2.send({
     messages: [
       {
         topic: testTopic,
         value: Buffer.from('message-with-object-headers'),
         headers: {
-          [Buffer.from('header-key-1').toString()]: Buffer.from('header-value-1'),
-          [Buffer.from('header-key-2').toString()]: Buffer.from('header-value-2')
+          'header-key-1': Buffer.from('header-value-1'),
+          'header-key-2': Buffer.from('header-value-2')
         }
       }
     ],

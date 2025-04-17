@@ -1,4 +1,4 @@
-import type BufferList from 'bl'
+import { type DynamicBuffer } from './dynamic-buffer.ts'
 
 export const INT8_SIZE = 1
 export const INT16_SIZE = 2
@@ -15,6 +15,6 @@ export const EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE = INT8_SIZE
 // TODO(ShogunPanda): Tagged fields are not supported yet
 export const EMPTY_TAGGED_FIELDS_BUFFER = Buffer.from([0])
 
-export type Collection = string | Buffer | BufferList | Array<unknown> | Map<unknown, unknown> | Set<unknown>
+export type Collection = string | Buffer | DynamicBuffer | Array<unknown> | Map<unknown, unknown> | Set<unknown>
 
 export type NullableString = string | undefined | null

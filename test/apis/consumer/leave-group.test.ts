@@ -20,7 +20,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify group ID
   deepStrictEqual(reader.readString(), groupId)
@@ -64,7 +64,7 @@ test('createRequest with group instance ID', () => {
   const writer = createRequest(groupId, members)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip to members
   reader.readString() // Group ID
@@ -95,7 +95,7 @@ test('createRequest with reason', () => {
   const writer = createRequest(groupId, members)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip to members
   reader.readString() // Group ID
@@ -131,7 +131,7 @@ test('createRequest with multiple members', () => {
   const writer = createRequest(groupId, members)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip to members
   reader.readString() // Group ID
@@ -180,7 +180,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 13, 5, writer.bufferList)
+  const response = parseResponse(1, 13, 5, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -212,7 +212,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 13, 5, writer.bufferList)
+      parseResponse(1, 13, 5, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -256,7 +256,7 @@ test('parseResponse handles member-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 13, 5, writer.bufferList)
+      parseResponse(1, 13, 5, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -308,7 +308,7 @@ test('parseResponse handles multiple members', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 13, 5, writer.bufferList)
+  const response = parseResponse(1, 13, 5, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {

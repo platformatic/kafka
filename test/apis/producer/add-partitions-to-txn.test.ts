@@ -26,7 +26,7 @@ test('createRequest serializes basic transaction parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the transactions array
   const transactionsArray = reader.readArray(() => {
@@ -102,7 +102,7 @@ test('createRequest serializes multiple transactions correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the transactions array
   const transactionsArray = reader.readArray(() => {
@@ -194,7 +194,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 24, 5, writer.bufferList)
+  const response = parseResponse(1, 24, 5, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -283,7 +283,7 @@ test('parseResponse correctly processes a complex response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 24, 5, writer.bufferList)
+  const response = parseResponse(1, 24, 5, Reader.from(writer))
 
   // Verify full response structure
   deepStrictEqual(response, {
@@ -347,7 +347,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 24, 5, writer.bufferList)
+      parseResponse(1, 24, 5, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -407,7 +407,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 24, 5, writer.bufferList)
+      parseResponse(1, 24, 5, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

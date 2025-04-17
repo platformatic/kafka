@@ -16,7 +16,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify all the parameters and tagged fields
   const data = {
@@ -44,7 +44,7 @@ test('createRequest with group instance ID', () => {
   const writer = createRequest(groupId, generationId, memberId, groupInstanceId)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all parameters and verify correctness
   const data = {
@@ -73,7 +73,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 12, 4, writer.bufferList)
+  const response = parseResponse(1, 12, 4, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -89,7 +89,7 @@ test('parseResponse handles throttling', () => {
     .appendInt16(0) // errorCode (success)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 12, 4, writer.bufferList)
+  const response = parseResponse(1, 12, 4, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -108,7 +108,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 12, 4, writer.bufferList)
+      parseResponse(1, 12, 4, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -138,7 +138,7 @@ test('parseResponse handles rebalance in progress', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 12, 4, writer.bufferList)
+      parseResponse(1, 12, 4, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

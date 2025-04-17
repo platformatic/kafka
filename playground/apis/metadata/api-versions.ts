@@ -1,4 +1,4 @@
-import { apiVersionsV4 } from '../../../src/apis/metadata/api-versions.ts'
+import { api as apiVersionsV4 } from '../../../src/apis/metadata/api-versions.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

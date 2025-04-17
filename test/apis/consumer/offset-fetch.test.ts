@@ -26,7 +26,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read groups array
   const groupsArray = reader.readArray(() => {
@@ -86,7 +86,7 @@ test('createRequest with specific member ID and epoch', () => {
   const writer = createRequest(groups, requireStable)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read groups array
   const groupsArray = reader.readArray(() => {
@@ -143,12 +143,12 @@ test('createRequest with requireStable flag set to true', () => {
   ok(writer2 instanceof Writer, 'Should return a Writer instance')
 
   // Verify the requireStable flag is properly handled by checking distinct buffer content
-  const buf1 = writer1.bufferList.slice()
-  const buf2 = writer2.bufferList.slice()
+  const buf1 = writer1.dynamicBuffer.slice()
+  const buf2 = writer2.dynamicBuffer.slice()
   ok(!buf1.equals(buf2), 'Buffers should be different based on requireStable flag')
 
   // Read the serialized data from the true version to verify correctness
-  const reader = new Reader(writer1.bufferList)
+  const reader = Reader.from(writer1)
 
   // Read groups array count - the exact value appears to vary based on protocol details
   const groupsCount = reader.readUnsignedVarInt()
@@ -233,7 +233,7 @@ test('createRequest with multiple groups and topics', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the complete groups array like in the first test case
   const groupsArray = reader.readArray(() => {
@@ -376,7 +376,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 9, 9, writer.bufferList)
+  const response = parseResponse(1, 9, 9, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -429,7 +429,7 @@ test('parseResponse handles group-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 9, 9, writer.bufferList)
+      parseResponse(1, 9, 9, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -503,7 +503,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 9, 9, writer.bufferList)
+      parseResponse(1, 9, 9, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -624,7 +624,7 @@ test('parseResponse handles multiple groups, topics, and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 9, 9, writer.bufferList)
+  const response = parseResponse(1, 9, 9, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {

@@ -29,7 +29,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and store basic parameters
   const basicParams = {
@@ -110,7 +110,7 @@ test('createRequest with committed metadata', () => {
   const writer = createRequest(groupId, generationIdOrMemberEpoch, memberId, groupInstanceId, topics)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all basic parameters
   const basicParams = {
@@ -191,7 +191,7 @@ test('createRequest with group instance ID', () => {
   const writer = createRequest(groupId, generationIdOrMemberEpoch, memberId, groupInstanceId, topics)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all parameters
   const serializedData = {
@@ -256,7 +256,7 @@ test('createRequest with multiple topics and partitions', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read basic parameters
   const basicParams = {
@@ -357,7 +357,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 8, 9, writer.bufferList)
+  const response = parseResponse(1, 8, 9, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -406,7 +406,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 8, 9, writer.bufferList)
+      parseResponse(1, 8, 9, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -476,7 +476,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 8, 9, writer.bufferList)
+  const response = parseResponse(1, 8, 9, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {

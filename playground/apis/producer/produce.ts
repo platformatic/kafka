@@ -1,4 +1,4 @@
-import { produceV11 } from '../../../src/apis/producer/produce.ts'
+import { api as produceV11 } from '../../../src/apis/producer/produce.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

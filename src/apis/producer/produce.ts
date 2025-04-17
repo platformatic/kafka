@@ -1,7 +1,6 @@
-import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
-import { Reader } from '../../protocol/reader.ts'
+import { type Reader } from '../../protocol/reader.ts'
 import { createRecordsBatch, type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { groupByProperty } from '../../utils.ts'
@@ -76,7 +75,7 @@ export function createRequest (
 
           w.appendInt32(partition)
             .appendUnsignedVarInt(records.length + 1)
-            .append(records)
+            .appendFrom(records)
         }
       )
     })
@@ -109,9 +108,8 @@ export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ): ProduceResponse {
-  const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 
   const response: ProduceResponse = {

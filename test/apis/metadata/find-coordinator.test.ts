@@ -15,7 +15,7 @@ test('createRequest serializes request parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify all data in a single assertion
   deepStrictEqual(
@@ -42,7 +42,7 @@ test('createRequest handles transaction coordinator key type', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify all data in a single assertion
   deepStrictEqual(
@@ -93,7 +93,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendUnsignedVarInt(0) // root tagged fields
 
-  const response = parseResponse(1, 10, 6, writer.bufferList)
+  const response = parseResponse(1, 10, 6, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -146,7 +146,7 @@ test('parseResponse handles response with throttling', () => {
     )
     .appendUnsignedVarInt(0) // root tagged fields
 
-  const response = parseResponse(1, 10, 6, writer.bufferList)
+  const response = parseResponse(1, 10, 6, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -194,7 +194,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 10, 6, writer.bufferList)
+      parseResponse(1, 10, 6, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

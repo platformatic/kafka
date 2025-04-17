@@ -1,17 +1,21 @@
-import BufferList from 'bl'
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { EMPTY_UUID, Writer } from '../../src/index.ts'
+import { DynamicBuffer, EMPTY_UUID, Writer } from '../../src/index.ts'
 
-test('create', () => {
+test('static isWriter', () => {
+  ok(Writer.isWriter(new Writer()))
+  ok(!Writer.isWriter('STRING'))
+})
+
+test('static create', () => {
   const writer = Writer.create()
   strictEqual(writer instanceof Writer, true)
   strictEqual(writer.length, 0)
 })
 
 test('constructor', () => {
-  const bl = new BufferList(Buffer.from([1, 2, 3]))
-  const writer = new Writer(bl)
+  const dynamic = new DynamicBuffer(Buffer.from([1, 2, 3]))
+  const writer = new Writer(dynamic)
 
   strictEqual(writer.length, 3)
   deepStrictEqual(writer.buffers, [Buffer.from([1, 2, 3])])
@@ -19,8 +23,8 @@ test('constructor', () => {
   // Test the buffer getter
   deepStrictEqual(writer.buffer, Buffer.from([1, 2, 3]))
 
-  // Test the bufferList getter
-  strictEqual(writer.bufferList, bl)
+  // Test the dynamicBuffer getter
+  deepStrictEqual(writer.dynamicBuffer, dynamic)
 })
 
 test('append and prepend', () => {
@@ -32,6 +36,82 @@ test('append and prepend', () => {
   // Verify the buffer content
   const buffer = Buffer.concat(writer.buffers)
   deepStrictEqual(buffer, Buffer.from([3, 4, 1, 2]))
+})
+
+test('appendFrom', () => {
+  // Test appending from another Writer
+  const writer1 = Writer.create()
+  writer1.appendInt8(1)
+  writer1.appendInt8(2)
+
+  const writer2 = Writer.create()
+  writer2.appendInt8(3)
+  writer2.appendInt8(4)
+
+  const result = writer1.appendFrom(writer2)
+  strictEqual(result, writer1) // Should return this
+  strictEqual(writer1.length, 4)
+  deepStrictEqual(writer1.buffer, Buffer.from([1, 2, 3, 4]))
+
+  // Test appending from a DynamicBuffer
+  const writer3 = Writer.create()
+  writer3.appendInt8(5)
+
+  const dynamicBuffer = new DynamicBuffer(Buffer.from([6, 7]))
+  writer3.appendFrom(dynamicBuffer)
+
+  strictEqual(writer3.length, 3)
+  deepStrictEqual(writer3.buffer, Buffer.from([5, 6, 7]))
+
+  // Test appending from empty sources
+  const emptyWriter = Writer.create()
+  const sourceWriter = Writer.create()
+  sourceWriter.appendInt8(8)
+
+  emptyWriter.appendFrom(Writer.create()) // Empty writer
+  strictEqual(emptyWriter.length, 0) // Should remain empty
+
+  emptyWriter.appendFrom(sourceWriter)
+  strictEqual(emptyWriter.length, 1)
+  deepStrictEqual(emptyWriter.buffer, Buffer.from([8]))
+})
+
+test('prependFrom', () => {
+  // Test prepending from another Writer
+  const writer1 = Writer.create()
+  writer1.appendInt8(3)
+  writer1.appendInt8(4)
+
+  const writer2 = Writer.create()
+  writer2.appendInt8(1)
+  writer2.appendInt8(2)
+
+  const result = writer1.prependFrom(writer2)
+  strictEqual(result, writer1) // Should return this
+  strictEqual(writer1.length, 4)
+  deepStrictEqual(writer1.buffer, Buffer.from([1, 2, 3, 4]))
+
+  // Test prepending from a DynamicBuffer
+  const writer3 = Writer.create()
+  writer3.appendInt8(7)
+
+  const dynamicBuffer = new DynamicBuffer(Buffer.from([5, 6]))
+  writer3.prependFrom(dynamicBuffer)
+
+  strictEqual(writer3.length, 3)
+  deepStrictEqual(writer3.buffer, Buffer.from([5, 6, 7]))
+
+  // Test prepending from empty sources
+  const emptyWriter = Writer.create()
+  const sourceWriter = Writer.create()
+  sourceWriter.appendInt8(8)
+
+  emptyWriter.prependFrom(Writer.create()) // Empty writer
+  strictEqual(emptyWriter.length, 0) // Should remain empty
+
+  emptyWriter.prependFrom(sourceWriter)
+  strictEqual(emptyWriter.length, 1)
+  deepStrictEqual(emptyWriter.buffer, Buffer.from([8]))
 })
 
 test('inspect', () => {

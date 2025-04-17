@@ -14,7 +14,7 @@ test('createRequest serializes client software name and version correctly', () =
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all values and verify them at once
   deepStrictEqual(
@@ -40,7 +40,7 @@ test('createRequest handles empty values', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all values and verify them at once
   deepStrictEqual(
@@ -73,7 +73,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(0) // throttleTimeMs
     .appendUnsignedVarInt(0) // tagged fields
 
-  const response = parseResponse(1, 18, 4, writer.bufferList)
+  const response = parseResponse(1, 18, 4, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -107,7 +107,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt32(100) // throttleTimeMs - non-zero value
     .appendUnsignedVarInt(0) // tagged fields
 
-  const response = parseResponse(1, 18, 4, writer.bufferList)
+  const response = parseResponse(1, 18, 4, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -135,7 +135,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 18, 4, writer.bufferList)
+      parseResponse(1, 18, 4, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

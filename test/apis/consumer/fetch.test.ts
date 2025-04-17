@@ -44,7 +44,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify basic parameters
   deepStrictEqual(
@@ -177,7 +177,7 @@ test('createRequest serializes multiple topics and partitions', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify basic parameters
   const basicParams = {
@@ -227,7 +227,7 @@ test('createRequest handles forgotten topics data', () => {
       partitions: [0, 1] // The original partition numbers
     }
   ]
-  const rackId = ''
+  const rackId = 'rack'
 
   const writer = createRequest(
     maxWaitMs,
@@ -245,7 +245,7 @@ test('createRequest handles forgotten topics data', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the serialized data to verify correctness step by step
   // Basic parameters
@@ -317,7 +317,7 @@ test('createRequest handles forgotten topics data', () => {
   // Forgotten topics array
   const forgottenTopicsRead = reader.readArray(() => {
     const topic = reader.readUUID()
-    const partitions = reader.readArray(() => reader.readInt32())
+    const partitions = reader.readArray(() => reader.readInt32(), true, false)
     return { topic, partitions }
   })
 
@@ -375,7 +375,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, writer.bufferList)
+  const response = parseResponse(1, 1, 17, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -415,7 +415,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 17, writer.bufferList)
+      parseResponse(1, 1, 17, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -483,7 +483,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 17, writer.bufferList)
+      parseResponse(1, 1, 17, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -586,7 +586,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, writer.bufferList)
+  const response = parseResponse(1, 1, 17, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -692,19 +692,18 @@ test('parseResponse handles aborted transactions', () => {
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array
               .appendArray(partition.abortedTransactions, (w, txn) => {
-                w.appendInt64(txn.producerId).appendInt64(txn.firstOffset).appendInt8(0) // Tagged fields for aborted transaction
+                w.appendInt64(txn.producerId).appendInt64(txn.firstOffset)
               })
               .appendInt32(partition.preferredReadReplica)
-
               // Add empty records batch
               .appendUnsignedVarInt(partition.recordsBatch.length + 2) // Records size (including varint length)
-              .append(partition.recordsBatch.bufferList)
+              .appendFrom(partition.recordsBatch)
           })
       }
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, writer.bufferList)
+  const response = parseResponse(1, 1, 17, Reader.from(writer))
 
   // Verify aborted transactions and records
   deepStrictEqual(
@@ -794,13 +793,13 @@ test('parseResponse parses record data', () => {
 
               // Add records batch
               .appendUnsignedVarInt(partition.recordsBatch.length + 2) // Records size (including varint length)
-              .append(partition.recordsBatch.bufferList)
+              .appendFrom(partition.recordsBatch)
           })
       }
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, writer.bufferList)
+  const response = parseResponse(1, 1, 17, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')

@@ -16,7 +16,7 @@ test('createRequest serializes request parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the entire request structure and verify in one assertion
   const serialized = {
@@ -54,7 +54,7 @@ test('createRequest handles null topics', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read the entire request structure and verify in one assertion
   const serialized = {
@@ -148,7 +148,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 3, 12, writer.bufferList)
+  const response = parseResponse(1, 3, 12, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -219,7 +219,7 @@ test('parseResponse handles response with throttling', () => {
     .appendArray([], () => {})
     .appendInt8(0) // root tagged fields
 
-  const response = parseResponse(1, 3, 12, writer.bufferList)
+  const response = parseResponse(1, 3, 12, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -288,7 +288,7 @@ test('parseResponse throws error on topic error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 3, 12, writer.bufferList)
+      parseResponse(1, 3, 12, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -381,7 +381,7 @@ test('parseResponse throws error on partition error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 3, 12, writer.bufferList)
+      parseResponse(1, 3, 12, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

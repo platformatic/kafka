@@ -31,7 +31,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify basic parameters
   deepStrictEqual(
@@ -105,7 +105,7 @@ test('createRequest with topic partitions', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip to topic partitions
   reader.readString() // Group ID
@@ -168,7 +168,7 @@ test('createRequest with instance ID and rack ID', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip to instance ID and rack ID
   reader.readString() // Group ID
@@ -203,7 +203,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendArray([], () => {}) // Empty assignment
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 68, 0, writer.bufferList)
+  const response = parseResponse(1, 68, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -251,7 +251,7 @@ test('parseResponse with assignment', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 68, 0, writer.bufferList)
+  const response = parseResponse(1, 68, 0, Reader.from(writer))
 
   // Verify assignment structure
   deepStrictEqual(response.assignment, [
@@ -282,7 +282,7 @@ test('parseResponse handles throttling', () => {
     .appendArray([], () => {}) // Empty assignment
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 68, 0, writer.bufferList)
+  const response = parseResponse(1, 68, 0, Reader.from(writer))
 
   // Verify response structure with throttling
   deepStrictEqual(response, {
@@ -311,7 +311,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 68, 0, writer.bufferList)
+      parseResponse(1, 68, 0, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

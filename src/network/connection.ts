@@ -1,4 +1,3 @@
-import BufferList from 'bl'
 import fastq from 'fastq'
 import EventEmitter from 'node:events'
 import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
@@ -8,6 +7,7 @@ import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise }
 import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
+import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
 import { Reader } from '../protocol/reader.ts'
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
@@ -69,7 +69,7 @@ export class Connection extends EventEmitter {
   #afterDrainRequests: Request[]
   #requestsQueue: fastq.queue<(callback: CallbackWithPromise<any>) => void>
   #inflightRequests: Map<number, Request>
-  #responseBuffer: BufferList
+  #responseBuffer: DynamicBuffer
   #responseReader: Reader
   #socket!: Socket
   #socketMustBeDrained: boolean
@@ -87,7 +87,7 @@ export class Connection extends EventEmitter {
     this.#afterDrainRequests = []
     this.#requestsQueue = fastq((op, cb) => op(cb), this.#options.maxInflights!)
     this.#inflightRequests = new Map()
-    this.#responseBuffer = new BufferList()
+    this.#responseBuffer = new DynamicBuffer()
     this.#responseReader = new Reader(this.#responseBuffer)
     this.#socketMustBeDrained = false
   }
@@ -143,6 +143,7 @@ export class Connection extends EventEmitter {
     this.#socket = this.#options.tls
       ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
       : createConnection({ ...connectionOptions, port, host })
+    this.#socket.setNoDelay(true)
 
     this.#socket.once('connect', () => {
       this.#socket.removeListener('timeout', connectionTimeoutHandler)
@@ -287,7 +288,7 @@ export class Connection extends EventEmitter {
     }
 
     const payload = payloadFn()
-    writer.append(payload.bufferList)
+    writer.appendFrom(payload)
     writer.prependLength()
 
     // Write the header
@@ -373,7 +374,9 @@ export class Connection extends EventEmitter {
           correlationId,
           apiKey,
           apiVersion,
-          this.#responseReader.buffer.shallowSlice(this.#responseReader.position, this.#nextMessage + INT32_SIZE)
+          new Reader(
+            this.#responseReader.buffer.subarray(this.#responseReader.position, this.#nextMessage + INT32_SIZE)
+          )
         )
       } catch (error) {
         responseError = error

@@ -14,7 +14,7 @@ test('createRequest serializes auth bytes correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify the complete request structure with deepStrictEqual
   deepStrictEqual(
@@ -38,7 +38,7 @@ test('createRequest handles empty auth bytes', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify the complete request structure with deepStrictEqual
   deepStrictEqual(
@@ -61,7 +61,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt64(7200000n) // session lifetime in ms (2 hours)
     .appendTaggedFields()
 
-  const response = parseResponse(1, 36, 2, writer.bufferList)
+  const response = parseResponse(1, 36, 2, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -83,7 +83,7 @@ test('parseResponse handles response with detailed error message', () => {
 
   throws(
     () => {
-      parseResponse(1, 36, 2, writer.bufferList)
+      parseResponse(1, 36, 2, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

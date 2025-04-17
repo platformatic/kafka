@@ -1,6 +1,5 @@
-import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
-import { Reader } from '../../protocol/reader.ts'
+import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
 
@@ -31,10 +30,8 @@ export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ): ExpireDelegationTokenResponse {
-  const reader = Reader.from(raw)
-
   const response: ExpireDelegationTokenResponse = {
     errorCode: reader.readInt16(),
     expiryTimestampMs: reader.readInt64(),

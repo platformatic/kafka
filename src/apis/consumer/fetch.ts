@@ -1,4 +1,3 @@
-import type BufferList from 'bl'
 import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { readRecordsBatch, type RecordsBatch } from '../../protocol/records.ts'
@@ -141,9 +140,8 @@ export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ): FetchResponse {
-  const reader = Reader.from(raw)
   const errors: ResponseErrorWithLocation[] = []
 
   const throttleTimeMs = reader.readInt32()
@@ -185,9 +183,7 @@ export function parseResponse (
           if (recordsSize > 1) {
             recordsSize--
 
-            partition.records = readRecordsBatch(
-              Reader.from(r.buffer.shallowSlice(r.position, r.position + recordsSize))
-            )
+            partition.records = readRecordsBatch(Reader.from(r.buffer.subarray(r.position, r.position + recordsSize)))
 
             r.skip(recordsSize)
           }

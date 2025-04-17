@@ -27,7 +27,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and collect all basic parameters in a single object
   const serializedParams = {
@@ -97,7 +97,7 @@ test('createRequest with assignments', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and collect all basic parameters in a single object
   const serializedParams = {
@@ -167,7 +167,7 @@ test('createRequest with group instance ID', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all parameters into a single object
   const serializedData = {
@@ -209,7 +209,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendBytes(assignment) // assignment
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 14, 5, writer.bufferList)
+  const response = parseResponse(1, 14, 5, Reader.from(writer))
 
   // Verify complete response structure in a single assertion
   deepStrictEqual(
@@ -236,7 +236,7 @@ test('parseResponse handles throttling', () => {
     .appendBytes(assignment) // assignment
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 14, 5, writer.bufferList)
+  const response = parseResponse(1, 14, 5, Reader.from(writer))
 
   // Verify response structure with throttling in a single assertion
   deepStrictEqual(
@@ -263,7 +263,7 @@ test('parseResponse with null protocol fields', () => {
     .appendBytes(assignment) // assignment
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 14, 5, writer.bufferList)
+  const response = parseResponse(1, 14, 5, Reader.from(writer))
 
   // Verify response structure with null protocol fields in a single assertion
   deepStrictEqual(
@@ -292,7 +292,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 14, 5, writer.bufferList)
+      parseResponse(1, 14, 5, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Error should be a ResponseError instance')

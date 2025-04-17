@@ -1,4 +1,3 @@
-import type BufferList from 'bl'
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { type TestContext } from 'node:test'
@@ -6,7 +5,7 @@ import {
   Connection,
   ConnectionStatuses,
   NetworkError,
-  Reader,
+  type Reader,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
@@ -177,8 +176,7 @@ test('Connection.send should enqueue request and process response', async t => {
   }
 
   // Create mock parser function
-  function parser (_apiKey: number, _apiVersion: number, _correlationId: number, buffer: BufferList) {
-    const reader = Reader.from(buffer)
+  function parser (_apiKey: number, _apiVersion: number, _correlationId: number, reader: Reader) {
     return { result: reader.readInt32() }
   }
 
@@ -608,9 +606,7 @@ test('Connection should handle response with tagged fields', async t => {
   }
 
   // Create parser
-  function parser (_apiKey: number, _apiVersion: number, _correlationId: number, buffer: BufferList) {
-    const reader = Reader.from(buffer)
-    reader.position = 0
+  function parser (_apiKey: number, _apiVersion: number, _correlationId: number, reader: Reader) {
     return { result: reader.readInt32() }
   }
 

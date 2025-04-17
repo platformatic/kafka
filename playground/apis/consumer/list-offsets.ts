@@ -1,4 +1,4 @@
-import { listOffsetsV9 } from '../../../src/apis/consumer/list-offsets.ts'
+import { api as listOffsetsV9 } from '../../../src/apis/consumer/list-offsets.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

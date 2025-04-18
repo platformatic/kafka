@@ -12,7 +12,7 @@ test('createRequest serializes mechanism correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Note: SaslHandshake V1 uses non-compact strings (false flag in readString)
   // Verify the complete request structure with deepStrictEqual
@@ -35,7 +35,7 @@ test('createRequest handles PLAIN mechanism', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Verify the complete request structure with deepStrictEqual
   deepStrictEqual(
@@ -61,7 +61,7 @@ test('parseResponse correctly processes a successful response', () => {
       false
     ) // non-compact array without tagged fields
 
-  const response = parseResponse(1, 17, 1, writer.bufferList)
+  const response = parseResponse(1, 17, 1, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -79,7 +79,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 17, 1, writer.bufferList)
+      parseResponse(1, 17, 1, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

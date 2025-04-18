@@ -1,5 +1,5 @@
-import { alterClientQuotasV1 } from '../../../src/apis/admin/alter-client-quotas.ts'
-import { describeClientQuotasV0 } from '../../../src/apis/admin/describe-client-quotas.ts'
+import { api as alterClientQuotasV1 } from '../../../src/apis/admin/alter-client-quotas.ts'
+import { api as describeClientQuotasV0 } from '../../../src/apis/admin/describe-client-quotas.ts'
 import { ClientQuotaMatchTypes } from '../../../src/apis/enumerations.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'

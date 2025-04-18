@@ -38,7 +38,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and store basic parameters
   const serializedData = {
@@ -128,7 +128,7 @@ test('createRequest with existing member ID', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all basic parameters
   const serializedData = {
@@ -174,7 +174,7 @@ test('createRequest with group instance ID', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all basic parameters
   const serializedData = {
@@ -226,7 +226,7 @@ test('createRequest with multiple protocols', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all basic parameters
   const serializedData = {
@@ -295,7 +295,7 @@ test('createRequest with reason', () => {
   )
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read all basic parameters
   const serializedData = {
@@ -346,7 +346,7 @@ test('parseResponse correctly processes a successful response for a follower', (
     .appendArray([], () => {})
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 11, 9, writer.bufferList)
+  const response = parseResponse(1, 11, 9, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -399,7 +399,7 @@ test('parseResponse correctly processes a successful response for a leader', () 
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 11, 9, writer.bufferList)
+  const response = parseResponse(1, 11, 9, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -447,7 +447,7 @@ test('parseResponse with skip assignment flag', () => {
     .appendArray([], () => {})
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 11, 9, writer.bufferList)
+  const response = parseResponse(1, 11, 9, Reader.from(writer))
 
   // Verify skipAssignment flag
   ok(response.skipAssignment)
@@ -471,7 +471,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 11, 9, writer.bufferList)
+      parseResponse(1, 11, 9, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

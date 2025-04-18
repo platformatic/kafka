@@ -1,31 +1,40 @@
-import BufferList from 'bl'
 import { EMPTY_BUFFER, INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
-import { readUnsignedVarInt, readVarInt } from './varint32.ts'
-import { readUnsignedVarInt64, readVarInt64 } from './varint64.ts'
+import { DynamicBuffer } from './dynamic-buffer.ts'
+import { Writer } from './writer.ts'
 
 export type EntryReader<OutputType> = (reader: Reader, index: number) => OutputType
 
-export class Reader {
-  buffer: BufferList
-  position: number
+const instanceIdentifier = Symbol('plt.kafka.reader.instanceIdentifier')
 
-  static from (buffer: Buffer | BufferList): Reader {
-    if (Buffer.isBuffer(buffer)) {
-      buffer = new BufferList(buffer)
+export class Reader {
+  buffer: DynamicBuffer
+  position: number;
+  [instanceIdentifier]: boolean
+
+  static isReader (target: any): boolean {
+    return target?.[instanceIdentifier] === true
+  }
+
+  static from (buffer: Buffer | DynamicBuffer | Writer): Reader {
+    if (Writer.isWriter(buffer)) {
+      return new Reader((buffer as Writer).dynamicBuffer)
+    } else if (Buffer.isBuffer(buffer)) {
+      buffer = new DynamicBuffer(buffer)
     }
 
-    return new Reader(buffer)
+    return new Reader(buffer as DynamicBuffer)
   }
 
-  constructor (buffer: BufferList) {
+  constructor (buffer: DynamicBuffer) {
     this.buffer = buffer
     this.position = 0
+    this[instanceIdentifier] = true
   }
 
-  reset (buffer?: Buffer | BufferList) {
+  reset (buffer?: Buffer | DynamicBuffer) {
     if (buffer) {
       if (Buffer.isBuffer(buffer)) {
-        buffer = new BufferList(buffer)
+        buffer = new DynamicBuffer(buffer)
       }
 
       this.buffer = buffer
@@ -36,7 +45,7 @@ export class Reader {
 
   inspect (): string {
     return this.buffer
-      .shallowSlice(this.position)
+      .subarray(this.position)
       .toString('hex')
       .replaceAll(/(.{4})/g, '$1 ')
       .trim()
@@ -64,11 +73,11 @@ export class Reader {
   }
 
   peekUnsignedVarInt (): number {
-    return readUnsignedVarInt(this.buffer, this.position)[0]
+    return this.buffer.readUnsignedVarInt(this.position)[0]
   }
 
   peekUnsignedVarInt64 (): bigint {
-    return readUnsignedVarInt64(this.buffer, this.position)[0]
+    return this.buffer.readUnsignedVarInt64(this.position)[0]
   }
 
   peekInt8 (): number {
@@ -92,11 +101,11 @@ export class Reader {
   }
 
   peekVarInt (): number {
-    return readVarInt(this.buffer, this.position)[0]
+    return this.buffer.readVarInt(this.position)[0]
   }
 
   peekVarInt64 (): bigint {
-    return readVarInt64(this.buffer, this.position)[0]
+    return this.buffer.readVarInt64(this.position)[0]
   }
 
   peekBoolean (): boolean {
@@ -136,14 +145,14 @@ export class Reader {
   }
 
   readUnsignedVarInt (): number {
-    const [value, read] = readUnsignedVarInt(this.buffer, this.position)
+    const [value, read] = this.buffer.readUnsignedVarInt(this.position)
     this.position += read
 
     return value
   }
 
   readUnsignedVarInt64 (): bigint {
-    const [value, read] = readUnsignedVarInt64(this.buffer, this.position)
+    const [value, read] = this.buffer.readUnsignedVarInt64(this.position)
     this.position += read
 
     return value
@@ -185,14 +194,14 @@ export class Reader {
   }
 
   readVarInt (): number {
-    const [value, read] = readVarInt(this.buffer, this.position)
+    const [value, read] = this.buffer.readVarInt(this.position)
     this.position += read
 
     return value
   }
 
   readVarInt64 (): bigint {
-    const [value, read] = readVarInt64(this.buffer, this.position)
+    const [value, read] = this.buffer.readVarInt64(this.position)
     this.position += read
 
     return value

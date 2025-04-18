@@ -236,6 +236,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           // Use the roundrobin
           partition = this.#partitionsRoundRobin.postIncrement(topic, 1, -1)
         }
+      } else {
+        partition = message.partition
       }
 
       if (message.headers) {

@@ -1,9 +1,8 @@
-import BufferList from 'bl'
 import { strictEqual, throws } from 'node:assert'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 import zlib from 'node:zlib'
-import { compressionsAlgorithms, compressionsAlgorithmsByBitmask } from '../../src/index.ts'
+import { compressionsAlgorithms, compressionsAlgorithmsByBitmask, DynamicBuffer } from '../../src/index.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -30,9 +29,9 @@ test('compressionsAlgorithmsByBitmask has correct mapping', () => {
   strictEqual(compressionsAlgorithmsByBitmask[4], compressionsAlgorithms.zstd)
 })
 
-test('compression works with BufferList', () => {
-  const bufferList = new BufferList(Buffer.from('test data in buffer list'))
-  const compressed = compressionsAlgorithms.gzip.compressSync(bufferList)
+test('compression works with DynamicBuffer', () => {
+  const dynamicBuffer = new DynamicBuffer(Buffer.from('test data in buffer list'))
+  const compressed = compressionsAlgorithms.gzip.compressSync(dynamicBuffer)
 
   strictEqual(Buffer.isBuffer(compressed), true)
 

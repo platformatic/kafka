@@ -31,7 +31,7 @@ test('createRecord should create a buffer with the correct format', () => {
   const recordBuffer = createRecord(message, offsetDelta, firstTimestamp)
 
   // Verify the record has the expected format
-  const reader = new Reader(recordBuffer)
+  const reader = Reader.from(recordBuffer)
 
   const length = reader.readVarInt()
   strictEqual(length > 0, true, 'Length should be greater than 0')
@@ -72,7 +72,7 @@ test('createRecord should handle null/undefined values', () => {
   const offsetDelta = 0
   const recordBuffer = createRecord(message, offsetDelta, firstTimestamp)
 
-  const reader = new Reader(recordBuffer)
+  const reader = Reader.from(recordBuffer)
 
   const length = reader.readVarInt()
   strictEqual(length > 0, true, 'Length should be greater than 0')
@@ -112,7 +112,7 @@ test('readRecord should correctly parse a record buffer', () => {
     .appendVarIntBytes(Buffer.from('header2'))
     .appendVarIntBytes(Buffer.from('value2'))
 
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
   const record = readRecord(reader)
 
   strictEqual(record.length, 20, 'Length should match')
@@ -156,7 +156,7 @@ test('createRecordsBatch should create a batch with the correct format', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Verify the batch has the expected format
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
 
   const firstOffset = reader.readInt64()
   strictEqual(firstOffset, 0n, 'First offset should be 0')
@@ -226,7 +226,7 @@ test('createRecordsBatch should handle minimal options', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Just verify we can read it without errors
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   const batch = readRecordsBatch(reader)
 
   strictEqual(batch.records.length, 1, 'Should have one record')
@@ -254,7 +254,7 @@ test('createRecordsBatch with compression should compress the records', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Verify it's compressed
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   const batch = readRecordsBatch(reader)
 
   strictEqual(batch.attributes & 0b111, 1, 'Attributes should have gzip compression bit set')
@@ -305,7 +305,7 @@ test('createRecordsBatch should handle transactionalId', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Verify transaction bit is set
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   reader.readInt64() // firstOffset
   reader.readInt32() // length
   reader.readInt32() // partitionLeaderEpoch
@@ -338,7 +338,7 @@ test('createRecordsBatch should handle sequence numbers', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Verify first sequence is read from the map
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   reader.readInt64() // firstOffset
   reader.readInt32() // length
   reader.readInt32() // partitionLeaderEpoch
@@ -376,7 +376,7 @@ test('readRecordsBatch should handle records with compression', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Now read and verify it
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   const batch = readRecordsBatch(reader)
 
   strictEqual(batch.attributes & 0b111, 1, 'Attributes should have gzip compression bit set')
@@ -402,7 +402,7 @@ test('readRecordsBatch should throw on unsupported compression bitmask', () => {
     .appendInt32(0) // firstSequence
     .appendInt32(0) // recordsLength
 
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   let error: Error | null = null
   try {
@@ -452,7 +452,7 @@ test('createRecordsBatch and readRecordsBatch should be symmetrical', () => {
   const batchBuffer = createRecordsBatch(messages, options)
 
   // Read it back
-  const reader = new Reader(batchBuffer)
+  const reader = Reader.from(batchBuffer)
   const batch = readRecordsBatch(reader)
 
   // Verify all the fields match
@@ -510,7 +510,7 @@ for (const [compression, algorithm] of Object.entries<CompressionAlgorithm>(comp
       const batchBuffer = createRecordsBatch(messages, options)
 
       // Read it back
-      const reader = new Reader(batchBuffer)
+      const reader = Reader.from(batchBuffer)
       const batch = readRecordsBatch(reader)
 
       // Verify compression was used and data is correct

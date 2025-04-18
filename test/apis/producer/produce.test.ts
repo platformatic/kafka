@@ -22,7 +22,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify basic parameters
   deepStrictEqual(
@@ -92,7 +92,7 @@ test('createRequest handles multiple topics and partitions', () => {
   ok(result instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify structure
-  const reader = new Reader(result.bufferList)
+  const reader = Reader.from(result)
 
   // Read and verify basic parameters
   deepStrictEqual(
@@ -184,7 +184,7 @@ test('createRequest with transactional ID', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify transactional ID
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify parameters including transactional ID
   deepStrictEqual(
@@ -224,7 +224,7 @@ test('createRequest with additional record batch options', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify structure
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read and verify basic parameters
   deepStrictEqual(
@@ -290,7 +290,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(0) // throttleTimeMs
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, writer.bufferList)
+  const response = parseResponse(1, 0, 11, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -376,7 +376,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
     .appendInt32(0) // throttleTimeMs
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, writer.bufferList)
+  const response = parseResponse(1, 0, 11, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -465,7 +465,7 @@ test('parseResponse handles partition error codes', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 11, writer.bufferList)
+      parseResponse(1, 0, 11, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -553,7 +553,7 @@ test('parseResponse handles record-level errors', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 11, writer.bufferList)
+      parseResponse(1, 0, 11, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -636,7 +636,7 @@ test('parseResponse handles throttling', () => {
     .appendInt32(100) // throttleTimeMs - non-zero value for throttling
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, writer.bufferList)
+  const response = parseResponse(1, 0, 11, Reader.from(writer))
 
   // Verify response structure with throttling
   deepStrictEqual(response, {

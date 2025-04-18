@@ -47,7 +47,7 @@ test('createRequest serializes parameters correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Create a complete structure of the serialized request
   const serializedRequest = {
@@ -165,7 +165,7 @@ test('createRequest handles null group instance ID', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Create a complete structure of the serialized request
   const serializedRequest = {
@@ -291,7 +291,7 @@ test('createRequest handles multiple topics', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Create a complete structure of the serialized request
   const serializedRequest = {
@@ -417,7 +417,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 28, 4, writer.bufferList)
+  const response = parseResponse(1, 28, 4, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -480,7 +480,7 @@ test('parseResponse handles multiple topics', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 28, 4, writer.bufferList)
+  const response = parseResponse(1, 28, 4, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -542,7 +542,7 @@ test('parseResponse throws error on partition error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 28, 4, writer.bufferList)
+      parseResponse(1, 28, 4, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

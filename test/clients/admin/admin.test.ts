@@ -8,6 +8,7 @@ import {
   type Broker,
   type Callback,
   type CallbackWithPromise,
+  type ClusterPartitionMetadata,
   type Connection,
   Consumer,
   describeGroupsV5,
@@ -194,7 +195,7 @@ test('createTopics should create a topic with specific partitions', async t => {
 
   // Verify each partition has a valid leader
   for (let i = 0; i < 3; i++) {
-    const partition = topic?.partitions[i]
+    const partition: ClusterPartitionMetadata = topic?.partitions[i]
     strictEqual(typeof partition?.leader, 'number')
     strictEqual(partition?.leader! >= 0, true)
   }

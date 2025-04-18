@@ -1,4 +1,4 @@
-import { createTopicsV7 } from '../../../src/apis/admin/create-topics.ts'
+import { api as createTopicsV7 } from '../../../src/apis/admin/create-topics.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

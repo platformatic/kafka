@@ -11,7 +11,7 @@ test('createRequest returns a correctly structured empty request', () => {
   ok(writer instanceof Writer)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // This API has no request parameters, just a tagged fields marker
   deepStrictEqual(reader.readUnsignedInt8(), 0)
@@ -29,7 +29,7 @@ test('parseResponse correctly processes a successful empty response', () => {
     )
     .appendInt8(0) // Root tagged fields (none)
 
-  const response = parseResponse(1, 74, 0, writer.bufferList)
+  const response = parseResponse(1, 74, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -50,7 +50,7 @@ test('parseResponse correctly processes a response with multiple resources', () 
     })
     .appendInt8(0) // Root tagged fields (none)
 
-  const response = parseResponse(1, 74, 0, writer.bufferList)
+  const response = parseResponse(1, 74, 0, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -72,7 +72,7 @@ test('parseResponse handles response with throttling', () => {
     )
     .appendInt8(0) // Root tagged fields (none)
 
-  const response = parseResponse(1, 74, 0, writer.bufferList)
+  const response = parseResponse(1, 74, 0, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -96,7 +96,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 74, 0, writer.bufferList)
+      parseResponse(1, 74, 0, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

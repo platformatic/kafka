@@ -1,17 +1,19 @@
-import type BufferList from 'bl'
 import { promisify } from 'node:util'
 import { type Connection } from '../network/connection.ts'
+import { type Reader } from '../protocol/reader.ts'
 import { type Writer } from '../protocol/writer.ts'
 
 export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
 
 export type CallbackArguments<ReturnType> = [cb: Callback<ReturnType>]
 
+export type RequestCreator = (...args: any[]) => Writer
+
 export type ResponseParser<ReturnType> = (
   correlationId: number,
   apiKey: number,
   apiVersion: number,
-  raw: BufferList
+  reader: Reader
 ) => ReturnType | Promise<ReturnType>
 
 export type ResponseErrorWithLocation = [string, number]
@@ -35,7 +37,7 @@ export type API<RequestType extends Array<unknown>, ResponseType> = APIWithCallb
 export function createAPI<RequestArguments extends Array<unknown>, ResponseType> (
   apiKey: number,
   apiVersion: number,
-  createRequest: (...args: any[]) => Writer,
+  createRequest: RequestCreator,
   parseResponse: ResponseParser<ResponseType>,
   hasRequestHeaderTaggedFields: boolean = true,
   hasResponseHeaderTaggedFields: boolean = true

@@ -23,7 +23,7 @@ test('createRequest serializes basic parameters correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array (only one topic)
   const topicsArray = reader.readArray(() => {
@@ -106,7 +106,7 @@ test('createRequest serializes topic with assignments correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const topicsArray = reader.readArray(() => {
@@ -194,7 +194,7 @@ test('createRequest serializes topic with configs correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const topicsArray = reader.readArray(() => {
@@ -270,7 +270,7 @@ test('createRequest serializes validate_only flag correctly', () => {
   const writer = createRequest(topics, timeoutMs, validateOnly)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const topicsArray = reader.readArray(() => {
@@ -354,7 +354,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 19, 7, writer.bufferList)
+  const response = parseResponse(1, 19, 7, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(
@@ -427,7 +427,7 @@ test('parseResponse correctly processes response with config data', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 19, 7, writer.bufferList)
+  const response = parseResponse(1, 19, 7, Reader.from(writer))
 
   // Verify configs in response
   deepStrictEqual(
@@ -484,7 +484,7 @@ test('parseResponse handles topic-level error', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 19, 7, writer.bufferList)
+      parseResponse(1, 19, 7, Reader.from(writer))
     },
     (err: any) => {
       // Group all error validation assertions
@@ -577,7 +577,7 @@ test('parseResponse handles multiple topics with mixed errors', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 19, 7, writer.bufferList)
+      parseResponse(1, 19, 7, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')

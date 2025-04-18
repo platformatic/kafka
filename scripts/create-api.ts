@@ -5,7 +5,6 @@ import { camelCase, kebabCase, pascalCase } from 'scule'
 import { formatOutput } from './utils.ts'
 
 const template = `
-import BufferList from 'bl'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../index.ts'
@@ -25,8 +24,7 @@ function createRequest (): Writer {
 /*
 
 */
-function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, raw: BufferList): #{type}Response {
-  const reader = Reader.from(raw)
+function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, reader: Reader): #{type}Response {
   const errors: ResponseErrorWithLocation[] = []
 
   const response: #{type}Response = {}

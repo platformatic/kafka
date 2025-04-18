@@ -1,14 +1,14 @@
-import BufferList from 'bl'
 import { createRequire } from 'node:module'
 import zlib from 'node:zlib'
 import { UnsupportedCompressionError } from '../errors.ts'
+import { DynamicBuffer } from './dynamic-buffer.ts'
 
 const require = createRequire(import.meta.url)
 
 // @ts-ignore
 const { zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
 
-export type SyncCompressionPhase = (data: Buffer | BufferList) => Buffer
+export type SyncCompressionPhase = (data: Buffer | DynamicBuffer) => Buffer
 export type CompressionOperation = (data: Buffer) => Buffer
 
 // Right now we support sync compressing only since the average time spent on compressing small sizes of
@@ -21,8 +21,8 @@ export interface CompressionAlgorithm {
   available?: boolean
 }
 
-function ensureBuffer (data: Buffer | BufferList): Buffer {
-  return BufferList.isBufferList(data) ? (data as BufferList).slice() : (data as Buffer)
+function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
+  return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
 }
 
 let snappyCompressSync: CompressionOperation | undefined
@@ -59,27 +59,27 @@ function loadLZ4 () {
 export const compressionsAlgorithms = {
   /* c8 ignore next 8 - 'none' is actually never used but this is to please Typescript */
   none: {
-    compressSync (data: Buffer | BufferList): Buffer {
+    compressSync (data: Buffer | DynamicBuffer): Buffer {
       return ensureBuffer(data)
     },
-    decompressSync (data: Buffer | BufferList): Buffer {
+    decompressSync (data: Buffer | DynamicBuffer): Buffer {
       return ensureBuffer(data)
     },
     bitmask: 0,
     available: true
   },
   gzip: {
-    compressSync (data: Buffer | BufferList): Buffer {
+    compressSync (data: Buffer | DynamicBuffer): Buffer {
       return gzipSync(ensureBuffer(data))
     },
-    decompressSync (data: Buffer | BufferList): Buffer {
+    decompressSync (data: Buffer | DynamicBuffer): Buffer {
       return gunzipSync(ensureBuffer(data)) as Buffer
     },
     bitmask: 1,
     available: true
   },
   snappy: {
-    compressSync (data: Buffer | BufferList): Buffer {
+    compressSync (data: Buffer | DynamicBuffer): Buffer {
       /* c8 ignore next 4 */
       if (!snappyCompressSync) {
         loadSnappy()
@@ -87,7 +87,7 @@ export const compressionsAlgorithms = {
 
       return snappyCompressSync!(ensureBuffer(data))
     },
-    decompressSync (data: Buffer | BufferList): Buffer {
+    decompressSync (data: Buffer | DynamicBuffer): Buffer {
       /* c8 ignore next 4 */
       if (!snappyDecompressSync) {
         loadSnappy()
@@ -99,7 +99,7 @@ export const compressionsAlgorithms = {
     available: true
   },
   lz4: {
-    compressSync (data: Buffer | BufferList): Buffer {
+    compressSync (data: Buffer | DynamicBuffer): Buffer {
       /* c8 ignore next 4 */
       if (!lz4CompressSync) {
         loadLZ4()
@@ -107,7 +107,7 @@ export const compressionsAlgorithms = {
 
       return lz4CompressSync!(ensureBuffer(data))
     },
-    decompressSync (data: Buffer | BufferList): Buffer {
+    decompressSync (data: Buffer | DynamicBuffer): Buffer {
       /* c8 ignore next 4 */
       if (!lz4DecompressSync) {
         loadLZ4()
@@ -119,16 +119,16 @@ export const compressionsAlgorithms = {
     available: true
   },
   zstd: {
-    compressSync (data: Buffer | BufferList): Buffer {
-      /* c8 ignore next 3 */
+    /* c8 ignore next 7 */
+    compressSync (data: Buffer | DynamicBuffer): Buffer {
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')
       }
 
       return zstdCompressSync(ensureBuffer(data))
     },
-    decompressSync (data: Buffer | BufferList): Buffer {
-      /* c8 ignore next 3 */
+    /* c8 ignore next 7 */
+    decompressSync (data: Buffer | DynamicBuffer): Buffer {
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')
       }

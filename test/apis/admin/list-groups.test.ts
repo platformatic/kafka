@@ -14,7 +14,7 @@ test('createRequest serializes states filter and types filter correctly', () => 
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
@@ -42,7 +42,7 @@ test('createRequest with empty states and types filters', () => {
   const writer = createRequest([], [])
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
@@ -73,7 +73,7 @@ test('createRequest with all possible consumer group states', () => {
   const writer = createRequest(statesFilter, typesFilter)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
@@ -126,7 +126,7 @@ test('parseResponse correctly processes a successful response', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, writer.bufferList)
+  const response = parseResponse(1, 16, 5, Reader.from(writer))
 
   // Verify the main response structure
   deepStrictEqual(
@@ -186,7 +186,7 @@ test('parseResponse with empty groups array', () => {
     // Empty groups array
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, writer.bufferList)
+  const response = parseResponse(1, 16, 5, Reader.from(writer))
 
   // Verify response with empty groups
   deepStrictEqual(
@@ -208,7 +208,7 @@ test('parseResponse handles throttling correctly', () => {
     // Empty groups array for simplicity
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, writer.bufferList)
+  const response = parseResponse(1, 16, 5, Reader.from(writer))
 
   // Verify throttling is processed correctly
   deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
@@ -225,7 +225,7 @@ test('parseResponse throws on error response', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 16, 5, writer.bufferList)
+      parseResponse(1, 16, 5, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -288,7 +288,7 @@ test('parseResponse with different group types and states', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, writer.bufferList)
+  const response = parseResponse(1, 16, 5, Reader.from(writer))
 
   // Verify number of groups
   deepStrictEqual(response.groups.length, 3, 'Response should have 3 groups')

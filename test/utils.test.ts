@@ -1,7 +1,7 @@
-import BufferList from 'bl'
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { mock, test } from 'node:test'
 import {
+  DynamicBuffer,
   NumericMap,
   ajv,
   debugDump,
@@ -138,9 +138,9 @@ test('humanize formats buffer contents correctly', () => {
   const result = humanize('Test Buffer', buffer)
   strictEqual(result, 'Test Buffer (6 bytes): dead beef 1234')
 
-  const bl = new BufferList([Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]), Buffer.from([0xee, 0xff])])
-  const blResult = humanize('Test BufferList', bl)
-  strictEqual(blResult, 'Test BufferList (6 bytes): aabb ccdd eeff')
+  const bl = new DynamicBuffer([Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]), Buffer.from([0xee, 0xff])])
+  const blResult = humanize('Test DynamicBuffer', bl)
+  strictEqual(blResult, 'Test DynamicBuffer (6 bytes): aabb ccdd eeff')
 
   const emptyBuffer = Buffer.alloc(0)
   const emptyResult = humanize('Empty Buffer', emptyBuffer)

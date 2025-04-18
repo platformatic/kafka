@@ -18,15 +18,15 @@ const consumer2 = new Consumer({
 })
 
 consumer1.topics.trackAll('temp1')
-await consumer1.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 2000 })
+await consumer1.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 15000 })
 debugDump({ id: 1, memberId: consumer1.memberId, assignments: consumer1.assignments })
 
 consumer1.topics.trackAll('temp2')
-await consumer1.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 2000 })
+await consumer1.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 15000 })
 debugDump({ id: 1, memberId: consumer1.memberId, assignments: consumer1.assignments })
 
 consumer2.topics.trackAll('temp1', 'temp2')
-await consumer2.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 2000 })
+await consumer2.joinGroup({ sessionTimeout: 10000, heartbeatInterval: 500, rebalanceTimeout: 15000 })
 debugDump({ id: 1, memberId: consumer1.memberId, assignments: consumer1.assignments })
 debugDump({ id: 2, memberId: consumer2.memberId, assignments: consumer2.assignments })
 

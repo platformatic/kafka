@@ -1,11 +1,15 @@
-import BufferList from 'bl'
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { Reader } from '../../src/index.ts'
+import { DynamicBuffer, Reader } from '../../src/index.ts'
 
-test('Reader.from and Reader constructor', () => {
-  // Test instantiation with BufferList
-  const bl = new BufferList(Buffer.from([1, 2, 3]))
+test('static isReader', () => {
+  ok(Reader.isReader(new Reader(new DynamicBuffer())))
+  ok(!Reader.isReader('STRING'))
+})
+
+test('static from and constructor', () => {
+  // Test instantiation with DynamicBuffer
+  const bl = new DynamicBuffer(Buffer.from([1, 2, 3]))
   const reader1 = new Reader(bl)
   strictEqual(reader1.position, 0)
   strictEqual(reader1.readInt8(), 1)
@@ -16,12 +20,12 @@ test('Reader.from and Reader constructor', () => {
   strictEqual(reader2.position, 0)
   strictEqual(reader2.readInt8(), 4)
 
-  // Test instantiation with Reader.from using a BufferList
-  const reader3 = Reader.from(new BufferList(Buffer.from([7, 8, 9])))
+  // Test instantiation with Reader.from using a DynamicBuffer
+  const reader3 = Reader.from(new DynamicBuffer(Buffer.from([7, 8, 9])))
   strictEqual(reader3.position, 0)
   strictEqual(reader3.readInt8(), 7)
 
-  const buffer2 = new BufferList(Buffer.from([1, 2, 3]))
+  const buffer2 = new DynamicBuffer(Buffer.from([1, 2, 3]))
   const reader4 = Reader.from(buffer2)
 
   strictEqual(reader4 instanceof Reader, true)
@@ -48,16 +52,16 @@ test('reset', () => {
   strictEqual(reader.position, 0)
   strictEqual(reader.readInt8(), 10) // Should read from the new buffer
 
-  // Test reset with new BufferList
-  const newBufferList = new BufferList(Buffer.from([100, 200]))
-  reader.reset(newBufferList)
+  // Test reset with new DynamicBuffer
+  const newDynamicBuffer = new DynamicBuffer(Buffer.from([100, 200]))
+  reader.reset(newDynamicBuffer)
   strictEqual(reader.position, 0)
-  strictEqual(reader.readInt8(), 100) // Should read from the new BufferList
+  strictEqual(reader.readInt8(), 100) // Should read from the new DynamicBuffer
 })
 
 test('inspect', () => {
   const buffer = Buffer.from([0xde, 0xad, 0xbe, 0xef])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.inspect(), 'dead beef')
 
@@ -67,7 +71,7 @@ test('inspect', () => {
 
 test('skip', () => {
   const buffer = Buffer.from([1, 2, 3, 4, 5])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   reader.skip(2)
   strictEqual(reader.readInt8(), 3)
@@ -77,7 +81,7 @@ test('skip', () => {
 
 test('peekInt8', () => {
   const buffer = Buffer.from([10, 20, 30])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekInt8(), 10)
   strictEqual(reader.position, 0) // Position should not change
@@ -102,7 +106,7 @@ test('peekUnsignedInt*', () => {
     138, 199, 35, 4, 136, 170, 126, 0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekUnsignedInt8(), 200)
   strictEqual(reader.readUnsignedInt8(), 200)
@@ -126,7 +130,7 @@ test('peekUnsignedVarInt and readUnsignedVarInt', () => {
     128, 1
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekUnsignedVarInt(), 10)
   strictEqual(reader.readUnsignedVarInt(), 10)
@@ -147,7 +151,7 @@ test('peekInt*', () => {
     255, 255, 255, 253, 171, 244, 28, 0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekInt8(), -10)
   strictEqual(reader.readInt8(), -10)
@@ -168,7 +172,7 @@ test('peekFloat64', () => {
     64, 94, 221, 47, 26, 159, 190, 119
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekFloat64(), 123.456)
   strictEqual(reader.readFloat64(), 123.456)
@@ -176,7 +180,7 @@ test('peekFloat64', () => {
 
 test('peekBoolean', () => {
   const buffer = Buffer.from([1, 0])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekBoolean(), true)
   strictEqual(reader.readBoolean(), true)
@@ -189,7 +193,7 @@ test('peekUUID', () => {
   const uuidHex = '550e8400e29b41d4a716446655440000'
   const buffer = Buffer.from(uuidHex, 'hex')
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.peekUUID(), uuidHex)
   strictEqual(reader.readUUID(), '550e8400-e29b-41d4-a716-446655440000')
@@ -206,7 +210,7 @@ test('peekVarInt and readVarInt', () => {
     2
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Test peeking and reading each value
   strictEqual(reader.peekVarInt(), 0)
@@ -226,7 +230,7 @@ test('peekVarInt64 and readVarInt64', () => {
     0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Just check that the method exists and doesn't throw
   const peekedValue = reader.peekVarInt64()
@@ -245,7 +249,7 @@ test('peekUnsignedVarInt64 and readUnsignedVarInt64', () => {
     10
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Check peek
   const peekedValue = reader.peekUnsignedVarInt64()
@@ -268,7 +272,7 @@ test('readUnsignedInt*', () => {
     178, 128, 94, 0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.readUnsignedInt8(), 200)
   strictEqual(reader.readUnsignedInt16(), 60000)
@@ -279,7 +283,7 @@ test('readUnsignedInt64', () => {
   // This is the actual value that's read by the implementation
   const expectedValue = 9999999999979191808n
   const buffer = Buffer.from([138, 199, 35, 4, 136, 170, 126, 0])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.readUnsignedInt64(), expectedValue)
 })
@@ -309,7 +313,7 @@ test('readInt*', () => {
 
 test('readBoolean', () => {
   const buffer = Buffer.from([1, 0])
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.readBoolean(), true)
   strictEqual(reader.readBoolean(), false)
@@ -330,7 +334,7 @@ test('readNullableString', () => {
     0, 5, 104, 101, 108, 108, 111
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.readNullableString(), null)
   strictEqual(reader.readNullableString(), '')
@@ -351,7 +355,7 @@ test('readNullableString - different encoding', () => {
     ...Buffer.from(text)
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   strictEqual(reader.readNullableString(), text)
 })
 
@@ -370,7 +374,7 @@ test('readString', () => {
     0, 5, 119, 111, 114, 108, 100
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Compact format tests
   strictEqual(reader.readString(), '') // null returns empty string
@@ -386,7 +390,7 @@ test('readString', () => {
     // Compact format, 2 bytes in hex
     3, 0xab, 0xcd
   ])
-  const hexReader = new Reader(new BufferList(hexBuffer))
+  const hexReader = new Reader(new DynamicBuffer(hexBuffer))
   strictEqual(hexReader.readString(true, 'hex'), 'abcd')
 })
 
@@ -395,7 +399,7 @@ test('readUUID', () => {
   const formattedUUID = '550e8400-e29b-41d4-a716-446655440000'
   const buffer = Buffer.from(uuidHex, 'hex')
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   strictEqual(reader.readUUID(), formattedUUID)
 })
 
@@ -414,7 +418,7 @@ test('readNullableBytes', () => {
     0, 0, 0, 3, 5, 6, 7
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(reader.readNullableBytes(), null)
   deepStrictEqual(reader.readNullableBytes(), Buffer.alloc(0))
@@ -433,7 +437,7 @@ test('readVarIntBytes', () => {
     10
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(reader.readVarIntBytes(), Buffer.from([10]))
 })
 
@@ -454,7 +458,7 @@ test('readNullableArray', () => {
     3, 0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   strictEqual(
     reader.readNullableArray(r => r.readInt8()),
@@ -489,7 +493,7 @@ test('readNullableArray - without discarding trailing tagged fields', () => {
     0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // When discardTrailingTaggedFields is false
   deepStrictEqual(
@@ -513,7 +517,7 @@ test('readNullableArray - non compact - null', () => {
     0xff, 0xff, 0xff, 0xff
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   strictEqual(
     reader.readNullableArray(r => r.readInt8(), false),
     null
@@ -526,7 +530,7 @@ test('readNullableArray - non compact - empty', () => {
     0, 0, 0, 0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(
     reader.readNullableArray(r => r.readInt8(), false),
     []
@@ -541,9 +545,9 @@ test('readNullableArray - non compact - with elements', () => {
     42
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(
-    reader.readNullableArray(r => r.readInt8(), false),
+    reader.readNullableArray(r => r.readInt8(), false, false),
     [42]
   )
 })
@@ -577,7 +581,7 @@ test('readArray', () => {
     0 // element + tagged field
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Compact format tests
   deepStrictEqual(
@@ -613,7 +617,7 @@ test('readArray', () => {
     0 // second element + tagged field
   ])
 
-  const reader2 = new Reader(new BufferList(buffer2))
+  const reader2 = new Reader(new DynamicBuffer(buffer2))
   const result = reader2.readArray(
     r => {
       const val = r.readInt8()
@@ -645,7 +649,7 @@ test('readNullableMap - compact form', () => {
     0 // last 0 is for tagged fields
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Test null map
   strictEqual(
@@ -696,7 +700,7 @@ test('readNullableMap - non-compact form', () => {
     0 // last 0 is for tagged fields
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Test null map
   strictEqual(
@@ -730,7 +734,7 @@ test('readNullableMap without discarding trailing tagged fields', () => {
     0
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // When discardTrailingTaggedFields is false
   const mapWithEntries = reader.readNullableMap(
@@ -780,7 +784,7 @@ test('readMap', () => {
     0 // entry (key, value) + tagged field
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Compact format tests
   let map = reader.readMap(r => [r.readInt8(), r.readInt8()])
@@ -819,7 +823,7 @@ test('readMap', () => {
     0 // second entry + tagged field
   ])
 
-  const reader2 = new Reader(new BufferList(buffer2))
+  const reader2 = new Reader(new DynamicBuffer(buffer2))
   const result = reader2.readMap(
     r => {
       const key = r.readInt8()
@@ -849,7 +853,7 @@ test('readVarIntArray', () => {
     1
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(
     reader.readVarIntArray(r => r.readInt8()),
     []
@@ -870,7 +874,7 @@ test('readVarIntMap', () => {
     1, 10
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
   const map = reader.readVarIntMap(r => [r.readInt8(), r.readInt8()])
 
   strictEqual(map instanceof Map, true)
@@ -889,7 +893,7 @@ test('readTaggedFields', () => {
     3
   ])
 
-  const reader = new Reader(new BufferList(buffer))
+  const reader = new Reader(new DynamicBuffer(buffer))
 
   // Should do nothing for zero length
   reader.readTaggedFields()

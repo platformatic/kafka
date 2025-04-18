@@ -14,7 +14,7 @@ test('createRequest serializes group names correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read group names array
   const serializedGroups = reader.readArray(() => reader.readString(), true, false)
@@ -43,7 +43,7 @@ test('createRequest with includeAuthorizedOperations false', () => {
   const writer = createRequest(groups, includeAuthorizedOperations)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read group names array
   const serializedGroups = reader.readArray(() => reader.readString(), true, false)
@@ -72,7 +72,7 @@ test('createRequest serializes empty groups array correctly', () => {
   const writer = createRequest(groups, includeAuthorizedOperations)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read group names array
   const serializedGroups = reader.readArray(() => reader.readString(), true, false)
@@ -101,7 +101,7 @@ test('createRequest serializes special characters in group names', () => {
   const writer = createRequest(groups, includeAuthorizedOperations)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read group names array
   const serializedGroups = reader.readArray(() => reader.readString(), true, false)
@@ -169,7 +169,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify the main response structure
   deepStrictEqual(
@@ -280,7 +280,7 @@ test('parseResponse with multiple members', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify multiple members
   deepStrictEqual(response.groups[0].members.length, 2, 'Response should have two members')
@@ -347,7 +347,7 @@ test('parseResponse with multiple groups', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify multiple groups
   deepStrictEqual(response.groups.length, 2, 'Response should have two groups')
@@ -412,7 +412,7 @@ test('parseResponse with authorized operations', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify authorized operations are parsed correctly
   deepStrictEqual(response.groups[0].authorizedOperations, 3, 'Authorized operations should be correctly parsed')
@@ -448,7 +448,7 @@ test('parseResponse handles throttling correctly', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify throttling is processed correctly
   deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
@@ -487,7 +487,7 @@ test('parseResponse handles group error correctly', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 15, 5, writer.bufferList)
+      parseResponse(1, 15, 5, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -571,7 +571,7 @@ test('parseResponse handles multiple groups with mixed errors', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 15, 5, writer.bufferList)
+      parseResponse(1, 15, 5, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -617,7 +617,7 @@ test('parseResponse with empty groups array', () => {
     .appendArray([], () => {})
     .appendTaggedFields()
 
-  const response = parseResponse(1, 15, 5, writer.bufferList)
+  const response = parseResponse(1, 15, 5, Reader.from(writer))
 
   // Verify response with empty groups
   deepStrictEqual(

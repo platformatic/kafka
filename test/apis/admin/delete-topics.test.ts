@@ -14,7 +14,7 @@ test('createRequest serializes topic names correctly', () => {
   ok(writer instanceof Writer, 'Should return a Writer instance')
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const serializedTopics = reader.readArray(() => {
@@ -62,7 +62,7 @@ test('createRequest serializes topic names and topic IDs correctly', () => {
   const writer = createRequest(topics, timeoutMs)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const serializedTopics = reader.readArray(() => {
@@ -98,7 +98,7 @@ test('createRequest serializes empty topics array correctly', () => {
   const writer = createRequest(topics, timeoutMs)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Read topics array
   const serializedTopics = reader.readArray(() => {
@@ -131,7 +131,7 @@ test('createRequest serializes different timeout values correctly', () => {
   const writer = createRequest(topics, timeoutMs)
 
   // Read the serialized data to verify correctness
-  const reader = new Reader(writer.bufferList)
+  const reader = Reader.from(writer)
 
   // Skip topics array
   reader.readArray(() => {
@@ -184,7 +184,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 20, 6, writer.bufferList)
+  const response = parseResponse(1, 20, 6, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(
@@ -233,7 +233,7 @@ test('parseResponse handles throttling correctly', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 20, 6, writer.bufferList)
+  const response = parseResponse(1, 20, 6, Reader.from(writer))
 
   // Verify throttling is processed correctly
   deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
@@ -279,7 +279,7 @@ test('parseResponse handles single topic error correctly', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 20, 6, writer.bufferList)
+      parseResponse(1, 20, 6, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -348,7 +348,7 @@ test('parseResponse handles multiple topics with mixed errors', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 20, 6, writer.bufferList)
+      parseResponse(1, 20, 6, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -414,7 +414,7 @@ test('parseResponse handles response with null topic names', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 20, 6, writer.bufferList)
+  const response = parseResponse(1, 20, 6, Reader.from(writer))
 
   // Verify null name is handled correctly
   deepStrictEqual(
@@ -442,7 +442,7 @@ test('parseResponse with empty responses array', () => {
     .appendArray([], () => {})
     .appendTaggedFields()
 
-  const response = parseResponse(1, 20, 6, writer.bufferList)
+  const response = parseResponse(1, 20, 6, Reader.from(writer))
 
   // Verify response with empty results
   deepStrictEqual(

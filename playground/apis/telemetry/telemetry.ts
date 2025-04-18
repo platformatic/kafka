@@ -1,7 +1,7 @@
 import { CompressionTypes } from 'kafkajs'
-import { getTelemetrySubscriptionsV0 } from '../../../src/apis/telemetry/get-telemetry-subscriptions.ts'
-import { listClientMetricsResourcesV0 } from '../../../src/apis/telemetry/list-client-metrics-resources.ts'
-import { pushTelemetryV0 } from '../../../src/apis/telemetry/push-telemetry.ts'
+import { api as getTelemetrySubscriptionsV0 } from '../../../src/apis/telemetry/get-telemetry-subscriptions.ts'
+import { api as listClientMetricsResourcesV0 } from '../../../src/apis/telemetry/list-client-metrics-resources.ts'
+import { api as pushTelemetryV0 } from '../../../src/apis/telemetry/push-telemetry.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

@@ -1,6 +1,6 @@
-import { createAclsV3 } from '../../../src/apis/admin/create-acls.ts'
-import { deleteAclsV3 } from '../../../src/apis/admin/delete-acls.ts'
-import { describeAclsV3 } from '../../../src/apis/admin/describe-acls.ts'
+import { api as createAclsV3 } from '../../../src/apis/admin/create-acls.ts'
+import { api as deleteAclsV3 } from '../../../src/apis/admin/delete-acls.ts'
+import { api as describeAclsV3 } from '../../../src/apis/admin/describe-acls.ts'
 import {
   AclOperations,
   AclPermissionTypes,

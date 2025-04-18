@@ -1,4 +1,3 @@
-import BufferList from 'bl'
 import { UnsupportedCompressionError } from '../errors.ts'
 import { type NumericMap } from '../utils.ts'
 import {
@@ -8,7 +7,8 @@ import {
   compressionsAlgorithmsByBitmask
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
-import { INT64_SIZE, type NullableString } from './definitions.ts'
+import { type NullableString } from './definitions.ts'
+import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
@@ -147,7 +147,7 @@ export const messageSchema = {
   additionalProperties: true
 }
 
-export function createRecord (message: MessageRecord, offsetDelta: number, firstTimestamp: bigint): BufferList {
+export function createRecord (message: MessageRecord, offsetDelta: number, firstTimestamp: bigint): Writer {
   return Writer.create()
     .appendInt8(0) // Attributes are unused for now
     .appendVarInt64((message.timestamp ?? BigInt(Date.now())) - firstTimestamp)
@@ -157,7 +157,7 @@ export function createRecord (message: MessageRecord, offsetDelta: number, first
     .appendVarIntMap(message.headers, (w, [key, value]) => {
       w.appendVarIntBytes(key).appendVarIntBytes(value)
     })
-    .prependVarIntLength().bufferList
+    .prependVarIntLength()
 }
 
 export function readRecord (reader: Reader): KafkaRecord {
@@ -175,7 +175,7 @@ export function readRecord (reader: Reader): KafkaRecord {
 export function createRecordsBatch (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions> = {}
-): BufferList {
+): Writer {
   const now = BigInt(Date.now())
   const timestamps = []
 
@@ -188,10 +188,10 @@ export function createRecordsBatch (
   const firstTimestamp = timestamps[0]
   const maxTimestamp = timestamps[timestamps.length - 1]
 
-  let buffer = new BufferList()
+  let buffer = new DynamicBuffer()
   for (let i = 0; i < messages.length; i++) {
     const record = createRecord(messages[i], i, firstTimestamp)
-    buffer.append(record)
+    buffer.appendFrom(record.dynamicBuffer)
   }
 
   let attributes = 0
@@ -221,8 +221,8 @@ export function createRecordsBatch (
 
     attributes |= algorithm.bitmask
 
-    const compressed = algorithm.compressSync(buffer)
-    buffer = new BufferList(compressed)
+    const compressed = algorithm.compressSync(buffer.buffer)
+    buffer = new DynamicBuffer(compressed)
   }
 
   const writer = Writer.create()
@@ -238,17 +238,17 @@ export function createRecordsBatch (
     .appendInt16(options.producerEpoch ?? 0)
     .appendInt32(firstSequence)
     .appendInt32(messages.length) // Number of records
-    .append(buffer)
+    .appendFrom(buffer)
 
   // Phase 2: Prepend the PartitionLeaderEpoch, Magic and CRC, then the Length and firstOffset, in reverse order
   return (
     writer
-      .appendUnsignedInt32(crc32c(writer.bufferList), false)
+      .appendUnsignedInt32(crc32c(writer.dynamicBuffer), false)
       .appendInt8(CURRENT_RECORD_VERSION, false)
       .appendInt32(options.partitionLeaderEpoch ?? 0, false)
       .prependLength()
       // FirstOffset is 0
-      .appendInt64(0n, false).bufferList
+      .appendInt64(0n, false)
   )
 }
 
@@ -279,11 +279,9 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
       throw new UnsupportedCompressionError(`Unsupported compression algorithm with bitmask ${compression}`)
     }
 
-    const buffer = algorithm.decompressSync(
-      reader.buffer.slice(reader.position, reader.position + batch.length - INT64_SIZE)
-    )
+    const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.buffer.length))
 
-    reader = new Reader(new BufferList(buffer))
+    reader = Reader.from(buffer)
   }
 
   for (let i = 0; i < recordsLength; i++) {

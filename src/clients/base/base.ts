@@ -14,9 +14,10 @@ import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
 export const kOptions = Symbol('plt.kafka.base.options')
-export const kConnections = Symbol('plt.kafka.base.kConnections')
-export const kCreateConnectionPool = Symbol('plt.kafka.base.kCreateConnectionPool')
-export const kClosed = Symbol('plt.kafka.base.kClosed')
+export const kConnections = Symbol('plt.kafka.base.connections')
+export const kFetchConnections = Symbol('plt.kafka.base.fetchCnnections')
+export const kCreateConnectionPool = Symbol('plt.kafka.base.createConnectionPool')
+export const kClosed = Symbol('plt.kafka.base.closed')
 export const kMetadata = Symbol('plt.kafka.base.metadata')
 export const kCheckNotClosed = Symbol('plt.kafka.base.checkNotClosed')
 export const kClearMetadata = Symbol('plt.kafka.base.clearMetadata')
@@ -25,6 +26,7 @@ export const kPerformWithRetry = Symbol('plt.kafka.base.performWithRetry')
 export const kPerformDeduplicated = Symbol('plt.kafka.base.performDeduplicated')
 export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
 export const kInspect = Symbol('plt.kafka.base.inspect')
+export const kFormatValidationErrors = Symbol('plt.kafka.base.formatValidationErrors')
 export const kInstance = Symbol('plt.kafka.base.instance')
 
 let currentInstance = 0
@@ -317,7 +319,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     const valid = validator(target)
 
     if (!valid) {
-      const error = new UserError(ajv.errorsText(validator.errors, { dataVar: targetName }) + '.')
+      const error = new UserError(this[kFormatValidationErrors](validator, targetName))
 
       if (throwOnErrors) {
         throw error
@@ -333,5 +335,9 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
   /* c8 ignore next 3 */
   [kInspect] (...args: unknown[]): void {
     debugDump(`client:${this[kInstance]}`, ...args)
+  }
+
+  [kFormatValidationErrors] (validator: ValidateFunction<unknown>, targetName: string) {
+    return ajv.errorsText(validator.errors, { dataVar: '$dataVar$' }).replaceAll('$dataVar$', targetName) + '.'
   }
 }

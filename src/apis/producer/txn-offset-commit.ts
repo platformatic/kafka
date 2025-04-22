@@ -68,27 +68,14 @@ export function createRequest (
     .appendInt32(generationId)
     .appendString(memberId, true)
     .appendString(groupInstanceId, true)
-    .appendArray(
-      topics,
-      (w, t) => {
-        w.appendString(t.name, true)
-          .appendArray(
-            t.partitions,
-            (w, p) => {
-              w.appendInt32(p.partitionIndex)
-                .appendInt64(p.committedOffset)
-                .appendInt32(p.committedLeaderEpoch)
-                .appendString(p.committedMetadata, true)
-                .appendTaggedFields() // Add tagged fields for partitions
-            },
-            true,
-            true
-          )
-          .appendTaggedFields() // Add tagged fields for topics
-      },
-      true,
-      true
-    )
+    .appendArray(topics, (w, t) => {
+      w.appendString(t.name, true).appendArray(t.partitions, (w, p) => {
+        w.appendInt32(p.partitionIndex)
+          .appendInt64(p.committedOffset)
+          .appendInt32(p.committedLeaderEpoch)
+          .appendString(p.committedMetadata, true)
+      })
+    })
     .appendTaggedFields()
 }
 

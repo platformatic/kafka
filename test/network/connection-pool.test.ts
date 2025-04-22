@@ -8,6 +8,7 @@ import {
   ConnectionPool,
   ConnectionStatuses
 } from '../../src/index.ts'
+import { mockMethod } from '../helpers.ts'
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -194,11 +195,18 @@ test('ConnectionPool.getFirstAvailable should try multiple brokers until one suc
   ]
 
   let connectionAttempt = 0
-  const originalGet = connectionPool.get.bind(connectionPool)
-  mock.method(connectionPool, 'get', (broker: Broker, callback: CallbackWithPromise<Connection>) => {
-    connectionAttempt++
-    return originalGet(broker, callback)
-  })
+  mockMethod(
+    connectionPool,
+    'get',
+    current => current <= 3,
+    null,
+    null,
+    (original, ...args) => {
+      connectionAttempt++
+      original(...args)
+      return true
+    }
+  )
 
   const connection = await connectionPool.getFirstAvailable(brokers)
 

@@ -478,6 +478,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #refreshOffsets (callback: Callback<void>) {
+    if (this.#topics.length === 0) {
+      callback(null)
+      return
+    }
+
     // List topic offsets
     this.#consumer.listOffsets(
       {

@@ -25,6 +25,34 @@ const groupOptionsProperties = {
   }
 }
 
+const groupOptionsAdditionalValidations = {
+  rebalanceTimeout: {
+    properties: {
+      rebalanceTimeout: {
+        type: 'number',
+        minimum: 0,
+        gteProperty: 'sessionTimeout'
+      }
+    }
+  },
+  heartbeatInterval: {
+    properties: {
+      heartbeatInterval: {
+        type: 'number',
+        minimum: 0,
+        allOf: [
+          {
+            lteProperty: 'sessionTimeout'
+          },
+          {
+            lteProperty: 'rebalanceTimeout'
+          }
+        ]
+      }
+    }
+  }
+}
+
 const consumeOptionsProperties = {
   autocommit: { oneOf: [{ type: 'boolean' }, { type: 'number', minimum: 100 }] },
   minBytes: { type: 'number', minimum: 0 },
@@ -166,7 +194,10 @@ export const listOffsetsOptionsSchema = {
   additionalProperties: false
 }
 
-export const groupOptionsValidator = ajv.compile(groupOptionsSchema)
+export const groupOptionsValidator = ajv.compile({
+  ...groupOptionsSchema,
+  dependentSchemas: groupOptionsAdditionalValidations
+})
 export const consumeOptionsValidator = ajv.compile(consumeOptionsSchema)
 export const consumerOptionsValidator = ajv.compile(consumerOptionsSchema)
 export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)

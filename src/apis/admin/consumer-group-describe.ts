@@ -129,7 +129,7 @@ export function parseResponse (
                 return {
                   topicId: r.readUUID(),
                   topicName: r.readString(),
-                  partitions: r.readArray(() => r.readInt32())
+                  partitions: r.readArray(() => r.readInt32(), true, false)
                 }
               })
             },
@@ -138,7 +138,7 @@ export function parseResponse (
                 return {
                   topicId: r.readUUID(),
                   topicName: r.readString(),
-                  partitions: r.readArray(() => r.readInt32())
+                  partitions: r.readArray(() => r.readInt32(), true, false)
                 }
               })
             }

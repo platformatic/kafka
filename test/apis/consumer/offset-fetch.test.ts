@@ -420,7 +420,7 @@ test('parseResponse handles group-level error code', () => {
       (w, group) => {
         w.appendString(group.groupId)
           // Empty topics array
-          .appendArray(group.topics, () => {}, true, true)
+          .appendArray(group.topics, () => {})
           .appendInt16(group.errorCode)
       }
     )

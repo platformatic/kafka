@@ -53,6 +53,7 @@ await producer.close()
 
 ```typescript
 import { Consumer, stringDeserializer } from '@platformatic/kafka'
+import { forEach } from 'hwp'
 
 // Create a consumer with string deserialisers
 const consumer = new Consumer({
@@ -80,6 +81,12 @@ for await (const message of stream) {
   console.log(`Received: ${message.key} -> ${message.value}`)
   // Process message...
 }
+
+// Option 3: Concurrent processing
+await forEach(stream, async message => {
+  console.log(`Received: ${message.key} -> ${message.value}`)
+  // Process message...
+}, 16) // 16 is the concurrency level
 
 // Close the consumer when done
 await consumer.close()

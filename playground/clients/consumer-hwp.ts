@@ -18,7 +18,7 @@ const stream = await consumer.consume({
   sessionTimeout: 10000,
   heartbeatInterval: 500,
   maxWaitTime: 500,
-  mode: "earliest"
+  mode: 'earliest'
 })
 
 // This is purposely not catched to show the error handling if we remove the force parameter
@@ -26,7 +26,6 @@ once(process, 'SIGINT').then(() => consumer.close(true))
 
 debugDump('start')
 
-let count = 0
 await forEach(stream, async (message, { signal }) => {
   console.log('data', message.partition, message.offset, message.key, message.value, message.headers)
   await sleep(1000)

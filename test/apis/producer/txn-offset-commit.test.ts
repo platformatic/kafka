@@ -70,22 +70,15 @@ test('createRequest serializes parameters correctly', () => {
         const committedLeaderEpoch = reader.readInt32()
         const committedMetadata = reader.readNullableString()
 
-        // Include tagged fields for partition
-        const partitionTagsCount = reader.readUnsignedVarInt()
-
         return {
           partitionIndex,
           committedOffset,
           committedLeaderEpoch,
-          committedMetadata,
-          partitionTagsCount
+          committedMetadata
         }
       })
 
-      // Include tagged fields for topic
-      const topicTagsCount = reader.readUnsignedVarInt()
-
-      return { topicName, partitions, topicTagsCount }
+      return { topicName, partitions }
     })
   }
 
@@ -110,18 +103,15 @@ test('createRequest serializes parameters correctly', () => {
               partitionIndex: 0,
               committedOffset: 100n,
               committedLeaderEpoch: 15,
-              committedMetadata: 'metadata-1',
-              partitionTagsCount: 0
+              committedMetadata: 'metadata-1'
             },
             {
               partitionIndex: 1,
               committedOffset: 200n,
               committedLeaderEpoch: 15,
-              committedMetadata: null,
-              partitionTagsCount: 0
+              committedMetadata: null
             }
-          ],
-          topicTagsCount: 0
+          ]
         }
       ]
     },
@@ -188,22 +178,15 @@ test('createRequest handles null group instance ID', () => {
         const committedLeaderEpoch = reader.readInt32()
         const committedMetadata = reader.readNullableString()
 
-        // Include tagged fields for partition
-        const partitionTagsCount = reader.readUnsignedVarInt()
-
         return {
           partitionIndex,
           committedOffset,
           committedLeaderEpoch,
-          committedMetadata,
-          partitionTagsCount
+          committedMetadata
         }
       })
 
-      // Include tagged fields for topic
-      const topicTagsCount = reader.readUnsignedVarInt()
-
-      return { topicName, partitions, topicTagsCount }
+      return { topicName, partitions }
     })
   }
 
@@ -228,11 +211,9 @@ test('createRequest handles null group instance ID', () => {
               partitionIndex: 0,
               committedOffset: 100n,
               committedLeaderEpoch: 15,
-              committedMetadata: null,
-              partitionTagsCount: 0
+              committedMetadata: null
             }
-          ],
-          topicTagsCount: 0
+          ]
         }
       ]
     },
@@ -314,22 +295,15 @@ test('createRequest handles multiple topics', () => {
         const committedLeaderEpoch = reader.readInt32()
         const committedMetadata = reader.readNullableString()
 
-        // Include tagged fields for partition
-        const partitionTagsCount = reader.readUnsignedVarInt()
-
         return {
           partitionIndex,
           committedOffset,
           committedLeaderEpoch,
-          committedMetadata,
-          partitionTagsCount
+          committedMetadata
         }
       })
 
-      // Include tagged fields for topic
-      const topicTagsCount = reader.readUnsignedVarInt()
-
-      return { topicName, partitions, topicTagsCount }
+      return { topicName, partitions }
     })
   }
 
@@ -354,11 +328,9 @@ test('createRequest handles multiple topics', () => {
               partitionIndex: 0,
               committedOffset: 100n,
               committedLeaderEpoch: 15,
-              committedMetadata: null,
-              partitionTagsCount: 0
+              committedMetadata: null
             }
-          ],
-          topicTagsCount: 0
+          ]
         },
         {
           topicName: 'topic-2',
@@ -367,18 +339,15 @@ test('createRequest handles multiple topics', () => {
               partitionIndex: 0,
               committedOffset: 200n,
               committedLeaderEpoch: 20,
-              committedMetadata: null,
-              partitionTagsCount: 0
+              committedMetadata: null
             },
             {
               partitionIndex: 1,
               committedOffset: 300n,
               committedLeaderEpoch: 20,
-              committedMetadata: null,
-              partitionTagsCount: 0
+              committedMetadata: null
             }
-          ],
-          topicTagsCount: 0
+          ]
         }
       ]
     },

@@ -1,64 +1,40 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
-import { randomUUID } from 'node:crypto'
-import { test, type TestContext } from 'node:test'
-import { kConnections, kMetadata } from '../../../src/clients/base/base.ts'
+import { test } from 'node:test'
+import { kConnections } from '../../../src/clients/base/base.ts'
 import {
-  type Broker,
-  type Callback,
-  type CallbackWithPromise,
-  type Connection,
+  initProducerIdV5,
   MultipleErrors,
   NetworkError,
   ProduceAcks,
   Producer,
-  type ProducerOptions,
   produceV11,
   ProtocolError,
-  type ResponseParser,
   stringSerializer,
   stringSerializers,
-  UserError,
-  type Writer
+  UserError
 } from '../../../src/index.ts'
-
-const kafkaBootstrapServers = ['localhost:29092']
-
-// Helper function to create a unique test client
-function createTestProducer<K = Buffer, V = Buffer, HK = Buffer, HV = Buffer> (
-  t: TestContext,
-  overrideOptions: Partial<ProducerOptions<K, V, HK, HV>> = {}
-) {
-  const options: ProducerOptions<K, V, HK, HV> = {
-    clientId: `test-client-${randomUUID()}`,
-    bootstrapBrokers: kafkaBootstrapServers,
-    autocreateTopics: true,
-    ...overrideOptions
-  }
-
-  const client = new Producer<K, V, HK, HV>(options)
-  t.after(() => client.close())
-
-  return client
-}
-
-// Helper function to generate a unique topic name
-function getTestTopicName () {
-  return `test-topic-${randomUUID()}`
-}
+import {
+  createProducer,
+  createTopic,
+  mockAPI,
+  mockConnectionPoolGet,
+  mockConnectionPoolGetFirstAvailable,
+  mockMetadata
+} from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
-  const client = createTestProducer(t)
+  const producer = createProducer(t)
 
-  strictEqual(client instanceof Producer, true)
-  strictEqual(client.closed, false)
+  strictEqual(producer instanceof Producer, true)
+  strictEqual(producer.closed, false)
 
-  client.close()
+  producer.close()
 })
 
 test('constructor should validate options in strict mode', t => {
   // Test with an invalid acks value
   try {
-    createTestProducer(t, {
+    createProducer(t, {
       strict: true,
       acks: 123 // Not a valid ProduceAcks enum value
     })
@@ -70,7 +46,7 @@ test('constructor should validate options in strict mode', t => {
 
   // Test with invalid compression
   try {
-    createTestProducer(t, {
+    createProducer(t, {
       strict: true,
       // @ts-expect-error - Intentionally passing invalid option
       compression: 'invalid-compression' // Not a valid compression algorithm
@@ -82,7 +58,7 @@ test('constructor should validate options in strict mode', t => {
 
   // Test with invalid serializers type
   try {
-    createTestProducer(t, {
+    createProducer(t, {
       strict: true,
       // @ts-expect-error - Intentionally passing invalid option
       serializers: 'not-an-object'
@@ -93,53 +69,52 @@ test('constructor should validate options in strict mode', t => {
   }
 
   // Valid options should work without throwing
-  const client = createTestProducer(t, {
+  const producer = createProducer(t, {
     strict: true,
     acks: ProduceAcks.LEADER,
     compression: 'none',
     serializers: stringSerializers
   })
-  strictEqual(client instanceof Producer, true)
-  client.close()
+  strictEqual(producer instanceof Producer, true)
+  producer.close()
 })
 
-test('should support both promise and callback API', (t, done) => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+test('should support both promise and callback API', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  // Use callback API
-  client.send(
-    {
-      messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
-      acks: ProduceAcks.LEADER
-    },
-    (err, result) => {
-      strictEqual(err, null)
-      ok(Array.isArray(result.offsets), 'Should have offsets array')
-      strictEqual(result.offsets?.length, 1)
-      strictEqual(result.offsets?.[0].topic, testTopic)
-      strictEqual(typeof result.offsets?.[0].offset, 'bigint')
+  await new Promise((resolve, reject) => {
+    // Use callback API
+    producer.send(
+      {
+        messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
+        acks: ProduceAcks.LEADER
+      },
+      (err, result) => {
+        strictEqual(err, null)
+        ok(Array.isArray(result.offsets), 'Should have offsets array')
+        strictEqual(result.offsets?.length, 1)
+        strictEqual(result.offsets?.[0].topic, testTopic)
+        strictEqual(typeof result.offsets?.[0].offset, 'bigint')
 
-      // Clean up and close
-      client
-        .close()
-        .then(() => done())
-        .catch(done)
-    }
-  )
+        // Clean up and close
+        producer.close().then(resolve).catch(reject)
+      }
+    )
+  })
 })
 
-test('all operations should fail when client is closed', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+test('all operations should fail when producer is closed', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  // Close the client first
-  await client.close()
+  // Close the producer first
+  await producer.close()
 
-  // Attempt to send a message on a closed client
+  // Attempt to send a message on a closed producer
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
       })
     },
@@ -150,10 +125,10 @@ test('all operations should fail when client is closed', async t => {
     }
   )
 
-  // Attempt to initialize idempotent client on closed client
+  // Attempt to initialize idempotent producer on closed producer
   await rejects(
     async () => {
-      await client.initIdempotentProducer({})
+      await producer.initIdempotentProducer({})
     },
     (error: any) => {
       strictEqual(error instanceof NetworkError, true)
@@ -164,16 +139,16 @@ test('all operations should fail when client is closed', async t => {
 })
 
 test('initIdempotentProducer should set idempotent options correctly', async t => {
-  // Create a client with idempotent=true
-  const client = createTestProducer(t, {
+  // Create a producer with idempotent=true
+  const producer = createProducer(t, {
     idempotent: true,
     strict: true
   })
 
   // Initialize and check if properly configured for idempotency
-  const clientInfo = await client.initIdempotentProducer({})
+  const clientInfo = await producer.initIdempotentProducer({})
 
-  // Verify client info structure
+  // Verify producer info structure
   strictEqual(typeof clientInfo.producerId, 'bigint')
   strictEqual(typeof clientInfo.producerEpoch, 'number')
   ok(clientInfo.producerId >= 0n, 'Producer ID should be a positive bigint')
@@ -181,7 +156,7 @@ test('initIdempotentProducer should set idempotent options correctly', async t =
 })
 
 test('initIdempotentProducer should validate options in strict mode', async t => {
-  const producer = createTestProducer(t, { strict: true })
+  const producer = createProducer(t, { strict: true })
 
   // Test with invalid producerId type
   await rejects(
@@ -287,19 +262,14 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
 })
 
 test('initIdempotentProducer should handle errors from getFirstAvailable', async t => {
-  const client = createTestProducer(t)
+  const producer = createProducer(t)
 
-  client[kConnections].getFirstAvailable = (_brokers: any, callback: any) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
+  mockConnectionPoolGetFirstAvailable(producer[kConnections])
 
-  // Attempt to initialize idempotent client - should fail with connection error
+  // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(
     async () => {
-      await client.initIdempotentProducer({})
+      await producer.initIdempotentProducer({})
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
@@ -310,48 +280,29 @@ test('initIdempotentProducer should handle errors from getFirstAvailable', async
 })
 
 test('initIdempotentProducer should handle errors from the API', async t => {
-  const client = createTestProducer(t)
+  const producer = createProducer(t)
 
-  client[kConnections].getFirstAvailable = (_brokers: any, callback: any) => {
-    // Successfully return a connection, but the API call will fail
-    const mockConnection = {
-      send: (
-        _apiKey: number,
-        _apiVersion: number,
-        _payload: any,
-        _responseParser: any,
-        _hasRequestHeaderTaggedFields: boolean,
-        _hasResponseHeaderTaggedFields: boolean,
-        apiCallback: any
-      ) => {
-        const connectionError = new MultipleErrors('API execution failed.', [
-          new Error('Failed to execute initProducerId')
-        ])
-        apiCallback(connectionError, undefined)
-      }
-    }
-    callback(null, mockConnection)
-  }
+  mockAPI(producer[kConnections], initProducerIdV5.api.key)
 
-  // Attempt to initialize idempotent client - should fail with API error
+  // Attempt to initialize idempotent producer - should fail with API error
   await rejects(
     async () => {
-      await client.initIdempotentProducer({})
+      await producer.initIdempotentProducer({})
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('API execution failed.'), true)
+      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
       return true
     }
   )
 })
 
 test('send should return ProduceResult with offsets', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
   // Produce a message
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
     acks: ProduceAcks.LEADER
   })
@@ -366,11 +317,11 @@ test('send should return ProduceResult with offsets', async t => {
 })
 
 test('send should support messages with keys', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
   // Produce a message with a key
-  const result = await client.send({
+  const result = await producer.send({
     messages: [
       {
         topic: testTopic,
@@ -389,10 +340,10 @@ test('send should support messages with keys', async t => {
 })
 
 test('send should support messages with headers', async t => {
-  const testTopic = getTestTopicName()
+  const testTopic = await createTopic(t)
 
   // Produce a message with headers using Map
-  const client1 = createTestProducer(t)
+  const client1 = createProducer(t)
   const result1 = await client1.send({
     messages: [
       {
@@ -412,7 +363,7 @@ test('send should support messages with headers', async t => {
   strictEqual(result1.offsets?.length, 1)
 
   // Produce a message with headers using object
-  const client2 = createTestProducer(t, {
+  const client2 = createProducer(t, {
     serializers: { headerKey: stringSerializer }
   })
 
@@ -436,11 +387,11 @@ test('send should support messages with headers', async t => {
 })
 
 test('send should support no response', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
   // Produce a message
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
     acks: ProduceAcks.NO_RESPONSE
   })
@@ -449,50 +400,13 @@ test('send should support no response', async t => {
 })
 
 test('send should support no response with backpressure handling', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    original(broker, (error: Error | null, connection: Connection) => {
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
-
-      const originalSend = connection.send.bind(connection)
-
-      connection.send = function <ReturnType>(
-        apiKey: number,
-        apiVersion: number,
-        payload: () => Writer,
-        responseParser: ResponseParser<ReturnType>,
-        hasRequestHeaderTaggedFields: boolean,
-        hasResponseHeaderTaggedFields: boolean,
-        callback: Callback<ReturnType>
-      ) {
-        if (apiKey === produceV11.api.key) {
-          callback(null, false as ReturnType)
-          return
-        }
-
-        originalSend(
-          apiKey,
-          apiVersion,
-          payload,
-          responseParser,
-          hasRequestHeaderTaggedFields,
-          hasResponseHeaderTaggedFields,
-          callback
-        )
-      } as typeof originalSend
-
-      callback(null, connection)
-    })
-  } as typeof original
+  mockAPI(producer[kConnections], produceV11.api.key, null, false)
 
   // Produce a message
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
     acks: ProduceAcks.NO_RESPONSE
   })
@@ -501,12 +415,12 @@ test('send should support no response with backpressure handling', async t => {
 })
 
 test('send should support string serialization with provided serializers', async t => {
-  const client = createTestProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
 
-  const testTopic = getTestTopicName()
+  const testTopic = await createTopic(t)
 
   // Produce a message with string key, value and headers
-  const result = await client.send({
+  const result = await producer.send({
     messages: [
       {
         topic: testTopic,
@@ -529,11 +443,11 @@ test('send should support string serialization with provided serializers', async
 })
 
 test('send should support specifying a partition', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
   // Produce a message to a specific partition
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, partition: 0, value: Buffer.from('test-message') }],
     acks: ProduceAcks.LEADER
   })
@@ -546,15 +460,15 @@ test('send should support specifying a partition', async t => {
 })
 
 test('send should handle custom partitioning function', async t => {
-  // Create a client with a custom partitioner
-  const client = createTestProducer(t, {
+  // Create a producer with a custom partitioner
+  const producer = createProducer(t, {
     // Always use partition 0 regardless of input
     partitioner: () => 0
   })
-  const testTopic = getTestTopicName()
+  const testTopic = await createTopic(t)
 
   // Send a message - should use our partitioner
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
   })
 
@@ -564,12 +478,12 @@ test('send should handle custom partitioning function', async t => {
 })
 
 test('send should support sending to multiple topics', async t => {
-  const client = createTestProducer(t)
-  const testTopic1 = getTestTopicName()
-  const testTopic2 = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic1 = await createTopic(t)
+  const testTopic2 = await createTopic(t)
 
   // Send to multiple topics in one request
-  const result = await client.send({
+  const result = await producer.send({
     messages: [
       { topic: testTopic1, value: Buffer.from('topic1-message') },
       { topic: testTopic2, value: Buffer.from('topic2-message') }
@@ -589,21 +503,21 @@ test('send should support sending to multiple topics', async t => {
   ok(topic2Offset, `Should have offset for topic ${testTopic2}`)
 })
 
-test('send should initialize idempotent client', async t => {
-  const client = createTestProducer(t)
+test('send should initialize idempotent producer', async t => {
+  const producer = createProducer(t)
 
-  // Initialize the idempotent client explicitly
-  const clientInfo = await client.initIdempotentProducer({})
+  // Initialize the idempotent producer explicitly
+  const clientInfo = await producer.initIdempotentProducer({})
 
-  // Verify client info structure
+  // Verify producer info structure
   strictEqual(typeof clientInfo.producerId, 'bigint')
   strictEqual(typeof clientInfo.producerEpoch, 'number')
   ok(clientInfo.producerId > 0n, 'Producer ID should be a positive bigint')
   ok(clientInfo.producerEpoch >= 0, 'Producer epoch should be a non-negative number')
 
-  // Send with idempotent client
-  const testTopic = getTestTopicName()
-  const result = await client.send({
+  // Send with idempotent producer
+  const testTopic = await createTopic(t)
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
     idempotent: true,
     acks: ProduceAcks.ALL
@@ -614,20 +528,20 @@ test('send should initialize idempotent client', async t => {
   strictEqual(result.offsets?.length, 1)
 })
 
-test('send should auto-initialize idempotent client if needed', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+test('send should auto-initialize idempotent producer if needed', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
   // Send with idempotent=true without initializing first
-  const result = await client.send({
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('auto-init-idempotent-message') }],
     idempotent: true,
     acks: ProduceAcks.ALL
   })
 
-  // Verify client info structure
-  ok(client.producerId! > 0n, 'Producer ID should be a positive bigint')
-  ok(client.producerEpoch! >= 0, 'Producer epoch should be a non-negative number')
+  // Verify producer info structure
+  ok(producer.producerId! > 0n, 'Producer ID should be a positive bigint')
+  ok(producer.producerEpoch! >= 0, 'Producer epoch should be a non-negative number')
 
   // Verify result structure
   ok(Array.isArray(result.offsets), 'Should have offsets array')
@@ -635,14 +549,14 @@ test('send should auto-initialize idempotent client if needed', async t => {
 })
 
 test('send should validate options in strict mode', async t => {
-  const client = createTestProducer(t, { strict: true })
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t, { strict: true })
+  const testTopic = await createTopic(t)
 
   // Test with missing required field (messages)
   await rejects(
     async () => {
       // @ts-expect-error - Intentionally passing invalid options
-      await client.send({})
+      await producer.send({})
     },
     (error: any) => {
       strictEqual(error instanceof UserError, true)
@@ -655,7 +569,7 @@ test('send should validate options in strict mode', async t => {
   await rejects(
     async () => {
       // @ts-expect-error - Intentionally passing invalid options
-      await client.send({ messages: 'not-an-array' })
+      await producer.send({ messages: 'not-an-array' })
     },
     (error: any) => {
       strictEqual(error instanceof UserError, true)
@@ -667,7 +581,7 @@ test('send should validate options in strict mode', async t => {
   // Test with invalid acks value
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         acks: 123 // Not a valid ProduceAcks enum value
       })
@@ -682,7 +596,7 @@ test('send should validate options in strict mode', async t => {
   // Test with invalid message (missing topic)
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         // @ts-expect-error - Intentionally passing invalid options
         messages: [{ value: Buffer.from('test-message') }]
       })
@@ -697,7 +611,7 @@ test('send should validate options in strict mode', async t => {
   // Test with invalid additional property
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         // @ts-expect-error - Intentionally passing invalid options
         invalidProperty: true
@@ -711,14 +625,14 @@ test('send should validate options in strict mode', async t => {
   )
 })
 
-test('send should reject conflicting idempotent client options', async t => {
-  const client = createTestProducer(t, { idempotent: true })
-  const testTopic = getTestTopicName()
+test('send should reject conflicting idempotent producer options', async t => {
+  const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
 
   // Try to send with custom clientId (should fail)
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         idempotent: true,
         producerId: 123n
@@ -734,7 +648,7 @@ test('send should reject conflicting idempotent client options', async t => {
   // Try to send with custom clientEpoch (should fail)
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         idempotent: true,
         producerEpoch: 1
@@ -750,7 +664,7 @@ test('send should reject conflicting idempotent client options', async t => {
   // Try to send with wrong acks value (should fail)
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         idempotent: true,
         acks: ProduceAcks.LEADER
@@ -763,8 +677,8 @@ test('send should reject conflicting idempotent client options', async t => {
     }
   )
 
-  // Should succeed with correct idempotent client settings
-  const result = await client.send({
+  // Should succeed with correct idempotent producer settings
+  const result = await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
     idempotent: true
   })
@@ -775,21 +689,15 @@ test('send should reject conflicting idempotent client options', async t => {
 })
 
 test('send should handle errors from initIdempotentProducer', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  // This will result in errors inside initIdempotentProducer
-  client[kConnections].getFirstAvailable = (_brokers: any, callback: any) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
+  mockConnectionPoolGetFirstAvailable(producer[kConnections])
 
-  // Attempt to initialize idempotent client - should fail with connection error
+  // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
         idempotent: true,
         acks: ProduceAcks.ALL
@@ -804,21 +712,15 @@ test('send should handle errors from initIdempotentProducer', async t => {
 })
 
 test('send should handle errors from Base.metadata', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  // Override the [kMetadata] method to simulate a connection error
-  client[kMetadata] = (_options: any, callback: CallbackWithPromise<any>) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
+  mockMetadata(producer)
 
-  // Attempt to initialize idempotent client - should fail with connection error
+  // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
         idempotent: true,
         acks: ProduceAcks.ALL
@@ -833,31 +735,15 @@ test('send should handle errors from Base.metadata', async t => {
 })
 
 test('send should handle errors from Base.metadata in internal calls', async t => {
-  const client = createTestProducer(t, {})
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t, {})
+  const testTopic = await createTopic(t)
 
-  // Save the original [kMetadata] method to restore it later
-  const original = client[kMetadata].bind(client)
+  mockMetadata(producer, 2)
 
-  // Override the [kMetadata] method to simulate a connection error
-  let firstCall = true
-  client[kMetadata] = (options: any, callback: CallbackWithPromise<any>) => {
-    if (firstCall) {
-      firstCall = false
-      original(options, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
-
-  // Attempt to initialize idempotent client - should fail with connection error
+  // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
         idempotent: true,
         acks: ProduceAcks.ALL
@@ -872,31 +758,15 @@ test('send should handle errors from Base.metadata in internal calls', async t =
 })
 
 test('send should handle errors from ConnectionPool.get', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
 
-  // Save original method
-  const original = client[kConnections].get.bind(client[kConnections])
+  mockConnectionPoolGet(producer[kConnections], 4)
 
-  let getCalls = 0
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    getCalls++
-
-    if (getCalls < 4) {
-      original(broker, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  } as typeof original
-
-  // Attempt to initialize idempotent client - should fail with connection error
+  // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(
     async () => {
-      await client.send({
+      await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
         idempotent: true,
         acks: ProduceAcks.ALL
@@ -911,51 +781,16 @@ test('send should handle errors from ConnectionPool.get', async t => {
 })
 
 test('send should repeat the operation in case of stale metadata', async t => {
-  const client = createTestProducer(t)
-  const testTopic = getTestTopicName()
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t, true)
 
-  let firstCall = true
-  const original = client[kConnections].get.bind(client[kConnections])
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    original(broker, (error: Error | null, connection: Connection) => {
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
+  mockAPI(
+    producer[kConnections],
+    produceV11.api.key,
+    new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', { topic: testTopic })
+  )
 
-      const originalSend = connection.send.bind(connection)
-
-      connection.send = function <ReturnType>(
-        apiKey: number,
-        apiVersion: number,
-        payload: () => Writer,
-        responseParser: ResponseParser<ReturnType>,
-        hasRequestHeaderTaggedFields: boolean,
-        hasResponseHeaderTaggedFields: boolean,
-        callback: Callback<ReturnType>
-      ) {
-        if (apiKey === produceV11.api.key && firstCall) {
-          firstCall = false
-          callback(new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', { topic: 'test-topic' }), undefined as ReturnType)
-          return
-        }
-
-        originalSend(
-          apiKey,
-          apiVersion,
-          payload,
-          responseParser,
-          hasRequestHeaderTaggedFields,
-          hasResponseHeaderTaggedFields,
-          callback
-        )
-      } as typeof originalSend
-
-      callback(null, connection)
-    })
-  } as typeof original
-
-  await client.send({
+  await producer.send({
     messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
     idempotent: true,
     acks: ProduceAcks.ALL

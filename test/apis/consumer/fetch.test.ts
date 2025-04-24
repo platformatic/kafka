@@ -366,7 +366,7 @@ test('parseResponse correctly processes a successful simple response', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => {}, true, true)
+              .appendArray(partition.abortedTransactions, () => {})
               .appendInt32(partition.preferredReadReplica)
               // Empty records (no records to return)
               .appendUnsignedVarInt(1) // Just the tag buffer header
@@ -471,7 +471,7 @@ test('parseResponse handles partition-level error code', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => {}, true, true)
+              .appendArray(partition.abortedTransactions, () => {})
               .appendInt32(partition.preferredReadReplica)
               // Empty records (no records with error)
               .appendUnsignedVarInt(1) // Just the tag buffer header
@@ -577,7 +577,7 @@ test('parseResponse handles multiple topics and partitions', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => {}, true, true)
+              .appendArray(partition.abortedTransactions, () => {})
               .appendInt32(partition.preferredReadReplica)
               // Empty records
               .appendUnsignedVarInt(1) // Just the tag buffer header
@@ -788,7 +788,7 @@ test('parseResponse parses record data', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => {}, true, true)
+              .appendArray(partition.abortedTransactions, () => {})
               .appendInt32(partition.preferredReadReplica)
 
               // Add records batch

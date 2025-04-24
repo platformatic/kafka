@@ -1,58 +1,42 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import { test, type TestContext } from 'node:test'
-import { kConnections, kMetadata } from '../../../src/clients/base/base.ts'
+import { test } from 'node:test'
+import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
-  type AdminOptions,
-  type Broker,
-  type Callback,
-  type CallbackWithPromise,
   type ClusterPartitionMetadata,
-  type Connection,
   Consumer,
   describeGroupsV5,
   EMPTY_BUFFER,
   listGroupsV5,
-  type MetadataOptions,
-  MultipleErrors,
-  type ResponseParser,
-  type Writer
+  MultipleErrors
 } from '../../../src/index.ts'
-
-const kafkaBootstrapServers = ['localhost:29092']
-
-// Helper function to create a unique test client
-function createTestClient (t: TestContext, overrideOptions = {}) {
-  const options: AdminOptions = {
-    clientId: `test-admin-client-${randomUUID()}`,
-    bootstrapBrokers: kafkaBootstrapServers,
-    ...overrideOptions
-  }
-
-  const client = new Admin(options)
-  t.after(() => client.close())
-
-  return client
-}
+import {
+  createAdmin,
+  kafkaBootstrapServers,
+  mockAPI,
+  mockConnectionPoolGet,
+  mockConnectionPoolGetFirstAvailable,
+  mockMetadata
+} from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
-  strictEqual(client instanceof Admin, true)
-  strictEqual(client.closed, false)
+  strictEqual(admin instanceof Admin, true)
+  strictEqual(admin.closed, false)
 
-  client.close()
+  admin.close()
 })
 
 test('should support both promise and callback API', (t, done) => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-${randomUUID()}`
 
   // Use callback API
-  client.createTopics(
+  admin.createTopics(
     {
       topics: [topicName],
       partitions: 1,
@@ -64,7 +48,7 @@ test('should support both promise and callback API', (t, done) => {
       strictEqual(created?.[0].name, topicName)
 
       // Clean up and close
-      client.deleteTopics({ topics: [topicName] }, err => {
+      admin.deleteTopics({ topics: [topicName] }, err => {
         if (err) {
           done(err)
           return
@@ -81,72 +65,72 @@ test('should support both promise and callback API', (t, done) => {
   )
 })
 
-test('all operations should fail when client is closed', async t => {
-  const client = createTestClient(t)
+test('all operations should fail when admin is closed', async t => {
+  const admin = createAdmin(t)
 
-  // Close the client first
-  await client.close()
+  // Close the admin first
+  await admin.close()
 
-  // Attempt to call createTopics on closed client
+  // Attempt to call createTopics on closed admin
   try {
-    await client.createTopics({
+    await admin.createTopics({
       topics: ['test-topic'],
       partitions: 1,
       replicas: 1
     })
-    throw new Error('Expected createTopics to fail on closed client')
+    throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should be about client being closed
+    // Error should be about admin being closed
     strictEqual(error.message, 'Client is closed.')
   }
 
-  // Attempt to call deleteTopics on closed client
+  // Attempt to call deleteTopics on closed admin
   try {
-    await client.deleteTopics({
+    await admin.deleteTopics({
       topics: ['test-topic']
     })
-    throw new Error('Expected deleteTopics to fail on closed client')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
   }
 
-  // Attempt to call listGroups on closed client
+  // Attempt to call listGroups on closed admin
   try {
-    await client.listGroups()
-    throw new Error('Expected listGroups to fail on closed client')
+    await admin.listGroups()
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
   }
 
-  // Attempt to call describeGroups on closed client
+  // Attempt to call describeGroups on closed admin
   try {
-    await client.describeGroups({
+    await admin.describeGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected describeGroups to fail on closed client')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
   }
 
-  // Attempt to call deleteGroups on closed client
+  // Attempt to call deleteGroups on closed admin
   try {
-    await client.deleteGroups({
+    await admin.deleteGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected deleteGroups to fail on closed client')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
   }
 })
 
 test('createTopics should create a new topic', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-${randomUUID()}`
 
   // Create a new topic
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName],
     partitions: 3,
     replicas: 1
@@ -164,17 +148,17 @@ test('createTopics should create a new topic', async t => {
   ])
 
   // Clean up by deleting the topic
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics should create a topic with specific partitions', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-partitions-${randomUUID()}`
 
   // Create a new topic with a specific number of partitions
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName],
     partitions: 3, // Specify 3 partitions
     replicas: 1 // With 1 replica (appropriate for single-broker setup)
@@ -187,7 +171,7 @@ test('createTopics should create a topic with specific partitions', async t => {
   strictEqual(created[0].replicas, 1)
 
   // Fetch the topic metadata to verify partitions
-  const topicMetadata = await client.metadata({ topics: [topicName] })
+  const topicMetadata = await admin.metadata({ topics: [topicName] })
   const topic = topicMetadata.topics.get(topicName)
 
   // Verify the topic has exactly 3 partitions
@@ -201,18 +185,18 @@ test('createTopics should create a topic with specific partitions', async t => {
   }
 
   // Clean up by deleting the topic
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics should create multiple topics', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate unique topic names for testing
   const topicName1 = `test-topic-${randomUUID()}`
   const topicName2 = `test-topic-${randomUUID()}`
 
   // Create multiple topics in a single request
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName1, topicName2]
   })
 
@@ -235,22 +219,22 @@ test('createTopics should create multiple topics', async t => {
   strictEqual(sortedTopics[secondTopicIndex].replicas, 1)
 
   // Fetch metadata to verify both topics exist
-  const topicMetadata = await client.metadata({ topics: [topicName1, topicName2] })
+  const topicMetadata = await admin.metadata({ topics: [topicName1, topicName2] })
   strictEqual(topicMetadata.topics.has(topicName1), true)
   strictEqual(topicMetadata.topics.has(topicName2), true)
 
   // Clean up by deleting the topics
-  await client.deleteTopics({ topics: [topicName1, topicName2] })
+  await admin.deleteTopics({ topics: [topicName1, topicName2] })
 })
 
 test('createTopics with multiple partitions', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique topic name
   const topicName = `test-topic-partitions-${randomUUID()}`
 
   // Create topic with multiple partitions
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName],
     partitions: 3,
     replicas: 1
@@ -268,26 +252,26 @@ test('createTopics with multiple partitions', async t => {
   ])
 
   // Get metadata to verify partitions
-  const topicMetadata = await client.metadata({ topics: [topicName] })
+  const topicMetadata = await admin.metadata({ topics: [topicName] })
   const topic = topicMetadata.topics.get(topicName)
 
   // Should have exactly 3 partitions
   strictEqual(topic?.partitionsCount, 3)
 
   // Clean up
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics using assignments', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // First, get cluster metadata to find the broker
-  const metadata = await client.metadata({ topics: [] })
+  const metadata = await admin.metadata({ topics: [] })
   const brokerIds = Array.from(metadata.brokers.keys())
   const topicName = `test-topic-leader-${randomUUID()}`
 
   // Create a topic with a single partition - leader will be automatically assigned
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName],
     partitions: -1,
     replicas: -1,
@@ -305,17 +289,17 @@ test('createTopics using assignments', async t => {
   ])
 
   // Clean up
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics should validate options in strict mode', async t => {
-  const client = createTestClient(t, { strict: true })
+  const admin = createAdmin(t, { strict: true })
 
   // Test with missing required field (topics)
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({})
-    throw new Error('Expected validation error')
+    await admin.createTopics({})
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -323,8 +307,8 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with invalid topics type
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -332,8 +316,8 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with non-string topic in topics array
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: [123] })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: [123] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -341,8 +325,8 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with invalid partitions type
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: ['test-topic'], partitions: 'not-a-number' })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: ['test-topic'], partitions: 'not-a-number' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('partitions'), true)
   }
@@ -350,8 +334,8 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with invalid replicas type
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: ['test-topic'], replicas: 'not-a-number' })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: ['test-topic'], replicas: 'not-a-number' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('replicas'), true)
   }
@@ -359,8 +343,8 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with invalid assignments type
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: ['test-topic'], assignments: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: ['test-topic'], assignments: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('assignments'), true)
   }
@@ -368,31 +352,26 @@ test('createTopics should validate options in strict mode', async t => {
   // Test with invalid additional property
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.createTopics({ topics: ['test-topic'], invalidProperty: true })
-    throw new Error('Expected validation error')
+    await admin.createTopics({ topics: ['test-topic'], invalidProperty: true })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
 })
 
-test('createTopics should handle errors from ConnectionPool.getFirstAvailable', async t => {
-  const client = createTestClient(t)
+test('createTopics should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
 
-  client[kConnections].getFirstAvailable = (_brokers: Broker[], callback: CallbackWithPromise<Connection>) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  }
+  mockConnectionPoolGetFirstAvailable(admin[kConnections])
 
   try {
     // Attempt to create a topic - should fail with connection error
-    await client.createTopics({
+    await admin.createTopics({
       topics: ['test-topic'],
       partitions: 1,
       replicas: 1
     })
-    throw new Error('Expected createTopics to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -401,24 +380,24 @@ test('createTopics should handle errors from ConnectionPool.getFirstAvailable', 
 })
 
 test('deleteTopics should delete a topic', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-${randomUUID()}`
 
   // Create a new topic
-  await client.createTopics({
+  await admin.createTopics({
     topics: [topicName],
     partitions: 1,
     replicas: 1
   })
 
   // Delete the topic
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 
   // Verify the topic was deleted by trying to recreate it
   // (If it still existed, this would fail with a topic already exists error)
-  const created = await client.createTopics({
+  const created = await admin.createTopics({
     topics: [topicName],
     partitions: 1,
     replicas: 1
@@ -428,17 +407,17 @@ test('deleteTopics should delete a topic', async t => {
   strictEqual(created[0].name, topicName)
 
   // Clean up
-  await client.deleteTopics({ topics: [topicName] })
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('deleteTopics should validate options in strict mode', async t => {
-  const client = createTestClient(t, { strict: true })
+  const admin = createAdmin(t, { strict: true })
 
   // Test with missing required field (topics)
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteTopics({})
-    throw new Error('Expected validation error')
+    await admin.deleteTopics({})
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -446,8 +425,8 @@ test('deleteTopics should validate options in strict mode', async t => {
   // Test with invalid type for topics
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteTopics({ topics: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.deleteTopics({ topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -455,8 +434,8 @@ test('deleteTopics should validate options in strict mode', async t => {
   // Test with non-string topic in topics array
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteTopics({ topics: [123] })
-    throw new Error('Expected validation error')
+    await admin.deleteTopics({ topics: [123] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('topics'), true)
   }
@@ -464,29 +443,24 @@ test('deleteTopics should validate options in strict mode', async t => {
   // Test with invalid additional property
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteTopics({ topics: ['test-topic'], invalidProperty: true })
-    throw new Error('Expected validation error')
+    await admin.deleteTopics({ topics: ['test-topic'], invalidProperty: true })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
 })
 
-test('deleteTopics should handle errors from ConnectionPool.getFirstAvailable', async t => {
-  const client = createTestClient(t)
+test('deleteTopics should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
 
-  client[kConnections].getFirstAvailable = (_brokers: Broker[], callback: CallbackWithPromise<Connection>) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  }
+  mockConnectionPoolGetFirstAvailable(admin[kConnections])
 
   try {
     // Attempt to delete a topic - should fail with connection error
-    await client.deleteTopics({
+    await admin.deleteTopics({
       topics: ['test-topic']
     })
-    throw new Error('Expected deleteTopics to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -497,18 +471,18 @@ test('deleteTopics should handle errors from ConnectionPool.getFirstAvailable', 
 test('listGroups should return consumer groups', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({
-    clientId: `test-admin-client-${randomUUID()}`,
+    clientId: `test-admin-admin-${randomUUID()}`,
     groupId: `test-group-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
 
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   await consumer.joinGroup({})
 
   // List all groups
-  const groups = await client.listGroups()
+  const groups = await admin.listGroups()
 
   // Basic validation of the groups map structure
   strictEqual(groups instanceof Map, true)
@@ -524,18 +498,18 @@ test('listGroups should return consumer groups', async t => {
 test('listGroups should support filtering by types and states', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({
-    clientId: `test-admin-client-${randomUUID()}`,
+    clientId: `test-admin-admin-${randomUUID()}`,
     groupId: `test-group-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
 
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   await consumer.joinGroup({})
 
   // Test with explicit types parameter - include consumer groups
-  const groups1 = await client.listGroups({
+  const groups1 = await admin.listGroups({
     types: ['classic']
   })
 
@@ -543,31 +517,31 @@ test('listGroups should support filtering by types and states', async t => {
   strictEqual(groups1.has(consumer.groupId), true, 'The consumer group should be found with type "classic"')
 
   // Test with empty options
-  const groups2 = await client.listGroups({})
+  const groups2 = await admin.listGroups({})
   // Default types should be used
   strictEqual(groups2.has(consumer.groupId), true, 'The consumer group should be found with default types')
 
   // Test with state filtering - stable should include our group
-  const groups3 = await client.listGroups({
+  const groups3 = await admin.listGroups({
     states: ['STABLE']
   })
   strictEqual(groups3.has(consumer.groupId), true, 'The consumer group should be found with state "STABLE"')
 
   // Test with a state that shouldn't match our group
-  const groups4 = await client.listGroups({
+  const groups4 = await admin.listGroups({
     states: ['DEAD']
   })
   strictEqual(groups4.has(consumer.groupId), false, 'The consumer group should not be found with state "DEAD"')
 })
 
 test('listGroups should validate options in strict mode', async t => {
-  const client = createTestClient(t, { strict: true })
+  const admin = createAdmin(t, { strict: true })
 
   // Test with invalid types field
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.listGroups({ types: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.listGroups({ types: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('types'), true)
   }
@@ -575,8 +549,8 @@ test('listGroups should validate options in strict mode', async t => {
   // Test with invalid states field
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.listGroups({ states: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.listGroups({ states: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('states'), true)
   }
@@ -584,8 +558,8 @@ test('listGroups should validate options in strict mode', async t => {
   // Test with invalid state value
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.listGroups({ states: ['INVALID_STATE'] })
-    throw new Error('Expected validation error')
+    await admin.listGroups({ states: ['INVALID_STATE'] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('states'), true)
   }
@@ -593,32 +567,27 @@ test('listGroups should validate options in strict mode', async t => {
   // Test with invalid additional property
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.listGroups({ invalidProperty: true })
-    throw new Error('Expected validation error')
+    await admin.listGroups({ invalidProperty: true })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
 
   // Empty options should be valid
-  const groups = await client.listGroups({})
+  const groups = await admin.listGroups({})
   strictEqual(groups instanceof Map, true)
 })
 
 test('listGroups should handle errors from Base.metadata', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Override the [kMetadata] method to simulate a connection error
-  client[kMetadata] = (_options: any, callback: CallbackWithPromise<any>) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
+  mockMetadata(admin)
 
   try {
     // Attempt to list groups - should fail with connection error
-    await client.listGroups()
-    throw new Error('Expected listGroups to fail with connection error')
+    await admin.listGroups()
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -626,29 +595,15 @@ test('listGroups should handle errors from Base.metadata', async t => {
   }
 })
 
-test('listGroups should handle errors from ConnectionPool.get', async t => {
-  const client = createTestClient(t)
+test('listGroups should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-  let firstCall = true
-
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    if (firstCall) {
-      firstCall = false
-      original(broker, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  } as typeof original
+  mockConnectionPoolGet(admin[kConnections], 2)
 
   try {
     // Attempt to list groups - should fail with connection error
-    await client.listGroups()
-    throw new Error('Expected listGroups to fail with connection error')
+    await admin.listGroups()
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should be about connection failure
     strictEqual(error instanceof Error, true)
@@ -657,54 +612,14 @@ test('listGroups should handle errors from ConnectionPool.get', async t => {
 })
 
 test('listGroups should handle errors from the API', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    original(broker, (error: Error | null, connection: Connection) => {
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
-
-      const originalSend = connection.send.bind(connection)
-
-      connection.send = function <ReturnType>(
-        apiKey: number,
-        apiVersion: number,
-        payload: () => Writer,
-        responseParser: ResponseParser<ReturnType>,
-        hasRequestHeaderTaggedFields: boolean,
-        hasResponseHeaderTaggedFields: boolean,
-        callback: Callback<ReturnType>
-      ) {
-        if (apiKey === listGroupsV5.api.key) {
-          const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-            new Error('Connection failed to localhost:29092')
-          ])
-          callback(connectionError, undefined as unknown as ReturnType)
-          return
-        }
-
-        originalSend(
-          apiKey,
-          apiVersion,
-          payload,
-          responseParser,
-          hasRequestHeaderTaggedFields,
-          hasResponseHeaderTaggedFields,
-          callback
-        )
-      } as typeof originalSend
-
-      callback(null, connection)
-    })
-  } as typeof original
+  mockAPI(admin[kConnections], listGroupsV5.api.key)
 
   try {
     // Attempt to list groups - should fail with connection error
-    await client.listGroups()
-    throw new Error('Expected listGroups to fail with connection error')
+    await admin.listGroups()
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should be about connection failure
     strictEqual(error instanceof Error, true)
@@ -715,23 +630,23 @@ test('listGroups should handle errors from the API', async t => {
 test('describeGroups should describe consumer groups', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({
-    clientId: `test-admin-client-${randomUUID()}`,
+    clientId: `test-admin-admin-${randomUUID()}`,
     groupId: `test-group-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
 
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
   const testTopic = `test-topic-${randomUUID()}`
 
   // Create a unique test topic name
-  await client.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
+  await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
 
   await consumer.topics.trackAll(testTopic)
   await consumer.joinGroup({})
 
   // Describe the groups
-  const describedGroups = await client.describeGroups({
+  const describedGroups = await admin.describeGroups({
     groups: [consumer.groupId, 'non-existent-group'],
     includeAuthorizedOperations: true
   })
@@ -776,18 +691,18 @@ test('describeGroups should describe consumer groups', async t => {
 test('describeGroups should handle includeAuthorizedOperations option', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({
-    clientId: `test-admin-client-${randomUUID()}`,
+    clientId: `test-admin-admin-${randomUUID()}`,
     groupId: `test-group-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
 
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   await consumer.joinGroup({})
 
   // Test with includeAuthorizedOperations: true
-  const groupsWithAuth = await client.describeGroups({
+  const groupsWithAuth = await admin.describeGroups({
     groups: [consumer.groupId],
     includeAuthorizedOperations: true
   })
@@ -797,7 +712,7 @@ test('describeGroups should handle includeAuthorizedOperations option', async t 
   strictEqual(typeof group1.authorizedOperations, 'number')
 
   // Test with includeAuthorizedOperations: false (default)
-  const groupsWithoutAuth = await client.describeGroups({
+  const groupsWithoutAuth = await admin.describeGroups({
     groups: [consumer.groupId]
   })
 
@@ -809,13 +724,13 @@ test('describeGroups should handle includeAuthorizedOperations option', async t 
 })
 
 test('describeGroups should validate options in strict mode', async t => {
-  const client = createTestClient(t, { strict: true })
+  const admin = createAdmin(t, { strict: true })
 
   // Test with missing required field (groups)
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.describeGroups({})
-    throw new Error('Expected validation error')
+    await admin.describeGroups({})
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -823,8 +738,8 @@ test('describeGroups should validate options in strict mode', async t => {
   // Test with invalid type for groups
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.describeGroups({ groups: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.describeGroups({ groups: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -832,16 +747,16 @@ test('describeGroups should validate options in strict mode', async t => {
   // Test with non-string group in groups array
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.describeGroups({ groups: [123] })
-    throw new Error('Expected validation error')
+    await admin.describeGroups({ groups: [123] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
 
   // Test with empty groups array
   try {
-    await client.describeGroups({ groups: [] })
-    throw new Error('Expected validation error')
+    await admin.describeGroups({ groups: [] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -849,8 +764,8 @@ test('describeGroups should validate options in strict mode', async t => {
   // Test with invalid includeAuthorizedOperations type
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.describeGroups({ groups: ['test-group'], includeAuthorizedOperations: 'not-a-boolean' })
-    throw new Error('Expected validation error')
+    await admin.describeGroups({ groups: ['test-group'], includeAuthorizedOperations: 'not-a-boolean' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('includeAuthorizedOperations'), true)
   }
@@ -858,30 +773,24 @@ test('describeGroups should validate options in strict mode', async t => {
   // Test with invalid additional property
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.describeGroups({ groups: ['test-group'], invalidProperty: true })
-    throw new Error('Expected validation error')
+    await admin.describeGroups({ groups: ['test-group'], invalidProperty: true })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
 })
 
 test('describeGroups should handle errors from Base.metadata', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
-  // Override the [kMetadata] method to simulate a connection error
-  client[kMetadata] = (_options: any, callback: CallbackWithPromise<any>) => {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined)
-  }
+  mockMetadata(admin)
 
   try {
     // Attempt to describe groups - should fail with connection error
-    await client.describeGroups({
+    await admin.describeGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected describeGroups to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -889,33 +798,17 @@ test('describeGroups should handle errors from Base.metadata', async t => {
   }
 })
 
-test('describeGroups should handle errors from ConnectionPool.getFirstAvailable', async t => {
-  const client = createTestClient(t)
+test('describeGroups should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
 
-  // Override the getFirstAvailable method to fail on the second use (after the successful metadata call)
-  const original = client[kConnections].getFirstAvailable.bind(client[kConnections])
-  let firstCall = true
-
-  client[kConnections].getFirstAvailable = (brokers: Broker[], callback: CallbackWithPromise<Connection>) => {
-    if (firstCall) {
-      // Let the first call (for metadata) succeed
-      firstCall = false
-      original(brokers, callback)
-    } else {
-      // Make the second call (for findCoordinator) fail
-      const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-        new Error('Connection failed to localhost:29092')
-      ])
-      callback(connectionError, undefined as unknown as Connection)
-    }
-  }
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
 
   try {
     // Attempt to describe groups - should fail with connection error
-    await client.describeGroups({
+    await admin.describeGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected describeGroups to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -923,32 +816,17 @@ test('describeGroups should handle errors from ConnectionPool.getFirstAvailable'
   }
 })
 
-test('describeGroups should handle errors from ConnectionPool.get', async t => {
-  const client = createTestClient(t)
+test('describeGroups should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-
-  let getCalls = 0
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    getCalls++
-
-    if (getCalls < 3) {
-      original(broker, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  } as typeof original
+  mockConnectionPoolGet(admin[kConnections], 3)
 
   try {
     // Attempt to describe groups - should fail with connection error
-    await client.describeGroups({
+    await admin.describeGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected describeGroups to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -957,56 +835,16 @@ test('describeGroups should handle errors from ConnectionPool.get', async t => {
 })
 
 test('describeGroups should handle errors from the API', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    original(broker, (error: Error | null, connection: Connection) => {
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
-
-      const originalSend = connection.send.bind(connection)
-
-      connection.send = function <ReturnType>(
-        apiKey: number,
-        apiVersion: number,
-        payload: () => Writer,
-        responseParser: ResponseParser<ReturnType>,
-        hasRequestHeaderTaggedFields: boolean,
-        hasResponseHeaderTaggedFields: boolean,
-        callback: Callback<ReturnType>
-      ) {
-        if (apiKey === describeGroupsV5.api.key) {
-          const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-            new Error('Connection failed to localhost:29092')
-          ])
-          callback(connectionError, undefined as unknown as ReturnType)
-          return
-        }
-
-        originalSend(
-          apiKey,
-          apiVersion,
-          payload,
-          responseParser,
-          hasRequestHeaderTaggedFields,
-          hasResponseHeaderTaggedFields,
-          callback
-        )
-      } as typeof originalSend
-
-      callback(null, connection)
-    })
-  } as typeof original
+  mockAPI(admin[kConnections], describeGroupsV5.api.key)
 
   try {
     // Attempt to describe groups - should fail with connection error
-    await client.describeGroups({
+    await admin.describeGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected describeGroups to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -1015,14 +853,14 @@ test('describeGroups should handle errors from the API', async t => {
 })
 
 test('deleteGroups should handle non-existent groups properly', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
   // Generate a unique group ID for testing
   const groupId = `test-group-${randomUUID()}`
 
   // Trying to delete a non-existent group will likely result in an error
   try {
-    await client.deleteGroups({ groups: [groupId] })
+    await admin.deleteGroups({ groups: [groupId] })
     // If no error, that's also fine
   } catch (error) {
     // This is expected - a non-existent group will cause an error
@@ -1033,13 +871,13 @@ test('deleteGroups should handle non-existent groups properly', async t => {
 })
 
 test('deleteGroups should validate options in strict mode', async t => {
-  const client = createTestClient(t, { strict: true })
+  const admin = createAdmin(t, { strict: true })
 
   // Test with missing required field (groups)
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteGroups({})
-    throw new Error('Expected validation error')
+    await admin.deleteGroups({})
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -1047,8 +885,8 @@ test('deleteGroups should validate options in strict mode', async t => {
   // Test with invalid type for groups
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteGroups({ groups: 'not-an-array' })
-    throw new Error('Expected validation error')
+    await admin.deleteGroups({ groups: 'not-an-array' })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -1056,16 +894,16 @@ test('deleteGroups should validate options in strict mode', async t => {
   // Test with non-string group in groups array
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteGroups({ groups: [123] })
-    throw new Error('Expected validation error')
+    await admin.deleteGroups({ groups: [123] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
 
   // Test with empty groups array
   try {
-    await client.deleteGroups({ groups: [] })
-    throw new Error('Expected validation error')
+    await admin.deleteGroups({ groups: [] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('groups'), true)
   }
@@ -1073,28 +911,22 @@ test('deleteGroups should validate options in strict mode', async t => {
   // Test with invalid additional property
   try {
     // @ts-expect-error - Intentionally passing invalid options
-    await client.deleteGroups({ groups: ['test-group'], invalidProperty: true })
-    throw new Error('Expected validation error')
+    await admin.deleteGroups({ groups: ['test-group'], invalidProperty: true })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
 })
 
 test('deleteGroups should handle errors from Base.metadata', async t => {
-  const client = createTestClient(t)
+  const admin = createAdmin(t)
 
-  client[kMetadata] = function (_options: MetadataOptions, callback: CallbackWithPromise<any>) {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-
-    callback(connectionError, undefined as unknown as Connection)
-  }
+  mockMetadata(admin)
 
   try {
     // Attempt to delete groups - should fail with connection error
-    await client.deleteGroups({ groups: ['non-existent'] })
-    throw new Error('Expected deleteGroups to fail with connection error')
+    await admin.deleteGroups({ groups: ['non-existent'] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -1102,33 +934,17 @@ test('deleteGroups should handle errors from Base.metadata', async t => {
   }
 })
 
-test('deleteGroups should handle errors from ConnectionPool.getFirstAvailable', async t => {
-  const client = createTestClient(t)
+test('deleteGroups should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
 
-  // Override the getFirstAvailable method to fail on the second use (after the successful metadata call)
-  const original = client[kConnections].getFirstAvailable.bind(client[kConnections])
-  let firstCall = true
-
-  client[kConnections].getFirstAvailable = (brokers: Broker[], callback: CallbackWithPromise<Connection>) => {
-    if (firstCall) {
-      // Let the first call (for metadata) succeed
-      firstCall = false
-      original(brokers, callback)
-    } else {
-      // Make the second call (for findCoordinator) fail
-      const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-        new Error('Connection failed to localhost:29092')
-      ])
-      callback(connectionError, undefined as unknown as Connection)
-    }
-  }
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
 
   try {
     // Attempt to delete groups - should fail with connection error
-    await client.deleteGroups({
+    await admin.deleteGroups({
       groups: ['test-group']
     })
-    throw new Error('Expected deleteGroups to fail with connection error')
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
@@ -1136,30 +952,15 @@ test('deleteGroups should handle errors from ConnectionPool.getFirstAvailable', 
   }
 })
 
-test('deleteGroups should handle errors from ConnectionPool.get', async t => {
-  const client = createTestClient(t)
+test('deleteGroups should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
 
-  const original = client[kConnections].get.bind(client[kConnections])
-
-  let getCalls = 0
-  client[kConnections].get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    getCalls++
-
-    if (getCalls < 3) {
-      original(broker, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-    callback(connectionError, undefined as unknown as Connection)
-  } as typeof original
+  mockConnectionPoolGet(admin[kConnections], 3)
 
   try {
     // Attempt to delete groups - should fail with connection error
-    await client.deleteGroups({ groups: ['non-existent'] })
-    throw new Error('Expected deleteGroups to fail with connection error')
+    await admin.deleteGroups({ groups: ['non-existent'] })
+    throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)

@@ -1,17 +1,23 @@
 import { Unpromise } from '@watchable/unpromise'
-import { Ajv } from 'ajv'
 import ajvErrors from 'ajv-errors'
+import { Ajv2020 } from 'ajv/dist/2020.js'
+import debug from 'debug'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { inspect } from 'node:util'
-
-import debug from 'debug'
 import { type DynamicBuffer } from './protocol/dynamic-buffer.ts'
+
+// See: ajv/dist/types/index.d.ts
+export interface DataValidationContext {
+  parentData: {
+    [k: string | number]: any
+  }
+}
 
 export type DebugDumpLogger = (...args: any[]) => void
 
 export { setTimeout as sleep } from 'node:timers/promises'
 
-export const ajv = new Ajv({ allErrors: true, coerceTypes: false, strict: true })
+export const ajv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true })
 
 export const loggers: Record<string, debug.Debugger> = {
   protocol: debug('plt:kafka:protocol'),
@@ -64,6 +70,32 @@ ajv.addKeyword({
   },
   error: {
     message: 'must be Buffer'
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'gteProperty',
+  validate (property: string, current: number, _: unknown, context?: DataValidationContext) {
+    const root = context?.parentData as Record<string, number>
+    return current >= root[property]
+  },
+  error: {
+    message ({ schema }: { schema: string }): string {
+      return `must be greater than or equal to $dataVar$/${schema}`
+    }
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'lteProperty',
+  validate (property: string, current: number, _: unknown, context?: DataValidationContext) {
+    const root = context?.parentData as Record<string, number>
+    return current < root[property]
+  },
+  error: {
+    message ({ schema }: { schema: string }): string {
+      return `must be less than or equal to $dataVar$/${schema}`
+    }
   }
 })
 

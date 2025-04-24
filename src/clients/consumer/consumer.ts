@@ -40,6 +40,8 @@ import {
   kClosed,
   kConnections,
   kCreateConnectionPool,
+  kFetchConnections,
+  kFormatValidationErrors,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -100,7 +102,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #protocol: string | null
   #coordinatorId: number | null
   #heartbeatInterval: NodeJS.Timeout | null
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>;
   /*
     The following requests are blocking in Kafka:
 
@@ -115,7 +117,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     In order to avoid consumer group problems, we separate FetchRequest only on a separate connection.
   */
-  #fetchConnectionPool: ConnectionPool
+  [kFetchConnections]: ConnectionPool
 
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
     super(options)
@@ -141,7 +143,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#validateGroupOptions(this[kOptions])
 
     // Initialize connection pool
-    this.#fetchConnectionPool = this[kCreateConnectionPool]()
+    this[kFetchConnections] = this[kCreateConnectionPool]()
+  }
+
+  get streamsCount (): number {
+    return this.#streams.size
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -165,18 +171,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const closer = this.#membershipActive
       ? this.#leaveGroup.bind(this)
-      : function (_: boolean, callback: CallbackWithPromise<void>) {
+      : function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
         callback(null)
       }
 
     closer(force as boolean, error => {
       if (error) {
+        this[kClosed] = false
         callback(error)
         return
       }
 
-      this.#fetchConnectionPool.close(error => {
+      this[kFetchConnections].close(error => {
         if (error) {
+          this[kClosed] = false
           callback(error)
           return
         }
@@ -358,7 +366,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback[kCallbackPromise]
   }
 
-  leaveGroup (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
+  leaveGroup (force?: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
   leaveGroup (force?: boolean): Promise<void>
   leaveGroup (force?: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (typeof force === 'function') {
@@ -375,7 +383,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#membershipActive = false
-    this.#leaveGroup(force as boolean, callback)
+    this.#leaveGroup(force as boolean, error => {
+      if (error) {
+        this.#membershipActive = true
+        callback(error)
+        return
+      }
+
+      callback(null)
+    })
+
     return callback[kCallbackPromise]
   }
 
@@ -445,7 +462,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#fetchConnectionPool.get(broker, (error, connection) => {
+          this[kFetchConnections].get(broker, (error, connection) => {
             if (error) {
               retryCallback(error, undefined as unknown as FetchResponse)
               return
@@ -842,6 +859,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           generationId: this.generationId
         })
 
+        this.memberId = null
+        this.generationId = 0
+        this.assignments = null
+
         callback(null)
       }
     )
@@ -849,7 +870,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #syncGroup (assignments: SyncGroupRequestAssignment[] | null, callback: CallbackWithPromise<GroupAssignment[]>): void {
     if (!this.#membershipActive) {
-      callback(null, undefined as unknown as GroupAssignment[])
+      callback(null, [])
       return
     }
 
@@ -874,11 +895,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
           if (error) {
             callback(error, undefined as unknown as GroupAssignment[])
-            return
-          }
-
-          if (!this.#membershipActive) {
-            callback(null, undefined as unknown as GroupAssignment[])
             return
           }
 
@@ -916,9 +932,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         if (error) {
           callback(error, undefined as unknown as GroupAssignment[])
           return
-        } else if (response.assignment.length === 0) {
-          callback(null, [])
-          return
         }
 
         // Read the assignment back
@@ -948,15 +961,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       (connection, groupCallback) => {
         // We have left the group in the meanwhile, abort
         if (!this.#membershipActive) {
+          this.emitWithDebug('consumer:heartbeat', 'cancel', eventPayload)
           return
         }
 
-        this.emitWithDebug('consumer:heartbeat', 'start')
+        this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
         heartbeatV4(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
       },
       error => {
         // The heartbeat has been aborted elsewhere, ignore the response
         if (this.#heartbeatInterval === null || !this.#membershipActive) {
+          this.emitWithDebug('consumer:heartbeat', 'cancel', eventPayload)
           return
         }
 
@@ -1049,16 +1064,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #validateGroupOptions (options: GroupOptions): void {
-    if (options.rebalanceTimeout! < options.sessionTimeout!) {
-      throw new UserError('/options/rebalanceTimeout must be greater than or equal to /options/sessionTimeout.')
-    }
+    const valid = groupOptionsValidator(options)
 
-    if (options.heartbeatInterval! > options.sessionTimeout!) {
-      throw new UserError('/options/heartbeatInterval must be less than or equal to /options/sessionTimeout.')
-    }
-
-    if (options.heartbeatInterval! > options.rebalanceTimeout!) {
-      throw new UserError('/options/heartbeatInterval must be less than or equal to /options/rebalanceTimeout.')
+    if (!valid) {
+      throw new UserError(this[kFormatValidationErrors](groupOptionsValidator, '/options'))
     }
   }
 
@@ -1181,6 +1190,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.memberId = null
     } else if (protocolError.memberId! && !this.memberId) {
       this.memberId = protocolError.memberId!
+    }
+
+    // This is only used in testing
+    if (protocolError.cancelMembership) {
+      this.#membershipActive = false
     }
 
     return protocolError

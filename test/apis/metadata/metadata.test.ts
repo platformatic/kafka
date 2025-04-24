@@ -279,7 +279,7 @@ test('parseResponse throws error on topic error code', () => {
           .appendUUID(topic.topicId)
           .appendBoolean(topic.isInternal)
           // Empty partitions array
-          .appendArray(topic.partitions, () => {}, true, true)
+          .appendArray(topic.partitions, () => {})
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )

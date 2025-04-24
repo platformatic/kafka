@@ -1,23 +1,8 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import { test, type TestContext } from 'node:test'
-import { Base, type BaseOptions, type ClusterMetadata, sleep } from '../../../src/index.ts'
-
-const kafkaBootstrapServers = ['localhost:29092']
-
-// Helper function to create a unique test client
-function createTestClient (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
-  const options: BaseOptions = {
-    clientId: `test-client-${randomUUID()}`,
-    bootstrapBrokers: kafkaBootstrapServers,
-    ...overrideOptions
-  }
-
-  const client = new Base(options)
-  t.after(() => client.close())
-
-  return client
-}
+import { test } from 'node:test'
+import { Base, type ClusterMetadata, sleep } from '../../../src/index.ts'
+import { createBase } from '../../helpers.ts'
 
 test('constructor should throw on invalid options when strict mode is enabled', () => {
   // Missing required clientId
@@ -102,7 +87,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
 })
 
 test('close should properly terminate client', async t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Close the client
   await client.close()
@@ -112,7 +97,7 @@ test('close should properly terminate client', async t => {
 })
 
 test('metadata should fetch cluster metadata', async t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Fetch metadata for the cluster
   const metadata = await client.metadata({ topics: [] })
@@ -134,7 +119,7 @@ test('metadata should fetch cluster metadata', async t => {
 })
 
 test('metadata should fetch topic metadata', async t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Create a unique test topic name
   const testTopic = `test-topic-${randomUUID()}`
@@ -163,7 +148,7 @@ test('metadata should fetch topic metadata', async t => {
 })
 
 test('should cache metadata according to metadataMaxAge', async t => {
-  const client = createTestClient(t, {
+  const client = createBase(t, {
     metadataMaxAge: 1000 // 1 second
   })
 
@@ -200,7 +185,7 @@ test('should cache metadata according to metadataMaxAge', async t => {
 })
 
 test('metadata should support force update option', async t => {
-  const client = createTestClient(t, {
+  const client = createBase(t, {
     metadataMaxAge: 60000 // 1 minute
   })
 
@@ -230,7 +215,7 @@ test('metadata should support force update option', async t => {
 })
 
 test('should support both callback and promise API for metadata', (t, done) => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Create a unique test topic
   const testTopic = `test-topic-${randomUUID()}`
@@ -248,7 +233,7 @@ test('should support both callback and promise API for metadata', (t, done) => {
 })
 
 test('should emit events', async t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Create a promise that resolves when metadata event is emitted
   const metadataPromise = new Promise<ClusterMetadata>(resolve => {
@@ -268,7 +253,7 @@ test('should emit events', async t => {
 })
 
 test('metadata should return validation error in strict mode', async t => {
-  const client = createTestClient(t, {
+  const client = createBase(t, {
     strict: true
   })
 
@@ -314,7 +299,7 @@ test('metadata should return validation error in strict mode', async t => {
 })
 
 test('emitWithDebug should emit events directly when section is null', t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Create a flag to check if event was emitted
   let eventEmitted = false
@@ -335,7 +320,7 @@ test('emitWithDebug should emit events directly when section is null', t => {
 })
 
 test('emitWithDebug should emit events with section prefix when section is provided', t => {
-  const client = createTestClient(t)
+  const client = createBase(t)
 
   // Create a flag to check if event was emitted
   let eventEmitted = false
@@ -362,7 +347,7 @@ test('emitWithDebug should emit events with section prefix when section is provi
 
 test('metadata should handle connection failures to non-existent broker', async t => {
   // Create a client with a non-existent broker
-  const client = createTestClient(t, {
+  const client = createBase(t, {
     bootstrapBrokers: [{ host: '192.0.2.1', port: 9092 }], // RFC 5737 reserved IP for documentation - guaranteed to not exist
     connectTimeout: 1000, // 1 second timeout
     retries: 2 // Minimal retries to make test faster
@@ -400,7 +385,7 @@ test('metadata should handle connection failures to non-existent broker', async 
 
 test('operations can be aborted without a retry', async t => {
   // Create a client with a non-existent broker
-  const client = createTestClient(t, {
+  const client = createBase(t, {
     bootstrapBrokers: ['192.0.2.1'], // RFC 5737 reserved IP for documentation - guaranteed to not exist
     connectTimeout: 1000, // 1 second timeout
     retries: 0

@@ -282,7 +282,7 @@ test('parseResponse correctly processes a successful response', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, true, true)
+              .appendArray(partition.recordErrors, () => {})
               .appendString(partition.errorMessage)
           })
       }
@@ -368,7 +368,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, true, true)
+              .appendArray(partition.recordErrors, () => {})
               .appendString(partition.errorMessage)
           })
       }
@@ -454,7 +454,7 @@ test('parseResponse handles partition error codes', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, true, true)
+              .appendArray(partition.recordErrors, () => {})
               .appendString(partition.errorMessage)
           })
       }
@@ -628,7 +628,7 @@ test('parseResponse handles throttling', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, true, true)
+              .appendArray(partition.recordErrors, () => {})
               .appendString(partition.errorMessage)
           })
       }

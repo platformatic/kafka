@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
-import { kMetadata } from '../../../src/clients/base/base.ts'
 import {
   type CallbackWithPromise,
   Consumer,
@@ -25,6 +24,7 @@ import {
   stringSerializers,
   UserError
 } from '../../../src/index.ts'
+import { mockMetadata } from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   messages: Message<K, V, HK, HV>[]
@@ -710,23 +710,7 @@ test('MessagesStream - should handle errors from Base.metadata', async t => {
     maxWaitTime: 1000
   })
 
-  let metadataCalls = 0
-  const original = consumer[kMetadata].bind(consumer)
-  consumer[kMetadata] = (options: any, callback: CallbackWithPromise<any>) => {
-    metadataCalls++
-
-    if (metadataCalls === 1) {
-      original(options, callback)
-      return
-    }
-
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
-
-    callback(connectionError, undefined)
-    consumer[kMetadata] = original
-  }
+  mockMetadata(consumer, 2)
 
   const errorPromise = once(stream, 'error')
   const [dataOrError] = (await Promise.race([once(stream, 'data'), errorPromise])) as (Error | object)[]

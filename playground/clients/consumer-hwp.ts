@@ -1,7 +1,7 @@
-import { once } from 'node:events'
-import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
 import { forEach } from 'hwp'
+import { once } from 'node:events'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
 
 // const consumer = new Consumer({ groupId: 'id7', clientId: 'id', bootstrapBrokers: ['localhost:9092'], strict: true })
 const consumer = new Consumer({
@@ -9,7 +9,7 @@ const consumer = new Consumer({
   clientId: 'id',
   bootstrapBrokers: ['localhost:29092'],
   strict: true,
-  deserializers: stringDeserializers,
+  deserializers: stringDeserializers
 })
 
 const stream = await consumer.consume({
@@ -26,11 +26,15 @@ once(process, 'SIGINT').then(() => consumer.close(true))
 
 debugDump('start')
 
-await forEach(stream, async (message, { signal }) => {
-  console.log('data', message.partition, message.offset, message.key, message.value, message.headers)
-  await sleep(1000)
-  console.log('done', message.partition, message.offset, message.key, message.value, message.headers)
-}, 16)
+await forEach(
+  stream,
+  async message => {
+    console.log('data', message.partition, message.offset, message.key, message.value, message.headers)
+    await sleep(1000)
+    console.log('done', message.partition, message.offset, message.key, message.value, message.headers)
+  },
+  16
+)
 
 debugDump('end')
 await consumer.close()

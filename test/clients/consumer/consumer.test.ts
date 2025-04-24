@@ -548,22 +548,14 @@ test('consume should add stream to internal streams set', async t => {
 test('consume should handle errors from joinGroup', async t => {
   const consumer = createConsumer(t)
 
-  // Mock joinGroup to simulate an error
-  consumer.joinGroup = function (_options?: any, callback?: any) {
-    if (!callback) {
-      return Promise.reject(new Error('Failed to join group'))
-    }
-
-    callback(new Error('Failed to join group'))
-    return Promise.reject(new Error('Failed to join group'))
-  }
+  mockMethod(consumer, 'joinGroup')
 
   // Attempt to consume
   try {
     await consumer.consume({ topics: ['test-topic'] })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, 'Failed to join group')
+    strictEqual(error.message, 'Cannot connect to any broker.')
   }
 })
 

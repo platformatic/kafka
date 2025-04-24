@@ -399,7 +399,7 @@ test('send should support no response', async t => {
   deepStrictEqual(result, { unwritableNodes: [] })
 })
 
-test.only('send should support no response with backpressure handling', async t => {
+test('send should support no response with backpressure handling', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
 

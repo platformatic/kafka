@@ -1,4 +1,5 @@
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
+import { type Metrics } from '../metrics.ts'
 
 export interface TopicWithPartitionAndOffset {
   topic: string
@@ -34,6 +35,7 @@ export interface BaseOptions extends ConnectionOptions {
   metadataMaxAge?: number
   autocreateTopics?: boolean
   strict?: boolean
+  metrics?: Metrics
 }
 
 export interface MetadataOptions {

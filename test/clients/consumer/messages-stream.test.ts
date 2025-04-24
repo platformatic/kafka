@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
+import * as Prometheus from 'prom-client'
 import {
   type CallbackWithPromise,
   Consumer,
@@ -126,6 +127,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   const consumer = createConsumer<K, V, HK, HV>(t, groupId, options)
   await consumer.topics.trackAll(topic)
   await consumer.joinGroup({})
+  options.metrics = undefined
 
   const stream: MessagesStream<K, V, HK, HV> = await consumer.consume({
     topics: [topic],
@@ -850,4 +852,56 @@ test('MessagesStream - should handle errors from Consumer.listCommittedOffsets',
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
   strictEqual((dataOrError as Error).message.includes('Cannot connect to any broker.'), true)
+})
+
+test('MessagesStream - metrics should track the number of consumed messages', async t => {
+  const registry = new Prometheus.Registry()
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Produce test messages
+  await produceTestMessages(t, topic)
+
+  {
+    const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+      mode: MessagesStreamModes.EARLIEST,
+      metrics: { registry, client: Prometheus }
+    })
+
+    // Verify messages
+    strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+    const metrics = await registry.getMetricsAsJSON()
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+
+    deepStrictEqual(consumedMessages, {
+      aggregator: 'sum',
+      help: 'Number of consumed Kafka messages',
+      name: 'kafka_consumers_messages',
+      type: 'counter',
+      values: [
+        {
+          labels: {},
+          value: 3
+        }
+      ]
+    })
+
+    await consumer.close(true)
+  }
+
+  {
+    const { messages } = await consumeMessages(t, groupId, topic, {
+      mode: MessagesStreamModes.EARLIEST,
+      metrics: { registry, client: Prometheus }
+    })
+
+    // Verify messages
+    strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+    const metrics = await registry.getMetricsAsJSON()
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+
+    deepStrictEqual(consumedMessages.values[0].value, 6)
+  }
 })

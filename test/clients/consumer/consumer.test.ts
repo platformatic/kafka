@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
+import * as Prometheus from 'prom-client'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
@@ -341,6 +342,25 @@ test('close should handle errors from ConnectionPool.close', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Cannot close the pool.'), true)
+  }
+})
+
+test('close should handle errors from Base.close', async t => {
+  const consumer = createConsumer(t)
+
+  // Join a group first
+  await consumer.joinGroup({})
+
+  // Mock the super.close method to fail
+  mockMethod(consumer[kConnections], 'close')
+
+  // Attempt to close with the mocked error
+  try {
+    await consumer.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
   }
 })
 
@@ -2065,4 +2085,170 @@ test('#heartbeat should emit events when it was cancelled while waiting for Hear
   await consumer.joinGroup({})
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:cancel')
+})
+
+test('metrics should track the number of active consumers', async t => {
+  const registry = new Prometheus.Registry()
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 2)
+  }
+
+  await consumer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 1)
+  }
+
+  await consumer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active streams', async t => {
+  const registry = new Prometheus.Registry()
+  const topic = await createTopic(t, true, 3)
+
+  const consumer = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers streams',
+      name: 'kafka_consumers_streams',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 0
+        }
+      ]
+    })
+  }
+
+  const stream1 = await consumer.consume({ topics: [topic] })
+  await consumer.consume({ topics: [topic] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 2)
+  }
+
+  await stream1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 1)
+  }
+
+  await consumer.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active topics', async t => {
+  const registry = new Prometheus.Registry()
+  const topic1 = await createTopic(t, true, 3)
+  const topic2 = await createTopic(t, true, 3)
+  const topic3 = await createTopic(t, true, 3)
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+
+    deepStrictEqual(activeTopics, {
+      aggregator: 'sum',
+      help: 'Number of topics being consumed',
+      name: 'kafka_consumers_topics',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await consumer1.consume({ topics: [topic1] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 1)
+  }
+
+  await consumer1.consume({ topics: [topic2] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 2)
+  }
+
+  await consumer2.consume({ topics: [topic2, topic3] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 4)
+  }
+
+  await consumer2.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 2)
+  }
+
+  await consumer1.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 0)
+  }
 })

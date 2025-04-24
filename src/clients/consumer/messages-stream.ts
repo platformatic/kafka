@@ -4,9 +4,10 @@ import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
 import { UserError } from '../../errors.ts'
 import { type Message } from '../../protocol/records.ts'
-import { kInspect } from '../base/base.ts'
+import { kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../callbacks.ts'
+import { ensureCounter, type Counter } from '../metrics.ts'
 import { type Deserializer } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import {
@@ -43,6 +44,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #autocommitInflight: boolean
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
+  #metricsConsumedMessages: Counter | undefined
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
@@ -108,6 +110,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.#fetch()
       })
     })
+
+    if (consumer[kPrometheus]) {
+      this.#metricsConsumedMessages = ensureCounter(
+        consumer[kPrometheus],
+        'kafka_consumers_messages',
+        'Number of consumed Kafka messages'
+      )
+    }
   }
 
   close (callback?: CallbackWithPromise<void>): void
@@ -401,6 +411,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           for (const [headerKey, headerValue] of record.headers) {
             headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
           }
+
+          this.#metricsConsumedMessages?.inc()
 
           canPush = this.push({
             key,

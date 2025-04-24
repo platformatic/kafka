@@ -10,11 +10,13 @@ import {
   kBootstrapBrokers,
   kCheckNotClosed,
   kClearMetadata,
+  kClosed,
   kConnections,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
   kPerformWithRetry,
+  kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
@@ -24,6 +26,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../callbacks.ts'
+import { type Counter, ensureCounter, ensureGauge } from '../metrics.ts'
 import { type Serializer } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
 import {
@@ -52,6 +55,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #valueSerializer: Serializer<Value>
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
+  #metricsProducedMessages: Counter | undefined
 
   constructor (options: ProducerOptions<Key, Value, HeaderKey, HeaderValue>) {
     if (options.idempotent) {
@@ -71,6 +75,16 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#headerValueSerializer = options.serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
 
     this[kValidateOptions](options, producerOptionsValidator, '/options')
+
+    if (this[kPrometheus]) {
+      ensureGauge(this[kPrometheus], 'kafka_producers', 'Number of active Kafka producers').inc()
+
+      this.#metricsProducedMessages = ensureCounter(
+        this[kPrometheus],
+        'kafka_produced_messages',
+        'Number of produced Kafka messages'
+      )
+    }
   }
 
   get producerId (): bigint | undefined {
@@ -79,6 +93,37 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get producerEpoch (): number | undefined {
     return this.#producerInfo?.producerEpoch
+  }
+
+  close (callback: CallbackWithPromise<void>): void
+  close (): Promise<void>
+  close (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kClosed]) {
+      callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    this[kClosed] = true
+
+    super.close(error => {
+      if (error) {
+        this[kClosed] = false
+        callback(error)
+        return
+      }
+
+      if (this[kPrometheus]) {
+        ensureGauge(this[kPrometheus], 'kafka_producers', 'Number of active Kafka producers').dec()
+      }
+
+      callback(null)
+    })
+
+    return callback[kCallbackPromise]
   }
 
   initIdempotentProducer (
@@ -315,12 +360,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         runConcurrentCallbacks<ProduceResponse | boolean>(
           'Producing messages failed.',
           messagesByDestination,
-          ([destination, messages], concurrentCallback) => {
+          ([destination, destinationMessages], concurrentCallback) => {
             nodes.push(destination)
 
             this.#performSingleDestinationSend(
               topics,
-              messages,
+              destinationMessages,
               this[kOptions].timeout!,
               sendOptions.acks,
               sendOptions.autocreateTopics,
@@ -335,6 +380,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
+            this.#metricsProducedMessages?.inc(messages.length)
             const results: ProduceResult = {}
 
             if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {

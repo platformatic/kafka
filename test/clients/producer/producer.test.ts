@@ -835,7 +835,7 @@ test('send should repeat the operation in case of stale metadata', async t => {
   })
 })
 
-test('metrics should track the number of active consumers', async t => {
+test('metrics should track the number of active producer', async t => {
   const registry = new Prometheus.Registry()
 
   const producer1 = await createProducer(t, { metrics: { registry, client: Prometheus } })
@@ -880,6 +880,102 @@ test('metrics should track the number of active consumers', async t => {
     const metrics = await registry.getMetricsAsJSON()
     const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
     deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active producer with different labels', async t => {
+  const registry = new Prometheus.Registry()
+
+  const producer1 = await createProducer(t, { metrics: { registry, client: Prometheus, labels: { a: 1, b: 2 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const producer2 = await createProducer(t, { metrics: { registry, client: Prometheus, labels: { b: 3, c: 4 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  await producer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await producer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 0
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 0
+        }
+      ]
+    })
   }
 })
 

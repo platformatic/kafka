@@ -10,7 +10,9 @@ export interface Metric {
   name?: string
   get(): Promise<unknown>
   reset: () => void
+  labels(labels: any): any
 }
+
 export interface Counter extends Metric {
   inc: (value?: number) => void
 }
@@ -42,32 +44,37 @@ export interface Registry {
 }
 
 export interface Prometheus {
-  Counter: new (options: { name: string; help: string; registers: Registry[] }) => Counter
-  Gauge: new (options: { name: string; help: string; registers: Registry[] }) => Gauge
+  Counter: new (options: { name: string; help: string; registers: Registry[]; labelNames?: string[] }) => Counter
+  Gauge: new (options: { name: string; help: string; registers: Registry[]; labelNames?: string[] }) => Gauge
   Registry: new (contentType?: string) => Registry
 }
 
 export interface Metrics {
   registry: Registry
   client: Prometheus
+  labels?: Record<string, any>
 }
 
-export function ensureCounter (metrics: Metrics, name: string, help: string): Counter {
-  let counter = metrics.registry.getSingleMetric(name) as Counter | undefined
+export function ensureMetric<MetricType extends Metric> (
+  metrics: Metrics,
+  type: 'Gauge' | 'Counter',
+  name: string,
+  help: string
+): MetricType {
+  let metric = metrics.registry.getSingleMetric(name) as MetricType
+  const labels = Object.keys(metrics.labels ?? {})
 
-  if (!counter) {
-    counter = new metrics.client.Counter({ name, help, registers: [metrics.registry] })
+  if (!metric) {
+    metric = new metrics.client[type]({
+      name,
+      help,
+      registers: [metrics.registry],
+      labelNames: labels
+    }) as unknown as MetricType
+  } else {
+    // @ts-expect-error Overriding internal API
+    metric.labelNames = metric.sortedLabelNames = Array.from(new Set([...metric.labelNames, ...labels])).sort()
   }
 
-  return counter
-}
-
-export function ensureGauge (metrics: Metrics, name: string, help: string): Gauge {
-  let gauge = metrics.registry.getSingleMetric(name) as Gauge
-
-  if (!gauge) {
-    gauge = new metrics.client.Gauge({ name, help, registers: [metrics.registry] })
-  }
-
-  return gauge
+  return metric.labels(metrics.labels ?? {}) as MetricType
 }

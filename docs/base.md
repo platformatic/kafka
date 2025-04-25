@@ -28,6 +28,7 @@ Creates a new base client.
 | `metadataMaxAge`   | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                            |
 | `autocreateTopics` | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                  |
 | `strict`           | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production. |
+| `metrics`          | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                        |
 
 ## Methods
 

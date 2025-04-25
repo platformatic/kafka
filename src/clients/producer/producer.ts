@@ -26,7 +26,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../callbacks.ts'
-import { type Counter, ensureCounter, ensureGauge } from '../metrics.ts'
+import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
 import { type Serializer } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
 import {
@@ -77,10 +77,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kValidateOptions](options, producerOptionsValidator, '/options')
 
     if (this[kPrometheus]) {
-      ensureGauge(this[kPrometheus], 'kafka_producers', 'Number of active Kafka producers').inc()
+      ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_producers', 'Number of active Kafka producers').inc()
 
-      this.#metricsProducedMessages = ensureCounter(
+      this.#metricsProducedMessages = ensureMetric<Counter>(
         this[kPrometheus],
+        'Counter',
         'kafka_produced_messages',
         'Number of produced Kafka messages'
       )
@@ -117,7 +118,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       if (this[kPrometheus]) {
-        ensureGauge(this[kPrometheus], 'kafka_producers', 'Number of active Kafka producers').dec()
+        ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_producers', 'Number of active Kafka producers').dec()
       }
 
       callback(null)

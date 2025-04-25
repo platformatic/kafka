@@ -57,7 +57,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../callbacks.ts'
-import { ensureGauge, type Gauge } from '../metrics.ts'
+import { ensureMetric, type Gauge } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
   commitOptionsValidator,
@@ -151,15 +151,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kFetchConnections] = this[kCreateConnectionPool]()
 
     if (this[kPrometheus]) {
-      ensureGauge(this[kPrometheus], 'kafka_consumers', 'Number of active Kafka consumers').inc()
+      ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').inc()
 
-      this.#metricActiveStreams = ensureGauge(
+      this.#metricActiveStreams = ensureMetric<Gauge>(
         this[kPrometheus],
+        'Gauge',
         'kafka_consumers_streams',
         'Number of active Kafka consumers streams'
       )
 
-      this.topics.setMetric(ensureGauge(this[kPrometheus], 'kafka_consumers_topics', 'Number of topics being consumed'))
+      this.topics.setMetric(
+        ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers_topics', 'Number of topics being consumed')
+      )
     }
   }
 
@@ -216,7 +219,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.topics.clear()
 
           if (this[kPrometheus]) {
-            ensureGauge(this[kPrometheus], 'kafka_consumers', 'Number of active Kafka consumers').dec()
+            ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
           }
 
           callback(null)
@@ -844,8 +847,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.#streams.delete(stream)
       }
     }
-
-    this.#metricActiveStreams?.reset()
 
     if (this.#streams.size) {
       if (!force) {

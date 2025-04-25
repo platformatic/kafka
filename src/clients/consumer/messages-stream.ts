@@ -7,7 +7,7 @@ import { type Message } from '../../protocol/records.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../callbacks.ts'
-import { ensureCounter, type Counter } from '../metrics.ts'
+import { ensureMetric, type Counter } from '../metrics.ts'
 import { type Deserializer } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import {
@@ -112,8 +112,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     })
 
     if (consumer[kPrometheus]) {
-      this.#metricsConsumedMessages = ensureCounter(
+      this.#metricsConsumedMessages = ensureMetric<Counter>(
         consumer[kPrometheus],
+        'Counter',
         'kafka_consumers_messages',
         'Number of consumed Kafka messages'
       )

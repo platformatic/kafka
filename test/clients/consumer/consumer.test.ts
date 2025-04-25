@@ -2136,6 +2136,123 @@ test('metrics should track the number of active consumers', async t => {
   }
 })
 
+test('metrics should track the number of active consumers with different labels', async t => {
+  const registry = new Prometheus.Registry()
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus, labels: { a: 1, b: 2 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus, labels: { b: 3, c: 4 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  await consumer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await consumer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 0
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 0
+        }
+      ]
+    })
+  }
+})
+
 test('metrics should track the number of active streams', async t => {
   const registry = new Prometheus.Registry()
   const topic = await createTopic(t, true, 3)

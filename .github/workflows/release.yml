@@ -12,11 +12,6 @@ on:
         required: false
         type: boolean
         default: false
-      private:
-        description: 'Release as private'
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   release-npm:
@@ -47,7 +42,7 @@ jobs:
       - name: Push changes
         run: git push origin HEAD:${{ github.ref }}
       - name: Publish to NPM
-        run: pnpm -r publish --access ${{ inputs.private == true && 'private' || 'public' }} --tag ${{ inputs.prerelease == true && 'next' || 'latest' }} --publish-branch ${{ github.ref_name }}
+        run: pnpm -r publish --access public --tag ${{ inputs.prerelease == true && 'next' || 'latest' }} --publish-branch ${{ github.ref_name }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: 'Create release notes'

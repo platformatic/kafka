@@ -4,7 +4,7 @@ import { messageSchema } from '../../protocol/records.ts'
 import { ajv, enumErrorMessage } from '../../utils.ts'
 import { serdeProperties } from '../serde.ts'
 
-const produceOptionsProperties = {
+export const produceOptionsProperties = {
   producerId: { bigint: true },
   producerEpoch: { type: 'number' },
   idempotent: { type: 'boolean' },

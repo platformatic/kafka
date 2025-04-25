@@ -4,7 +4,7 @@ import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/optio
 import { serdeProperties } from '../serde.ts'
 import { MessagesStreamFallbackModes, MessagesStreamModes, type ConsumerOptions } from './types.ts'
 
-const groupOptionsProperties = {
+export const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
   rebalanceTimeout: { type: 'number', minimum: 0 },
   heartbeatInterval: { type: 'number', minimum: 0 },
@@ -25,7 +25,7 @@ const groupOptionsProperties = {
   }
 }
 
-const groupOptionsAdditionalValidations = {
+export const groupOptionsAdditionalValidations = {
   rebalanceTimeout: {
     properties: {
       rebalanceTimeout: {
@@ -53,7 +53,7 @@ const groupOptionsAdditionalValidations = {
   }
 }
 
-const consumeOptionsProperties = {
+export const consumeOptionsProperties = {
   autocommit: { oneOf: [{ type: 'boolean' }, { type: 'number', minimum: 100 }] },
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
@@ -198,6 +198,18 @@ export const groupOptionsValidator = ajv.compile({
   ...groupOptionsSchema,
   dependentSchemas: groupOptionsAdditionalValidations
 })
+
+export const groupIdAndOptionsValidator = ajv.compile({
+  type: 'object',
+  properties: {
+    groupId: idProperty,
+    ...groupOptionsProperties
+  },
+  required: ['groupId'],
+  additionalProperties: true,
+  dependentSchemas: groupOptionsAdditionalValidations
+})
+
 export const consumeOptionsValidator = ajv.compile(consumeOptionsSchema)
 export const consumerOptionsValidator = ajv.compile(consumerOptionsSchema)
 export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)

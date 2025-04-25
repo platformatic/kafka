@@ -158,7 +158,21 @@ test('constructor should throw on invalid options when strict mode is enabled', 
   consumer.close()
 })
 
-test('constructor should validate group options relationship', () => {
+test('constructor should validate necessary options even not in strict mode', () => {
+  // Test no groupId
+  try {
+    // @ts-expect-error No group ID
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092']
+    })
+    throw new Error('Should have thrown for missing groupID')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, "/options must have required property 'groupId'.")
+  }
+
   // Test with rebalanceTimeout < sessionTimeout (invalid)
   try {
     // eslint-disable-next-line no-new

@@ -1,3 +1,4 @@
+import { type ValidateFunction } from 'ajv'
 import { type FetchResponse, api as fetchV17 } from '../../apis/consumer/fetch.ts'
 import { type HeartbeatResponse, api as heartbeatV4 } from '../../apis/consumer/heartbeat.ts'
 import {
@@ -65,6 +66,7 @@ import {
   consumerOptionsValidator,
   defaultConsumerOptions,
   fetchOptionsValidator,
+  groupIdAndOptionsValidator,
   groupOptionsValidator,
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
@@ -145,7 +147,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#streams = new Set()
 
-    this.#validateGroupOptions(this[kOptions])
+    this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
     // Initialize connection pool
     this[kFetchConnections] = this[kCreateConnectionPool]()
@@ -1102,11 +1104,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #validateGroupOptions (options: GroupOptions): void {
-    const valid = groupOptionsValidator(options)
+  #validateGroupOptions (options: GroupOptions, validator?: ValidateFunction<unknown>): void {
+    validator ??= groupOptionsValidator
+    const valid = validator(options)
 
     if (!valid) {
-      throw new UserError(this[kFormatValidationErrors](groupOptionsValidator, '/options'))
+      throw new UserError(this[kFormatValidationErrors](validator, '/options'))
     }
   }
 

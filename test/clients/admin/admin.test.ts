@@ -17,6 +17,7 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
+  mockedErrorMessage,
   mockMetadata
 } from '../../helpers.ts'
 
@@ -375,7 +376,7 @@ test('createTopics should handle errors from Connection.getFirstAvailable', asyn
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -464,7 +465,7 @@ test('deleteTopics should handle errors from Connection.getFirstAvailable', asyn
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -591,7 +592,7 @@ test('listGroups should handle errors from Base.metadata', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -794,7 +795,7 @@ test('describeGroups should handle errors from Base.metadata', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -812,7 +813,7 @@ test('describeGroups should handle errors from Connection.getFirstAvailable', as
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -930,7 +931,7 @@ test('deleteGroups should handle errors from Base.metadata', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -948,7 +949,7 @@ test('deleteGroups should handle errors from Connection.getFirstAvailable', asyn
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 

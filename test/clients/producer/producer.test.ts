@@ -20,6 +20,7 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
+  mockedErrorMessage,
   mockMetadata,
   mockMethod
 } from '../../helpers.ts'
@@ -112,7 +113,7 @@ test('close should handle errors from Base.close', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -310,7 +311,7 @@ test('initIdempotentProducer should handle errors from getFirstAvailable', async
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -328,7 +329,7 @@ test('initIdempotentProducer should handle errors from the API', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -742,7 +743,7 @@ test('send should handle errors from initIdempotentProducer', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -765,7 +766,7 @@ test('send should handle errors from Base.metadata', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )

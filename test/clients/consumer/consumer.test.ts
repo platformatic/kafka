@@ -28,6 +28,7 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
+  mockedErrorMessage,
   mockMetadata,
   mockMethod
 } from '../../helpers.ts'
@@ -83,7 +84,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       strict: true
     })
     throw new Error('Should have thrown for missing groupId')
@@ -97,7 +98,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       // @ts-expect-error - Intentionally passing invalid option
       sessionTimeout: 'not-a-number',
@@ -114,7 +115,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: -1, // Negative value
       strict: true
@@ -130,7 +131,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       // @ts-expect-error - Intentionally passing invalid option
       protocols: 'not-an-array',
@@ -163,7 +164,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 20000 // Less than sessionTimeout
@@ -179,7 +180,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 60000,
@@ -196,7 +197,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 60000,
@@ -317,7 +318,7 @@ test('close should handle errors from leaveGroup', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -360,7 +361,7 @@ test('close should handle errors from Base.close', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -575,7 +576,7 @@ test('consume should handle errors from joinGroup', async t => {
     await consumer.consume({ topics: ['test-topic'] })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -806,7 +807,7 @@ test('fetch should handle errors from Connection.get', async t => {
   const topic = await createTopic(t, true)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   mockConnectionPoolGet(consumer[kFetchConnections], 1)
@@ -833,7 +834,7 @@ test('fetch should handle errors from Connection.get', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -864,7 +865,7 @@ test('fetch should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -873,7 +874,7 @@ test('fetch should handle missing nodes from Base.metadata', async t => {
 
   // Mock metadata to fail
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   // Attempt to fetch with mocked metadata
@@ -906,7 +907,7 @@ test('fetch should handle errors from the API', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   mockAPI(consumer[kFetchConnections], fetchV17.api.key)
@@ -933,7 +934,7 @@ test('fetch should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1048,7 +1049,7 @@ test('commit should handle errors from the API (findGroupCoordinator)', async t 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1068,7 +1069,7 @@ test('commit should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1089,7 +1090,7 @@ test('commit should handle errors from the API (offsetCommit)', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof Error, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1209,7 +1210,7 @@ test('listOffsets should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1404,7 +1405,7 @@ test('listCommittedOffsets should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1480,7 +1481,7 @@ test('findGroupCoordinator should handle errors from Connection.getFirstAvailabl
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1494,7 +1495,7 @@ test('findGroupCoordinator should handle errors from the API', async t => {
     await consumer.findGroupCoordinator()
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1688,7 +1689,7 @@ test('joinGroup should handle errors from Connection.get', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1704,7 +1705,7 @@ test('joinGroup should handle errors from the API (joinGroup)', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1720,7 +1721,7 @@ test('joinGroup should handle errors from the API (syncGroup)', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1736,7 +1737,7 @@ test('joinGroup should handle errors from the API (findCoordinator)', async t =>
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1752,7 +1753,7 @@ test('joinGroup should handle errors from Base.metadata', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1777,7 +1778,7 @@ test('joinGroup should handle errors from Base.metadata during sync', async t =>
   const [error] = await errorPromise
   // Error should contain our mock error message
   strictEqual(error instanceof MultipleErrors, true)
-  strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+  strictEqual(error.message.includes(mockedErrorMessage), true)
 })
 
 test('joinGroup should cancel when membership has been cancelled during join', async t => {
@@ -1952,7 +1953,7 @@ test('leaveGroup should handle errors from Connection.get', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1970,7 +1971,7 @@ test('leaveGroup should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -2056,7 +2057,7 @@ test('#heartbeat should handle errors from the API', async t => {
 
   // Error should contain our mock error message
   strictEqual(error instanceof MultipleErrors, true)
-  strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+  strictEqual(error.message.includes(mockedErrorMessage), true)
 })
 
 test('#heartbeat should emit events when it was cancelled while waiting for API response', async t => {

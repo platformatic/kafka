@@ -2,7 +2,7 @@ import { Producer, debugDump, sleep, stringSerializers } from '../../src/index.t
 
 const producer = new Producer({
   clientId: 'id',
-  bootstrapBrokers: ['localhost:29092'],
+  bootstrapBrokers: ['localhost:9092'],
   serializers: stringSerializers,
   strict: true
 })

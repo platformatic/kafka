@@ -32,7 +32,7 @@
     "test": "c8 -c test/config/c8-local.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 'test/**/*.test.ts'",
     "test:ci": "c8 -c test/config/c8-ci.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 'test/**/*.test.ts'",
     "ci": "npm run build && npm run lint && npm run test:ci",
-    "prepublishOnly": "npm run ci",
+    "prepublishOnly": "npm run build && npm run lint",
     "postpublish": "git push origin && git push origin -f --tags",
     "generate:apis": "node --experimental-strip-types scripts/generate-apis.ts",
     "generate:errors": "node --experimental-strip-types scripts/generate-errors.ts",

@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { Base, type ClusterMetadata, sleep } from '../../../src/index.ts'
-import { createBase } from '../../helpers.ts'
+import { createBase, mockedErrorMessage } from '../../helpers.ts'
 
 test('constructor should throw on invalid options when strict mode is enabled', () => {
   // Missing required clientId
@@ -10,7 +10,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // @ts-expect-error - Intentionally passing invalid options
     // eslint-disable-next-line no-new
     new Base({
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       strict: true
     })
     throw new Error('Should have thrown for missing clientId')
@@ -36,7 +36,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Base({
       clientId: 'test-client',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       // @ts-expect-error - Intentionally passing invalid option type
       timeout: 'not-a-number',
       strict: true
@@ -51,7 +51,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Base({
       clientId: 'test-client',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       timeout: -1, // Negative value
       strict: true
     })
@@ -398,6 +398,6 @@ test('operations can be aborted without a retry', async t => {
     // If we get here, the call unexpectedly succeeded
     throw new Error('Expected metadata call to fail with connection error')
   } catch (error: any) {
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })

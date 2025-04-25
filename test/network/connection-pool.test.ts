@@ -8,7 +8,7 @@ import {
   ConnectionPool,
   ConnectionStatuses
 } from '../../src/index.ts'
-import { mockMethod } from '../helpers.ts'
+import { mockedErrorMessage, mockMethod } from '../helpers.ts'
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -228,7 +228,7 @@ test('ConnectionPool.getFirstAvailable should fail if all brokers fail', async t
 
   await rejects(() => connectionPool.getFirstAvailable(brokers) as Promise<unknown>, {
     code: 'PLT_KFK_MULTIPLE',
-    message: 'Cannot connect to any broker.'
+    message: mockedErrorMessage
   })
 })
 

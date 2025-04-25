@@ -1,5 +1,5 @@
 export const topic = 'benchmarks'
-export const brokers = ['localhost:29092', 'localhost:39092', 'localhost:49092']
+export const brokers = ['localhost:9092', 'localhost:9093', 'localhost:9094']
 
 // This is needed by KafkaJS
 process.env.KAFKAJS_NO_PARTITIONER_WARNING = '1'

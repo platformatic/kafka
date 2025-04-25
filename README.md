@@ -83,10 +83,14 @@ for await (const message of stream) {
 }
 
 // Option 3: Concurrent processing
-await forEach(stream, async message => {
-  console.log(`Received: ${message.key} -> ${message.value}`)
-  // Process message...
-}, 16) // 16 is the concurrency level
+await forEach(
+  stream,
+  async message => {
+    console.log(`Received: ${message.key} -> ${message.value}`)
+    // Process message...
+  },
+  16
+) // 16 is the concurrency level
 
 // Close the consumer when done
 await consumer.close()
@@ -164,7 +168,7 @@ type Strings = string[]
 
 const producer = new Producer({
   clientId: 'my-producer',
-  bootstrapBrokers: ['localhost:29092'],
+  bootstrapBrokers: ['localhost:9092'],
   serializers: {
     key: stringSerializer,
     value: jsonSerializer<Strings>
@@ -174,7 +178,7 @@ const producer = new Producer({
 const consumer = new Consumer({
   groupId: 'my-consumer-group',
   clientId: 'my-consumer',
-  bootstrapBrokers: ['localhost:29092'],
+  bootstrapBrokers: ['localhost:9092'],
   deserializers: {
     key: stringDeserializer,
     value: jsonDeserializer<Strings>

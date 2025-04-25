@@ -20,7 +20,8 @@ import {
   type Writer
 } from '../src/index.ts'
 
-export const kafkaBootstrapServers = ['localhost:29092']
+export const kafkaBootstrapServers = ['localhost:9092']
+export const mockedErrorMessage = 'Cannot connect to any broker.'
 
 export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
   const options: BaseOptions = {
@@ -111,9 +112,7 @@ export function mockMethod (
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
 ) {
   if (typeof errorToMock === 'undefined') {
-    errorToMock = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')])
   }
 
   const original = target[method].bind(target)
@@ -182,9 +181,7 @@ export function mockAPI (
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
 ) {
   if (typeof errorToMock === 'undefined') {
-    errorToMock = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')])
   }
 
   const originalGet = pool.get.bind(pool)

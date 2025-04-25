@@ -8,6 +8,7 @@ import { ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
+import { type Metrics } from '../metrics.ts'
 import { baseOptionsValidator, defaultBaseOptions, defaultPort, metadataOptionsValidator } from './options.ts'
 import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
 
@@ -28,6 +29,7 @@ export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
 export const kInspect = Symbol('plt.kafka.base.inspect')
 export const kFormatValidationErrors = Symbol('plt.kafka.base.formatValidationErrors')
 export const kInstance = Symbol('plt.kafka.base.instance')
+export const kPrometheus = Symbol('plt.kafka.base.prometheus')
 
 let currentInstance = 0
 
@@ -40,7 +42,8 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
   [kBootstrapBrokers]: Broker[];
   [kOptions]: OptionsType;
   [kConnections]: ConnectionPool;
-  [kClosed]: boolean
+  [kClosed]: boolean;
+  [kPrometheus]: Metrics | undefined
 
   #metadata: ClusterMetadata | undefined
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
@@ -65,6 +68,11 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
     this[kClosed] = false
 
     this.#inflightDeduplications = new Map()
+
+    // Initialize metrics
+    if (options.metrics) {
+      this[kPrometheus] = options.metrics
+    }
   }
 
   /* c8 ignore next 3 */

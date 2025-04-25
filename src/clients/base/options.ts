@@ -32,7 +32,8 @@ export const baseOptionsSchema = {
     maxInflights: { type: 'number', minimum: 0 },
     metadataMaxAge: { type: 'number', minimum: 0 },
     autocreateTopics: { type: 'boolean' },
-    strict: { type: 'boolean' }
+    strict: { type: 'boolean' },
+    metrics: { type: 'object', additionalProperties: true }
   },
   required: ['clientId', 'bootstrapBrokers'],
   additionalProperties: true

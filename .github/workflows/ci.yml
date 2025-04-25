@@ -28,6 +28,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Start Kafka Cluster
-        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:29092 tcp:39092 tcp:49092
+        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094
       - name: Run Tests
         run: pnpm run ci

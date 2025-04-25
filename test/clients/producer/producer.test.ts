@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { test } from 'node:test'
+import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   initProducerIdV5,
@@ -19,7 +20,9 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
-  mockMetadata
+  mockedErrorMessage,
+  mockMetadata,
+  mockMethod
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
@@ -27,8 +30,6 @@ test('constructor should initialize properly', t => {
 
   strictEqual(producer instanceof Producer, true)
   strictEqual(producer.closed, false)
-
-  producer.close()
 })
 
 test('constructor should validate options in strict mode', t => {
@@ -77,6 +78,43 @@ test('constructor should validate options in strict mode', t => {
   })
   strictEqual(producer instanceof Producer, true)
   producer.close()
+})
+
+test('close should properly clean up resources and set closed state', t => {
+  return new Promise<void>((resolve, reject) => {
+    const producer = createProducer(t)
+
+    // Verify initial state
+    strictEqual(producer.closed, false)
+
+    // Close the producer
+    producer.close(err => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      // Verify closed state
+      strictEqual(producer.closed, true)
+      resolve()
+    })
+  })
+})
+
+test('close should handle errors from Base.close', async t => {
+  const producer = createProducer(t)
+
+  // Mock the super.close method to fail
+  mockMethod(producer[kConnections], 'close')
+
+  // Attempt to close with the mocked error
+  try {
+    await producer.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
 })
 
 test('should support both promise and callback API', async t => {
@@ -273,7 +311,7 @@ test('initIdempotentProducer should handle errors from getFirstAvailable', async
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -291,7 +329,7 @@ test('initIdempotentProducer should handle errors from the API', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -705,7 +743,7 @@ test('send should handle errors from initIdempotentProducer', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -728,7 +766,7 @@ test('send should handle errors from Base.metadata', async t => {
     },
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -795,4 +833,217 @@ test('send should repeat the operation in case of stale metadata', async t => {
     idempotent: true,
     acks: ProduceAcks.ALL
   })
+})
+
+test('metrics should track the number of active producer', async t => {
+  const registry = new Prometheus.Registry()
+
+  const producer1 = await createProducer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const producer2 = await createProducer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+    deepStrictEqual(activeConsumers.values[0].value, 2)
+  }
+
+  await producer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+    deepStrictEqual(activeConsumers.values[0].value, 1)
+  }
+
+  await producer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+    deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active producer with different labels', async t => {
+  const registry = new Prometheus.Registry()
+
+  const producer1 = await createProducer(t, { metrics: { registry, client: Prometheus, labels: { a: 1, b: 2 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const producer2 = await createProducer(t, { metrics: { registry, client: Prometheus, labels: { b: 3, c: 4 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  await producer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 1
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await producer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_producers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka producers',
+      name: 'kafka_producers',
+      type: 'gauge',
+      values: [
+        {
+          labels: { a: 1, b: 2 },
+          value: 0
+        },
+        {
+          labels: { b: 3, c: 4 },
+          value: 0
+        }
+      ]
+    })
+  }
+})
+
+test('metrics should track the number of produced messages', async t => {
+  const registry = new Prometheus.Registry()
+  const producer1 = createProducer(t, { metrics: { registry, client: Prometheus } })
+  const producer2 = createProducer(t, { metrics: { registry, client: Prometheus } })
+  const testTopic = await createTopic(t)
+
+  await producer1.send({
+    messages: [
+      {
+        topic: testTopic,
+        key: Buffer.from('message-key'),
+        value: Buffer.from('message-value')
+      },
+      {
+        topic: testTopic,
+        key: Buffer.from('message-key'),
+        value: Buffer.from('message-value')
+      },
+      {
+        topic: testTopic,
+        key: Buffer.from('message-key'),
+        value: Buffer.from('message-value')
+      }
+    ],
+    acks: ProduceAcks.LEADER
+  })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const producedMessages = metrics.find(m => m.name === 'kafka_produced_messages')!
+
+    deepStrictEqual(producedMessages, {
+      aggregator: 'sum',
+      help: 'Number of produced Kafka messages',
+      name: 'kafka_produced_messages',
+      type: 'counter',
+      values: [
+        {
+          labels: {},
+          value: 3
+        }
+      ]
+    })
+  }
+
+  await producer2.send({
+    messages: [
+      {
+        topic: testTopic,
+        key: Buffer.from('message-key'),
+        value: Buffer.from('message-value')
+      },
+      {
+        topic: testTopic,
+        key: Buffer.from('message-key'),
+        value: Buffer.from('message-value')
+      }
+    ],
+    acks: ProduceAcks.LEADER
+  })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const producedMessages = metrics.find(m => m.name === 'kafka_produced_messages')!
+
+    deepStrictEqual(producedMessages.values[0].value, 5)
+  }
 })

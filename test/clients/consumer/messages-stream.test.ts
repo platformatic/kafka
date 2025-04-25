@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
+import * as Prometheus from 'prom-client'
 import {
   type CallbackWithPromise,
   Consumer,
@@ -24,7 +25,7 @@ import {
   stringSerializers,
   UserError
 } from '../../../src/index.ts'
-import { mockMetadata } from '../../helpers.ts'
+import { mockedErrorMessage, mockMetadata } from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   messages: Message<K, V, HK, HV>[]
@@ -33,7 +34,7 @@ interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   timeout: boolean
 }
 
-const kafkaBootstrapServers = ['localhost:29092']
+const kafkaBootstrapServers = ['localhost:9092']
 
 // Helper functions
 function createTestGroupId () {
@@ -126,6 +127,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   const consumer = createConsumer<K, V, HK, HV>(t, groupId, options)
   await consumer.topics.trackAll(topic)
   await consumer.joinGroup({})
+  options.metrics = undefined
 
   const stream: MessagesStream<K, V, HK, HV> = await consumer.consume({
     topics: [topic],
@@ -167,7 +169,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   return { messages, stream, consumer, timeout: result === 'timeout' }
 }
 
-test('MessagesStream - should be an instance of Readable', async t => {
+test('should be an instance of Readable', async t => {
   const topic = createTestTopic()
 
   // Produce test messages
@@ -183,7 +185,7 @@ test('MessagesStream - should be an instance of Readable', async t => {
   ok(stream instanceof Readable, 'MessagesStream should be an instance of Readable')
 })
 
-test('MessagesStream - should throw error when specifying offsets with non-MANUAL mode', async t => {
+test('should throw error when specifying offsets with non-MANUAL mode', async t => {
   const consumer = createConsumer(t)
 
   await throws(
@@ -202,7 +204,7 @@ test('MessagesStream - should throw error when specifying offsets with non-MANUA
   )
 })
 
-test('MessagesStream - should throw error when not specifying offsets with MANUAL mode', async t => {
+test('should throw error when not specifying offsets with MANUAL mode', async t => {
   const consumer = createConsumer(t)
 
   throws(
@@ -220,7 +222,7 @@ test('MessagesStream - should throw error when not specifying offsets with MANUA
   )
 })
 
-test('MessagesStream - should support autocommit and COMMITTED mode', async t => {
+test('should support autocommit and COMMITTED mode', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -251,7 +253,7 @@ test('MessagesStream - should support autocommit and COMMITTED mode', async t =>
   strictEqual(secondBatch.length, 0, 'Should not consume any messages in second batch')
 })
 
-test('MessagesStream - should support timed autocommits', async t => {
+test('should support timed autocommits', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -282,7 +284,7 @@ test('MessagesStream - should support timed autocommits', async t => {
   }
 })
 
-test('MessagesStream - should support timed empty autocommits', async t => {
+test('should support timed empty autocommits', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -301,7 +303,7 @@ test('MessagesStream - should support timed empty autocommits', async t => {
   strictEqual(stream.errored, null)
 })
 
-test('MessagesStream - should support manual commits', async t => {
+test('should support manual commits', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -337,7 +339,7 @@ test('MessagesStream - should support manual commits', async t => {
   deepStrictEqual(secondBatch[1].key, 'key-2', 'Second message in second batch should be key-2')
 })
 
-test('MessagesStream - should consume messages with LATEST mode', async t => {
+test('should consume messages with LATEST mode', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -386,7 +388,7 @@ test('MessagesStream - should consume messages with LATEST mode', async t => {
   }
 })
 
-test('MessagesStream - should consume messages with EARLIEST mode', async t => {
+test('should consume messages with EARLIEST mode', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -411,7 +413,7 @@ test('MessagesStream - should consume messages with EARLIEST mode', async t => {
   }
 })
 
-test('MessagesStream - should consume messages with MANUAL mode', async t => {
+test('should consume messages with MANUAL mode', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -459,7 +461,7 @@ test('MessagesStream - should consume messages with MANUAL mode', async t => {
   deepStrictEqual(manualMessages[1].key, 'key-2', 'Second message should be key-2')
 })
 
-test('MessagesStream - should support different fallback modes', async t => {
+test('should support different fallback modes', async t => {
   const groupIdFail = createTestGroupId()
   const groupIdLatest = createTestGroupId()
   const groupIdEarliest = createTestGroupId()
@@ -502,7 +504,7 @@ test('MessagesStream - should support different fallback modes', async t => {
   strictEqual(earliestMessages.length, 3, 'With EARLIEST fallback, should consume all messages')
 })
 
-test('MessagesStream - should support asyncIterator interface', async t => {
+test('should support asyncIterator interface', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -535,7 +537,7 @@ test('MessagesStream - should support asyncIterator interface', async t => {
   }
 })
 
-test('MessagesStream - should support custom deserializers', async t => {
+test('should support custom deserializers', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -591,7 +593,7 @@ test('MessagesStream - should support custom deserializers', async t => {
   }
 })
 
-test('MessagesStream - should properly handle close', async t => {
+test('should properly handle close', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -644,7 +646,7 @@ test('MessagesStream - should properly handle close', async t => {
   await stream.close()
 })
 
-test('MessagesStream - should properly handle going back and forth to empty assignments', async t => {
+test('should properly handle going back and forth to empty assignments', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -693,7 +695,7 @@ test('MessagesStream - should properly handle going back and forth to empty assi
   deepStrictEqual(response.key, 'key-0')
 })
 
-test('MessagesStream - should handle errors from Base.metadata', async t => {
+test('should handle errors from Base.metadata', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -716,10 +718,10 @@ test('MessagesStream - should handle errors from Base.metadata', async t => {
   const [dataOrError] = (await Promise.race([once(stream, 'data'), errorPromise])) as (Error | object)[]
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
-  strictEqual((dataOrError as Error).message.includes('Cannot connect to any broker.'), true)
+  strictEqual((dataOrError as Error).message.includes(mockedErrorMessage), true)
 })
 
-test('MessagesStream - should handle errors from Consumer.fetch', async t => {
+test('should handle errors from Consumer.fetch', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -732,9 +734,7 @@ test('MessagesStream - should handle errors from Consumer.fetch', async t => {
 
   // Override the fetch method to simulate a connection error
   consumer.fetch = function (_options: any, callback: CallbackWithPromise<any>) {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
     callback(connectionError, undefined)
   } as typeof consumer.fetch
@@ -749,10 +749,10 @@ test('MessagesStream - should handle errors from Consumer.fetch', async t => {
   const [dataOrError] = (await Promise.race([once(stream, 'data'), errorPromise])) as (Error | object)[]
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
-  strictEqual((dataOrError as Error).message.includes('Cannot connect to any broker.'), true)
+  strictEqual((dataOrError as Error).message.includes(mockedErrorMessage), true)
 })
 
-test('MessagesStream - should handle errors from Consumer.commit', async t => {
+test('should handle errors from Consumer.commit', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -765,9 +765,7 @@ test('MessagesStream - should handle errors from Consumer.commit', async t => {
 
   // Override the fetch method to simulate a connection error
   consumer.commit = function (_options: any, callback: CallbackWithPromise<any>) {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
     callback(connectionError, undefined)
   } as typeof consumer.commit
@@ -783,10 +781,10 @@ test('MessagesStream - should handle errors from Consumer.commit', async t => {
 
   const [error] = await once(stream, 'error')
   strictEqual(error instanceof MultipleErrors, true)
-  strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+  strictEqual(error.message.includes(mockedErrorMessage), true)
 })
 
-test('MessagesStream - should handle errors from Consumer.listOffsets', async t => {
+test('should handle errors from Consumer.listOffsets', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -799,9 +797,7 @@ test('MessagesStream - should handle errors from Consumer.listOffsets', async t 
 
   // Override the fetch method to simulate a connection error
   consumer.listOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
     callback(connectionError, undefined)
   } as typeof consumer.listOffsets
@@ -816,10 +812,10 @@ test('MessagesStream - should handle errors from Consumer.listOffsets', async t 
   const [dataOrError] = (await Promise.race([once(stream, 'data'), errorPromise])) as (Error | object)[]
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
-  strictEqual((dataOrError as Error).message.includes('Cannot connect to any broker.'), true)
+  strictEqual((dataOrError as Error).message.includes(mockedErrorMessage), true)
 })
 
-test('MessagesStream - should handle errors from Consumer.listCommittedOffsets', async t => {
+test('should handle errors from Consumer.listCommittedOffsets', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()
 
@@ -832,9 +828,7 @@ test('MessagesStream - should handle errors from Consumer.listCommittedOffsets',
 
   // Override the fetch method to simulate a connection error
   consumer.listCommittedOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
-    const connectionError = new MultipleErrors('Cannot connect to any broker.', [
-      new Error('Connection failed to localhost:29092')
-    ])
+    const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
     callback(connectionError, undefined)
   } as typeof consumer.listCommittedOffsets
@@ -849,5 +843,57 @@ test('MessagesStream - should handle errors from Consumer.listCommittedOffsets',
   const [dataOrError] = (await Promise.race([once(stream, 'data'), errorPromise])) as (Error | object)[]
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
-  strictEqual((dataOrError as Error).message.includes('Cannot connect to any broker.'), true)
+  strictEqual((dataOrError as Error).message.includes(mockedErrorMessage), true)
+})
+
+test('metrics should track the number of consumed messages', async t => {
+  const registry = new Prometheus.Registry()
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Produce test messages
+  await produceTestMessages(t, topic)
+
+  {
+    const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+      mode: MessagesStreamModes.EARLIEST,
+      metrics: { registry, client: Prometheus }
+    })
+
+    // Verify messages
+    strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+    const metrics = await registry.getMetricsAsJSON()
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+
+    deepStrictEqual(consumedMessages, {
+      aggregator: 'sum',
+      help: 'Number of consumed Kafka messages',
+      name: 'kafka_consumers_messages',
+      type: 'counter',
+      values: [
+        {
+          labels: {},
+          value: 3
+        }
+      ]
+    })
+
+    await consumer.close(true)
+  }
+
+  {
+    const { messages } = await consumeMessages(t, groupId, topic, {
+      mode: MessagesStreamModes.EARLIEST,
+      metrics: { registry, client: Prometheus }
+    })
+
+    // Verify messages
+    strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+    const metrics = await registry.getMetricsAsJSON()
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+
+    deepStrictEqual(consumedMessages.values[0].value, 6)
+  }
 })

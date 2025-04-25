@@ -2,7 +2,7 @@ import { ProduceAcks, Producer, debugDump, stringSerializers } from '../../src/i
 
 const producer = new Producer({
   clientId: 'id',
-  bootstrapBrokers: ['localhost:29092'],
+  bootstrapBrokers: ['localhost:9092'],
   idempotent: true,
   autocreateTopics: true,
   serializers: stringSerializers,

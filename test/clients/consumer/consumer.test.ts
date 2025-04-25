@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
+import * as Prometheus from 'prom-client'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
@@ -27,6 +28,7 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
+  mockedErrorMessage,
   mockMetadata,
   mockMethod
 } from '../../helpers.ts'
@@ -82,7 +84,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       strict: true
     })
     throw new Error('Should have thrown for missing groupId')
@@ -96,7 +98,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       // @ts-expect-error - Intentionally passing invalid option
       sessionTimeout: 'not-a-number',
@@ -113,7 +115,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: -1, // Negative value
       strict: true
@@ -129,7 +131,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       // @ts-expect-error - Intentionally passing invalid option
       protocols: 'not-an-array',
@@ -162,7 +164,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 20000 // Less than sessionTimeout
@@ -178,7 +180,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 60000,
@@ -195,7 +197,7 @@ test('constructor should validate group options relationship', () => {
     // eslint-disable-next-line no-new
     new Consumer({
       clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:29092'],
+      bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 60000,
@@ -316,7 +318,7 @@ test('close should handle errors from leaveGroup', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -341,6 +343,25 @@ test('close should handle errors from ConnectionPool.close', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Cannot close the pool.'), true)
+  }
+})
+
+test('close should handle errors from Base.close', async t => {
+  const consumer = createConsumer(t)
+
+  // Join a group first
+  await consumer.joinGroup({})
+
+  // Mock the super.close method to fail
+  mockMethod(consumer[kConnections], 'close')
+
+  // Attempt to close with the mocked error
+  try {
+    await consumer.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -555,7 +576,7 @@ test('consume should handle errors from joinGroup', async t => {
     await consumer.consume({ topics: ['test-topic'] })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -786,7 +807,7 @@ test('fetch should handle errors from Connection.get', async t => {
   const topic = await createTopic(t, true)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   mockConnectionPoolGet(consumer[kFetchConnections], 1)
@@ -813,7 +834,7 @@ test('fetch should handle errors from Connection.get', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -844,7 +865,7 @@ test('fetch should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -853,7 +874,7 @@ test('fetch should handle missing nodes from Base.metadata', async t => {
 
   // Mock metadata to fail
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   // Attempt to fetch with mocked metadata
@@ -886,7 +907,7 @@ test('fetch should handle errors from the API', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 29092 }]])
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
   })
 
   mockAPI(consumer[kFetchConnections], fetchV17.api.key)
@@ -913,7 +934,7 @@ test('fetch should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1028,7 +1049,7 @@ test('commit should handle errors from the API (findGroupCoordinator)', async t 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1048,7 +1069,7 @@ test('commit should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1069,7 +1090,7 @@ test('commit should handle errors from the API (offsetCommit)', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof Error, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1189,7 +1210,7 @@ test('listOffsets should handle errors from Base.metadata', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1384,7 +1405,7 @@ test('listCommittedOffsets should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1460,7 +1481,7 @@ test('findGroupCoordinator should handle errors from Connection.getFirstAvailabl
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1474,7 +1495,7 @@ test('findGroupCoordinator should handle errors from the API', async t => {
     await consumer.findGroupCoordinator()
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    strictEqual(error.message, mockedErrorMessage)
   }
 })
 
@@ -1668,7 +1689,7 @@ test('joinGroup should handle errors from Connection.get', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1684,7 +1705,7 @@ test('joinGroup should handle errors from the API (joinGroup)', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1700,7 +1721,7 @@ test('joinGroup should handle errors from the API (syncGroup)', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1716,7 +1737,7 @@ test('joinGroup should handle errors from the API (findCoordinator)', async t =>
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1732,7 +1753,7 @@ test('joinGroup should handle errors from Base.metadata', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1757,7 +1778,7 @@ test('joinGroup should handle errors from Base.metadata during sync', async t =>
   const [error] = await errorPromise
   // Error should contain our mock error message
   strictEqual(error instanceof MultipleErrors, true)
-  strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+  strictEqual(error.message.includes(mockedErrorMessage), true)
 })
 
 test('joinGroup should cancel when membership has been cancelled during join', async t => {
@@ -1932,7 +1953,7 @@ test('leaveGroup should handle errors from Connection.get', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -1950,7 +1971,7 @@ test('leaveGroup should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -2036,7 +2057,7 @@ test('#heartbeat should handle errors from the API', async t => {
 
   // Error should contain our mock error message
   strictEqual(error instanceof MultipleErrors, true)
-  strictEqual(error.message.includes('Cannot connect to any broker.'), true)
+  strictEqual(error.message.includes(mockedErrorMessage), true)
 })
 
 test('#heartbeat should emit events when it was cancelled while waiting for API response', async t => {
@@ -2065,4 +2086,287 @@ test('#heartbeat should emit events when it was cancelled while waiting for Hear
   await consumer.joinGroup({})
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:cancel')
+})
+
+test('metrics should track the number of active consumers', async t => {
+  const registry = new Prometheus.Registry()
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 2)
+  }
+
+  await consumer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 1)
+  }
+
+  await consumer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+    deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active consumers with different labels', async t => {
+  const registry = new Prometheus.Registry()
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus, labels: { a: 1, b: 2 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus, labels: { b: 3, c: 4 } } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 1
+        }
+      ]
+    })
+  }
+
+  await consumer2.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 1
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await consumer1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers',
+      name: 'kafka_consumers',
+      type: 'gauge',
+      values: [
+        {
+          labels: {
+            a: 1,
+            b: 2
+          },
+          value: 0
+        },
+        {
+          labels: {
+            b: 3,
+            c: 4
+          },
+          value: 0
+        }
+      ]
+    })
+  }
+})
+
+test('metrics should track the number of active streams', async t => {
+  const registry = new Prometheus.Registry()
+  const topic = await createTopic(t, true, 3)
+
+  const consumer = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+
+    deepStrictEqual(activeConsumers, {
+      aggregator: 'sum',
+      help: 'Number of active Kafka consumers streams',
+      name: 'kafka_consumers_streams',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 0
+        }
+      ]
+    })
+  }
+
+  const stream1 = await consumer.consume({ topics: [topic] })
+  await consumer.consume({ topics: [topic] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 2)
+  }
+
+  await stream1.close()
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 1)
+  }
+
+  await consumer.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
+    deepStrictEqual(activeConsumers.values[0].value, 0)
+  }
+})
+
+test('metrics should track the number of active topics', async t => {
+  const registry = new Prometheus.Registry()
+  const topic1 = await createTopic(t, true, 3)
+  const topic2 = await createTopic(t, true, 3)
+  const topic3 = await createTopic(t, true, 3)
+
+  const consumer1 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+  const consumer2 = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+
+    deepStrictEqual(activeTopics, {
+      aggregator: 'sum',
+      help: 'Number of topics being consumed',
+      name: 'kafka_consumers_topics',
+      type: 'gauge',
+      values: [
+        {
+          labels: {},
+          value: 0
+        }
+      ]
+    })
+  }
+
+  await consumer1.consume({ topics: [topic1] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 1)
+  }
+
+  await consumer1.consume({ topics: [topic2] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 2)
+  }
+
+  await consumer2.consume({ topics: [topic2, topic3] })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 4)
+  }
+
+  await consumer2.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 2)
+  }
+
+  await consumer1.close(true)
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
+    deepStrictEqual(activeTopics.values[0].value, 0)
+  }
 })

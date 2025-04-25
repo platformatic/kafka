@@ -46,6 +46,7 @@ import {
   kOptions,
   kPerformDeduplicated,
   kPerformWithRetry,
+  kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
 import { defaultBaseOptions } from '../base/options.ts'
@@ -56,6 +57,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../callbacks.ts'
+import { ensureMetric, type Gauge } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
   commitOptionsValidator,
@@ -119,6 +121,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   */
   [kFetchConnections]: ConnectionPool
 
+  // Metrics
+  #metricActiveStreams: Gauge | undefined
+
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
     super(options)
 
@@ -144,6 +149,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // Initialize connection pool
     this[kFetchConnections] = this[kCreateConnectionPool]()
+
+    if (this[kPrometheus]) {
+      ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').inc()
+
+      this.#metricActiveStreams = ensureMetric<Gauge>(
+        this[kPrometheus],
+        'Gauge',
+        'kafka_consumers_streams',
+        'Number of active Kafka consumers streams'
+      )
+
+      this.topics.setMetric(
+        ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers_topics', 'Number of topics being consumed')
+      )
+    }
   }
 
   get streamsCount (): number {
@@ -189,7 +209,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           return
         }
 
-        super.close(callback)
+        super.close(error => {
+          if (error) {
+            this[kClosed] = false
+            callback(error)
+            return
+          }
+
+          this.topics.clear()
+
+          if (this[kPrometheus]) {
+            ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
+          }
+
+          callback(null)
+        })
       })
     })
 
@@ -398,14 +432,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>,
+    trackTopics: boolean = true
   ): void | Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>> {
     // Subscribe all topics
     let joinNeeded = this.memberId === null
 
-    for (const topic of options.topics) {
-      if (this.topics.track(topic)) {
-        joinNeeded = true
+    if (trackTopics) {
+      for (const topic of options.topics) {
+        if (this.topics.track(topic)) {
+          joinNeeded = true
+        }
       }
     }
 
@@ -417,7 +454,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           return
         }
 
-        this.#consume(options, callback)
+        this.#consume(options, callback, false)
       })
 
       return callback![kCallbackPromise]
@@ -430,7 +467,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
     this.#streams.add(stream)
 
+    this.#metricActiveStreams?.inc()
     stream.once('close', () => {
+      this.#metricActiveStreams?.dec()
       this.#streams.delete(stream)
     })
 

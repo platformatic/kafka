@@ -5,7 +5,7 @@ import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
 const consumer = new Consumer({
   groupId: 'id9',
   clientId: 'id',
-  bootstrapBrokers: ['localhost:29092'],
+  bootstrapBrokers: ['localhost:9092'],
   strict: true,
   deserializers: stringDeserializers
 })

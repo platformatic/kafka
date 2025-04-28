@@ -6,14 +6,14 @@ To ensure maximum compatibility, no `prom-client` version is shipped with the pa
 
 If you provide both the `metrics.client` and `metrics.registry` (an instance of `Registry`) options, then `@platformatic/kafka` will register and provide the following metrics:
 
-| Name                       | Type      | Description                               |
-| -------------------------- | --------- | ----------------------------------------- |
-| `kafka_producers`          | `Gauge`   | Number of active Kafka producers.         |
-| `kafka_produced_messages`  | `Counter` | Number of produced Kafka messages.        |
-| `kafka_consumers`          | `Gauge`   | Number of active Kafka consumers.         |
-| `kafka_consumers_streams`  | `Gauge`   | Number of active Kafka consumers streams. |
-| `kafka_consumers_topics`   | `Gauge`   | Number of topics being consumed.          |
-| `kafka_consumers_messages` | `Counter` | Number of consumed Kafka messages.        |
+| Name                      | Type      | Description                               |
+| ------------------------- | --------- | ----------------------------------------- |
+| `kafka_producers`         | `Gauge`   | Number of active Kafka producers.         |
+| `kafka_produced_messages` | `Counter` | Number of produced Kafka messages.        |
+| `kafka_consumers`         | `Gauge`   | Number of active Kafka consumers.         |
+| `kafka_consumers_streams` | `Gauge`   | Number of active Kafka consumers streams. |
+| `kafka_consumers_topics`  | `Gauge`   | Number of topics being consumed.          |
+| `kafka_consumed_messages` | `Counter` | Number of consumed Kafka messages.        |
 
 Optionally, you can provide labels with the `metrics.label` option.
 

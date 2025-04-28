@@ -115,7 +115,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.#metricsConsumedMessages = ensureMetric<Counter>(
         consumer[kPrometheus],
         'Counter',
-        'kafka_consumers_messages',
+        'kafka_consumed_messages',
         'Number of consumed Kafka messages'
       )
     }

@@ -864,12 +864,12 @@ test('metrics should track the number of consumed messages', async t => {
     strictEqual(messages.length, 3, 'Should consume 3 messages')
 
     const metrics = await registry.getMetricsAsJSON()
-    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumed_messages')!
 
     deepStrictEqual(consumedMessages, {
       aggregator: 'sum',
       help: 'Number of consumed Kafka messages',
-      name: 'kafka_consumers_messages',
+      name: 'kafka_consumed_messages',
       type: 'counter',
       values: [
         {
@@ -892,7 +892,7 @@ test('metrics should track the number of consumed messages', async t => {
     strictEqual(messages.length, 3, 'Should consume 3 messages')
 
     const metrics = await registry.getMetricsAsJSON()
-    const consumedMessages = metrics.find(m => m.name === 'kafka_consumers_messages')!
+    const consumedMessages = metrics.find(m => m.name === 'kafka_consumed_messages')!
 
     deepStrictEqual(consumedMessages.values[0].value, 6)
   }

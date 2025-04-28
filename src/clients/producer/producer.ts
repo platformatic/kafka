@@ -27,7 +27,7 @@ import {
   runConcurrentCallbacks
 } from '../callbacks.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
-import { type Serializer } from '../serde.ts'
+import { type Serializer, type SerializerWithHeaders } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
 import {
   type ProduceOptions,
@@ -51,8 +51,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   // the idempotent producer status.
   #producerInfo!: ProducerInfo
   #sequences: NumericMap
-  #keySerializer: Serializer<Key>
-  #valueSerializer: Serializer<Value>
+  #keySerializer: SerializerWithHeaders<Key, HeaderKey, HeaderValue>
+  #valueSerializer: SerializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
   #metricsProducedMessages: Counter | undefined
@@ -269,8 +269,23 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     const messages: MessageRecord[] = []
     for (const message of options.messages) {
       const topic = message.topic
-      const key = this.#keySerializer(message.key)
-      const headers = new Map<Buffer, Buffer>()
+      let headers = new Map<HeaderKey, HeaderValue>()
+      const serializedHeaders = new Map<Buffer, Buffer>()
+
+      if (message.headers) {
+        headers =
+          message.headers instanceof Map
+            ? (message.headers as Map<HeaderKey, HeaderValue>)
+            : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
+
+        for (const [key, value] of headers) {
+          serializedHeaders.set(this.#headerKeySerializer(key as HeaderKey)!, this.#headerValueSerializer(value)!)
+        }
+      }
+
+      const key = this.#keySerializer(message.key, headers)
+      const value = this.#valueSerializer(message.value, headers)!
+
       let partition: number = 0
 
       if (typeof message.partition !== 'number') {
@@ -286,19 +301,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         partition = message.partition
       }
 
-      if (message.headers) {
-        const entries = message.headers instanceof Map ? message.headers : Object.entries(message.headers)
-
-        for (const [key, value] of entries) {
-          headers.set(this.#headerKeySerializer(key as HeaderKey)!, this.#headerValueSerializer(value)!)
-        }
-      }
-
       topics.add(topic)
       messages.push({
         key,
-        value: this.#valueSerializer(message.value)!,
-        headers,
+        value,
+        headers: serializedHeaders,
         topic,
         partition,
         timestamp: message.timestamp

@@ -8,7 +8,7 @@ import { kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../callbacks.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
-import { type Deserializer } from '../serde.ts'
+import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import {
   MessagesStreamFallbackModes,
@@ -35,8 +35,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #inflightNodes: Set<number>
-  #keyDeserializer: Deserializer<Key>
-  #valueDeserializer: Deserializer<Value>
+  #keyDeserializer: DeserializerWithHeaders<Key>
+  #valueDeserializer: DeserializerWithHeaders<Value>
   #headerKeyDeserializer: Deserializer<HeaderKey>
   #headerValueDeserializer: Deserializer<HeaderValue>
   #autocommitEnabled: boolean
@@ -406,12 +406,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
         for (const record of records.records) {
-          const key = keyDeserializer(record.key)
-          const value = valueDeserializer(record.value)
           const headers = new Map()
           for (const [headerKey, headerValue] of record.headers) {
             headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
           }
+          const key = keyDeserializer(record.key, headers)
+          const value = valueDeserializer(record.value, headers)
 
           this.#metricsConsumedMessages?.inc()
 

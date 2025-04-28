@@ -1,16 +1,25 @@
 export type Serializer<InputType = unknown> = (data?: InputType) => Buffer | undefined
 export type Deserializer<OutputType = unknown> = (data?: Buffer) => OutputType | undefined
 
+export type SerializerWithHeaders<InputType = unknown, HeaderKey = unknown, HeaderValue = unknown> = (
+  data?: InputType,
+  headers?: Map<HeaderKey, HeaderValue>
+) => Buffer | undefined
+export type DeserializerWithHeaders<OutputType = unknown, HeaderKey = unknown, HeaderValue = unknown> = (
+  data?: Buffer,
+  headers?: Map<HeaderKey, HeaderValue>
+) => OutputType | undefined
+
 export interface Serializers<Key, Value, HeaderKey, HeaderValue> {
-  key: Serializer<Key>
-  value: Serializer<Value>
+  key: SerializerWithHeaders<Key, HeaderKey, HeaderValue>
+  value: SerializerWithHeaders<Value, HeaderKey, HeaderValue>
   headerKey: Serializer<HeaderKey>
   headerValue: Serializer<HeaderValue>
 }
 
 export interface Deserializers<Key, Value, HeaderKey, HeaderValue> {
-  key: Deserializer<Key>
-  value: Deserializer<Value>
+  key: DeserializerWithHeaders<Key>
+  value: DeserializerWithHeaders<Value>
   headerKey: Deserializer<HeaderKey>
   headerValue: Deserializer<HeaderValue>
 }

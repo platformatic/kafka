@@ -2,27 +2,47 @@
 
 import { execSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
+import { inc, type ReleaseType } from 'semver'
 
-const defaultUser = 'mcollina'
+type UserInfo = [string, string]
 
-const users: Record<string, [string, string]> = {
-  mcollina: ['Matteo Collina', 'hello@matteocollina.com'],
-  ShogunPanda: ['Paolo Insogna', 'paolo@cowtech.it']
+function getUserInfo (): UserInfo {
+  const username = process.argv[3] ?? process.env.GITHUB_ACTOR
+  const defaultUser = 'mcollina'
+
+  const users: Record<string, UserInfo> = {
+    mcollina: ['Matteo Collina', 'hello@matteocollina.com'],
+    ShogunPanda: ['Paolo Insogna', 'paolo@cowtech.it']
+  }
+
+  let userInfo = users[username]
+
+  if (!userInfo) {
+    userInfo = users[defaultUser]
+  }
+
+  return userInfo
 }
 
-const version = process.argv[2]!.replace(/^v/, '')
-let username = process.argv[3]
-let userInfo = users[username]
+async function getVersion (): Promise<string> {
+  const version = process.argv[2].replace(/^v/, '')
 
-if (!userInfo) {
-  username = defaultUser
-  userInfo = users[defaultUser]
+  if (['minor', 'major', 'patch'].includes(process.argv[2])) {
+    const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
+    return inc(packageJson.version, version as ReleaseType)!
+  }
+
+  return version
 }
 
-// Update package.json
-const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
-packageJson.version = process.argv[2].replace(/^v/, '')
-await writeFile('package.json', JSON.stringify(packageJson, null, 2))
+async function updatePackageJson (version: string): Promise<void> {
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
+  packageJson.version = version
+  await writeFile('package.json', JSON.stringify(packageJson, null, 2))
+}
 
-// Commit changes
+const userInfo = getUserInfo()
+const version = await getVersion()
+
+await updatePackageJson(version)
 execSync(`git commit -a -m "chore: Bumped v${version}." -m "Signed-off-by: ${userInfo[0]} <${userInfo[1]}>"`)

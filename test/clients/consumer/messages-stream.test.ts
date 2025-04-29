@@ -10,6 +10,7 @@ import {
   type ConsumerOptions,
   type Deserializers,
   executeWithTimeout,
+  jsonDeserializer,
   type Message,
   MessagesStream,
   MessagesStreamFallbackModes,
@@ -534,6 +535,49 @@ test('should support asyncIterator interface', async t => {
   for (let i = 0; i < 3; i++) {
     deepStrictEqual(messages[i].key, `key-${i}`, `Message ${i} should have correct key`)
     deepStrictEqual(messages[i].value, `value-${i}`, `Message ${i} should have correct value`)
+  }
+})
+
+test('should handle deserialization errors', async t => {
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Create a producer with string serializers (uppercase values)
+  const producer = createProducer(t, {
+    serializers: stringSerializers,
+    autocreateTopics: true
+  })
+
+  // Produce messages
+  const messages = []
+  for (let i = 0; i < 3; i++) {
+    messages.push({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      headers: { headerKey: `headerValue-${i}` }
+    })
+  }
+
+  await producer.send({
+    messages,
+    acks: ProduceAcks.LEADER
+  })
+
+  // Consume messages with JSON deserializer for value
+  try {
+    await consumeMessages(t, groupId, topic, {
+      mode: MessagesStreamModes.EARLIEST,
+      deserializers: {
+        ...stringDeserializers,
+        value: jsonDeserializer
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('Failed to deserialize a message.'), true)
+    strictEqual(error.cause.message.includes('Unexpected token \'v\', "value-0" is not valid JSON'), true)
   }
 })
 

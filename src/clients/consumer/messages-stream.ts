@@ -394,50 +394,61 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     const headerValueDeserializer = this.#headerValueDeserializer
 
     // Parse results
-    for (const topicResponse of response.responses) {
-      const topic = topicIds.get(topicResponse.topicId)!
+    try {
+      for (const topicResponse of response.responses) {
+        const topic = topicIds.get(topicResponse.topicId)!
 
-      for (const { records, partitionIndex: partition } of topicResponse.partitions) {
-        if (!records) {
-          continue
-        }
-
-        const firstTimestamp = records.firstTimestamp
-        const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
-
-        for (const record of records.records) {
-          const headers = new Map()
-          for (const [headerKey, headerValue] of record.headers) {
-            headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+        for (const { records, partitionIndex: partition } of topicResponse.partitions) {
+          if (!records) {
+            continue
           }
-          const key = keyDeserializer(record.key, headers)
-          const value = valueDeserializer(record.value, headers)
 
-          this.#metricsConsumedMessages?.inc()
+          const firstTimestamp = records.firstTimestamp
+          const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
-          canPush = this.push({
-            key,
-            value,
-            headers,
-            topic,
-            partition,
-            timestamp: firstTimestamp + record.timestampDelta,
-            offset: records.firstOffset + BigInt(record.offsetDelta),
-            commit: autocommit
-              ? noopCallback
-              : this.#commit.bind(this, topic, partition, records.firstOffset + BigInt(record.offsetDelta), leaderEpoch)
-          } as Message)
-        }
+          for (const record of records.records) {
+            const headers = new Map()
+            for (const [headerKey, headerValue] of record.headers) {
+              headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+            }
+            const key = keyDeserializer(record.key, headers)
+            const value = valueDeserializer(record.value, headers)
 
-        // Track the last read offset
-        const lastOffset = records.firstOffset + BigInt(records.lastOffsetDelta)
-        this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
+            this.#metricsConsumedMessages?.inc()
 
-        // Autocommit if needed
-        if (autocommit) {
-          this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
+            canPush = this.push({
+              key,
+              value,
+              headers,
+              topic,
+              partition,
+              timestamp: firstTimestamp + record.timestampDelta,
+              offset: records.firstOffset + BigInt(record.offsetDelta),
+              commit: autocommit
+                ? noopCallback
+                : this.#commit.bind(
+                  this,
+                  topic,
+                  partition,
+                  records.firstOffset + BigInt(record.offsetDelta),
+                  leaderEpoch
+                )
+            } as Message)
+          }
+
+          // Track the last read offset
+          const lastOffset = records.firstOffset + BigInt(records.lastOffsetDelta)
+          this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
+
+          // Autocommit if needed
+          if (autocommit) {
+            this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
+          }
         }
       }
+    } catch (error) {
+      this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
+      return
     }
 
     if (this.#autocommitEnabled && !this.#autocommitInterval) {

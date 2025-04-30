@@ -39,6 +39,8 @@ jobs:
         run: pnpm install
       - name: Bump Version
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
+        env:
+          GITHUB_ACTIONS: 'true'
       - name: Push changes
         run: git push origin HEAD:${{ github.ref }}
       - name: Publish to NPM

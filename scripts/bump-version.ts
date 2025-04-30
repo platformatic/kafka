@@ -45,4 +45,10 @@ const userInfo = getUserInfo()
 const version = await getVersion()
 
 await updatePackageJson(version)
+
+if (process.env.GITHUB_ACTIONS === 'true') {
+  execSync(`git config --global user.name "${userInfo[0]}"`)
+  execSync(`git config --global user.email "${userInfo[1]}"`)
+}
+
 execSync(`git commit -a -m "chore: Bumped v${version}." -m "Signed-off-by: ${userInfo[0]} <${userInfo[1]}>"`)

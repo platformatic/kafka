@@ -29,6 +29,9 @@ Creates a new base client.
 | `autocreateTopics` | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                  |
 | `strict`           | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production. |
 | `metrics`          | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                        |
+| `connectTimeout`   | `number`               | `5000`    | Client connection timeout.                                                                                                                       |
+| `maxInflights`     | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                   |
+| `tls`              | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                        |
 
 ## Methods
 
@@ -50,3 +53,24 @@ The return value is a [`ClusterMetadata`](./other.md#clustermetadata) object.
 Closes the client and all its connections.
 
 The return value is `void`.
+
+## Connecting to Kafka via TLS connection
+
+To connect to a Kafka via TLS connection, simply pass all relevant options in the `tls` options when creating any subclass of `Base`.
+Example:
+
+```javascript
+import { readFile } from 'node:fs/promises'
+import { Producer, stringSerializers } from '@platformatic/kafka'
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializers,
+  tls: {
+    rejectUnauthorized: false,
+    cert: await readFile(resolve(import.meta.dirname, './ssl/client.pem')),
+    key: await readFile(resolve(import.meta.dirname, './ssl/client.key'))
+  }
+})
+```

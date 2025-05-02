@@ -173,3 +173,17 @@ Leaves a consumer group.
 If `force` is not `true`, then the method will throw an error if any `MessagesStream` created from this consumer is still active.
 
 The return value is `void`.
+
+## FAQs
+
+### My consumer is not receiving any message when the application restarts
+
+If you use a fixed consumer group ID (or one that is persisted between restarts), you might encounter a rebalance issue if the application is closed without properly shutting down the consumer or issuing a leaveGroup request.
+
+This commonly happens during development (for example, when you terminate the process with Ctrl+C or use a file watcher), or if the application crashes in production.
+
+When the application exits without leaving the group, Kafka still considers the consumer as potentially alive. Upon restarting with the same group ID but a different member ID, Kafka triggers a group rebalance. Since the previous member did not formally leave, Kafka waits for the full session timeout (1 minute by default) to determine whether the old member is still active.
+
+Only after this timeout expires and the member is considered dead will Kafka complete the rebalance and assign partitions to the new instance. During this period, the restarted consumer cannot consume any messages, even if it is the only member in the group.
+
+If you encounter this issue, you can easily avoid it by manually call `joinGroup`, rather than relying on `consume` to handle it automatically.

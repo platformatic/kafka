@@ -1,4 +1,12 @@
+import { deepStrictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
+import {
+  type ChannelListener,
+  subscribe,
+  tracingChannel,
+  type TracingChannelSubscribers,
+  unsubscribe
+} from 'node:diagnostics_channel'
 import { type TestContext } from 'node:test'
 import { kMetadata } from '../src/clients/base/base.ts'
 import {
@@ -22,6 +30,7 @@ import {
 
 export const kafkaBootstrapServers = ['localhost:9092']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
+export const mockedOperationId = -1n
 
 export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
   const options: BaseOptions = {
@@ -246,4 +255,77 @@ export function mockAPI (
       callback(null, connection)
     })
   } as typeof originalGet
+}
+
+export function createCreationChannelVerifier<InstanceType> (
+  channel: string,
+  filter: (data: InstanceType) => boolean = () => true
+) {
+  let instance: InstanceType | null = null
+
+  function creationSubscriber (candidate: InstanceType) {
+    if (filter(candidate)) {
+      instance = candidate
+    }
+  }
+
+  subscribe(channel, creationSubscriber as ChannelListener)
+
+  return function get (): InstanceType | null {
+    unsubscribe(channel, creationSubscriber as ChannelListener)
+    return instance
+  }
+}
+
+export function createTracingChannelVerifier<DiagnosticEvent extends Record<string, unknown>> (
+  channelName: string,
+  unclonable: string | string[],
+  verifiers: Record<string, Function>,
+  filter: (label: string, data: DiagnosticEvent) => boolean = () => true
+) {
+  const channel = tracingChannel<string, DiagnosticEvent>(channelName)
+  const eventsData: Record<string, object> = {}
+  const operationsId = new Set<bigint>()
+
+  function tracker (label: string, data: DiagnosticEvent) {
+    if (!filter(label, data)) {
+      return
+    }
+    if (!Array.isArray(unclonable)) {
+      unclonable = [unclonable]
+    }
+
+    const toClone: Record<string, unknown> = {}
+    const toCopy: Record<string, unknown> = {}
+
+    for (const [key, value] of Object.entries(data)) {
+      if (unclonable.includes(key)) {
+        toCopy[key] = value
+      } else {
+        toClone[key] = value
+      }
+    }
+
+    operationsId.add(data.operationId as bigint)
+    eventsData[label] = { ...toCopy, ...structuredClone(toClone), operationId: mockedOperationId }
+  }
+
+  const subscribers = {
+    start: tracker.bind(null, 'start'),
+    end: tracker.bind(null, 'end'),
+    asyncStart: tracker.bind(null, 'asyncStart'),
+    asyncEnd: tracker.bind(null, 'asyncEnd'),
+    error: tracker.bind(null, 'error')
+  }
+
+  channel.subscribe(subscribers as TracingChannelSubscribers<DiagnosticEvent>)
+
+  return function verify () {
+    channel.unsubscribe(subscribers as TracingChannelSubscribers<DiagnosticEvent>)
+    deepStrictEqual(operationsId.size, 1, 'Only one operationId should be present, got: ' + operationsId.toString())
+
+    for (const [label, verifier] of Object.entries(verifiers)) {
+      verifier(eventsData[label])
+    }
+  }
 }

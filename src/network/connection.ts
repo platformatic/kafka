@@ -4,6 +4,7 @@ import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../clients/callbacks.ts'
+import { connectionsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
@@ -33,6 +34,7 @@ export interface Request {
   payload: () => Writer
   parser: ResponseParser<unknown>
   callback: Callback<any>
+  diagnostic: Record<string, unknown>
 }
 
 export const ConnectionStatuses = {
@@ -52,6 +54,7 @@ export const defaultOptions: ConnectionOptions = {
   maxInflights: 5
 }
 
+let currentInstance = 0
 const kNoResponse = Symbol('plt.kafka.noResponse')
 
 /* c8 ignore next */
@@ -61,6 +64,7 @@ noResponseCallback[kNoResponse] = true
 export class Connection extends EventEmitter {
   #options: ConnectionOptions
   #status: ConnectionStatusValue
+  #instanceId: number
   #clientId: string | undefined
   // @ts-ignore This is used just for debugging
   #ownerId: number | undefined
@@ -78,6 +82,7 @@ export class Connection extends EventEmitter {
     super()
     this.setMaxListeners(0)
 
+    this.#instanceId = currentInstance++
     this.#options = Object.assign({}, defaultOptions, options)
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId
@@ -90,6 +95,13 @@ export class Connection extends EventEmitter {
     this.#responseBuffer = new DynamicBuffer()
     this.#responseReader = new Reader(this.#responseBuffer)
     this.#socketMustBeDrained = false
+
+    notifyCreation('connection', this)
+  }
+
+  /* c8 ignore next 3 */
+  get instanceId (): number {
+    return this.#instanceId
   }
 
   get status (): ConnectionStatusValue {
@@ -105,63 +117,89 @@ export class Connection extends EventEmitter {
       callback = createPromisifiedCallback()
     }
 
-    if (this.#status === ConnectionStatuses.CONNECTED) {
-      callback(null)
-      return callback[kCallbackPromise]
+    const diagnosticContext = createDiagnosticContext({ connection: this, operation: 'connect', host, port })
+
+    connectionsChannel.start.publish(diagnosticContext)
+
+    try {
+      if (this.#status === ConnectionStatuses.CONNECTED) {
+        callback(null)
+        return callback[kCallbackPromise]
+      }
+
+      this.ready(callback)
+
+      if (this.#status === ConnectionStatuses.CONNECTING) {
+        return callback[kCallbackPromise]
+      }
+
+      this.#status = ConnectionStatuses.CONNECTING
+
+      const connectionOptions: Partial<NetConnectOpts> = {
+        timeout: this.#options.connectTimeout
+      }
+
+      const connectionTimeoutHandler = () => {
+        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`)
+        diagnosticContext.error = error
+        this.#socket.destroy()
+
+        this.#status = ConnectionStatuses.ERROR
+
+        connectionsChannel.error.publish(diagnosticContext)
+        connectionsChannel.asyncStart.publish(diagnosticContext)
+        this.emit('timeout', error)
+        this.emit('error', error)
+        connectionsChannel.asyncEnd.publish(diagnosticContext)
+      }
+
+      const connectionErrorHandler = (e: Error) => {
+        const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause: e })
+        diagnosticContext.error = error
+
+        this.#status = ConnectionStatuses.ERROR
+
+        connectionsChannel.error.publish(diagnosticContext)
+        connectionsChannel.asyncStart.publish(diagnosticContext)
+        this.emit('error', error)
+        connectionsChannel.asyncEnd.publish(diagnosticContext)
+      }
+
+      this.emit('connecting')
+      /* c8 ignore next 3 */
+      this.#socket = this.#options.tls
+        ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
+        : createConnection({ ...connectionOptions, port, host })
+      this.#socket.setNoDelay(true)
+
+      this.#socket.once('connect', () => {
+        this.#socket.removeListener('timeout', connectionTimeoutHandler)
+        this.#socket.removeListener('error', connectionErrorHandler)
+
+        this.#socket.on('error', this.#onError.bind(this))
+        this.#socket.on('data', this.#onData.bind(this))
+        this.#socket.on('drain', this.#onDrain.bind(this))
+        this.#socket.on('close', this.#onClose.bind(this))
+
+        this.#socket.setTimeout(0)
+
+        this.#status = ConnectionStatuses.CONNECTED
+
+        connectionsChannel.asyncStart.publish(diagnosticContext)
+        this.emit('connect')
+        connectionsChannel.asyncEnd.publish(diagnosticContext)
+      })
+
+      this.#socket.once('timeout', connectionTimeoutHandler)
+      this.#socket.once('error', connectionErrorHandler)
+      /* c8 ignore next 5 */
+    } catch (error) {
+      connectionsChannel.error.publish({ ...diagnosticContext, error })
+
+      throw error
+    } finally {
+      connectionsChannel.end.publish(diagnosticContext)
     }
-
-    this.ready(callback)
-
-    if (this.#status === ConnectionStatuses.CONNECTING) {
-      return callback[kCallbackPromise]
-    }
-
-    this.#status = ConnectionStatuses.CONNECTING
-
-    const connectionOptions: Partial<NetConnectOpts> = {
-      timeout: this.#options.connectTimeout
-    }
-
-    const connectionTimeoutHandler = () => {
-      const error = new TimeoutError(`Connection to ${host}:${port} timed out.`)
-      this.#socket.destroy()
-
-      this.#status = ConnectionStatuses.ERROR
-      this.emit('timeout', error)
-      this.emit('error', error)
-    }
-
-    const connectionErrorHandler = (e: Error) => {
-      const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause: e })
-
-      this.#status = ConnectionStatuses.ERROR
-      this.emit('error', error)
-    }
-
-    this.emit('connecting')
-    /* c8 ignore next 3 */
-    this.#socket = this.#options.tls
-      ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
-      : createConnection({ ...connectionOptions, port, host })
-    this.#socket.setNoDelay(true)
-
-    this.#socket.once('connect', () => {
-      this.#socket.removeListener('timeout', connectionTimeoutHandler)
-      this.#socket.removeListener('error', connectionErrorHandler)
-
-      this.#socket.on('error', this.#onError.bind(this))
-      this.#socket.on('data', this.#onData.bind(this))
-      this.#socket.on('drain', this.#onDrain.bind(this))
-      this.#socket.on('close', this.#onClose.bind(this))
-
-      this.#socket.setTimeout(0)
-
-      this.#status = ConnectionStatuses.CONNECTED
-      this.emit('connect')
-    })
-
-    this.#socket.once('timeout', connectionTimeoutHandler)
-    this.#socket.once('error', connectionErrorHandler)
 
     return callback[kCallbackPromise]
   }
@@ -247,7 +285,14 @@ export class Connection extends EventEmitter {
         hasResponseHeaderTaggedFields,
         parser: responseParser,
         payload,
-        callback: fastQueueCallback
+        callback: fastQueueCallback,
+        diagnostic: createDiagnosticContext({
+          connection: this,
+          operation: 'send',
+          apiKey,
+          apiVersion,
+          correlationId
+        })
       }
 
       if (this.#socketMustBeDrained) {
@@ -268,58 +313,69 @@ export class Connection extends EventEmitter {
       client_id => NULLABLE_STRING
   */
   #sendRequest (request: Request): boolean {
-    if (this.#status !== ConnectionStatuses.CONNECTED) {
-      request.callback(new NetworkError('Connection closed'), undefined)
-      return false
-    }
+    connectionsChannel.start.publish(request.diagnostic)
 
-    let canWrite = true
-
-    const { correlationId, apiKey, apiVersion, payload: payloadFn, hasRequestHeaderTaggedFields } = request
-
-    const writer = Writer.create()
-      .appendInt16(apiKey)
-      .appendInt16(apiVersion)
-      .appendInt32(correlationId)
-      .appendString(this.#clientId, false)
-
-    if (hasRequestHeaderTaggedFields) {
-      writer.appendTaggedFields()
-    }
-
-    const payload = payloadFn()
-    writer.appendFrom(payload)
-    writer.prependLength()
-
-    // Write the header
-    this.#socket.cork()
-
-    if (!payload.context.noResponse) {
-      this.#inflightRequests.set(correlationId, request)
-    }
-
-    /* c8 ignore next */
-    loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
-
-    for (const buf of writer.buffers) {
-      if (!this.#socket.write(buf)) {
-        canWrite = false
+    try {
+      if (this.#status !== ConnectionStatuses.CONNECTED) {
+        request.callback(new NetworkError('Connection closed'), undefined)
+        return false
       }
+
+      let canWrite = true
+
+      const { correlationId, apiKey, apiVersion, payload: payloadFn, hasRequestHeaderTaggedFields } = request
+
+      const writer = Writer.create()
+        .appendInt16(apiKey)
+        .appendInt16(apiVersion)
+        .appendInt32(correlationId)
+        .appendString(this.#clientId, false)
+
+      if (hasRequestHeaderTaggedFields) {
+        writer.appendTaggedFields()
+      }
+
+      const payload = payloadFn()
+      writer.appendFrom(payload)
+      writer.prependLength()
+
+      // Write the header
+      this.#socket.cork()
+
+      if (!payload.context.noResponse) {
+        this.#inflightRequests.set(correlationId, request)
+      }
+
+      /* c8 ignore next */
+      loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
+
+      for (const buf of writer.buffers) {
+        if (!this.#socket.write(buf)) {
+          canWrite = false
+        }
+      }
+
+      if (!canWrite) {
+        this.#socketMustBeDrained = true
+      }
+
+      this.#socket.uncork()
+
+      if (payload.context.noResponse) {
+        request.callback(null, canWrite)
+      }
+
+      // debugDump(Date.now() % 100000, 'send', { owner: this.#ownerId, apiKey: protocolAPIsById[apiKey], correlationId })
+
+      return canWrite
+      /* c8 ignore next 5 */
+    } catch (error) {
+      connectionsChannel.error.publish({ ...request.diagnostic, error })
+      connectionsChannel.end.publish(request.diagnostic)
+      throw error
+    } finally {
+      connectionsChannel.end.publish(request.diagnostic)
     }
-
-    if (!canWrite) {
-      this.#socketMustBeDrained = true
-    }
-
-    this.#socket.uncork()
-
-    if (payload.context.noResponse) {
-      request.callback(null, canWrite)
-    }
-
-    // debugDump(Date.now() % 100000, 'send', { owner: this.#ownerId, apiKey: protocolAPIsById[apiKey], correlationId })
-
-    return canWrite
   }
 
   /*
@@ -400,7 +456,17 @@ export class Connection extends EventEmitter {
 
       /* c8 ignore next */
       loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
+
+      if (responseError) {
+        request.diagnostic.error = responseError
+        connectionsChannel.error.publish(request.diagnostic)
+      } else {
+        request.diagnostic.result = deserialized
+      }
+
+      connectionsChannel.asyncStart.publish(request.diagnostic)
       callback(responseError, deserialized)
+      connectionsChannel.asyncStart.publish(request.diagnostic)
     }
   }
 

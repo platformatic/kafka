@@ -10,6 +10,7 @@ import {
   fetchV17,
   findCoordinatorV6,
   heartbeatV4,
+  instancesChannelName,
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
@@ -23,6 +24,7 @@ import {
 } from '../../../src/index.ts'
 import {
   createConsumer,
+  createCreationChannelVerifier,
   createGroupId,
   createTopic,
   mockAPI,
@@ -34,11 +36,13 @@ import {
 } from '../../helpers.ts'
 
 test('constructor should initialize properly with default options', t => {
+  const created = createCreationChannelVerifier(instancesChannelName)
   const consumer = createConsumer(t)
 
   // Verify instance type
   strictEqual(consumer instanceof Consumer, true)
   strictEqual(consumer.closed, false)
+  deepStrictEqual(created(), { type: 'consumer', instance: consumer })
 
   // Verify group properties
   strictEqual(typeof consumer.groupId, 'string')
@@ -46,9 +50,6 @@ test('constructor should initialize properly with default options', t => {
   strictEqual(consumer.memberId, null)
   deepStrictEqual(consumer.assignments, null)
   strictEqual(consumer.topics instanceof TopicsMap, true)
-
-  // Clean up
-  consumer.close()
 })
 
 test('constructor should initialize with custom options', t => {

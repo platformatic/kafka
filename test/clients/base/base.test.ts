@@ -1,8 +1,14 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
-import { Base, type ClusterMetadata, sleep } from '../../../src/index.ts'
-import { createBase, mockedErrorMessage } from '../../helpers.ts'
+import {
+  Base,
+  clientsChannelName,
+  sleep,
+  type ClientDiagnosticEvent,
+  type ClusterMetadata
+} from '../../../src/index.ts'
+import { createBase, createTracingChannelVerifier, mockedErrorMessage, mockedOperationId } from '../../helpers.ts'
 
 test('constructor should throw on invalid options when strict mode is enabled', () => {
   // Missing required clientId
@@ -212,6 +218,25 @@ test('metadata should support force update option', async t => {
 
   // The timestamp should be updated despite cache not being expired
   strictEqual(metadata2.lastUpdate > lastUpdate1, true)
+})
+
+test('metadata should support diagnostic channels', async t => {
+  const client = createBase(t)
+
+  const verifyTracingChannel = createTracingChannelVerifier(clientsChannelName, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, { client, operation: 'metadata', operationId: mockedOperationId })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  // Fetch metadata for the cluster
+  const metadataPromise = client.metadata({ topics: [] })
+
+  await metadataPromise
+  verifyTracingChannel()
 })
 
 test('should support both callback and promise API for metadata', (t, done) => {

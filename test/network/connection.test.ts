@@ -3,12 +3,16 @@ import { type AddressInfo, createServer as createNetworkServer, type Server, Soc
 import test, { type TestContext } from 'node:test'
 import {
   Connection,
+  type ConnectionDiagnosticEvent,
+  connectionsChannelName,
   ConnectionStatuses,
+  instancesChannelName,
   NetworkError,
   type Reader,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
+import { createCreationChannelVerifier, createTracingChannelVerifier, mockedOperationId } from '../helpers.ts'
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -33,11 +37,62 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 }
 
 test('Connection constructor', () => {
+  const created = createCreationChannelVerifier(instancesChannelName)
   const connection = new Connection('test-client')
+
   deepStrictEqual(connection.status, ConnectionStatuses.NONE)
+  deepStrictEqual(created(), { type: 'connection', instance: connection })
 })
 
 test('Connection.connect should establish a connection', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  ok(connection.socket instanceof Socket)
+})
+
+test('Connection.connect should support diagnostic channels', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsChannelName, ['connection'], {
+    start (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual(context, {
+        operationId: mockedOperationId,
+        connection,
+        operation: 'connect',
+        host: 'localhost',
+        port
+      })
+    },
+    asyncStart (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual(context, {
+        operationId: mockedOperationId,
+        connection,
+        operation: 'connect',
+        host: 'localhost',
+        port
+      })
+    },
+    error (context: ConnectionDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  ok(connection.socket instanceof Socket)
+
+  verifyTracingChannel()
+})
+
+test('Connection.connect should support diagnostic channel', async t => {
   const { port } = await createServer(t)
   const connection = new Connection('test-client')
   t.after(() => connection.close())
@@ -82,6 +137,39 @@ test('Connection.connect should handle connection error', async t => {
     code: 'PLT_KFK_NETWORK',
     message: 'Connection to localhost:100 failed.'
   })
+})
+
+test('Connection.connect should support diagnostic channels when erroring', async t => {
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsChannelName, ['connection'], {
+    start (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual(context, {
+        operationId: mockedOperationId,
+        connection,
+        operation: 'connect',
+        host: 'localhost',
+        port: 100
+      })
+    },
+    asyncStart (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual((context.error as Error).message, 'Connection to localhost:100 failed.')
+    },
+    error (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual((context.error as Error).message, 'Connection to localhost:100 failed.')
+    }
+  })
+
+  await rejects(() => connection.connect('localhost', 100) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK',
+    message: 'Connection to localhost:100 failed.'
+  })
+
+  deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
+  ok(connection.socket instanceof Socket)
+
+  verifyTracingChannel()
 })
 
 test('Connection.ready should resolve when connection is ready', async t => {
@@ -135,8 +223,43 @@ test('Connection.send should enqueue request and process response', async t => {
   const connection = new Connection('test-client')
   t.after(() => connection.close())
 
-  // Create a mock server that responds to requests
+  const verifyTracingChannel = createTracingChannelVerifier(
+    connectionsChannelName,
+    ['connection'],
+    {
+      start (context: ConnectionDiagnosticEvent) {
+        deepStrictEqual(context, {
+          operationId: mockedOperationId,
+          connection,
+          operation: 'send',
+          apiKey: 1,
+          apiVersion: 1,
+          correlationId: 1
+        })
+      },
+      asyncStart (context: ConnectionDiagnosticEvent) {
+        deepStrictEqual(context, {
+          operationId: mockedOperationId,
+          connection,
+          operation: 'send',
+          apiKey: 1,
+          apiVersion: 1,
+          correlationId: 1,
+          result: {
+            result: 123
+          }
+        })
+      },
+      error (context: ConnectionDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, context: ConnectionDiagnosticEvent) => {
+      return context.operation === 'send'
+    }
+  )
 
+  // Create a mock server that responds to requests
   server.on('connection', socket => {
     // Handle data coming from client
     socket.on('data', data => {
@@ -205,6 +328,8 @@ test('Connection.send should enqueue request and process response', async t => {
       }
     )
   })
+
+  verifyTracingChannel()
 })
 
 test('Connection.send should handle requests with no response', async t => {
@@ -524,6 +649,19 @@ test('Connection should handle response parsing errors', async t => {
   const connection = new Connection('test-client')
   t.after(() => connection.close())
 
+  const verifyTracingChannel = createTracingChannelVerifier(
+    connectionsChannelName,
+    ['connection'],
+    {
+      error (context: ConnectionDiagnosticEvent) {
+        deepStrictEqual((context.error as Error).message, 'Parser error')
+      }
+    },
+    (_label: string, context: ConnectionDiagnosticEvent) => {
+      return context.operation === 'send'
+    }
+  )
+
   // Mock server that sends valid response
   server.on('connection', socket => {
     socket.on('data', data => {
@@ -573,6 +711,8 @@ test('Connection should handle response parsing errors', async t => {
       }
     )
   })
+
+  verifyTracingChannel()
 })
 
 test('Connection should handle response with tagged fields', async t => {

@@ -6,10 +6,14 @@ import {
   runConcurrentCallbacks,
   type CallbackWithPromise
 } from '../clients/callbacks.ts'
+import { connectionPoolsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { MultipleErrors } from '../errors.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
 
+let currentInstance = 0
+
 export class ConnectionPool extends EventEmitter {
+  #instanceId: number
   #clientId: string
   // @ts-ignore This is used just for debugging
   #ownerId: number | undefined
@@ -18,22 +22,84 @@ export class ConnectionPool extends EventEmitter {
 
   constructor (clientId: string, connectionOptions: ConnectionOptions = {}) {
     super()
-
+    this.#instanceId = currentInstance++
     this.#clientId = clientId
     this.#ownerId = connectionOptions.ownerId
     this.#connections = new Map()
     this.#connectionOptions = connectionOptions
+
+    notifyCreation('connectionPool', this)
+  }
+
+  /* c8 ignore next 3 */
+  get instanceId (): number {
+    return this.#instanceId
   }
 
   get (broker: Broker, callback: CallbackWithPromise<Connection>): void
   get (broker: Broker): Promise<Connection>
   get (broker: Broker, callback?: CallbackWithPromise<Connection>): void | Promise<Connection> {
-    const key = `${broker.host}:${broker.port}`
-    const existing = this.#connections.get(key)
-
     if (!callback) {
       callback = createPromisifiedCallback<Connection>()
     }
+
+    connectionPoolsChannel.traceCallback(
+      this.#get,
+      1,
+      createDiagnosticContext({ connectionPool: this, broker, operation: 'get' }),
+      this,
+      broker,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  getFirstAvailable (brokers: Broker[], callback?: CallbackWithPromise<Connection>): void | Promise<Connection> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Connection>()
+    }
+
+    connectionPoolsChannel.traceCallback(
+      this.#getFirstAvailable,
+      3,
+      createDiagnosticContext({ connectionPool: this, brokers, operation: 'getFirstAvailable' }),
+      this,
+      brokers,
+      0,
+      [],
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  close (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this.#connections.size === 0) {
+      callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    runConcurrentCallbacks<void>(
+      'Closing connections failed.',
+      this.#connections,
+      ([key, connection]: [string, Connection], cb: Callback<void>) => {
+        connection.close(cb)
+        this.#connections.delete(key)
+      },
+      error => callback(error)
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  #get (broker: Broker, callback: Callback<Connection>): void {
+    const key = `${broker.host}:${broker.port}`
+    const existing = this.#connections.get(key)
 
     if (existing) {
       if (existing.status !== ConnectionStatuses.CONNECTED) {
@@ -49,7 +115,7 @@ export class ConnectionPool extends EventEmitter {
         callback(null, existing)
       }
 
-      return callback[kCallbackPromise]
+      return
     }
 
     const connection = new Connection(this.#clientId, this.#connectionOptions)
@@ -85,46 +151,6 @@ export class ConnectionPool extends EventEmitter {
     connection.on('drain', () => {
       this.emit('drain', eventPayload)
     })
-
-    return callback[kCallbackPromise]
-  }
-
-  getFirstAvailable (
-    brokers: Broker[],
-    callback?: CallbackWithPromise<Connection>,
-    current: number = 0,
-    errors: Error[] = []
-  ): void | Promise<Connection> {
-    if (!callback) {
-      callback = createPromisifiedCallback<Connection>()
-    }
-
-    this.#getFirstAvailable(brokers, current, errors, callback)
-
-    return callback[kCallbackPromise]
-  }
-
-  close (callback?: CallbackWithPromise<void>): void | Promise<void> {
-    if (!callback) {
-      callback = createPromisifiedCallback()
-    }
-
-    if (this.#connections.size === 0) {
-      callback(null)
-      return callback[kCallbackPromise]
-    }
-
-    runConcurrentCallbacks<void>(
-      'Closing connections failed.',
-      this.#connections,
-      ([key, connection]: [string, Connection], cb: Callback<void>) => {
-        connection.close(cb)
-        this.#connections.delete(key)
-      },
-      error => callback(error)
-    )
-
-    return callback[kCallbackPromise]
   }
 
   #getFirstAvailable (

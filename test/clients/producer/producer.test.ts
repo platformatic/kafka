@@ -3,11 +3,15 @@ import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
+  type ClientDiagnosticEvent,
+  clientsChannelName,
   initProducerIdV5,
+  instancesChannelName,
   MultipleErrors,
   NetworkError,
   ProduceAcks,
   Producer,
+  type ProduceResult,
   produceV11,
   ProtocolError,
   stringSerializer,
@@ -15,21 +19,26 @@ import {
   UserError
 } from '../../../src/index.ts'
 import {
+  createCreationChannelVerifier,
   createProducer,
   createTopic,
+  createTracingChannelVerifier,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
   mockedErrorMessage,
+  mockedOperationId,
   mockMetadata,
   mockMethod
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
-  const producer = createProducer(t)
+  const created = createCreationChannelVerifier(instancesChannelName)
+  const admin = createProducer(t)
 
-  strictEqual(producer instanceof Producer, true)
-  strictEqual(producer.closed, false)
+  strictEqual(admin instanceof Producer, true)
+  strictEqual(admin.closed, false)
+  deepStrictEqual(created(), { type: 'producer', instance: admin })
 })
 
 test('constructor should validate options in strict mode', t => {
@@ -176,12 +185,34 @@ test('all operations should fail when producer is closed', async t => {
   )
 })
 
-test('initIdempotentProducer should set idempotent options correctly', async t => {
+test('initIdempotentProducer should set idempotent options correctly and support diagnostic channels', async t => {
   // Create a producer with idempotent=true
   const producer = createProducer(t, {
     idempotent: true,
     strict: true
   })
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    clientsChannelName,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: producer,
+          operation: 'initIdempotentProducer',
+          options: {},
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context.result, clientInfo)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'initIdempotentProducer'
+  )
 
   // Initialize and check if properly configured for idempotency
   const clientInfo = await producer.initIdempotentProducer({})
@@ -191,6 +222,8 @@ test('initIdempotentProducer should set idempotent options correctly', async t =
   strictEqual(typeof clientInfo.producerEpoch, 'number')
   ok(clientInfo.producerId >= 0n, 'Producer ID should be a positive bigint')
   ok(clientInfo.producerEpoch >= 0, 'Producer epoch should be a non-negative number')
+
+  verifyTracingChannel()
 })
 
 test('initIdempotentProducer should validate options in strict mode', async t => {
@@ -335,15 +368,43 @@ test('initIdempotentProducer should handle errors from the API', async t => {
   )
 })
 
-test('send should return ProduceResult with offsets', async t => {
+test('send should return ProduceResult with offsets and support diagnostic channels', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
 
-  // Produce a message
-  const result = await producer.send({
+  const options = {
     messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
     acks: ProduceAcks.LEADER
-  })
+  }
+
+  const originalOptions = structuredClone(options)
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    clientsChannelName,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: producer,
+          operation: 'send',
+          options: originalOptions,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const offsets = (context.result as ProduceResult).offsets!
+        deepStrictEqual(offsets[0].topic, testTopic)
+        deepStrictEqual(typeof offsets[0].offset, 'bigint')
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'send'
+  )
+
+  // Produce a message
+  const result = await producer.send(options)
 
   // Verify result structure
   ok(Array.isArray(result.offsets), 'Should have offsets array')
@@ -352,6 +413,8 @@ test('send should return ProduceResult with offsets', async t => {
   strictEqual(typeof result.offsets?.[0].offset, 'bigint')
   strictEqual(typeof result.offsets?.[0].partition, 'number')
   ok(result.offsets?.[0].offset >= 0n, 'Offset should be a non-negative bigint')
+
+  verifyTracingChannel()
 })
 
 test('send should support messages with keys', async t => {

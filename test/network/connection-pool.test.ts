@@ -6,9 +6,18 @@ import {
   type CallbackWithPromise,
   Connection,
   ConnectionPool,
-  ConnectionStatuses
+  type ConnectionPoolDiagnosticEvent,
+  connectionPoolsChannelName,
+  ConnectionStatuses,
+  instancesChannelName
 } from '../../src/index.ts'
-import { mockedErrorMessage, mockMethod } from '../helpers.ts'
+import {
+  createCreationChannelVerifier,
+  createTracingChannelVerifier,
+  mockedErrorMessage,
+  mockedOperationId,
+  mockMethod
+} from '../helpers.ts'
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -32,7 +41,13 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
   return promise
 }
 
-test('ConnectionPool.get should return a connection for a broker', async t => {
+test('constructor should support diagnostic channels', () => {
+  const created = createCreationChannelVerifier(instancesChannelName)
+  const pool = new ConnectionPool('test-client')
+  deepStrictEqual(created(), { type: 'connectionPool', instance: pool })
+})
+
+test('get should return a connection for a broker', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -46,7 +61,7 @@ test('ConnectionPool.get should return a connection for a broker', async t => {
   await connection.close()
 })
 
-test('ConnectionPool.get should return the same connection for the same broker', async t => {
+test('get should return the same connection for the same broker', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -60,7 +75,7 @@ test('ConnectionPool.get should return the same connection for the same broker',
   deepStrictEqual(connection1, connection2)
 })
 
-test('ConnectionPool.get should handle connecting status and return same connection', async t => {
+test('get should handle connecting status and return same connection', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -83,7 +98,7 @@ test('ConnectionPool.get should handle connecting status and return same connect
   await connection1.close()
 })
 
-test('ConnectionPool.get should handle connecting error and return same error', (t, done) => {
+test('get should handle connecting error and return same error', (t, done) => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
@@ -105,7 +120,7 @@ test('ConnectionPool.get should handle connecting error and return same error', 
   connectionPool.get(broker, callback)
 })
 
-test('ConnectionPool.get should handle connection drain events', async t => {
+test('get should handle connection drain events', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -128,7 +143,7 @@ test('ConnectionPool.get should handle connection drain events', async t => {
   await connection.close()
 })
 
-test('ConnectionPool.get should handle connection disconnect event', async t => {
+test('get should handle connection disconnect event', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -155,7 +170,7 @@ test('ConnectionPool.get should handle connection disconnect event', async t => 
   await newConnection.close()
 })
 
-test('ConnectionPool.get should handle errors and remove connection', async t => {
+test('get should handle errors and remove connection', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
@@ -182,7 +197,41 @@ test('ConnectionPool.get should handle errors and remove connection', async t =>
   deepStrictEqual(failedSpy.mock.calls.length, 2)
 })
 
-test('ConnectionPool.getFirstAvailable should try multiple brokers until one succeeds', async t => {
+test('ConnectionPool.get should support diagnostic channels', async t => {
+  const { port } = await createServer(t)
+  const broker = { host: 'localhost', port }
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const verifyTracingChannel = createTracingChannelVerifier(connectionPoolsChannelName, ['connectionPool', 'result'], {
+    start (context: ConnectionPoolDiagnosticEvent) {
+      deepStrictEqual(context, { operationId: mockedOperationId, connectionPool, operation: 'get', broker })
+    },
+    asyncStart (context: ConnectionPoolDiagnosticEvent) {
+      deepStrictEqual(context, {
+        operationId: mockedOperationId,
+        connectionPool,
+        operation: 'get',
+        broker,
+        result: connection
+      })
+    },
+    error (context: ConnectionPoolDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  const connection = await connectionPool.get(broker)
+
+  ok(connection instanceof Connection)
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  await connection.close()
+
+  verifyTracingChannel()
+})
+
+test('getFirstAvailable should try multiple brokers until one succeeds', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -216,7 +265,73 @@ test('ConnectionPool.getFirstAvailable should try multiple brokers until one suc
   await connection.close()
 })
 
-test('ConnectionPool.getFirstAvailable should fail if all brokers fail', async t => {
+test('getFirstAvailable should support diagnostic channels', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const brokers = [
+    { host: 'localhost', port: 100 },
+    { host: 'localhost', port: 200 },
+    { host: 'localhost', port }
+  ]
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    connectionPoolsChannelName,
+    ['connectionPool', 'result'],
+    {
+      start (context: ConnectionPoolDiagnosticEvent) {
+        deepStrictEqual(context, {
+          operationId: mockedOperationId,
+          connectionPool,
+          operation: 'getFirstAvailable',
+          brokers
+        })
+      },
+      asyncStart (context: ConnectionPoolDiagnosticEvent) {
+        deepStrictEqual(context, {
+          operationId: mockedOperationId,
+          connectionPool,
+          operation: 'getFirstAvailable',
+          brokers,
+          result: connection
+        })
+      },
+      error (context: ConnectionPoolDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, context: ConnectionPoolDiagnosticEvent) => {
+      return context.operation === 'getFirstAvailable'
+    }
+  )
+
+  let connectionAttempt = 0
+  mockMethod(
+    connectionPool,
+    'get',
+    current => current <= 3,
+    null,
+    null,
+    (original, ...args) => {
+      connectionAttempt++
+      original(...args)
+      return true
+    }
+  )
+
+  const connection = await connectionPool.getFirstAvailable(brokers)
+
+  ok(connection instanceof Connection)
+  deepStrictEqual(connectionAttempt, 3)
+
+  await connection.close()
+
+  verifyTracingChannel()
+})
+
+test('getFirstAvailable should fail if all brokers fail', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
@@ -232,7 +347,7 @@ test('ConnectionPool.getFirstAvailable should fail if all brokers fail', async t
   })
 })
 
-test('ConnectionPool.getFirstAvailable with callback parameter', async t => {
+test('getFirstAvailable with callback parameter', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
@@ -260,7 +375,7 @@ test('ConnectionPool.getFirstAvailable with callback parameter', async t => {
   ok(callbackCalled, 'Callback should have been called')
 })
 
-test('ConnectionPool.close should close all connections', async t => {
+test('close should close all connections', async t => {
   const server1 = await createServer(t)
   const server2 = await createServer(t)
 
@@ -279,7 +394,7 @@ test('ConnectionPool.close should close all connections', async t => {
   ok(connection2.socket.closed)
 })
 
-test('ConnectionPool.close should handle empty pool', async () => {
+test('close should handle empty pool', async () => {
   const connectionPool = new ConnectionPool('test-client')
   await connectionPool.close()
 })

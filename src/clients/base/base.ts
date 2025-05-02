@@ -2,10 +2,12 @@ import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
 import { type Callback } from '../../apis/definitions.ts'
 import { api as metadataV12, type MetadataResponse } from '../../apis/metadata/metadata.ts'
+import { clientsChannel, createDiagnosticContext, notifyCreation, type ClientType } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
+import { kInstance } from '../../symbols.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
 import { type Metrics } from '../metrics.ts'
@@ -28,17 +30,19 @@ export const kPerformDeduplicated = Symbol('plt.kafka.base.performDeduplicated')
 export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
 export const kInspect = Symbol('plt.kafka.base.inspect')
 export const kFormatValidationErrors = Symbol('plt.kafka.base.formatValidationErrors')
-export const kInstance = Symbol('plt.kafka.base.instance')
 export const kPrometheus = Symbol('plt.kafka.base.prometheus')
+export const kClientType = Symbol('plt.kafka.base.clientType')
+export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 
 let currentInstance = 0
 
-export class Base<OptionsType extends BaseOptions> extends EventEmitter {
-  // This is just used for debugging
+export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEmitter {
+  // This is declared using a symbol (a.k.a protected/friend) to make it available in ConnectionPool and MessagesStream
   [kInstance]: number;
 
   // General status - Use symbols rather than JS private property to make them "protected" as in C++
   [kClientId]: string;
+  [kClientType]: ClientType;
   [kBootstrapBrokers]: Broker[];
   [kOptions]: OptionsType;
   [kConnections]: ConnectionPool;
@@ -50,6 +54,7 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
 
   constructor (options: OptionsType) {
     super()
+    this[kClientType] = 'base'
     this[kInstance] = currentInstance++
 
     // Validate options
@@ -76,6 +81,11 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
   }
 
   /* c8 ignore next 3 */
+  get instanceId (): number {
+    return this[kInstance]
+  }
+
+  /* c8 ignore next 3 */
   get clientId (): string {
     return this[kClientId]
   }
@@ -83,6 +93,11 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
   /* c8 ignore next 3 */
   get closed (): boolean {
     return this[kClosed] === true
+  }
+
+  /* c8 ignore next 3 */
+  get type (): ClientType {
+    return this[kClientType]
   }
 
   emitWithDebug (section: string | null, name: string, ...args: any[]): boolean {
@@ -121,7 +136,15 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
       return callback[kCallbackPromise]
     }
 
-    this[kMetadata](options, callback)
+    clientsChannel.traceCallback(
+      this[kMetadata],
+      1,
+      createDiagnosticContext({ client: this, operation: 'metadata' }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -347,5 +370,10 @@ export class Base<OptionsType extends BaseOptions> extends EventEmitter {
 
   [kFormatValidationErrors] (validator: ValidateFunction<unknown>, targetName: string) {
     return ajv.errorsText(validator.errors, { dataVar: '$dataVar$' }).replaceAll('$dataVar$', targetName) + '.'
+  }
+
+  [kAfterCreate] (type: ClientType): void {
+    this[kClientType] = type
+    notifyCreation(type, this)
   }
 }

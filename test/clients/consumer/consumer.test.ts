@@ -3,13 +3,23 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
+import { type FetchResponse } from '../../../src/apis/consumer/fetch.ts'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
+  type ClientDiagnosticEvent,
   Consumer,
+  consumerCommitsChannel,
+  consumerConsumesChannel,
+  consumerFetchesChannel,
+  consumerGroupChannel,
+  consumerHeartbeatChannel,
+  consumerOffsetsChannel,
+  defaultConsumerOptions,
   fetchV17,
   findCoordinatorV6,
   heartbeatV4,
+  instancesChannel,
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
@@ -17,28 +27,34 @@ import {
   NetworkError,
   offsetCommitV9,
   offsetFetchV9,
+  type Offsets,
   ProtocolError,
   syncGroupV5,
   UserError
 } from '../../../src/index.ts'
 import {
   createConsumer,
+  createCreationChannelVerifier,
   createGroupId,
   createTopic,
+  createTracingChannelVerifier,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
   mockedErrorMessage,
+  mockedOperationId,
   mockMetadata,
   mockMethod
 } from '../../helpers.ts'
 
 test('constructor should initialize properly with default options', t => {
+  const created = createCreationChannelVerifier(instancesChannel)
   const consumer = createConsumer(t)
 
   // Verify instance type
   strictEqual(consumer instanceof Consumer, true)
   strictEqual(consumer.closed, false)
+  deepStrictEqual(created(), { type: 'consumer', instance: consumer })
 
   // Verify group properties
   strictEqual(typeof consumer.groupId, 'string')
@@ -46,9 +62,6 @@ test('constructor should initialize properly with default options', t => {
   strictEqual(consumer.memberId, null)
   deepStrictEqual(consumer.assignments, null)
   strictEqual(consumer.topics instanceof TopicsMap, true)
-
-  // Clean up
-  consumer.close()
 })
 
 test('constructor should initialize with custom options', t => {
@@ -397,8 +410,31 @@ test('close with force=true should force close all resources', async t => {
   strictEqual(stream.closed, true)
 })
 
-test('consume should return a MessagesStream instance', async t => {
+test('consume should return a MessagesStream instance and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerConsumesChannel, ['client', 'result'], {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'consume',
+        options: {
+          topics: [],
+          autocommit: true,
+          deserializers: {},
+          highWaterMark: defaultConsumerOptions.highWaterMark,
+          maxBytes: defaultConsumerOptions.maxBytes
+        },
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      ok(context.result instanceof MessagesStream, 'Should return a MessagesStream instance')
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
 
   // Call consume with empty topics array
   consumer[kOptions].autocommit = undefined
@@ -407,6 +443,8 @@ test('consume should return a MessagesStream instance', async t => {
   // Verify the stream is a MessagesStream instance
   ok(stream instanceof MessagesStream, 'Should return a MessagesStream instance')
   strictEqual(stream.closed, false, 'Stream should not be closed initially')
+
+  verifyTracingChannel()
 })
 
 test('consume should automatically join the group if not already joined', async t => {
@@ -616,14 +654,14 @@ test('consume should integrate with custom deserializers', async t => {
   await stream.close()
 })
 
-test('fetch should return data', async t => {
+test('fetch should return data and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)
 
   const metadata = await consumer.metadata({ topics: [topic] })
   const topicInfo = metadata.topics.get(topic)!
 
-  const response = await consumer.fetch({
+  const options = {
     node: topicInfo.partitions[0].leader,
     maxWaitTime: 1000,
     topics: [
@@ -640,7 +678,26 @@ test('fetch should return data', async t => {
         ]
       }
     ]
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerFetchesChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'fetch',
+        options,
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      deepStrictEqual((context.result as FetchResponse).responses[0].topicId, topicInfo.id)
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
   })
+
+  const response = await consumer.fetch(options)
 
   response.sessionId = 0
   deepStrictEqual(response, {
@@ -664,6 +721,8 @@ test('fetch should return data', async t => {
       }
     ]
   })
+
+  verifyTracingChannel()
 })
 
 test('fetch should support both promise and callback API', async t => {
@@ -952,20 +1011,37 @@ test('fetch should handle errors from the API', async t => {
   }
 })
 
-test('commit should commit offsets to Kafka', async t => {
+test('commit should commit offsets to Kafka and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)
+  const options = {
+    offsets: [{ topic, partition: 0, offset: 100n, leaderEpoch: 0 }]
+  }
 
   // First join the group
   await consumer.joinGroup({})
 
-  // Commit offsets
-  await consumer.commit({
-    offsets: [{ topic, partition: 0, offset: 100n, leaderEpoch: 0 }]
+  const verifyTracingChannel = createTracingChannelVerifier(consumerCommitsChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'commit',
+        options,
+        operationId: mockedOperationId
+      })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
   })
+
+  // Commit offsets
+  await consumer.commit(options)
 
   // Verification is implicit - if commit doesn't throw, it succeeded
   strictEqual(consumer.closed, false)
+
+  verifyTracingChannel()
 })
 
 test('commit should support both promise and callback API', async t => {
@@ -1108,9 +1184,26 @@ test('commit should handle errors from the API (offsetCommit)', async t => {
   }
 })
 
-test('listOffsets should return offset values for topics and partitions', async t => {
+test('listOffsets should return offset values for topics and partitions and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true, 2)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerOffsetsChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'listOffsets',
+        options: { topics: [topic] },
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      deepStrictEqual((context.result as Offsets).get(topic), [0n, 0n])
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
 
   // Get offsets for the test topic
   const offsets = await consumer.listOffsets({ topics: [topic] })
@@ -1126,6 +1219,8 @@ test('listOffsets should return offset values for topics and partitions', async 
   // For new topics, offsets should typically be 0
   strictEqual(typeof topicOffsets[0], 'bigint', 'Offset should be a bigint')
   strictEqual(typeof topicOffsets[1], 'bigint', 'Offset should be a bigint')
+
+  verifyTracingChannel()
 })
 
 test('listOffsets should support both promise and callback API', async t => {
@@ -1258,7 +1353,7 @@ test('listOffsets should use custom isolation level when provided', async t => {
   strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
 })
 
-test('listCommittedOffsets should return committed offset values for topics and partitions', async t => {
+test('listCommittedOffsets should return committed offset values for topics and partitions and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true, 2)
 
@@ -1273,10 +1368,29 @@ test('listCommittedOffsets should return committed offset values for topics and 
     ]
   })
 
-  // Get the committed offsets for the test topic
-  const committed = await consumer.listCommittedOffsets({
+  const options = {
     topics: [{ topic, partitions: [0, 1] }]
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerOffsetsChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'listCommittedOffsets',
+        options,
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      deepStrictEqual((context.result as Offsets).get(topic), [100n, 200n])
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
   })
+
+  // Get the committed offsets for the test topic
+  const committed = await consumer.listCommittedOffsets(options)
 
   // Verify the offsets structure
   strictEqual(committed instanceof Map, true, 'Should return a Map of offsets')
@@ -1289,6 +1403,8 @@ test('listCommittedOffsets should return committed offset values for topics and 
   // Verify the committed offsets match what we committed
   strictEqual(topicOffsets[0], 100n, 'Partition 0 offset should be 100n')
   strictEqual(topicOffsets[1], 200n, 'Partition 1 offset should be 200n')
+
+  verifyTracingChannel()
 })
 
 test('listCommittedOffsets should support both promise and callback API', async t => {
@@ -1423,8 +1539,24 @@ test('listCommittedOffsets should handle errors from the API', async t => {
   }
 })
 
-test('findGroupCoordinator should return the coordinator nodeId', async t => {
+test('findGroupCoordinator should return the coordinator nodeId and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerGroupChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'findGroupCoordinator',
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      ok(typeof context.result === 'number')
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
 
   // First call - should find the coordinator
   const coordinatorId = await consumer.findGroupCoordinator()
@@ -1438,6 +1570,8 @@ test('findGroupCoordinator should return the coordinator nodeId', async t => {
 
   // Should be the same coordinator ID from the cache
   strictEqual(cachedCoordinatorId, coordinatorId)
+
+  verifyTracingChannel()
 })
 
 test('findGroupCoordinator should support both promise and callback API', t => {
@@ -1513,8 +1647,56 @@ test('findGroupCoordinator should handle errors from the API', async t => {
   }
 })
 
-test('joinGroup should join the consumer group and return memberId', async t => {
+test('joinGroup should join the consumer group and return memberId and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
+
+  const verifyJoinTracingChannel = createTracingChannelVerifier(
+    consumerGroupChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: consumer,
+          operation: 'joinGroup',
+          options: {
+            heartbeatInterval: 1000,
+            protocols: defaultConsumerOptions.protocols,
+            sessionTimeout: 6000,
+            rebalanceTimeout: 6000
+          },
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        ok(typeof context.result === 'string')
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'joinGroup'
+  )
+
+  const verifySyncTracingChannel = createTracingChannelVerifier(
+    consumerGroupChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: consumer,
+          operation: 'syncGroup',
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context.result, [])
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'syncGroup'
+  )
 
   // Join the group
   const memberId = await consumer.joinGroup({})
@@ -1527,6 +1709,9 @@ test('joinGroup should join the consumer group and return memberId', async t => 
   strictEqual(consumer.memberId, memberId)
   strictEqual(consumer.generationId > 0, true, 'Generation ID should be greater than 0')
   ok(Array.isArray(consumer.assignments), 'Assignments should be an array')
+
+  verifyJoinTracingChannel()
+  verifySyncTracingChannel()
 })
 
 test('joinGroup should setup assignment for a topic', async t => {
@@ -1862,10 +2047,29 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
   deepStrictEqual(await consumer.joinGroup({}), undefined)
 })
 
-test('leaveGroup should reset group state and leave the consumer group', async t => {
+test('leaveGroup should reset group state and leave the consumer group and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 
   await consumer.joinGroup({})
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    consumerGroupChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: consumer,
+          operation: 'leaveGroup',
+          force: undefined,
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'leaveGroup'
+  )
 
   // Verify we're in a group
   strictEqual(typeof consumer.memberId, 'string')
@@ -1878,6 +2082,8 @@ test('leaveGroup should reset group state and leave the consumer group', async t
   // Verify group state is reset
   strictEqual(consumer.memberId, null, 'Member ID should be reset to null')
   strictEqual(consumer.generationId, 0, 'Generation ID should be reset to 0')
+
+  verifyTracingChannel()
 })
 
 test('leaveGroup should support both promise and callback API', t => {
@@ -2051,13 +2257,28 @@ test('leaveGroup should ignore closed streams', async t => {
   await consumer.leaveGroup()
 })
 
-test('#heartbeat should regularly trigger events', async t => {
+test('#heartbeat should regularly trigger events and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerHeartbeatChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'heartbeat',
+        operationId: mockedOperationId
+      })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
 
   await consumer.joinGroup({})
 
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:end')
+
+  verifyTracingChannel()
 })
 
 test('#heartbeat should handle errors from the API', async t => {

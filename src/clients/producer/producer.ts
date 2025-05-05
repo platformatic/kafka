@@ -1,12 +1,14 @@
 import { ProduceAcks } from '../../apis/enumerations.ts'
 import { type InitProducerIdResponse, api as initProducerIdV5 } from '../../apis/producer/init-producer-id.ts'
 import { type ProduceResponse, api as produceV11 } from '../../apis/producer/produce.ts'
+import { createDiagnosticContext, producerInitIdempotentChannel, producerSendsChannel } from '../../diagnostic.ts'
 import { type GenericError, UserError } from '../../errors.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
 import { type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
 import { NumericMap } from '../../utils.ts'
 import {
   Base,
+  kAfterCreate,
   kBootstrapBrokers,
   kCheckNotClosed,
   kClearMetadata,
@@ -86,6 +88,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         'Number of produced Kafka messages'
       )
     }
+
+    this[kAfterCreate]('producer')
   }
 
   get producerId (): bigint | undefined {
@@ -150,7 +154,55 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    return this[kPerformDeduplicated](
+    producerInitIdempotentChannel.traceCallback(
+      this.#initIdempotentProducer,
+      1,
+      createDiagnosticContext({ client: this, operation: 'initIdempotentProducer', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]!
+  }
+
+  send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void
+  send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<ProduceResult>
+  send (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback?: CallbackWithPromise<ProduceResult>
+  ): void | Promise<ProduceResult> {
+    if (!callback) {
+      callback = createPromisifiedCallback<ProduceResult>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, sendOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as ProduceResult)
+      return callback[kCallbackPromise]
+    }
+
+    producerSendsChannel.traceCallback(
+      this.#send,
+      1,
+      createDiagnosticContext({ client: this, operation: 'send', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  #initIdempotentProducer (
+    options: ProduceOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<ProducerInfo>
+  ) {
+    this[kPerformDeduplicated](
       'initProducerId',
       deduplicateCallback => {
         this[kPerformWithRetry]<InitProducerIdResponse>(
@@ -188,26 +240,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void
-  send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<ProduceResult>
-  send (
-    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback?: CallbackWithPromise<ProduceResult>
-  ): void | Promise<ProduceResult> {
-    if (!callback) {
-      callback = createPromisifiedCallback<ProduceResult>()
-    }
-
-    if (this[kCheckNotClosed](callback)) {
-      return callback[kCallbackPromise]
-    }
-
-    const validationError = this[kValidateOptions](options, sendOptionsValidator, '/options', false)
-    if (validationError) {
-      callback(validationError, undefined as unknown as ProduceResult)
-      return callback[kCallbackPromise]
-    }
-
+  #send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void {
     options.idempotent ??= this[kOptions].idempotent ?? false
     /* c8 ignore next */
     options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata ?? true
@@ -232,10 +265,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.send(options, callback)
+          this.#send(options, callback)
         })
 
-        return callback[kCallbackPromise]
+        return
       }
 
       if (typeof options.producerId !== 'undefined' || typeof options.producerEpoch !== 'undefined') {
@@ -244,7 +277,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           undefined as unknown as ProduceResult
         )
 
-        return callback[kCallbackPromise]
+        return
       }
 
       if (options.acks !== ProduceAcks.ALL) {
@@ -253,7 +286,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           undefined as unknown as ProduceResult
         )
 
-        return callback[kCallbackPromise]
+        return
       }
     }
 
@@ -319,8 +352,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       produceOptions,
       callback
     )
-
-    return callback[kCallbackPromise]
   }
 
   #performSend (

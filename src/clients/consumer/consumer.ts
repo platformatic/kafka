@@ -29,6 +29,15 @@ import {
 } from '../../apis/consumer/sync-group.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
 import { type FindCoordinatorResponse, api as findCoordinatorV6 } from '../../apis/metadata/find-coordinator.ts'
+import {
+  consumerCommitsChannel,
+  consumerConsumesChannel,
+  consumerFetchesChannel,
+  consumerGroupChannel,
+  consumerHeartbeatChannel,
+  consumerOffsetsChannel,
+  createDiagnosticContext
+} from '../../diagnostic.ts'
 import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
@@ -36,6 +45,7 @@ import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import {
   Base,
+  kAfterCreate,
   kBootstrapBrokers,
   kCheckNotClosed,
   kClosed,
@@ -166,6 +176,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers_topics', 'Number of topics being consumed')
       )
     }
+
+    this[kAfterCreate]('consumer')
   }
 
   get streamsCount (): number {
@@ -263,6 +275,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.highWaterMark ??= this[kOptions].highWaterMark!
 
     this.#consume(options, callback)
+
     return callback![kCallbackPromise]
   }
 
@@ -286,7 +299,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.#fetch(options, callback)
+    consumerFetchesChannel.traceCallback(
+      this.#fetch,
+      1,
+      createDiagnosticContext({ client: this, operation: 'fetch', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback![kCallbackPromise]
   }
 
@@ -307,7 +328,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.#commit(options, callback)
+    consumerCommitsChannel.traceCallback(
+      this.#commit,
+      1,
+      createDiagnosticContext({ client: this, operation: 'commit', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback![kCallbackPromise]
   }
 
@@ -328,7 +357,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.#listOffsets(options, callback)
+    consumerOffsetsChannel.traceCallback(
+      this.#listOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback![kCallbackPromise]
   }
 
@@ -349,7 +386,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.#listCommittedOffsets(options, callback)
+    consumerOffsetsChannel.traceCallback(
+      this.#listCommittedOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listCommittedOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback![kCallbackPromise]
   }
 
@@ -370,6 +415,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#findGroupCoordinator(callback)
+
     return callback[kCallbackPromise]
   }
 
@@ -399,6 +445,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#membershipActive = true
     this.#joinGroup(options as Required<GroupOptions>, callback)
+
     return callback[kCallbackPromise]
   }
 
@@ -434,50 +481,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>,
-    trackTopics: boolean = true
-  ): void | Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>> {
-    // Subscribe all topics
-    let joinNeeded = this.memberId === null
-
-    if (trackTopics) {
-      for (const topic of options.topics) {
-        if (this.topics.track(topic)) {
-          joinNeeded = true
-        }
-      }
-    }
-
-    // If we need to (re)join the group, do that first and then try again
-    if (joinNeeded) {
-      this.joinGroup(options, error => {
-        if (error) {
-          callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
-          return
-        }
-
-        this.#consume(options, callback, false)
-      })
-
-      return callback![kCallbackPromise]
-    }
-
-    // Create the stream and start consuming
-    const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
+    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  ): void {
+    consumerConsumesChannel.traceCallback(
+      this.#performConsume,
+      2,
+      createDiagnosticContext({ client: this, operation: 'consume', options }),
       this,
-      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
+      options,
+      true,
+      callback
     )
-    this.#streams.add(stream)
-
-    this.#metricActiveStreams?.inc()
-    stream.once('close', () => {
-      this.#metricActiveStreams?.dec()
-      this.#streams.delete(stream)
-    })
-
-    callback(null, stream)
-
-    return callback![kCallbackPromise]
   }
 
   #fetch (
@@ -707,297 +721,56 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
-    this[kPerformDeduplicated](
-      'findGroupCoordinator',
-      deduplicateCallback => {
-        this[kPerformWithRetry]<FindCoordinatorResponse>(
-          'findGroupCoordinator',
-          retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
-              if (error) {
-                retryCallback(error, undefined as unknown as FindCoordinatorResponse)
-                return
-              }
-
-              findCoordinatorV6(connection, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
-            })
-          },
-          (error, response) => {
-            if (error) {
-              deduplicateCallback(error, undefined as unknown as number)
-              return
-            }
-
-            const groupInfo = response.coordinators.find(coordinator => coordinator.key === this.groupId)!
-            this.#coordinatorId = groupInfo.nodeId
-            deduplicateCallback(null, this.#coordinatorId)
-          },
-          0
-        )
-      },
+    consumerGroupChannel.traceCallback(
+      this.#performFindGroupCoordinator,
+      0,
+      createDiagnosticContext({ client: this, operation: 'findGroupCoordinator' }),
+      this,
       callback
     )
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
-    if (!this.#membershipActive) {
-      callback(null, undefined as unknown as string)
-      return
-    }
-
-    this.#cancelHeartbeat()
-
-    const protocols: JoinGroupRequestProtocol[] = []
-    for (const protocol of options.protocols) {
-      protocols.push({
-        name: protocol.name,
-        metadata: this.#encodeProtocolSubscriptionMetadata(protocol, this.topics.current)
-      })
-    }
-
-    this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
-      'joinGroup',
-      (connection, groupCallback) => {
-        joinGroupV9(
-          connection,
-          this.groupId,
-          options.sessionTimeout,
-          options.rebalanceTimeout,
-          this.memberId ?? '',
-          null,
-          'consumer',
-          protocols,
-          '',
-          groupCallback
-        )
-      },
-      (error, response) => {
-        if (!this.#membershipActive) {
-          callback(null, undefined as unknown as string)
-          return
-        }
-
-        if (error) {
-          if (this.#getRejoinError(error)) {
-            this.#joinGroup(options, callback)
-            return
-          }
-
-          callback(error, undefined as unknown as string)
-          return
-        }
-
-        this.generationId = response.generationId
-        this.#isLeader = response.leader === this.memberId
-        this.#protocol = response.protocolName!
-
-        this.#members = new Map()
-        for (const member of response.members) {
-          this.#members.set(
-            member.memberId,
-            this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
-          )
-        }
-
-        // Send a syncGroup request
-        this.#syncGroup(null, (error, response) => {
-          if (!this.#membershipActive) {
-            callback(null, undefined as unknown as string)
-            return
-          }
-
-          if (error) {
-            if (this.#getRejoinError(error)) {
-              this.#joinGroup(options, callback)
-              return
-            }
-
-            callback(error, undefined as unknown as string)
-            return
-          }
-
-          this.assignments = response
-
-          this.#cancelHeartbeat()
-          this.#heartbeatInterval = setTimeout(() => {
-            this.#heartbeat(options)
-          }, options.heartbeatInterval)
-
-          this.emitWithDebug('consumer', 'group:join', {
-            groupId: this.groupId,
-            memberId: this.memberId,
-            generationId: this.generationId,
-            isLeader: this.#isLeader,
-            assignments: this.assignments
-          })
-
-          callback(null, this.memberId!)
-        })
-      }
+    consumerGroupChannel.traceCallback(
+      this.#performJoinGroup,
+      1,
+      createDiagnosticContext({ client: this, operation: 'joinGroup', options }),
+      this,
+      options,
+      callback
     )
   }
 
   #leaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
-    if (!this.memberId) {
-      callback(null)
-      return
-    }
-
-    // Remove streams that might have been exited in the meanwhile
-    for (const stream of this.#streams) {
-      if (stream.closed || stream.destroyed) {
-        this.#streams.delete(stream)
-      }
-    }
-
-    if (this.#streams.size) {
-      if (!force) {
-        callback(new UserError('Cannot leave group while consuming messages.'))
-        return
-      }
-
-      runConcurrentCallbacks<void>(
-        'Closing streams failed.',
-        this.#streams,
-        (stream, concurrentCallback) => {
-          stream.close(concurrentCallback)
-        },
-        error => {
-          if (error) {
-            callback(error)
-            return
-          }
-
-          // All streams are closed, try the operation again without force
-          this.#leaveGroup(false, callback)
-        }
-      )
-
-      return
-    }
-
-    this.#cancelHeartbeat()
-
-    this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
-      'leaveGroup',
-      (connection, groupCallback) => {
-        leaveGroupV5(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
-      },
-      error => {
-        if (error) {
-          const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
-
-          // This is to avoid throwing an error if a group join was cancelled.
-          if (!unknownMemberError) {
-            callback(error)
-            return
-          }
-        }
-
-        this.emitWithDebug('consumer', 'group:leave', {
-          groupId: this.groupId,
-          memberId: this.memberId,
-          generationId: this.generationId
-        })
-
-        this.memberId = null
-        this.generationId = 0
-        this.assignments = null
-
-        callback(null)
-      }
+    consumerGroupChannel.traceCallback(
+      this.#performLeaveGroup,
+      1,
+      createDiagnosticContext({ client: this, operation: 'leaveGroup', force }),
+      this,
+      force,
+      callback
     )
   }
 
-  #syncGroup (assignments: SyncGroupRequestAssignment[] | null, callback: CallbackWithPromise<GroupAssignment[]>): void {
-    if (!this.#membershipActive) {
-      callback(null, [])
-      return
-    }
-
-    if (!Array.isArray(assignments)) {
-      if (this.#isLeader) {
-        // Get all the metadata for  the topics the consumer are listening to, then compute the assignments
-        const topicsSubscriptions = new Map<string, ExtendedGroupProtocolSubscription[]>()
-
-        for (const subscription of this.#members.values()) {
-          for (const topic of subscription.topics!) {
-            let topicSubscriptions = topicsSubscriptions.get(topic)
-
-            if (!topicSubscriptions) {
-              topicSubscriptions = []
-              topicsSubscriptions.set(topic, topicSubscriptions)
-            }
-
-            topicSubscriptions.push(subscription)
-          }
-        }
-
-        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
-          if (error) {
-            callback(error, undefined as unknown as GroupAssignment[])
-            return
-          }
-
-          this.#syncGroup(this.#roundRobinAssignments(metadata), callback)
-        })
-
-        return
-      } else {
-        // Non leader simply do not send any assignments and wait
-        assignments = []
-      }
-    }
-
-    this.#performDeduplicateGroupOperaton<SyncGroupResponse>(
-      'syncGroup',
-      (connection, groupCallback) => {
-        syncGroupV5(
-          connection,
-          this.groupId,
-          this.generationId,
-          this.memberId!,
-          null,
-          'consumer',
-          this.#protocol!,
-          assignments!,
-          groupCallback
-        )
-      },
-      (error, response) => {
-        if (!this.#membershipActive) {
-          callback(null, undefined as unknown as GroupAssignment[])
-          return
-        }
-
-        if (error) {
-          callback(error, undefined as unknown as GroupAssignment[])
-          return
-        }
-
-        // Read the assignment back
-        const reader = Reader.from(response.assignment)
-
-        const assignments: GroupAssignment[] = reader.readArray(
-          r => {
-            return {
-              topic: r.readString(),
-              partitions: r.readArray(r => r.readInt32(), true, false)
-            }
-          },
-          true,
-          false
-        )
-
-        callback(error, assignments)
-      }
+  #syncGroup (callback: CallbackWithPromise<GroupAssignment[]>): void {
+    consumerGroupChannel.traceCallback(
+      this.#performSyncGroup,
+      1,
+      createDiagnosticContext({ client: this, operation: 'syncGroup' }),
+      this,
+      null,
+      callback
     )
   }
 
   #heartbeat (options: Required<GroupOptions>): void {
     const eventPayload = { groupId: this.groupId, memberId: this.memberId, generationId: this.generationId }
 
-    this.#performDeduplicateGroupOperaton<HeartbeatResponse>(
+    consumerHeartbeatChannel.traceCallback(
+      this.#performDeduplicateGroupOperaton<HeartbeatResponse>,
+      2,
+      createDiagnosticContext({ client: this, operation: 'heartbeat' }),
+      this,
       'heartbeat',
       (connection, groupCallback) => {
         // We have left the group in the meanwhile, abort
@@ -1053,6 +826,343 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #cancelHeartbeat (): void {
     clearTimeout(this.#heartbeatInterval!)
     this.#heartbeatInterval = null
+  }
+
+  #performConsume (
+    options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
+    trackTopics: boolean,
+    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  ): void {
+    // Subscribe all topics
+    let joinNeeded = this.memberId === null
+
+    if (trackTopics) {
+      for (const topic of options.topics) {
+        if (this.topics.track(topic)) {
+          joinNeeded = true
+        }
+      }
+    }
+
+    // If we need to (re)join the group, do that first and then try again
+    if (joinNeeded) {
+      this.joinGroup(options, error => {
+        if (error) {
+          callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
+          return
+        }
+
+        this.#performConsume(options, false, callback)
+      })
+
+      return
+    }
+
+    // Create the stream and start consuming
+    const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
+      this,
+      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
+    )
+    this.#streams.add(stream)
+
+    this.#metricActiveStreams?.inc()
+    stream.once('close', () => {
+      this.#metricActiveStreams?.dec()
+      this.#streams.delete(stream)
+    })
+
+    callback(null, stream)
+  }
+
+  #performFindGroupCoordinator (callback: CallbackWithPromise<number>): void {
+    this[kPerformDeduplicated](
+      'findGroupCoordinator',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<FindCoordinatorResponse>(
+          'findGroupCoordinator',
+          retryCallback => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                return
+              }
+
+              findCoordinatorV6(connection, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
+            })
+          },
+          (error, response) => {
+            if (error) {
+              deduplicateCallback(error, undefined as unknown as number)
+              return
+            }
+
+            const groupInfo = response.coordinators.find(coordinator => coordinator.key === this.groupId)!
+            this.#coordinatorId = groupInfo.nodeId
+            deduplicateCallback(null, this.#coordinatorId)
+          },
+          0
+        )
+      },
+      callback
+    )
+  }
+
+  #performJoinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
+    if (!this.#membershipActive) {
+      callback(null, undefined as unknown as string)
+      return
+    }
+
+    this.#cancelHeartbeat()
+
+    const protocols: JoinGroupRequestProtocol[] = []
+    for (const protocol of options.protocols) {
+      protocols.push({
+        name: protocol.name,
+        metadata: this.#encodeProtocolSubscriptionMetadata(protocol, this.topics.current)
+      })
+    }
+
+    this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
+      'joinGroup',
+      (connection, groupCallback) => {
+        joinGroupV9(
+          connection,
+          this.groupId,
+          options.sessionTimeout,
+          options.rebalanceTimeout,
+          this.memberId ?? '',
+          null,
+          'consumer',
+          protocols,
+          '',
+          groupCallback
+        )
+      },
+      (error, response) => {
+        if (!this.#membershipActive) {
+          callback(null, undefined as unknown as string)
+          return
+        }
+
+        if (error) {
+          if (this.#getRejoinError(error)) {
+            this.#performJoinGroup(options, callback)
+            return
+          }
+
+          callback(error, undefined as unknown as string)
+          return
+        }
+
+        this.generationId = response.generationId
+        this.#isLeader = response.leader === this.memberId
+        this.#protocol = response.protocolName!
+
+        this.#members = new Map()
+        for (const member of response.members) {
+          this.#members.set(
+            member.memberId,
+            this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
+          )
+        }
+
+        // Send a syncGroup request
+        this.#syncGroup((error, response) => {
+          if (!this.#membershipActive) {
+            callback(null, undefined as unknown as string)
+            return
+          }
+
+          if (error) {
+            if (this.#getRejoinError(error)) {
+              this.#performJoinGroup(options, callback)
+              return
+            }
+
+            callback(error, undefined as unknown as string)
+            return
+          }
+
+          this.assignments = response
+
+          this.#cancelHeartbeat()
+          this.#heartbeatInterval = setTimeout(() => {
+            this.#heartbeat(options)
+          }, options.heartbeatInterval)
+
+          this.emitWithDebug('consumer', 'group:join', {
+            groupId: this.groupId,
+            memberId: this.memberId,
+            generationId: this.generationId,
+            isLeader: this.#isLeader,
+            assignments: this.assignments
+          })
+
+          callback(null, this.memberId!)
+        })
+      }
+    )
+  }
+
+  #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
+    if (!this.memberId) {
+      callback(null)
+      return
+    }
+
+    // Remove streams that might have been exited in the meanwhile
+    for (const stream of this.#streams) {
+      if (stream.closed || stream.destroyed) {
+        this.#streams.delete(stream)
+      }
+    }
+
+    if (this.#streams.size) {
+      if (!force) {
+        callback(new UserError('Cannot leave group while consuming messages.'))
+        return
+      }
+
+      runConcurrentCallbacks<void>(
+        'Closing streams failed.',
+        this.#streams,
+        (stream, concurrentCallback) => {
+          stream.close(concurrentCallback)
+        },
+        error => {
+          if (error) {
+            callback(error)
+            return
+          }
+
+          // All streams are closed, try the operation again without force
+          this.#performLeaveGroup(false, callback)
+        }
+      )
+
+      return
+    }
+
+    this.#cancelHeartbeat()
+
+    this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
+      'leaveGroup',
+      (connection, groupCallback) => {
+        leaveGroupV5(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
+      },
+      error => {
+        if (error) {
+          const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
+
+          // This is to avoid throwing an error if a group join was cancelled.
+          if (!unknownMemberError) {
+            callback(error)
+            return
+          }
+        }
+
+        this.emitWithDebug('consumer', 'group:leave', {
+          groupId: this.groupId,
+          memberId: this.memberId,
+          generationId: this.generationId
+        })
+
+        this.memberId = null
+        this.generationId = 0
+        this.assignments = null
+
+        callback(null)
+      }
+    )
+  }
+
+  #performSyncGroup (
+    assignments: SyncGroupRequestAssignment[] | null,
+    callback: CallbackWithPromise<GroupAssignment[]>
+  ): void {
+    if (!this.#membershipActive) {
+      callback(null, [])
+      return
+    }
+
+    if (!Array.isArray(assignments)) {
+      if (this.#isLeader) {
+        // Get all the metadata for  the topics the consumer are listening to, then compute the assignments
+        const topicsSubscriptions = new Map<string, ExtendedGroupProtocolSubscription[]>()
+
+        for (const subscription of this.#members.values()) {
+          for (const topic of subscription.topics!) {
+            let topicSubscriptions = topicsSubscriptions.get(topic)
+
+            if (!topicSubscriptions) {
+              topicSubscriptions = []
+              topicsSubscriptions.set(topic, topicSubscriptions)
+            }
+
+            topicSubscriptions.push(subscription)
+          }
+        }
+
+        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
+          if (error) {
+            callback(error, undefined as unknown as GroupAssignment[])
+            return
+          }
+
+          this.#performSyncGroup(this.#roundRobinAssignments(metadata), callback)
+        })
+
+        return
+      } else {
+        // Non leader simply do not send any assignments and wait
+        assignments = []
+      }
+    }
+
+    this.#performDeduplicateGroupOperaton<SyncGroupResponse>(
+      'syncGroup',
+      (connection, groupCallback) => {
+        syncGroupV5(
+          connection,
+          this.groupId,
+          this.generationId,
+          this.memberId!,
+          null,
+          'consumer',
+          this.#protocol!,
+          assignments!,
+          groupCallback
+        )
+      },
+      (error, response) => {
+        if (!this.#membershipActive) {
+          callback(null, undefined as unknown as GroupAssignment[])
+          return
+        }
+
+        if (error) {
+          callback(error, undefined as unknown as GroupAssignment[])
+          return
+        }
+
+        // Read the assignment back
+        const reader = Reader.from(response.assignment)
+
+        const assignments: GroupAssignment[] = reader.readArray(
+          r => {
+            return {
+              topic: r.readString(),
+              partitions: r.readArray(r => r.readInt32(), true, false)
+            }
+          },
+          true,
+          false
+        )
+
+        callback(error, assignments)
+      }
+    )
   }
 
   #performDeduplicateGroupOperaton<ReturnType>(

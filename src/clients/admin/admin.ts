@@ -15,9 +15,11 @@ import { api as listGroupsV5, type ListGroupsResponse } from '../../apis/admin/l
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { api as findCoordinatorV6, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator.ts'
+import { adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
+  kAfterCreate,
   kBootstrapBrokers,
   kCheckNotClosed,
   kConnections,
@@ -57,6 +59,7 @@ import {
 export class Admin extends Base<AdminOptions> {
   constructor (options: AdminOptions) {
     super(options as BaseOptions)
+    this[kAfterCreate]('admin')
   }
 
   createTopics (options: CreateTopicsOptions, callback: Callback<CreatedTopic[]>): void
@@ -79,7 +82,15 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    this.#createTopics(options, callback)
+    adminTopicsChannel.traceCallback(
+      this.#createTopics,
+      1,
+      createDiagnosticContext({ client: this, operation: 'createTopics', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -100,7 +111,15 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    this.#deleteTopics(options, callback)
+    adminTopicsChannel.traceCallback(
+      this.#deleteTopics,
+      1,
+      createDiagnosticContext({ client: this, operation: 'deleteTopics', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -130,7 +149,15 @@ export class Admin extends Base<AdminOptions> {
 
     options.types ??= ['classic']
 
-    this.#listGroups(options, callback)
+    adminGroupsChannel.traceCallback(
+      this.#listGroups,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listGroups', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -154,7 +181,15 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    this.#describeGroups(options, callback)
+    adminGroupsChannel.traceCallback(
+      this.#describeGroups,
+      1,
+      createDiagnosticContext({ client: this, operation: 'describeGroups', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -175,7 +210,15 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    this.#deleteGroups(options, callback)
+    adminGroupsChannel.traceCallback(
+      this.#deleteGroups,
+      1,
+      createDiagnosticContext({ client: this, operation: 'deleteGroups', options }),
+      this,
+      options,
+      callback
+    )
+
     return callback[kCallbackPromise]
   }
 
@@ -283,7 +326,7 @@ export class Admin extends Base<AdminOptions> {
           0
         )
       },
-      callback
+      error => callback(error)
     )
   }
 
@@ -489,9 +532,7 @@ export class Admin extends Base<AdminOptions> {
               )
             })
           },
-          error => {
-            callback(error)
-          }
+          error => callback(error)
         )
       })
     })

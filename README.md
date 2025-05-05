@@ -264,6 +264,7 @@ Many of the methods accept the same options as the client's constructors. The co
 - [Admin API](./docs/admin.md)
 - [Base Client](./docs/base.md)
 - [Metrics](./docs/metrics.md)
+- [Diagnostic and Instrumentation](./docs/diagnostic.md)
 - [Other APIs and Types](./docs/other.md)
 
 ## Requirements

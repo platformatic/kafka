@@ -1,33 +1,42 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
+  adminGroupsChannel,
+  adminTopicsChannel,
+  type ClientDiagnosticEvent,
   type ClusterPartitionMetadata,
   Consumer,
+  type CreatedTopic,
   describeGroupsV5,
   EMPTY_BUFFER,
+  type GroupBase,
+  instancesChannel,
   listGroupsV5,
   MultipleErrors
 } from '../../../src/index.ts'
 import {
   createAdmin,
+  createCreationChannelVerifier,
+  createTracingChannelVerifier,
   kafkaBootstrapServers,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
   mockedErrorMessage,
+  mockedOperationId,
   mockMetadata
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
+  const created = createCreationChannelVerifier(instancesChannel)
   const admin = createAdmin(t)
 
   strictEqual(admin instanceof Admin, true)
   strictEqual(admin.closed, false)
-
-  admin.close()
+  deepStrictEqual(created(), { type: 'admin', instance: admin })
 })
 
 test('should support both promise and callback API', (t, done) => {
@@ -124,18 +133,36 @@ test('all operations should fail when admin is closed', async t => {
   }
 })
 
-test('createTopics should create a new topic', async t => {
+test('createTopics should create a new topic and support diagnostic channels', async t => {
   const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-${randomUUID()}`
-
-  // Create a new topic
-  const created = await admin.createTopics({
+  const options = {
     topics: [topicName],
     partitions: 3,
     replicas: 1
-  })
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminTopicsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, { client: admin, operation: 'createTopics', options, operationId: mockedOperationId })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        deepStrictEqual((context.result as CreatedTopic[])[0].name, topicName)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'createTopics'
+  )
+
+  // Create a new topic
+  const created = await admin.createTopics(options)
 
   // Verify the response contains the created topic
   deepStrictEqual(created, [
@@ -147,6 +174,8 @@ test('createTopics should create a new topic', async t => {
       configuration: created[0].configuration // Preserve dynamic value
     }
   ])
+
+  verifyTracingChannel()
 
   // Clean up by deleting the topic
   await admin.deleteTopics({ topics: [topicName] })
@@ -380,11 +409,30 @@ test('createTopics should handle errors from Connection.getFirstAvailable', asyn
   }
 })
 
-test('deleteTopics should delete a topic', async t => {
+test('deleteTopics should delete a topic and support diagnostic channels', async t => {
   const admin = createAdmin(t)
 
   // Generate a unique topic name for testing
   const topicName = `test-topic-${randomUUID()}`
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminTopicsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'deleteTopics',
+          options: { topics: [topicName] },
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'deleteTopics'
+  )
 
   // Create a new topic
   await admin.createTopics({
@@ -406,6 +454,8 @@ test('deleteTopics should delete a topic', async t => {
 
   strictEqual(created.length, 1)
   strictEqual(created[0].name, topicName)
+
+  verifyTracingChannel()
 
   // Clean up
   await admin.deleteTopics({ topics: [topicName] })
@@ -469,11 +519,12 @@ test('deleteTopics should handle errors from Connection.getFirstAvailable', asyn
   }
 })
 
-test('listGroups should return consumer groups', async t => {
+test('listGroups should return consumer groups and support diagnostic channels', async t => {
+  const groupId = `test-group-${randomUUID()}`
   // Create a consumer that joins a group
   const consumer = new Consumer({
     clientId: `test-admin-admin-${randomUUID()}`,
-    groupId: `test-group-${randomUUID()}`,
+    groupId,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
@@ -481,6 +532,28 @@ test('listGroups should return consumer groups', async t => {
   const admin = createAdmin(t)
 
   await consumer.joinGroup({})
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminGroupsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'listGroups',
+          options: { types: ['classic'] },
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        ok((context.result as Map<string, GroupBase>).get(groupId))
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'listGroups'
+  )
 
   // List all groups
   const groups = await admin.listGroups()
@@ -494,6 +567,8 @@ test('listGroups should return consumer groups', async t => {
     state: 'STABLE',
     groupType: 'classic'
   })
+
+  verifyTracingChannel()
 })
 
 test('listGroups should support filtering by types and states', async t => {
@@ -628,11 +703,12 @@ test('listGroups should handle errors from the API', async t => {
   }
 })
 
-test('describeGroups should describe consumer groups', async t => {
+test('describeGroups should describe consumer groups and support diagnostic channels', async t => {
   // Create a consumer that joins a group
+  const groupId = `test-group-${randomUUID()}`
   const consumer = new Consumer({
     clientId: `test-admin-admin-${randomUUID()}`,
-    groupId: `test-group-${randomUUID()}`,
+    groupId,
     bootstrapBrokers: kafkaBootstrapServers
   })
   t.after(() => consumer.close())
@@ -646,11 +722,35 @@ test('describeGroups should describe consumer groups', async t => {
   await consumer.topics.trackAll(testTopic)
   await consumer.joinGroup({})
 
-  // Describe the groups
-  const describedGroups = await admin.describeGroups({
+  const options = {
     groups: [consumer.groupId, 'non-existent-group'],
     includeAuthorizedOperations: true
-  })
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminGroupsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'describeGroups',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        deepStrictEqual((context.result as Map<string, GroupBase>).get(groupId)!.state, 'STABLE')
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeGroups'
+  )
+
+  // Describe the groups
+  const describedGroups = await admin.describeGroups(options)
 
   const { id, clientId, clientHost } = Array.from(describedGroups.get(consumer.groupId)?.members.values()!)[0]
   deepStrictEqual(Array.from(describedGroups.values()), [
@@ -687,6 +787,8 @@ test('describeGroups should describe consumer groups', async t => {
       authorizedOperations: 328
     }
   ])
+
+  verifyTracingChannel()
 })
 
 test('describeGroups should handle includeAuthorizedOperations option', async t => {
@@ -851,6 +953,43 @@ test('describeGroups should handle errors from the API', async t => {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Describing groups failed.'), true)
   }
+})
+
+test('deleteGroups should delete groups and support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+
+  // Create a consumer that joins a group and then immediately leaves
+  const groupId = `test-group-${randomUUID()}`
+  const consumer = new Consumer({
+    clientId: `test-admin-admin-${randomUUID()}`,
+    groupId,
+    bootstrapBrokers: kafkaBootstrapServers
+  })
+  await consumer.joinGroup({})
+  await consumer.leaveGroup()
+  await consumer.close()
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminGroupsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'deleteGroups',
+          options: { groups: [groupId] },
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'deleteGroups'
+  )
+
+  await admin.deleteGroups({ groups: [groupId] })
+  verifyTracingChannel()
 })
 
 test('deleteGroups should handle non-existent groups properly', async t => {

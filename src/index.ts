@@ -1,4 +1,5 @@
 // General
+export * from './diagnostic.ts'
 export * from './errors.ts'
 export * from './utils.ts'
 

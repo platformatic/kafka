@@ -1,7 +1,7 @@
 import { ProduceAcks } from '../../apis/enumerations.ts'
 import { type InitProducerIdResponse, api as initProducerIdV5 } from '../../apis/producer/init-producer-id.ts'
 import { type ProduceResponse, api as produceV11 } from '../../apis/producer/produce.ts'
-import { clientsChannel, createDiagnosticContext } from '../../diagnostic.ts'
+import { createDiagnosticContext, producerInitIdempotentChannel, producerSendsChannel } from '../../diagnostic.ts'
 import { type GenericError, UserError } from '../../errors.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
 import { type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
@@ -154,7 +154,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    producerInitIdempotentChannel.traceCallback(
       this.#initIdempotentProducer,
       1,
       createDiagnosticContext({ client: this, operation: 'initIdempotentProducer', options }),
@@ -186,7 +186,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    producerSendsChannel.traceCallback(
       this.#send,
       1,
       createDiagnosticContext({ client: this, operation: 'send', options }),

@@ -15,7 +15,7 @@ import { api as listGroupsV5, type ListGroupsResponse } from '../../apis/admin/l
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { api as findCoordinatorV6, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator.ts'
-import { clientsChannel, createDiagnosticContext } from '../../diagnostic.ts'
+import { adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
@@ -82,7 +82,7 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    adminTopicsChannel.traceCallback(
       this.#createTopics,
       1,
       createDiagnosticContext({ client: this, operation: 'createTopics', options }),
@@ -111,7 +111,7 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    adminTopicsChannel.traceCallback(
       this.#deleteTopics,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteTopics', options }),
@@ -149,7 +149,7 @@ export class Admin extends Base<AdminOptions> {
 
     options.types ??= ['classic']
 
-    clientsChannel.traceCallback(
+    adminGroupsChannel.traceCallback(
       this.#listGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'listGroups', options }),
@@ -181,7 +181,7 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    adminGroupsChannel.traceCallback(
       this.#describeGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'describeGroups', options }),
@@ -210,7 +210,7 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    adminGroupsChannel.traceCallback(
       this.#deleteGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteGroups', options }),

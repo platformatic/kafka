@@ -6,16 +6,21 @@ import { test, type TestContext } from 'node:test'
 import * as Prometheus from 'prom-client'
 import {
   type CallbackWithPromise,
+  type ClientDiagnosticEvent,
   Consumer,
   type ConsumerOptions,
+  consumerReceivesChannel,
   type Deserializers,
   executeWithTimeout,
+  instancesChannel,
   jsonDeserializer,
+  type KafkaRecord,
   type Message,
   MessagesStream,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
   MultipleErrors,
+  noopCallback,
   ProduceAcks,
   Producer,
   type ProducerOptions,
@@ -26,7 +31,13 @@ import {
   stringSerializers,
   UserError
 } from '../../../src/index.ts'
-import { mockedErrorMessage, mockMetadata } from '../../helpers.ts'
+import {
+  createCreationChannelVerifier,
+  createTracingChannelVerifier,
+  mockedErrorMessage,
+  mockedOperationId,
+  mockMetadata
+} from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   messages: Message<K, V, HK, HV>[]
@@ -171,6 +182,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
 }
 
 test('should be an instance of Readable', async t => {
+  const created = createCreationChannelVerifier(instancesChannel)
   const topic = createTestTopic()
 
   // Produce test messages
@@ -184,6 +196,7 @@ test('should be an instance of Readable', async t => {
   })
 
   ok(stream instanceof Readable, 'MessagesStream should be an instance of Readable')
+  deepStrictEqual(created(), { type: 'messages-stream', instance: stream })
 })
 
 test('should throw error when specifying offsets with non-MANUAL mode', async t => {
@@ -221,6 +234,60 @@ test('should throw error when not specifying offsets with MANUAL mode', async t 
       return true
     }
   )
+})
+
+test('should support diagnostic channels', async t => {
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerReceivesChannel, ['client', 'stream', 'result'], {
+    start (context: ClientDiagnosticEvent) {
+      const raw = context.raw as KafkaRecord
+      deepStrictEqual(Buffer.from(raw.key).toString(), 'key-0')
+      deepStrictEqual(Buffer.from(raw.value).toString(), 'value-0')
+      deepStrictEqual(Buffer.from(raw.headers[0][0]).toString(), 'headerKey')
+      deepStrictEqual(Buffer.from(raw.headers[0][1]).toString(), 'headerValue-0')
+      delete context.raw
+
+      deepStrictEqual(context, {
+        client: consumer,
+        stream,
+        operation: 'receive',
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      const message = context.result as Message
+      ok(typeof message.timestamp, 'bigint')
+      message.timestamp = 0n
+
+      deepStrictEqual(context.result, {
+        key: 'key-0',
+        value: 'value-0',
+        headers: new Map([['headerKey', 'headerValue-0']]),
+        topic,
+        partition: 0,
+        timestamp: 0n,
+        offset: 0n,
+        commit: noopCallback
+      })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  // Consume messages with autocommit
+  const { consumer, stream, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true
+  })
+
+  strictEqual(messages.length, 1)
+  verifyTracingChannel()
 })
 
 test('should support autocommit and COMMITTED mode', async t => {

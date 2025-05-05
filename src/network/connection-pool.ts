@@ -6,7 +6,7 @@ import {
   runConcurrentCallbacks,
   type CallbackWithPromise
 } from '../clients/callbacks.ts'
-import { connectionPoolsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
+import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { MultipleErrors } from '../errors.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
 
@@ -28,7 +28,7 @@ export class ConnectionPool extends EventEmitter {
     this.#connections = new Map()
     this.#connectionOptions = connectionOptions
 
-    notifyCreation('connectionPool', this)
+    notifyCreation('connection-pool', this)
   }
 
   /* c8 ignore next 3 */
@@ -43,7 +43,7 @@ export class ConnectionPool extends EventEmitter {
       callback = createPromisifiedCallback<Connection>()
     }
 
-    connectionPoolsChannel.traceCallback(
+    connectionsPoolGetsChannel.traceCallback(
       this.#get,
       1,
       createDiagnosticContext({ connectionPool: this, broker, operation: 'get' }),
@@ -60,7 +60,7 @@ export class ConnectionPool extends EventEmitter {
       callback = createPromisifiedCallback<Connection>()
     }
 
-    connectionPoolsChannel.traceCallback(
+    connectionsPoolGetsChannel.traceCallback(
       this.#getFirstAvailable,
       3,
       createDiagnosticContext({ connectionPool: this, brokers, operation: 'getFirstAvailable' }),

@@ -4,9 +4,10 @@ import test, { type TestContext } from 'node:test'
 import {
   Connection,
   type ConnectionDiagnosticEvent,
-  connectionsChannelName,
+  connectionsApiChannel,
+  connectionsConnectsChannel,
   ConnectionStatuses,
-  instancesChannelName,
+  instancesChannel,
   NetworkError,
   type Reader,
   UnexpectedCorrelationIdError,
@@ -37,7 +38,7 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 }
 
 test('Connection constructor', () => {
-  const created = createCreationChannelVerifier(instancesChannelName)
+  const created = createCreationChannelVerifier(instancesChannel.name)
   const connection = new Connection('test-client')
 
   deepStrictEqual(connection.status, ConnectionStatuses.NONE)
@@ -60,7 +61,7 @@ test('Connection.connect should support diagnostic channels', async t => {
   const connection = new Connection('test-client')
   t.after(() => connection.close())
 
-  const verifyTracingChannel = createTracingChannelVerifier(connectionsChannelName, ['connection'], {
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsConnectsChannel.name, ['connection'], {
     start (context: ConnectionDiagnosticEvent) {
       deepStrictEqual(context, {
         operationId: mockedOperationId,
@@ -143,7 +144,7 @@ test('Connection.connect should support diagnostic channels when erroring', asyn
   const connection = new Connection('test-client')
   t.after(() => connection.close())
 
-  const verifyTracingChannel = createTracingChannelVerifier(connectionsChannelName, ['connection'], {
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsConnectsChannel.name as string, ['connection'], {
     start (context: ConnectionDiagnosticEvent) {
       deepStrictEqual(context, {
         operationId: mockedOperationId,
@@ -224,7 +225,7 @@ test('Connection.send should enqueue request and process response', async t => {
   t.after(() => connection.close())
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    connectionsChannelName,
+    connectionsApiChannel.name,
     ['connection'],
     {
       start (context: ConnectionDiagnosticEvent) {
@@ -650,7 +651,7 @@ test('Connection should handle response parsing errors', async t => {
   t.after(() => connection.close())
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    connectionsChannelName,
+    connectionsApiChannel.name,
     ['connection'],
     {
       error (context: ConnectionDiagnosticEvent) {

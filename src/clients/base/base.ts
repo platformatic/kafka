@@ -2,7 +2,7 @@ import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
 import { type Callback } from '../../apis/definitions.ts'
 import { api as metadataV12, type MetadataResponse } from '../../apis/metadata/metadata.ts'
-import { clientsChannel, createDiagnosticContext, notifyCreation, type ClientType } from '../../diagnostic.ts'
+import { baseMetadataChannel, createDiagnosticContext, notifyCreation, type ClientType } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
@@ -136,7 +136,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    baseMetadataChannel.traceCallback(
       this[kMetadata],
       1,
       createDiagnosticContext({ client: this, operation: 'metadata' }),

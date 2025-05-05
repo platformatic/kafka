@@ -1,6 +1,7 @@
 import { deepStrictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import {
+  type Channel,
   type ChannelListener,
   subscribe,
   tracingChannel,
@@ -25,6 +26,7 @@ import {
   Producer,
   type ProducerOptions,
   type ResponseParser,
+  type TracingChannelWithName,
   type Writer
 } from '../src/index.ts'
 
@@ -258,9 +260,13 @@ export function mockAPI (
 }
 
 export function createCreationChannelVerifier<InstanceType> (
-  channel: string,
+  channel: string | symbol | Channel,
   filter: (data: InstanceType) => boolean = () => true
 ) {
+  if (typeof channel !== 'string') {
+    channel = (channel as Channel).name
+  }
+
   let instance: InstanceType | null = null
 
   function creationSubscriber (candidate: InstanceType) {
@@ -278,11 +284,15 @@ export function createCreationChannelVerifier<InstanceType> (
 }
 
 export function createTracingChannelVerifier<DiagnosticEvent extends Record<string, unknown>> (
-  channelName: string,
+  channelName: string | TracingChannelWithName<DiagnosticEvent>,
   unclonable: string | string[],
   verifiers: Record<string, Function>,
   filter: (label: string, data: DiagnosticEvent) => boolean = () => true
 ) {
+  if (typeof channelName !== 'string') {
+    channelName = (channelName as TracingChannelWithName<DiagnosticEvent>).name
+  }
+
   const channel = tracingChannel<string, DiagnosticEvent>(channelName)
   const eventsData: Record<string, object> = {}
   const operationsId = new Set<bigint>()

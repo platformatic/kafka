@@ -29,7 +29,15 @@ import {
 } from '../../apis/consumer/sync-group.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
 import { type FindCoordinatorResponse, api as findCoordinatorV6 } from '../../apis/metadata/find-coordinator.ts'
-import { clientsChannel, createDiagnosticContext } from '../../diagnostic.ts'
+import {
+  consumerCommitsChannel,
+  consumerConsumesChannel,
+  consumerFetchesChannel,
+  consumerGroupChannel,
+  consumerHeartbeatChannel,
+  consumerOffsetsChannel,
+  createDiagnosticContext
+} from '../../diagnostic.ts'
 import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
@@ -291,7 +299,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    consumerFetchesChannel.traceCallback(
       this.#fetch,
       1,
       createDiagnosticContext({ client: this, operation: 'fetch', options }),
@@ -320,7 +328,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    consumerCommitsChannel.traceCallback(
       this.#commit,
       1,
       createDiagnosticContext({ client: this, operation: 'commit', options }),
@@ -349,7 +357,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    consumerOffsetsChannel.traceCallback(
       this.#listOffsets,
       1,
       createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
@@ -378,7 +386,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    clientsChannel.traceCallback(
+    consumerOffsetsChannel.traceCallback(
       this.#listCommittedOffsets,
       1,
       createDiagnosticContext({ client: this, operation: 'listCommittedOffsets', options }),
@@ -475,10 +483,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   ): void {
-    clientsChannel.traceCallback(
+    consumerConsumesChannel.traceCallback(
       this.#performConsume,
       2,
-      createDiagnosticContext({ client: this, operation: 'fetch', options }),
+      createDiagnosticContext({ client: this, operation: 'consume', options }),
       this,
       options,
       true,
@@ -713,7 +721,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
-    clientsChannel.traceCallback(
+    consumerGroupChannel.traceCallback(
       this.#performFindGroupCoordinator,
       0,
       createDiagnosticContext({ client: this, operation: 'findGroupCoordinator' }),
@@ -723,7 +731,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
-    clientsChannel.traceCallback(
+    consumerGroupChannel.traceCallback(
       this.#performJoinGroup,
       1,
       createDiagnosticContext({ client: this, operation: 'joinGroup', options }),
@@ -734,7 +742,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #leaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
-    clientsChannel.traceCallback(
+    consumerGroupChannel.traceCallback(
       this.#performLeaveGroup,
       1,
       createDiagnosticContext({ client: this, operation: 'leaveGroup', force }),
@@ -745,7 +753,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #syncGroup (callback: CallbackWithPromise<GroupAssignment[]>): void {
-    clientsChannel.traceCallback(
+    consumerGroupChannel.traceCallback(
       this.#performSyncGroup,
       1,
       createDiagnosticContext({ client: this, operation: 'syncGroup' }),
@@ -758,7 +766,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeat (options: Required<GroupOptions>): void {
     const eventPayload = { groupId: this.groupId, memberId: this.memberId, generationId: this.generationId }
 
-    clientsChannel.traceCallback(
+    consumerHeartbeatChannel.traceCallback(
       this.#performDeduplicateGroupOperaton<HeartbeatResponse>,
       2,
       createDiagnosticContext({ client: this, operation: 'heartbeat' }),

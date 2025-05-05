@@ -4,15 +4,16 @@ import { test } from 'node:test'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
+  adminGroupsChannel,
+  adminTopicsChannel,
   type ClientDiagnosticEvent,
-  clientsChannelName,
   type ClusterPartitionMetadata,
   Consumer,
   type CreatedTopic,
   describeGroupsV5,
   EMPTY_BUFFER,
   type GroupBase,
-  instancesChannelName,
+  instancesChannel,
   listGroupsV5,
   MultipleErrors
 } from '../../../src/index.ts'
@@ -30,7 +31,7 @@ import {
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
-  const created = createCreationChannelVerifier(instancesChannelName)
+  const created = createCreationChannelVerifier(instancesChannel)
   const admin = createAdmin(t)
 
   strictEqual(admin instanceof Admin, true)
@@ -144,7 +145,7 @@ test('createTopics should create a new topic and support diagnostic channels', a
   }
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    adminTopicsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {
@@ -415,7 +416,7 @@ test('deleteTopics should delete a topic and support diagnostic channels', async
   const topicName = `test-topic-${randomUUID()}`
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    adminTopicsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {
@@ -533,7 +534,7 @@ test('listGroups should return consumer groups and support diagnostic channels',
   await consumer.joinGroup({})
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    adminGroupsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {
@@ -727,7 +728,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
   }
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    adminGroupsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {
@@ -969,7 +970,7 @@ test('deleteGroups should delete groups and support diagnostic channels', async 
   await consumer.close()
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    adminGroupsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {

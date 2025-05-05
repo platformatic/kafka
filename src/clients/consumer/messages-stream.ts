@@ -2,6 +2,12 @@ import { Readable } from 'node:stream'
 import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
+import {
+  consumerReceivesChannel,
+  createDiagnosticContext,
+  notifyCreation,
+  type DiagnosticContext
+} from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
 import { type Message } from '../../protocol/records.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
@@ -10,6 +16,7 @@ import { createPromisifiedCallback, kCallbackPromise, noopCallback, type Callbac
 import { ensureMetric, type Counter } from '../metrics.ts'
 import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
+import { defaultConsumerOptions } from './options.ts'
 import {
   MessagesStreamFallbackModes,
   MessagesStreamModes,
@@ -61,7 +68,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     /* c8 ignore next 14 */
-    super({ objectMode: true, highWaterMark: options.highWaterMark ?? 1024 })
+    super({ objectMode: true, highWaterMark: options.highWaterMark ?? defaultConsumerOptions.highWaterMark })
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
@@ -119,6 +126,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         'Number of consumed Kafka messages'
       )
     }
+
+    notifyCreation('messages-stream', this)
   }
 
   close (callback?: CallbackWithPromise<void>): void
@@ -393,6 +402,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     const headerKeyDeserializer = this.#headerKeyDeserializer
     const headerValueDeserializer = this.#headerValueDeserializer
 
+    let diagnosticContext: DiagnosticContext<unknown>
+
     // Parse results
     try {
       for (const topicResponse of response.responses) {
@@ -407,6 +418,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
           for (const record of records.records) {
+            diagnosticContext = createDiagnosticContext({
+              client: this.#consumer,
+              stream: this,
+              operation: 'receive',
+              raw: record
+            })
+
+            consumerReceivesChannel.start.publish(diagnosticContext)
+
             const headers = new Map()
             for (const [headerKey, headerValue] of record.headers) {
               headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
@@ -416,7 +436,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             this.#metricsConsumedMessages?.inc()
 
-            canPush = this.push({
+            const message: Message = {
               key,
               value,
               headers,
@@ -433,7 +453,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   records.firstOffset + BigInt(record.offsetDelta),
                   leaderEpoch
                 )
-            } as Message)
+            } as Message
+
+            diagnosticContext.result = message
+
+            consumerReceivesChannel.asyncStart.publish(diagnosticContext)
+
+            canPush = this.push(message)
+
+            consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
+            consumerReceivesChannel.end.publish(diagnosticContext)
           }
 
           // Track the last read offset

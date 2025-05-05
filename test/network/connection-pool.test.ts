@@ -7,9 +7,9 @@ import {
   Connection,
   ConnectionPool,
   type ConnectionPoolDiagnosticEvent,
-  connectionPoolsChannelName,
+  connectionsPoolGetsChannel,
   ConnectionStatuses,
-  instancesChannelName
+  instancesChannel
 } from '../../src/index.ts'
 import {
   createCreationChannelVerifier,
@@ -42,9 +42,9 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 }
 
 test('constructor should support diagnostic channels', () => {
-  const created = createCreationChannelVerifier(instancesChannelName)
+  const created = createCreationChannelVerifier(instancesChannel.name)
   const pool = new ConnectionPool('test-client')
-  deepStrictEqual(created(), { type: 'connectionPool', instance: pool })
+  deepStrictEqual(created(), { type: 'connection-pool', instance: pool })
 })
 
 test('get should return a connection for a broker', async t => {
@@ -204,7 +204,7 @@ test('ConnectionPool.get should support diagnostic channels', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
-  const verifyTracingChannel = createTracingChannelVerifier(connectionPoolsChannelName, ['connectionPool', 'result'], {
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsPoolGetsChannel, ['connectionPool', 'result'], {
     start (context: ConnectionPoolDiagnosticEvent) {
       deepStrictEqual(context, { operationId: mockedOperationId, connectionPool, operation: 'get', broker })
     },
@@ -278,7 +278,7 @@ test('getFirstAvailable should support diagnostic channels', async t => {
   ]
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    connectionPoolsChannelName,
+    connectionsPoolGetsChannel,
     ['connectionPool', 'result'],
     {
       start (context: ConnectionPoolDiagnosticEvent) {

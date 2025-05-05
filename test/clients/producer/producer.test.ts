@@ -4,14 +4,15 @@ import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   type ClientDiagnosticEvent,
-  clientsChannelName,
   initProducerIdV5,
-  instancesChannelName,
+  instancesChannel,
   MultipleErrors,
   NetworkError,
   ProduceAcks,
   Producer,
   type ProduceResult,
+  producerInitIdempotentChannel,
+  producerSendsChannel,
   produceV11,
   ProtocolError,
   stringSerializer,
@@ -33,7 +34,7 @@ import {
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
-  const created = createCreationChannelVerifier(instancesChannelName)
+  const created = createCreationChannelVerifier(instancesChannel)
   const admin = createProducer(t)
 
   strictEqual(admin instanceof Producer, true)
@@ -193,7 +194,7 @@ test('initIdempotentProducer should set idempotent options correctly and support
   })
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    producerInitIdempotentChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {
@@ -380,7 +381,7 @@ test('send should return ProduceResult with offsets and support diagnostic chann
   const originalOptions = structuredClone(options)
 
   const verifyTracingChannel = createTracingChannelVerifier(
-    clientsChannelName,
+    producerSendsChannel,
     'client',
     {
       start (context: ClientDiagnosticEvent) {

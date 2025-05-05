@@ -4,7 +4,7 @@ import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../clients/callbacks.ts'
-import { connectionsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
+import { connectionsApiChannel, connectionsConnectsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
@@ -119,7 +119,7 @@ export class Connection extends EventEmitter {
 
     const diagnosticContext = createDiagnosticContext({ connection: this, operation: 'connect', host, port })
 
-    connectionsChannel.start.publish(diagnosticContext)
+    connectionsConnectsChannel.start.publish(diagnosticContext)
 
     try {
       if (this.#status === ConnectionStatuses.CONNECTED) {
@@ -146,11 +146,11 @@ export class Connection extends EventEmitter {
 
         this.#status = ConnectionStatuses.ERROR
 
-        connectionsChannel.error.publish(diagnosticContext)
-        connectionsChannel.asyncStart.publish(diagnosticContext)
+        connectionsConnectsChannel.error.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
         this.emit('timeout', error)
         this.emit('error', error)
-        connectionsChannel.asyncEnd.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
       }
 
       const connectionErrorHandler = (e: Error) => {
@@ -159,10 +159,10 @@ export class Connection extends EventEmitter {
 
         this.#status = ConnectionStatuses.ERROR
 
-        connectionsChannel.error.publish(diagnosticContext)
-        connectionsChannel.asyncStart.publish(diagnosticContext)
+        connectionsConnectsChannel.error.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
         this.emit('error', error)
-        connectionsChannel.asyncEnd.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
       }
 
       this.emit('connecting')
@@ -185,20 +185,20 @@ export class Connection extends EventEmitter {
 
         this.#status = ConnectionStatuses.CONNECTED
 
-        connectionsChannel.asyncStart.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
         this.emit('connect')
-        connectionsChannel.asyncEnd.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
       })
 
       this.#socket.once('timeout', connectionTimeoutHandler)
       this.#socket.once('error', connectionErrorHandler)
       /* c8 ignore next 5 */
     } catch (error) {
-      connectionsChannel.error.publish({ ...diagnosticContext, error })
+      connectionsConnectsChannel.error.publish({ ...diagnosticContext, error })
 
       throw error
     } finally {
-      connectionsChannel.end.publish(diagnosticContext)
+      connectionsConnectsChannel.end.publish(diagnosticContext)
     }
 
     return callback[kCallbackPromise]
@@ -313,7 +313,7 @@ export class Connection extends EventEmitter {
       client_id => NULLABLE_STRING
   */
   #sendRequest (request: Request): boolean {
-    connectionsChannel.start.publish(request.diagnostic)
+    connectionsApiChannel.start.publish(request.diagnostic)
 
     try {
       if (this.#status !== ConnectionStatuses.CONNECTED) {
@@ -370,11 +370,11 @@ export class Connection extends EventEmitter {
       return canWrite
       /* c8 ignore next 5 */
     } catch (error) {
-      connectionsChannel.error.publish({ ...request.diagnostic, error })
-      connectionsChannel.end.publish(request.diagnostic)
+      connectionsApiChannel.error.publish({ ...request.diagnostic, error })
+      connectionsApiChannel.end.publish(request.diagnostic)
       throw error
     } finally {
-      connectionsChannel.end.publish(request.diagnostic)
+      connectionsApiChannel.end.publish(request.diagnostic)
     }
   }
 
@@ -459,14 +459,14 @@ export class Connection extends EventEmitter {
 
       if (responseError) {
         request.diagnostic.error = responseError
-        connectionsChannel.error.publish(request.diagnostic)
+        connectionsApiChannel.error.publish(request.diagnostic)
       } else {
         request.diagnostic.result = deserialized
       }
 
-      connectionsChannel.asyncStart.publish(request.diagnostic)
+      connectionsApiChannel.asyncStart.publish(request.diagnostic)
       callback(responseError, deserialized)
-      connectionsChannel.asyncStart.publish(request.diagnostic)
+      connectionsApiChannel.asyncStart.publish(request.diagnostic)
     }
   }
 

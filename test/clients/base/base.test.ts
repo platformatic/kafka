@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import {
   Base,
-  clientsChannelName,
+  baseMetadataChannel,
   sleep,
   type ClientDiagnosticEvent,
   type ClusterMetadata
@@ -223,7 +223,7 @@ test('metadata should support force update option', async t => {
 test('metadata should support diagnostic channels', async t => {
   const client = createBase(t)
 
-  const verifyTracingChannel = createTracingChannelVerifier(clientsChannelName, 'client', {
+  const verifyTracingChannel = createTracingChannelVerifier(baseMetadataChannel, 'client', {
     start (context: ClientDiagnosticEvent) {
       deepStrictEqual(context, { client, operation: 'metadata', operationId: mockedOperationId })
     },

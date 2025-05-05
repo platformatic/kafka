@@ -1,4 +1,4 @@
-import { channel, tracingChannel } from 'node:diagnostics_channel'
+import { channel, type TracingChannel, tracingChannel } from 'node:diagnostics_channel'
 import { type Base } from './clients/base/base.ts'
 import { type ConnectionPool } from './network/connection-pool.ts'
 import { type Connection } from './network/connection.ts'
@@ -20,29 +20,62 @@ export type ClientDiagnosticEvent<InstanceType extends Base = Base, Attributes =
   client: InstanceType
 } & Attributes
 
-export const diagnosticChannelNamespace = 'plt.kafka' as const
+export type TracingChannelWithName<EventType extends object> = TracingChannel<string, EventType> & { name: string }
 
-export const instancesChannelName = `${diagnosticChannelNamespace}:instances` as const
-export const instancesChannel = channel(instancesChannelName)
+export type DiagnosticContext<BaseContext> = BaseContext & {
+  operationId: bigint
+  result?: unknown
+  error?: unknown
+}
 
-export const connectionsChannelName = `${diagnosticChannelNamespace}:connections` as const
-export const connectionsChannel = tracingChannel<string, ConnectionDiagnosticEvent>(connectionsChannelName)
-
-export const connectionPoolsChannelName = `${diagnosticChannelNamespace}:connectionPools` as const
-export const connectionPoolsChannel = tracingChannel<string, ConnectionPoolDiagnosticEvent>(connectionPoolsChannelName)
-
-export const clientsChannelName = `${diagnosticChannelNamespace}:clients` as const
-export const clientsChannel = tracingChannel<string, ClientDiagnosticEvent>(clientsChannelName)
+export const channelsNamespace = 'plt:kafka' as const
 
 let operationId = 0n
 
-export function createDiagnosticContext<T> (context: T): T & { operationId: bigint; result?: unknown; error?: unknown } {
+export function createDiagnosticContext<BaseContext> (context: BaseContext): DiagnosticContext<BaseContext> {
   return { operationId: operationId++, ...context }
 }
 
 export function notifyCreation<InstanceType> (
-  type: ClientType | 'connection' | 'connectionPool',
+  type: ClientType | 'connection' | 'connection-pool' | 'messages-stream',
   instance: InstanceType
 ): void {
   instancesChannel.publish({ type, instance })
 }
+
+export function createTracingChannel<DiagnosticEvent extends object> (
+  name: string
+): TracingChannelWithName<DiagnosticEvent> {
+  name = `${channelsNamespace}:${name}`
+  const channel = tracingChannel<string, DiagnosticEvent>(name) as TracingChannelWithName<DiagnosticEvent>
+  channel.name = name
+  return channel
+}
+
+// Generic channel for objects creation
+export const instancesChannel = channel(`${channelsNamespace}:instances`)
+
+// Connection related channels
+export const connectionsConnectsChannel = createTracingChannel<ConnectionDiagnosticEvent>('connections:connects')
+export const connectionsApiChannel = createTracingChannel<ConnectionDiagnosticEvent>('connections:api')
+export const connectionsPoolGetsChannel = createTracingChannel<ConnectionPoolDiagnosticEvent>('connections:pool:get')
+
+// Base channels
+export const baseMetadataChannel = createTracingChannel<ClientDiagnosticEvent>('base:metadata')
+
+// Admin channels
+export const adminTopicsChannel = createTracingChannel<ClientDiagnosticEvent>('admin:topics')
+export const adminGroupsChannel = createTracingChannel<ClientDiagnosticEvent>('admin:groups')
+
+// Producer channels
+export const producerInitIdempotentChannel = createTracingChannel<ClientDiagnosticEvent>('producer:initIdempotent')
+export const producerSendsChannel = createTracingChannel<ClientDiagnosticEvent>('producer:sends')
+
+// Consumer channels
+export const consumerGroupChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:group')
+export const consumerHeartbeatChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:heartbeat')
+export const consumerReceivesChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:receives')
+export const consumerFetchesChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:fetches')
+export const consumerConsumesChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:consumes')
+export const consumerCommitsChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:commits')
+export const consumerOffsetsChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:offsets')

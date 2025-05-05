@@ -57,7 +57,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   ) {
-    const { autocommit, mode, fallbackMode, offsets, deserializers, ..._options } = options
+    const { autocommit, mode, fallbackMode, offsets, deserializers } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')
@@ -67,6 +67,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       throw new UserError('Must specify offsets when the stream mode is MANUAL.')
     }
 
+    /* c8 ignore next - Unless is initialized directly, highWaterMark is always defined */
     super({ objectMode: true, highWaterMark: options.highWaterMark ?? defaultConsumerOptions.highWaterMark })
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
@@ -347,7 +348,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             partitions: [
               {
                 partition,
-                fetchOffset: this.#offsetsToFetch.get(`${topic}:${partition}`) ?? 0n,
+                fetchOffset: this.#offsetsToFetch.get(`${topic}:${partition}`)!,
                 partitionMaxBytes: this.#options.maxBytes!,
                 currentLeaderEpoch: -1,
                 lastFetchedEpoch: -1

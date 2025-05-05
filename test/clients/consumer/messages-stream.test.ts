@@ -182,7 +182,10 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
 }
 
 test('should be an instance of Readable', async t => {
-  const created = createCreationChannelVerifier(instancesChannel)
+  const created = createCreationChannelVerifier(
+    instancesChannel,
+    (data: { type: string }) => data.type === 'messages-stream'
+  )
   const topic = createTestTopic()
 
   // Produce test messages

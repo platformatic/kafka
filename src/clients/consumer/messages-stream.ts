@@ -22,6 +22,7 @@ import {
   MessagesStreamModes,
   type CommitOptionsPartition,
   type ConsumeOptions,
+  type CorruptedMessageHandler,
   type GroupAssignment,
   type Offsets
 } from './types.ts'
@@ -31,6 +32,10 @@ import {
 /* c8 ignore next 3 - Fallback deserializer, nothing to really test */
 export function noopDeserializer (data?: Buffer): Buffer | undefined {
   return data
+}
+
+export function defaultCorruptedMessageHandler (): boolean {
+  return true
 }
 
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
@@ -52,12 +57,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
+  #corruptedMessageHandler: CorruptedMessageHandler
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   ) {
-    const { autocommit, mode, fallbackMode, offsets, deserializers, ...otherOptions } = options
+    const { autocommit, mode, fallbackMode, offsets, deserializers, onCorruptedMessage, ...otherOptions } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')
@@ -83,6 +89,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#autocommitInflight = false
     this.#shouldClose = false
     this.#closeCallbacks = []
+    this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
@@ -412,35 +419,38 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     let diagnosticContext: DiagnosticContext<unknown>
 
     // Parse results
-    try {
-      for (const topicResponse of response.responses) {
-        const topic = topicIds.get(topicResponse.topicId)!
+    for (const topicResponse of response.responses) {
+      const topic = topicIds.get(topicResponse.topicId)!
 
-        for (const { records, partitionIndex: partition } of topicResponse.partitions) {
-          if (!records) {
+      for (const { records, partitionIndex: partition } of topicResponse.partitions) {
+        if (!records) {
+          continue
+        }
+
+        const firstTimestamp = records.firstTimestamp
+        const firstOffset = records.firstOffset
+        const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
+
+        for (const record of records.records) {
+          const offset = records.firstOffset + BigInt(record.offsetDelta)
+
+          if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
+            // Thi is a duplicate message, ignore it
             continue
           }
 
-          const firstTimestamp = records.firstTimestamp
-          const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
+          diagnosticContext = createDiagnosticContext({
+            client: this.#consumer,
+            stream: this,
+            operation: 'receive',
+            raw: record
+          })
 
-          for (const record of records.records) {
-            const offset = records.firstOffset + BigInt(record.offsetDelta)
+          consumerReceivesChannel.start.publish(diagnosticContext)
 
-            if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
-              // This is a duplicate message, ignore it
-              continue
-            }
+          const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
 
-            diagnosticContext = createDiagnosticContext({
-              client: this.#consumer,
-              stream: this,
-              operation: 'receive',
-              raw: record
-            })
-
-            consumerReceivesChannel.start.publish(diagnosticContext)
-
+          try {
             const headers = new Map()
             for (const [headerKey, headerValue] of record.headers) {
               headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
@@ -458,7 +468,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               partition,
               timestamp: firstTimestamp + record.timestampDelta,
               offset,
-              commit: autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
+              commit
             } as Message
 
             diagnosticContext.result = message
@@ -468,22 +478,37 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             canPush = this.push(message)
 
             consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
+          } catch (error) {
+            const shouldDestroy = this.#corruptedMessageHandler(
+              record,
+              topic,
+              partition,
+              firstTimestamp,
+              firstOffset,
+              commit as Message['commit']
+            )
+
+            if (shouldDestroy) {
+              diagnosticContext.error = error
+              consumerReceivesChannel.error.publish(diagnosticContext)
+
+              this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
+              return
+            }
+          } finally {
             consumerReceivesChannel.end.publish(diagnosticContext)
           }
+        }
 
-          // Track the last read offset
-          const lastOffset = records.firstOffset + BigInt(records.lastOffsetDelta)
-          this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
+        // Track the last read offset
+        const lastOffset = records.firstOffset + BigInt(records.lastOffsetDelta)
+        this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
 
-          // Autocommit if needed
-          if (autocommit) {
-            this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
-          }
+        // Autocommit if needed
+        if (autocommit) {
+          this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
         }
       }
-    } catch (error) {
-      this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
-      return
     }
 
     if (this.#autocommitEnabled && !this.#autocommitInterval) {

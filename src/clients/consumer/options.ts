@@ -84,6 +84,7 @@ export const consumeOptionsSchema = {
         additionalProperties: false
       }
     },
+    onCorruptedMessage: { function: true },
     ...groupOptionsProperties,
     ...consumeOptionsProperties
   },

@@ -80,22 +80,18 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
   }
 
-  /* c8 ignore next 3 */
   get instanceId (): number {
     return this[kInstance]
   }
 
-  /* c8 ignore next 3 */
   get clientId (): string {
     return this[kClientId]
   }
 
-  /* c8 ignore next 3 */
   get closed (): boolean {
     return this[kClosed] === true
   }
 
-  /* c8 ignore next 3 */
   get type (): ClientType {
     return this[kClientType]
   }
@@ -105,7 +101,6 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       return this.emit(name, ...args)
     }
 
-    /* c8 ignore next */
     loggers[section]?.({ event: name, payload: args })
     return this.emit(`${section}:${name}`, ...args)
   }
@@ -206,7 +201,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
             }
 
             for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
-              /* c8 ignore next 3 */
+              /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
               if (isInternal) {
                 continue
               }
@@ -362,8 +357,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return null
   }
 
-  // This is a private API used to debug during development
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 -- This is a private API used to debug during development */
   [kInspect] (...args: unknown[]): void {
     debugDump(`client:${this[kInstance]}`, ...args)
   }

@@ -33,7 +33,8 @@ function operation(options, callback) {
 
     channel.end.publish(context)
   } catch (error) {
-    channel.error.publish({ ...context, error })
+    context.error = error
+    channel.error.publish(context)
     channel.end.publish(context)
   }
 }

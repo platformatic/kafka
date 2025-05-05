@@ -28,7 +28,7 @@ import {
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
-/* c8 ignore next 3 */
+/* c8 ignore next 3 - Fallback deserializer, nothing to really test */
 export function noopDeserializer (data?: Buffer): Buffer | undefined {
   return data
 }
@@ -67,7 +67,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       throw new UserError('Must specify offsets when the stream mode is MANUAL.')
     }
 
-    /* c8 ignore next 14 */
     super({ objectMode: true, highWaterMark: options.highWaterMark ?? defaultConsumerOptions.highWaterMark })
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
@@ -96,7 +95,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#options = structuredClone(_options)
 
     // Start the autocommit interval
-    /* c8 ignore next */
     if (typeof autocommit === 'number' && autocommit > 0) {
       this.#autocommitInterval = setInterval(this.#autocommit.bind(this), autocommit as number)
     } else {
@@ -108,7 +106,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // having some.
     this.#consumer.on('consumer:group:join', () => {
       this.#refreshOffsets((error: Error | null) => {
-        /* c8 ignore next 4 */
+        /* c8 ignore next 4 - Hard to test */
         if (error) {
           this.destroy(error)
           return
@@ -162,7 +160,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.resume()
     }
 
-    /* c8 ignore next 3 */
+    /* c8 ignore next 3 - Hard to test */
     this.once('error', (error: Error) => {
       callback(error)
     })
@@ -213,7 +211,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   addListener (event: 'pause', listener: () => void): this
   addListener (event: 'readable', listener: () => void): this
   addListener (event: 'resume', listener: () => void): this
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
   addListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.addListener(event, listener)
   }
@@ -226,7 +224,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   on (event: 'pause', listener: () => void): this
   on (event: 'readable', listener: () => void): this
   on (event: 'resume', listener: () => void): this
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
   on (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.on(event, listener)
   }
@@ -239,7 +237,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   once (event: 'pause', listener: () => void): this
   once (event: 'readable', listener: () => void): this
   once (event: 'resume', listener: () => void): this
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
   once (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.once(event, listener)
   }
@@ -251,7 +249,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependListener (event: 'pause', listener: () => void): this
   prependListener (event: 'readable', listener: () => void): this
   prependListener (event: 'resume', listener: () => void): this
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
   prependListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.prependListener(event, listener)
   }
@@ -263,7 +261,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependOnceListener (event: 'pause', listener: () => void): this
   prependOnceListener (event: 'readable', listener: () => void): this
   prependOnceListener (event: 'resume', listener: () => void): this
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
   prependOnceListener (event: string | symbol, listener: (...args: any[]) => void): this {
     return super.prependOnceListener(event, listener)
   }
@@ -289,7 +287,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #fetch () {
-    /* c8 ignore next 4 */
+    /* c8 ignore next 4 - Hard to test */
     if (this.#shouldClose || this.closed || this.destroyed) {
       this.push(null)
       return
@@ -298,7 +296,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
       if (error) {
         // The stream has been closed, ignore any error
-        /* c8 ignore next 4 */
+        /* c8 ignore next 4 - Hard to test */
         if (this.#shouldClose) {
           this.push(null)
           return
@@ -308,7 +306,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
-      /* c8 ignore next 4 */
+      /* c8 ignore next 4 - Hard to test */
       if (this.#shouldClose || this.closed || this.destroyed) {
         this.push(null)
         return
@@ -349,7 +347,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             partitions: [
               {
                 partition,
-                /* c8 ignore next */
                 fetchOffset: this.#offsetsToFetch.get(`${topic}:${partition}`) ?? 0n,
                 partitionMaxBytes: this.#options.maxBytes!,
                 currentLeaderEpoch: -1,
@@ -367,7 +364,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
           if (error) {
             // The stream has been closed, ignore the error
-            /* c8 ignore next 4 */
+            /* c8 ignore next 4 - Hard to test */
             if (this.#shouldClose) {
               this.push(null)
               return
@@ -531,6 +528,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #refreshOffsets (callback: Callback<void>) {
+    /* c8 ignore next 4 - Hard to test */
     if (this.#topics.length === 0) {
       callback(null)
       return
@@ -628,8 +626,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#closeCallbacks = []
   }
 
-  // This is a private API used to debug during development
-  /* c8 ignore next 3 */
+  /* c8 ignore next 3 - This is a private API used to debug during development */
   [kInspect] (...args: unknown[]): void {
     this.#consumer[kInspect](...args)
   }

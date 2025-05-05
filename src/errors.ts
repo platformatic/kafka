@@ -108,7 +108,6 @@ export class MultipleErrors extends AggregateError {
     }
 
     for (const error of this.errors) {
-      /* c8 ignore next */
       if (error[kGenericError] ? error.findBy(property, value) : error[property] === value) {
         return error as unknown as ErrorType
       }

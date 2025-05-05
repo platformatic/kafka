@@ -3,9 +3,11 @@ import { MultipleErrors } from '../errors.ts'
 
 export const kCallbackPromise = Symbol('plt.kafka.callbackPromise')
 
-/* c8 ignore next 3 */
+// This is only meaningful for testing
+export const kNoopCallbackReturnValue = Symbol('plt.kafka.noopCallbackReturnValue')
+
 export const noopCallback: CallbackWithPromise<any> = () => {
-  return Promise.resolve()
+  return Promise.resolve(kNoopCallbackReturnValue)
 }
 
 export type CallbackWithPromise<ReturnType> = Callback<ReturnType> & { [kCallbackPromise]?: Promise<ReturnType> }

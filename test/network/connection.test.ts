@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { type TestContext } from 'node:test'
 import {
@@ -42,6 +42,7 @@ test('Connection constructor', () => {
   const connection = new Connection('test-client')
 
   deepStrictEqual(connection.status, ConnectionStatuses.NONE)
+  ok(typeof connection.instanceId === 'number')
   deepStrictEqual(created(), { type: 'connection', instance: connection })
 })
 
@@ -89,6 +90,26 @@ test('Connection.connect should support diagnostic channels', async t => {
 
   deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
   ok(connection.socket instanceof Socket)
+
+  verifyTracingChannel()
+})
+
+test('Connection.connect should support diagnostic channels when erroring', async t => {
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  const verifyTracingChannel = createTracingChannelVerifier(connectionsConnectsChannel.name, ['connection'], {
+    error (context: ConnectionDiagnosticEvent) {
+      deepStrictEqual(
+        (context.error as Error).message,
+        'Port should be >= 0 and < 65536. Received type number (100000).'
+      )
+    }
+  })
+
+  await throws(() => connection.connect('localhost', 100000) as Promise<unknown>)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
 
   verifyTracingChannel()
 })
@@ -643,6 +664,52 @@ test('Connection should handle close with in-flight and after-drain requests', a
     code: 'PLT_KFK_NETWORK',
     message: 'Connection closed'
   })
+})
+
+test('Connection should handle request serialization errors', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    connectionsApiChannel.name,
+    ['connection'],
+    {
+      error (context: ConnectionDiagnosticEvent) {
+        deepStrictEqual((context.error as Error).message, 'Serialization error')
+      }
+    },
+    (_label: string, context: ConnectionDiagnosticEvent) => {
+      return context.operation === 'send'
+    }
+  )
+
+  await connection.connect('localhost', port)
+
+  // Create payload
+  function payloadFn () {
+    throw new Error('Serialization error')
+  }
+
+  // Create parser that throws an error
+  function parser () {
+    throw new Error('Parser error')
+  }
+
+  // Send a request
+  await throws(() =>
+    connection.send(
+      0, // apiKey
+      0, // apiVersion
+      payloadFn as () => Writer,
+      parser,
+      false,
+      false,
+      () => {}
+    )
+  )
+
+  verifyTracingChannel()
 })
 
 test('Connection should handle response parsing errors', async t => {

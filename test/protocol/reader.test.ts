@@ -429,6 +429,33 @@ test('readNullableBytes', () => {
   deepStrictEqual(reader.readNullableBytes(false), Buffer.from([5, 6, 7]))
 })
 
+test('readBytes', () => {
+  // Compact encoded buffer (null, empty, content)
+  const buffer = Buffer.from([
+    // null (length 0) - should return empty buffer
+    0,
+    // empty buffer (length 1, but value is empty)
+    1,
+    // Buffer with content [1, 2, 3, 4] (length 5, 1 byte for length + 4 bytes for content)
+    5, 1, 2, 3, 4,
+    // non-compact null (length -1) - should return empty buffer
+    255, 255, 255, 255,
+    // non-compact buffer [5, 6, 7] (length 3)
+    0, 0, 0, 3, 5, 6, 7
+  ])
+
+  const reader = new Reader(new DynamicBuffer(buffer))
+
+  // Compact format tests
+  deepStrictEqual(reader.readBytes(), Buffer.alloc(0)) // null returns empty buffer
+  deepStrictEqual(reader.readBytes(), Buffer.alloc(0)) // empty buffer returns empty buffer
+  deepStrictEqual(reader.readBytes(), Buffer.from([1, 2, 3, 4]))
+
+  // Non-compact format tests
+  deepStrictEqual(reader.readBytes(false), Buffer.alloc(0)) // null returns empty buffer
+  deepStrictEqual(reader.readBytes(false), Buffer.from([5, 6, 7]))
+})
+
 test('readVarIntBytes', () => {
   const buffer = Buffer.from([
     // length as VarInt (1 - ZigZag encoded would be 2, but for length it's not ZigZag)

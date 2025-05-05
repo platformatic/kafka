@@ -15,6 +15,7 @@ import {
   instancesChannel,
   jsonDeserializer,
   type KafkaRecord,
+  kNoopCallbackReturnValue,
   type Message,
   MessagesStream,
   MessagesStreamFallbackModes,
@@ -336,6 +337,8 @@ test('should support timed autocommits', async t => {
     mode: MessagesStreamModes.EARLIEST,
     autocommit: 1000
   })
+
+  deepStrictEqual(await messages[0].commit(), kNoopCallbackReturnValue)
 
   strictEqual(messages.length, 3, 'Should consume 3 messages')
 

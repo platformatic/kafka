@@ -57,7 +57,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   ) {
-    const { autocommit, mode, fallbackMode, offsets, deserializers } = options
+    const { autocommit, mode, fallbackMode, offsets, deserializers, ...otherOptions } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')
@@ -93,7 +93,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     // Clone the rest of the options so the user can never mutate them
-    this.#options = structuredClone(_options)
+    this.#options = structuredClone(otherOptions)
 
     // Start the autocommit interval
     if (typeof autocommit === 'number' && autocommit > 0) {

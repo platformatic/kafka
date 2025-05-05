@@ -317,6 +317,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       const topicIds = new Map<string, string>()
 
       // Group topic-partitions by the destination broker
+      const requestedOffsets = new Map<string, bigint>()
       for (const topic of this.#topics) {
         const assignment = this.#assignmentsForTopic(topic)
 
@@ -343,12 +344,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const topicId = metadata.topics.get(topic)!.id
           topicIds.set(topicId, topic)
 
+          const fetchOffset = this.#offsetsToFetch.get(`${topic}:${partition}`)!
+          requestedOffsets.set(`${topic}:${partition}`, fetchOffset)
+
           leaderRequests.push({
             topicId,
             partitions: [
               {
                 partition,
-                fetchOffset: this.#offsetsToFetch.get(`${topic}:${partition}`)!,
+                fetchOffset,
                 partitionMaxBytes: this.#options.maxBytes!,
                 currentLeaderEpoch: -1,
                 lastFetchedEpoch: -1
@@ -385,13 +389,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          this.#pushRecords(metadata, topicIds, response)
+          this.#pushRecords(metadata, topicIds, response, requestedOffsets)
         })
       }
     })
   }
 
-  #pushRecords (metadata: ClusterMetadata, topicIds: Map<string, string>, response: FetchResponse) {
+  #pushRecords (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>
+  ) {
     const autocommit = this.#autocommitEnabled
     let canPush = true
 
@@ -416,6 +425,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
           for (const record of records.records) {
+            const offset = records.firstOffset + BigInt(record.offsetDelta)
+
+            if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
+              // This is a duplicate message, ignore it
+              continue
+            }
+
             diagnosticContext = createDiagnosticContext({
               client: this.#consumer,
               stream: this,
@@ -441,16 +457,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               topic,
               partition,
               timestamp: firstTimestamp + record.timestampDelta,
-              offset: records.firstOffset + BigInt(record.offsetDelta),
-              commit: autocommit
-                ? noopCallback
-                : this.#commit.bind(
-                  this,
-                  topic,
-                  partition,
-                  records.firstOffset + BigInt(record.offsetDelta),
-                  leaderEpoch
-                )
+              offset,
+              commit: autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
             } as Message
 
             diagnosticContext.result = message

@@ -578,6 +578,59 @@ test('should support different fallback modes', async t => {
   strictEqual(earliestMessages.length, 3, 'With EARLIEST fallback, should consume all messages')
 })
 
+test('should ignore part of records batchs already consumed', async t => {
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Produce test messages - Note that these are parte of the same batch
+  // Create a producer with string serializers (uppercase values)
+  const producer = createProducer(t, {
+    serializers: stringSerializers,
+    autocreateTopics: true
+  })
+
+  // Produce messages
+  const messages = []
+  for (let i = 0; i < 6; i++) {
+    messages.push({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      headers: { headerKey: `headerValue-${i}` }
+    })
+  }
+
+  await producer.send({
+    messages,
+    acks: ProduceAcks.LEADER
+  })
+
+  // Consume messages and commit the fouth one
+  const {
+    consumer: firstConsumer,
+    stream: firstStream,
+    messages: firstBatch
+  } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  await firstBatch[3].commit()
+
+  // Have the first consumer leave the group so that we are sure assignments are sent to the second consumer
+  await firstStream.close()
+  await firstConsumer.leaveGroup()
+
+  // Consume again with same group ID but using COMMITTED mode
+  // We should only see the last two messages
+  const { messages: secondBatch } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.COMMITTED
+  })
+
+  strictEqual(firstBatch.length, 6, 'Should consume 6 messages in first batch')
+  strictEqual(secondBatch.length, 2, 'Should consume 2 messages in second batch')
+})
+
 test('should support asyncIterator interface', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()

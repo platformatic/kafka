@@ -186,4 +186,7 @@ When the application exits without leaving the group, Kafka still considers the 
 
 Only after this timeout expires and the member is considered dead will Kafka complete the rebalance and assign partitions to the new instance. During this period, the restarted consumer cannot consume any messages, even if it is the only member in the group.
 
-If you encounter this issue, you can easily avoid it by manually call `joinGroup`, rather than relying on `consume` to handle it automatically.
+If you encounter this issue, there are two ways to easily avoid it:
+
+1. If don't really use consumer groups, just use a random consumer group (like [crypto.randomUUID](https://nodejs.org/dist/latest/docs/api/crypto.html#cryptorandomuuidoptions)) as your group ID.
+2. If you use consumer groups, manually call `joinGroup`, rather than relying on `consume` to handle it automatically.

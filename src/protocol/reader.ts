@@ -276,7 +276,6 @@ export class Reader {
   }
 
   readBytes (compact: boolean = true): Buffer {
-    /* c8 ignore next */
     return this.readNullableBytes(compact) || EMPTY_BUFFER
   }
 

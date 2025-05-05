@@ -209,7 +209,6 @@ export function createRecordsBatch (
   }
 
   // Set the compression, if any
-  /* c8 ignore next */
   if ((options.compression ?? 'none') !== 'none') {
     const algorithm = compressionsAlgorithms[
       options.compression as keyof typeof compressionsAlgorithms
@@ -232,9 +231,7 @@ export function createRecordsBatch (
     .appendInt32(messages.length - 1)
     .appendInt64(BigInt(firstTimestamp))
     .appendInt64(BigInt(maxTimestamp))
-    /* c8 ignore next */
     .appendInt64(options.producerId ?? -1n)
-    /* c8 ignore next */
     .appendInt16(options.producerEpoch ?? 0)
     .appendInt32(firstSequence)
     .appendInt32(messages.length) // Number of records

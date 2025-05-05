@@ -44,6 +44,7 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 test('constructor should support diagnostic channels', () => {
   const created = createCreationChannelVerifier(instancesChannel.name)
   const pool = new ConnectionPool('test-client')
+  ok(typeof pool.instanceId === 'number')
   deepStrictEqual(created(), { type: 'connection-pool', instance: pool })
 })
 

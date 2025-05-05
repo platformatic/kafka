@@ -4,7 +4,12 @@ import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../clients/callbacks.ts'
-import { connectionsApiChannel, connectionsConnectsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
+import {
+  connectionsApiChannel,
+  connectionsConnectsChannel,
+  createDiagnosticContext,
+  notifyCreation
+} from '../diagnostic.ts'
 import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
@@ -55,11 +60,6 @@ export const defaultOptions: ConnectionOptions = {
 }
 
 let currentInstance = 0
-const kNoResponse = Symbol('plt.kafka.noResponse')
-
-/* c8 ignore next */
-export function noResponseCallback (..._: any[]): void {}
-noResponseCallback[kNoResponse] = true
 
 export class Connection extends EventEmitter {
   #options: ConnectionOptions
@@ -99,7 +99,6 @@ export class Connection extends EventEmitter {
     notifyCreation('connection', this)
   }
 
-  /* c8 ignore next 3 */
   get instanceId (): number {
     return this.#instanceId
   }
@@ -166,7 +165,7 @@ export class Connection extends EventEmitter {
       }
 
       this.emit('connecting')
-      /* c8 ignore next 3 */
+      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
       this.#socket = this.#options.tls
         ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
         : createConnection({ ...connectionOptions, port, host })
@@ -192,9 +191,11 @@ export class Connection extends EventEmitter {
 
       this.#socket.once('timeout', connectionTimeoutHandler)
       this.#socket.once('error', connectionErrorHandler)
-      /* c8 ignore next 5 */
     } catch (error) {
-      connectionsConnectsChannel.error.publish({ ...diagnosticContext, error })
+      this.#status = ConnectionStatuses.ERROR
+
+      diagnosticContext.error = error
+      connectionsConnectsChannel.error.publish(diagnosticContext)
 
       throw error
     } finally {
@@ -346,7 +347,6 @@ export class Connection extends EventEmitter {
         this.#inflightRequests.set(correlationId, request)
       }
 
-      /* c8 ignore next */
       loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
 
       for (const buf of writer.buffers) {
@@ -368,11 +368,12 @@ export class Connection extends EventEmitter {
       // debugDump(Date.now() % 100000, 'send', { owner: this.#ownerId, apiKey: protocolAPIsById[apiKey], correlationId })
 
       return canWrite
-      /* c8 ignore next 5 */
     } catch (error) {
-      connectionsApiChannel.error.publish({ ...request.diagnostic, error })
+      request.diagnostic.error = error
+      connectionsApiChannel.error.publish(request.diagnostic)
       connectionsApiChannel.end.publish(request.diagnostic)
       throw error
+      /* c8 ignore next 3 - C8 does not detect these as covered */
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }
@@ -454,7 +455,6 @@ export class Connection extends EventEmitter {
       //   correlationId
       // })
 
-      /* c8 ignore next */
       loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
 
       if (responseError) {

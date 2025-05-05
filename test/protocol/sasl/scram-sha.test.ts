@@ -1,6 +1,9 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from 'node:assert'
+import { randomBytes } from 'node:crypto'
 import test from 'node:test'
 import { AuthenticationError, type Connection, type saslAuthenticateV2, saslScramSha } from '../../../src/index.ts'
+import * as scramShaModule from '../../../src/protocol/sasl/scram-sha.ts'
+import { defaultCrypto, type ScramAlgorithmDefinition } from '../../../src/protocol/sasl/scram-sha.ts'
 
 const { authenticate, createNonce, h, hi, hmac, parseParameters, sanitizeString, ScramAlgorithms, xor } = saslScramSha
 
@@ -434,4 +437,58 @@ test('authenticate should check server signature validity', async () => {
       return true
     }
   )
+})
+
+test('authenticate should return the last response on successful authentication', async () => {
+  let callsCount = 0
+  let hmacCounts = 0
+
+  let serverSignature: Buffer
+
+  const api = {
+    async (_: Connection, payload: Buffer) {
+      callsCount++
+
+      if (callsCount === 1) {
+        return {
+          errorCode: 0,
+          errorMessage: null,
+          authBytes: Buffer.from(
+            `s=${randomBytes(10).toString('base64')},i=4096,r=${payload.toString().split('r=')[1]}`
+          ),
+          sessionLifetimeMs: 3600000n
+        }
+      } else {
+        return {
+          errorCode: 0,
+          errorMessage: null,
+          authBytes: `v=${serverSignature.toString('base64')}`,
+          sessionLifetimeMs: 3600000n
+        }
+      }
+    }
+  } as unknown as saslAuthenticateV2.SASLAuthenticationAPI
+  const mockConnection = {} as Connection
+
+  // Call authenticate with any parameters, our mock will bypass all checks
+  const response = await scramShaModule.authenticate(api, mockConnection, 'SHA-256', 'testuser', 'testpass', {
+    ...defaultCrypto,
+    hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer) {
+      const computed = defaultCrypto.hmac(definition, key, data)
+
+      hmacCounts++
+
+      if (hmacCounts === 4) {
+        serverSignature = computed
+      }
+
+      return computed
+    }
+  })
+
+  // This specifically tests lines 145-146 where no error is thrown and the lastResponse is returned
+  strictEqual(response.errorCode, 0, 'Response should have errorCode 0')
+  strictEqual(response.errorMessage, null, 'Response should have null errorMessage')
+  ok(response.authBytes, 'Response should have authBytes')
+  ok(response.sessionLifetimeMs, 'Response should have sessionLifetimeMs')
 })

@@ -46,7 +46,6 @@ export function createAPI<RequestArguments extends Array<unknown>, ResponseType>
     connection: Connection,
     ...args: [...RequestArguments, ...Partial<CallbackArguments<ResponseType>>]
   ): void {
-    /* c8 ignore next */
     const cb = typeof args[args.length - 1] === 'function' ? (args.pop() as Callback<ResponseType>) : () => {}
 
     connection.send(

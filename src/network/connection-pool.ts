@@ -31,7 +31,6 @@ export class ConnectionPool extends EventEmitter {
     notifyCreation('connection-pool', this)
   }
 
-  /* c8 ignore next 3 */
   get instanceId (): number {
     return this.#instanceId
   }

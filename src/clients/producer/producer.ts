@@ -64,6 +64,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       options.maxInflights = 1
       options.acks = ProduceAcks.ALL
       options.retries = Number.MAX_SAFE_INTEGER
+    } else {
+      options.idempotent = false
     }
 
     options.repeatOnStaleMetadata ??= true
@@ -241,9 +243,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void {
-    options.idempotent ??= this[kOptions].idempotent ?? false
-    /* c8 ignore next */
-    options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata ?? true
+    options.idempotent ??= this[kOptions].idempotent
+    options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata
     options.partitioner ??= this[kOptions].partitioner
 
     const { idempotent, partitioner } = options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>

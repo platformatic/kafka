@@ -15,6 +15,13 @@ export interface ScramAlgorithmDefinition {
   minIterations: number
 }
 
+export interface ScramCryptoModule {
+  h: (definition: ScramAlgorithmDefinition, data: string | Buffer) => Buffer
+  hi: (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) => Buffer
+  hmac: (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer) => Buffer
+  xor: (a: Buffer, b: Buffer) => Buffer
+}
+
 export const ScramAlgorithms = {
   'SHA-256': {
     keyLength: 32,
@@ -47,12 +54,11 @@ export function parseParameters (data: Buffer): Record<string, string> {
 }
 
 // h, hi, hmac and xor, are defined in https://datatracker.ietf.org/doc/html/rfc5802#section-2.2
-
-export function h (definition: ScramAlgorithmDefinition, data: string | Buffer) {
+export function h (definition: ScramAlgorithmDefinition, data: string | Buffer): Buffer {
   return createHash(definition.algorithm).update(data).digest()
 }
 
-export function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) {
+export function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number): Buffer {
   return pbkdf2Sync(password, salt, iterations, definition.keyLength, definition.algorithm)
 }
 
@@ -74,14 +80,23 @@ export function xor (a: Buffer, b: Buffer): Buffer {
   return result
 }
 
+export const defaultCrypto: ScramCryptoModule = {
+  h,
+  hi,
+  hmac,
+  xor
+}
+
 // Implements https://datatracker.ietf.org/doc/html/rfc5802#section-9
 export async function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
   username: string,
-  password: string
+  password: string,
+  crypto: ScramCryptoModule = defaultCrypto
 ): Promise<SaslAuthenticateResponse> {
+  const { h, hi, hmac, xor } = crypto
   const definition = ScramAlgorithms[algorithm]
 
   if (!definition) {
@@ -142,7 +157,6 @@ export async function authenticate (
   } else if (lastData.v !== serverSignature.toString('base64')) {
     throw new AuthenticationError('Invalid server signature.')
   }
-  /* c8 ignore next 2 */
 
   return lastResponse
 }

@@ -35,7 +35,7 @@ function loadSnappy () {
     const snappy = require('snappy')
     snappyCompressSync = snappy.compressSync
     snappyDecompressSync = snappy.uncompressSync
-    /* c8 ignore next 5 */
+    /* c8 ignore next 5 - In tests snappy is always available */
   } catch (e) {
     throw new UnsupportedCompressionError(
       'Cannot load snappy module, which is an optionalDependency. Please check your local installation.'
@@ -48,7 +48,7 @@ function loadLZ4 () {
     const lz4 = require('lz4-napi')
     lz4CompressSync = lz4.compressSync
     lz4DecompressSync = lz4.uncompressSync
-    /* c8 ignore next 5 */
+    /* c8 ignore next 5 - In tests lz4-napi is always available */
   } catch (e) {
     throw new UnsupportedCompressionError(
       'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
@@ -80,7 +80,7 @@ export const compressionsAlgorithms = {
   },
   snappy: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 */
+      /* c8 ignore next 4 - In tests snappy is always available */
       if (!snappyCompressSync) {
         loadSnappy()
       }
@@ -88,7 +88,7 @@ export const compressionsAlgorithms = {
       return snappyCompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 */
+      /* c8 ignore next 4 - In tests snappy is always available */
       if (!snappyDecompressSync) {
         loadSnappy()
       }
@@ -100,7 +100,7 @@ export const compressionsAlgorithms = {
   },
   lz4: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 */
+      /* c8 ignore next 4 - In tests lz4-napi is always available */
       if (!lz4CompressSync) {
         loadLZ4()
       }
@@ -108,7 +108,7 @@ export const compressionsAlgorithms = {
       return lz4CompressSync!(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 */
+      /* c8 ignore next 4 - In tests lz4-napi is always available */
       if (!lz4DecompressSync) {
         loadLZ4()
       }
@@ -119,7 +119,7 @@ export const compressionsAlgorithms = {
     available: true
   },
   zstd: {
-    /* c8 ignore next 7 */
+    /* c8 ignore next 7 - Tests are only run on Node.js versions that support zstd */
     compressSync (data: Buffer | DynamicBuffer): Buffer {
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')
@@ -127,7 +127,7 @@ export const compressionsAlgorithms = {
 
       return zstdCompressSync(ensureBuffer(data))
     },
-    /* c8 ignore next 7 */
+    /* c8 ignore next 7 - Tests are only run on Node.js versions that support zstd */
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
       if (!zstdCompressSync) {
         throw new UnsupportedCompressionError('zstd is not supported in the current Node.js version')

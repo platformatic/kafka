@@ -10,6 +10,15 @@ import {
 } from '../../../src/index.ts'
 import { createBase, createTracingChannelVerifier, mockedErrorMessage, mockedOperationId } from '../../helpers.ts'
 
+test('constructor should properly set getters', () => {
+  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9092'], strict: true })
+
+  ok(typeof base.instanceId, 'number')
+  deepStrictEqual(base.clientId, 'clientId')
+  deepStrictEqual(base.closed, false)
+  deepStrictEqual(base.type, 'base')
+})
+
 test('constructor should throw on invalid options when strict mode is enabled', () => {
   // Missing required clientId
   try {

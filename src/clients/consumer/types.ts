@@ -1,5 +1,6 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch.ts'
 import { type FetchIsolationLevel } from '../../apis/enumerations.ts'
+import { type Message, type KafkaRecord } from '../../protocol/records.ts'
 import { type BaseOptions, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
 
@@ -22,6 +23,15 @@ export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSub
 
 export type Offsets = Map<string, bigint[]>
 
+export type CorruptedMessageHandler = (
+  record: KafkaRecord,
+  topic: string,
+  partition: number,
+  firstTimestamp: bigint,
+  firstOffset: bigint,
+  commit: Message['commit']
+) => boolean
+
 export const MessagesStreamModes = {
   LATEST: 'latest',
   EARLIEST: 'earliest',
@@ -37,7 +47,8 @@ export const MessagesStreamFallbackModes = {
   FAIL: 'fail'
 } as const
 export type MessagesStreamFallbackMode = keyof typeof MessagesStreamFallbackModes
-export type MessagesStreamFallbackModeValue = (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
+export type MessagesStreamFallbackModeValue =
+  (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
 export interface GroupOptions {
   sessionTimeout?: number
   rebalanceTimeout?: number
@@ -60,6 +71,7 @@ export interface StreamOptions {
   mode?: MessagesStreamModeValue
   fallbackMode?: MessagesStreamFallbackModeValue
   offsets?: TopicWithPartitionAndOffset[]
+  onCorruptedMessage?: CorruptedMessageHandler
 }
 
 export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &

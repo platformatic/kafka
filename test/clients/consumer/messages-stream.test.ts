@@ -707,6 +707,60 @@ test('should handle deserialization errors', async t => {
   }
 })
 
+test('should allow resuming deserialization errors', async t => {
+  const groupId = createTestGroupId()
+  const topic = createTestTopic()
+
+  // Create a producer with string serializers (uppercase values)
+  const producer = createProducer(t, {
+    serializers: stringSerializers,
+    autocreateTopics: true
+  })
+
+  // Produce messages
+  const messages = []
+  for (let i = 0; i < 3; i++) {
+    messages.push({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      headers: { headerKey: `headerValue-${i}` }
+    })
+  }
+
+  await producer.send({
+    messages,
+    acks: ProduceAcks.LEADER
+  })
+
+  let corruptedKey: string = ''
+  const { messages: deserializedMessages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    deserializers: {
+      ...stringDeserializers,
+      key (buffer?: Buffer) {
+        const deserialized = buffer!.toString('utf-8')
+
+        if (deserialized === 'key-1') {
+          throw new Error('Deserialization error')
+        }
+
+        return deserialized
+      }
+    },
+    onCorruptedMessage (record) {
+      corruptedKey = record.key.toString('utf-8')
+      return false
+    }
+  })
+
+  deepStrictEqual(
+    deserializedMessages.map(m => m.key),
+    ['key-0', 'key-2']
+  )
+  deepStrictEqual(corruptedKey, 'key-1')
+})
+
 test('should support custom deserializers', async t => {
   const groupId = createTestGroupId()
   const topic = createTestTopic()

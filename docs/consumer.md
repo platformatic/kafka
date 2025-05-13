@@ -192,7 +192,7 @@ If you encounter this issue, there are two ways to easily avoid it:
 1. If don't really use consumer groups, just use a random consumer group (like [crypto.randomUUID](https://nodejs.org/dist/latest/docs/api/crypto.html#cryptorandomuuidoptions)) as your group ID.
 2. If you use consumer groups, manually call `joinGroup`, rather than relying on `consume` to handle it automatically.
 
-### How do blocking operation impact consuming of messages?
+### How do blocking operations impact consuming of messages?
 
 Kafka requires consumers to regularly report their status using a dedicated heartbeat API. If a consumer fails to send heartbeats within the configured session timeout, Kafka considers it dead. When this happens, the consumer must rejoin the group, during which time it cannot consume messages. Moreover, all other group members must also rejoin due to the triggered rebalance, resulting in a temporary halt in message consumption across the group.
 

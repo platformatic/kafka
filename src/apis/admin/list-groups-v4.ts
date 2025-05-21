@@ -23,7 +23,7 @@ export interface ListGroupsResponse {
   ListGroups Request (Version: 4) => [states_filter] TAG_BUFFER
     states_filter => COMPACT_STRING
 */
-export function createRequest(statesFilter: ConsumerGroupState[]): Writer {
+export function createRequest (statesFilter: ConsumerGroupState[]): Writer {
   return Writer.create()
     .appendArray(statesFilter, (w, s) => w.appendString(pascalCase(s, { normalize: true })), true, false)
     .appendTaggedFields()
@@ -38,7 +38,7 @@ export function createRequest(statesFilter: ConsumerGroupState[]): Writer {
       protocol_type => COMPACT_STRING
       group_state => COMPACT_STRING
 */
-export function parseResponse(
+export function parseResponse (
   _correlationId: number,
   apiKey: number,
   apiVersion: number,

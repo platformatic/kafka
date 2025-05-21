@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
-        run: docker compose -f docker/${{matrix.kafka-version}}/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094
+        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
       - name: Run Tests

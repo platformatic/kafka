@@ -447,7 +447,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     // Starting from the highest version, we need to find the first one that is supported
     for (let i = maxVersion; i >= minVersion; i--) {
       const apiName = (name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i) as keyof typeof apis
-      const candidate = apis[apiName]
+      const candidate = apis[apiName] as unknown as { api: API<RequestArguments, ResponseType> }
 
       if (candidate) {
         callback(null, candidate.api)

@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs'
 import { ajv } from '../../utils.ts'
 import { type BaseOptions } from './types.ts'
+
+const packageJson = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf-8'))
+
+// Note: clientSoftwareName can only contain alphanumeric characters, hyphens and dots
+export const clientSoftwareName = 'platformatic-kafka'
+export const clientSoftwareVersion = packageJson.version
 
 export const idProperty = { type: 'string', pattern: '^\\S+$' }
 

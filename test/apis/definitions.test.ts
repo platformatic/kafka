@@ -2,7 +2,8 @@
 
 import { deepStrictEqual } from 'assert'
 import test from 'node:test'
-import { api } from '../../src/apis/metadata/api-versions.ts'
+// Technically V4 is the latest version, but we use V3 in the tests so that it is also compatible with older brokers (2.4.0+)
+import { api } from '../../src/apis/metadata/api-versions-v3.ts'
 import { Connection } from '../../src/index.ts'
 import { kafkaBootstrapServers } from '../helpers.ts'
 

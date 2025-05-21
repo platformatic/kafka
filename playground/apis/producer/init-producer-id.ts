@@ -1,6 +1,6 @@
 import { FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
-import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator.ts'
-import { api as initProducerIdV5 } from '../../../src/apis/producer/init-producer-id.ts'
+import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
+import { api as initProducerIdV5 } from '../../../src/apis/producer/init-producer-id-v5.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

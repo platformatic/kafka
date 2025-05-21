@@ -1,5 +1,5 @@
-import { api as alterPartitionReassignmentsV0 } from '../../../src/apis/admin/alter-partition-reassignments.ts'
-import { api as listPartitionReassignmentsV0 } from '../../../src/apis/admin/list-partition-reassignments.ts'
+import { api as alterPartitionReassignmentsV0 } from '../../../src/apis/admin/alter-partition-reassignments-v0.ts'
+import { api as listPartitionReassignmentsV0 } from '../../../src/apis/admin/list-partition-reassignments-v0.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

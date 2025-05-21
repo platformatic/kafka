@@ -1,4 +1,4 @@
-import { api as offsetDeleteV0 } from '../../../src/apis/admin/offset-delete.ts'
+import { api as offsetDeleteV0 } from '../../../src/apis/admin/offset-delete-v0.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

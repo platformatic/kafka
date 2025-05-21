@@ -1,5 +1,5 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
-import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate.ts'
+import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type Connection } from '../../network/connection.ts'
 

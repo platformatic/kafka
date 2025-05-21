@@ -7,6 +7,7 @@ jobs:
       matrix:
         node-version: [22, 23]
         os: [ubuntu-latest]
+        kafka-version: ['3.7.0', '3.8.0', '3.9.0']
     runs-on: ${{matrix.os}}
     timeout-minutes: 10
     steps:
@@ -27,7 +28,11 @@ jobs:
           version: latest
       - name: Install dependencies
         run: pnpm install
-      - name: Start Kafka Cluster
+      - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
         run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094
+        env:
+          KAFKA_VERSION: ${{ matrix.kafka-version }}
       - name: Run Tests
         run: pnpm run ci
+        env:
+          KAFKA_VERSION: ${{ matrix.kafka-version }}

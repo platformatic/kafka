@@ -1,5 +1,5 @@
-import { api as alterReplicaLogDirsV2 } from '../../../src/apis/admin/alter-replica-log-dirs.ts'
-import { api as describeLogDirsV4 } from '../../../src/apis/admin/describe-log-dirs.ts'
+import { api as alterReplicaLogDirsV2 } from '../../../src/apis/admin/alter-replica-log-dirs-v2.ts'
+import { api as describeLogDirsV4 } from '../../../src/apis/admin/describe-log-dirs-v4.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

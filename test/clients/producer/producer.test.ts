@@ -17,6 +17,7 @@ import {
   ProtocolError,
   stringSerializer,
   stringSerializers,
+  UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
 import {
@@ -30,7 +31,8 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
-  mockMethod
+  mockMethod,
+  mockUnavailableAPI
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
@@ -364,6 +366,24 @@ test('initIdempotentProducer should handle errors from the API', async t => {
     (error: any) => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
+      return true
+    }
+  )
+})
+
+test('initIdempotentProducer should handle unavailable API errors', async t => {
+  const producer = createProducer(t)
+
+  mockUnavailableAPI(producer, 'InitProducerId')
+
+  // Attempt to initialize idempotent producer - should fail with API error
+  await rejects(
+    async () => {
+      await producer.initIdempotentProducer({})
+    },
+    (error: any) => {
+      strictEqual(error instanceof UnsupportedApiError, true)
+      strictEqual(error.message.includes('Unsupported API InitProducerId.'), true)
       return true
     }
   )
@@ -790,6 +810,29 @@ test('send should reject conflicting idempotent producer options', async t => {
   strictEqual(result.offsets?.length, 1)
 })
 
+test('send should handle unavailable API errors', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
+
+  mockUnavailableAPI(producer, 'Produce')
+
+  // Attempt to initialize idempotent producer - should fail with connection error
+  await rejects(
+    async () => {
+      await producer.send({
+        messages: [{ topic: testTopic, value: Buffer.from('idempotent-message') }],
+        idempotent: true,
+        acks: ProduceAcks.ALL
+      })
+    },
+    (error: any) => {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.errors[0].message.includes('Unsupported API Produce.'), true)
+      return true
+    }
+  )
+})
+
 test('send should handle errors from initIdempotentProducer', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
@@ -863,7 +906,7 @@ test('send should handle errors from ConnectionPool.get', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
 
-  mockConnectionPoolGet(producer[kConnections], 4)
+  mockConnectionPoolGet(producer[kConnections], 5)
 
   // Attempt to initialize idempotent producer - should fail with connection error
   await rejects(

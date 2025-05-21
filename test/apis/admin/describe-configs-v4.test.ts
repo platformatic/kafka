@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { type DescribeConfigsResponseResult } from '../../../src/apis/admin/describe-configs.ts'
+import { type DescribeConfigsResponseResult } from '../../../src/apis/admin/describe-configs-v4.ts'
 import { Reader, ResponseError, Writer, describeConfigsV4 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = describeConfigsV4

@@ -1,5 +1,5 @@
-import { api as alterPartitionV3 } from '../../../src/apis/admin/alter-partition.ts'
-import { api as createPartitionsV3 } from '../../../src/apis/admin/create-partitions.ts'
+import { api as alterPartitionV3 } from '../../../src/apis/admin/alter-partition-v3.ts'
+import { api as createPartitionsV3 } from '../../../src/apis/admin/create-partitions-v3.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

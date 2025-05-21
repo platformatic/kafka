@@ -1,34 +1,34 @@
 import { type ValidateFunction } from 'ajv'
-import { type FetchResponse, api as fetchV17 } from '../../apis/consumer/fetch.ts'
-import { type HeartbeatResponse, api as heartbeatV4 } from '../../apis/consumer/heartbeat.ts'
+import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
+  type JoinGroupRequest,
   type JoinGroupRequestProtocol,
-  type JoinGroupResponse,
-  api as joinGroupV9
-} from '../../apis/consumer/join-group.ts'
-import { type LeaveGroupResponse, api as leaveGroupV5 } from '../../apis/consumer/leave-group.ts'
+  type JoinGroupResponse
+} from '../../apis/consumer/join-group-v9.ts'
+import { type LeaveGroupRequest, type LeaveGroupResponse } from '../../apis/consumer/leave-group-v5.ts'
 import {
+  type ListOffsetsRequest,
   type ListOffsetsRequestTopic,
-  type ListOffsetsResponse,
-  api as listOffsetsV9
-} from '../../apis/consumer/list-offsets.ts'
+  type ListOffsetsResponse
+} from '../../apis/consumer/list-offsets-v9.ts'
 import {
+  type OffsetCommitRequest,
   type OffsetCommitRequestTopic,
-  type OffsetCommitResponse,
-  api as offsetCommitV9
-} from '../../apis/consumer/offset-commit.ts'
+  type OffsetCommitResponse
+} from '../../apis/consumer/offset-commit-v9.ts'
 import {
+  type OffsetFetchRequest,
   type OffsetFetchRequestTopic,
-  type OffsetFetchResponse,
-  api as offsetFetchV9
-} from '../../apis/consumer/offset-fetch.ts'
+  type OffsetFetchResponse
+} from '../../apis/consumer/offset-fetch-v9.ts'
 import {
+  type SyncGroupRequest,
   type SyncGroupRequestAssignment,
-  type SyncGroupResponse,
-  api as syncGroupV5
-} from '../../apis/consumer/sync-group.ts'
+  type SyncGroupResponse
+} from '../../apis/consumer/sync-group-v5.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
-import { type FindCoordinatorResponse, api as findCoordinatorV6 } from '../../apis/metadata/find-coordinator.ts'
+import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import {
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -53,6 +53,7 @@ import {
   kCreateConnectionPool,
   kFetchConnections,
   kFormatValidationErrors,
+  kGetApi,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -523,19 +524,26 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            fetchV17(
-              connection,
-              options.maxWaitTime ?? this[kOptions].maxWaitTime!,
-              options.minBytes ?? this[kOptions].minBytes!,
-              options.maxBytes ?? this[kOptions].maxBytes!,
-              FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
-              0,
-              0,
-              options.topics,
-              [],
-              '',
-              retryCallback
-            )
+            this[kGetApi]<FetchRequest, FetchResponse>('Fetch', (error, api) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as FetchResponse)
+                return
+              }
+
+              api(
+                connection,
+                options.maxWaitTime ?? this[kOptions].maxWaitTime!,
+                options.minBytes ?? this[kOptions].minBytes!,
+                options.maxBytes ?? this[kOptions].maxBytes!,
+                FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                0,
+                0,
+                options.topics,
+                [],
+                '',
+                retryCallback
+              )
+            })
           })
         })
       },
@@ -565,15 +573,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           })
         }
 
-        offsetCommitV9(
-          connection,
-          this.groupId,
-          this.generationId,
-          this.memberId!,
-          null,
-          Array.from(topics.values()),
-          groupCallback
-        )
+        this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as OffsetCommitResponse)
+            return
+          }
+
+          api(
+            connection,
+            this.groupId,
+            this.generationId,
+            this.memberId!,
+            null,
+            Array.from(topics.values()),
+            groupCallback
+          )
+        })
       },
       error => {
         callback(error)
@@ -630,13 +645,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   return
                 }
 
-                listOffsetsV9(
-                  connection,
-                  -1,
-                  FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
-                  Array.from(requests.values()),
-                  retryCallback
-                )
+                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
+                  if (error) {
+                    retryCallback(error, undefined as unknown as ListOffsetsResponse)
+                    return
+                  }
+
+                  api(
+                    connection,
+                    -1,
+                    FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                    Array.from(requests.values()),
+                    retryCallback
+                  )
+                })
               })
             },
             concurrentCallback,
@@ -682,13 +704,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performGroupOperation<OffsetFetchResponse>(
       'listCommits',
       (connection, groupCallback) => {
-        offsetFetchV9(
-          connection,
-          // Note: once we start implementing KIP-848, the memberEpoch must be obtained
-          [{ groupId: this.groupId, memberId: this.memberId!, memberEpoch: -1, topics }],
-          false,
-          groupCallback
-        )
+        this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as OffsetFetchResponse)
+            return
+          }
+
+          api(
+            connection,
+            // Note: once we start implementing KIP-848, the memberEpoch must be obtained
+            [{ groupId: this.groupId, memberId: this.memberId!, memberEpoch: -1, topics }],
+            false,
+            groupCallback
+          )
+        })
       },
       (error, response) => {
         if (error) {
@@ -780,7 +809,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
-        heartbeatV4(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
+
+        this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as HeartbeatResponse)
+            return
+          }
+
+          api(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
+        })
       },
       error => {
         // The heartbeat has been aborted elsewhere, ignore the response
@@ -887,7 +924,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 return
               }
 
-              findCoordinatorV6(connection, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
+              this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                  return
+                }
+
+                api(connection, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
+              })
             })
           },
           (error, response) => {
@@ -926,18 +970,25 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
       'joinGroup',
       (connection, groupCallback) => {
-        joinGroupV9(
-          connection,
-          this.groupId,
-          options.sessionTimeout,
-          options.rebalanceTimeout,
-          this.memberId ?? '',
-          null,
-          'consumer',
-          protocols,
-          '',
-          groupCallback
-        )
+        this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as JoinGroupResponse)
+            return
+          }
+
+          api(
+            connection,
+            this.groupId,
+            options.sessionTimeout,
+            options.rebalanceTimeout,
+            this.memberId ?? '',
+            null,
+            'consumer',
+            protocols,
+            '',
+            groupCallback
+          )
+        })
       },
       (error, response) => {
         if (!this.#membershipActive) {
@@ -1049,7 +1100,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
       'leaveGroup',
       (connection, groupCallback) => {
-        leaveGroupV5(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
+        this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as LeaveGroupResponse)
+            return
+          }
+
+          api(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
+        })
       },
       error => {
         if (error) {
@@ -1123,17 +1181,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<SyncGroupResponse>(
       'syncGroup',
       (connection, groupCallback) => {
-        syncGroupV5(
-          connection,
-          this.groupId,
-          this.generationId,
-          this.memberId!,
-          null,
-          'consumer',
-          this.#protocol!,
-          assignments!,
-          groupCallback
-        )
+        this[kGetApi]<SyncGroupRequest, SyncGroupResponse>('SyncGroup', (error, api) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as SyncGroupResponse)
+            return
+          }
+
+          api(
+            connection,
+            this.groupId,
+            this.generationId,
+            this.memberId!,
+            null,
+            'consumer',
+            this.#protocol!,
+            assignments!,
+            groupCallback
+          )
+        })
       },
       (error, response) => {
         if (!this.#membershipActive) {

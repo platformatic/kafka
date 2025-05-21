@@ -66,6 +66,7 @@ Each tracing channel publishes events with the following common properties:
 | `plt:kafka:connections:connects`    | `Connection`     | Traces a connection attempt to a broker.                                                          |
 | `plt:kafka:connections:api`         | `Connection`     | Traces a low level API request.                                                                   |
 | `plt:kafka:connections:pools:gets`  | `ConnectionPool` | Traces a connection retrieval attempt from a connection pool.                                     |
+| `plt:kafka:base:apis`               | `Base`           | Traces a `Base.listApis` request.                                                                 |
 | `plt:kafka:base:metadata`           | `Base`           | Traces a `Base.metadata` request.                                                                 |
 | `plt:kafka:admin:topics`            | `Admin`          | Traces a `Admin.createTopics` or `Admin.deleteTopics` request.                                    |
 | `plt:kafka:admin:groups`            | `Admin`          | Traces a `Admin.listGroups`, `Admin.describeGroups` or `Admin.deleteGroups` request.              |

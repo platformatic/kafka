@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { type DescribeQuorumResponseVoter } from '../../../src/apis/admin/describe-quorum.ts'
+import { type DescribeQuorumResponseVoter } from '../../../src/apis/admin/describe-quorum-v2.ts'
 import { Reader, ResponseError, Writer, describeQuorumV2 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = describeQuorumV2

@@ -1,4 +1,4 @@
-import { api as deleteRecordsV2 } from '../../../src/apis/admin/delete-records.ts'
+import { api as deleteRecordsV2 } from '../../../src/apis/admin/delete-records-v2.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

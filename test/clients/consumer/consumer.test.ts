@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
-import { type FetchResponse } from '../../../src/apis/consumer/fetch.ts'
+import { type FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
@@ -30,6 +30,7 @@ import {
   type Offsets,
   ProtocolError,
   syncGroupV5,
+  UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
 import {
@@ -44,7 +45,8 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
-  mockMethod
+  mockMethod,
+  mockUnavailableAPI
 } from '../../helpers.ts'
 
 test('constructor should initialize properly with default options', t => {
@@ -1011,6 +1013,41 @@ test('fetch should handle errors from the API', async t => {
   }
 })
 
+test('fetch should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+
+  mockMetadata(consumer, 1, null, {
+    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
+  })
+
+  mockUnavailableAPI(consumer, 'Fetch')
+
+  // Attempt to fetch with the mocked API
+  try {
+    await consumer.fetch({
+      node: 0,
+      topics: [
+        {
+          topicId: 'test-topic',
+          partitions: [
+            {
+              partition: 0,
+              currentLeaderEpoch: 0,
+              fetchOffset: 0n,
+              lastFetchedEpoch: 0,
+              partitionMaxBytes: 1048576
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API Fetch.'), true)
+  }
+})
+
 test('commit should commit offsets to Kafka and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)
@@ -1184,6 +1221,26 @@ test('commit should handle errors from the API (offsetCommit)', async t => {
   }
 })
 
+test('commit should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  // First join the group
+  await consumer.joinGroup({})
+
+  mockUnavailableAPI(consumer, 'OffsetCommit')
+
+  try {
+    await consumer.commit({
+      offsets: [{ topic, partition: 0, offset: 100n, leaderEpoch: 0 }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API OffsetCommit.'), true)
+  }
+})
+
 test('listOffsets should return offset values for topics and partitions and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true, 2)
@@ -1337,6 +1394,22 @@ test('listOffsets should handle errors from Connection.get', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Listing offsets failed.'), true)
+  }
+})
+
+test('listOffsets should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+  await consumer.metadata({ topics: [topic] })
+
+  mockUnavailableAPI(consumer, 'ListOffsets')
+
+  try {
+    await consumer.listOffsets({ topics: [topic] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API ListOffsets.'), true)
   }
 })
 
@@ -1539,6 +1612,26 @@ test('listCommittedOffsets should handle errors from the API', async t => {
   }
 })
 
+test('listCommittedOffsets should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true, 2)
+
+  // First join the group
+  await consumer.joinGroup({})
+
+  mockUnavailableAPI(consumer, 'OffsetFetch')
+
+  try {
+    await consumer.listCommittedOffsets({
+      topics: [{ topic, partitions: [0, 1] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API OffsetFetch.'), true)
+  }
+})
+
 test('findGroupCoordinator should return the coordinator nodeId and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 
@@ -1638,12 +1731,26 @@ test('findGroupCoordinator should handle errors from the API', async t => {
 
   mockAPI(consumer[kConnections], findCoordinatorV6.api.key)
 
-  // Attempt to find coordinator with the mocked API
   try {
     await consumer.findGroupCoordinator()
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, mockedErrorMessage)
+  }
+})
+
+test('findGroupCoordinator should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+
+  mockUnavailableAPI(consumer, 'FindCoordinator')
+
+  // Attempt to commit with mocked error
+  try {
+    await consumer.findGroupCoordinator()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
   }
 })
 
@@ -1940,6 +2047,34 @@ test('joinGroup should handle errors from the API (findCoordinator)', async t =>
   }
 })
 
+test('joinGroup should handle unavailable API errors (JoinGroup)', async t => {
+  const consumer = createConsumer(t)
+
+  mockUnavailableAPI(consumer, 'JoinGroup')
+
+  try {
+    await consumer.joinGroup({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API JoinGroup.'), true)
+  }
+})
+
+test('joinGroup should handle unavailable API errors (SyncGroup)', async t => {
+  const consumer = createConsumer(t)
+
+  mockUnavailableAPI(consumer, 'SyncGroup')
+
+  try {
+    await consumer.joinGroup({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API SyncGroup.'), true)
+  }
+})
+
 test('joinGroup should handle errors from Base.metadata', async t => {
   const consumer = createConsumer(t)
 
@@ -2195,6 +2330,22 @@ test('leaveGroup should handle errors from the API', async t => {
   }
 })
 
+test('leaveGroup should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+
+  mockUnavailableAPI(consumer, 'LeaveGroup')
+
+  await consumer.joinGroup({})
+
+  try {
+    await consumer.leaveGroup()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API LeaveGroup.'), true)
+  }
+})
+
 test('leaveGroup should handle unknown member errors gracefully', async t => {
   const consumer = createConsumer(t)
 
@@ -2293,6 +2444,19 @@ test('#heartbeat should handle errors from the API', async t => {
   // Error should contain our mock error message
   strictEqual(error instanceof MultipleErrors, true)
   strictEqual(error.message.includes(mockedErrorMessage), true)
+})
+
+test('#heartbeat should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+
+  mockUnavailableAPI(consumer, 'Heartbeat')
+
+  await consumer.joinGroup({})
+
+  const [{ error }] = await once(consumer, 'consumer:heartbeat:error')
+
+  strictEqual(error instanceof UnsupportedApiError, true)
+  strictEqual(error.message.includes('Unsupported API Heartbeat.'), true)
 })
 
 test('#heartbeat should emit events when it was cancelled while waiting for API response', async t => {

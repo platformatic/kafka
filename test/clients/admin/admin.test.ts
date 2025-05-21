@@ -15,19 +15,22 @@ import {
   type GroupBase,
   instancesChannel,
   listGroupsV5,
-  MultipleErrors
+  MultipleErrors,
+  UnsupportedApiError
 } from '../../../src/index.ts'
 import {
   createAdmin,
   createCreationChannelVerifier,
   createTracingChannelVerifier,
+  isKafka,
   kafkaBootstrapServers,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
   mockedErrorMessage,
   mockedOperationId,
-  mockMetadata
+  mockMetadata,
+  mockUnavailableAPI
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
@@ -409,6 +412,26 @@ test('createTopics should handle errors from Connection.getFirstAvailable', asyn
   }
 })
 
+test('createTopics should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'CreateTopics')
+
+  try {
+    // Attempt to create a topic - should fail with connection error
+    await admin.createTopics({
+      topics: ['test-topic'],
+      partitions: 1,
+      replicas: 1
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API CreateTopics.'), true)
+  }
+})
+
 test('deleteTopics should delete a topic and support diagnostic channels', async t => {
   const admin = createAdmin(t)
 
@@ -519,6 +542,24 @@ test('deleteTopics should handle errors from Connection.getFirstAvailable', asyn
   }
 })
 
+test('deleteTopics should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DeleteTopics')
+
+  try {
+    // Attempt to delete a topic - should fail with connection error
+    await admin.deleteTopics({
+      topics: ['test-topic']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API DeleteTopics.'), true)
+  }
+})
+
 test('listGroups should return consumer groups and support diagnostic channels', async t => {
   const groupId = `test-group-${randomUUID()}`
   // Create a consumer that joins a group
@@ -565,7 +606,7 @@ test('listGroups should return consumer groups and support diagnostic channels',
     id: consumer.groupId,
     protocolType: 'consumer',
     state: 'STABLE',
-    groupType: 'classic'
+    groupType: isKafka(['3.8.0', '3.9.0']) ? 'classic' : undefined
   })
 
   verifyTracingChannel()
@@ -674,7 +715,7 @@ test('listGroups should handle errors from Base.metadata', async t => {
 test('listGroups should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 2)
+  mockConnectionPoolGet(admin[kConnections], 3)
 
   try {
     // Attempt to list groups - should fail with connection error
@@ -700,6 +741,22 @@ test('listGroups should handle errors from the API', async t => {
     // Error should be about connection failure
     strictEqual(error instanceof Error, true)
     strictEqual(error.message, 'Listing groups failed.')
+  }
+})
+
+test('listGroups should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'ListGroups')
+
+  try {
+    // Attempt to list groups - should fail with connection error
+    await admin.listGroups()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about connection failure
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API ListGroups.'), true)
   }
 })
 
@@ -904,7 +961,7 @@ test('describeGroups should handle errors from Base.metadata', async t => {
 test('describeGroups should handle errors from Connection.getFirstAvailable', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
 
   try {
     // Attempt to describe groups - should fail with connection error
@@ -922,7 +979,7 @@ test('describeGroups should handle errors from Connection.getFirstAvailable', as
 test('describeGroups should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 3)
+  mockConnectionPoolGet(admin[kConnections], 4)
 
   try {
     // Attempt to describe groups - should fail with connection error
@@ -952,6 +1009,42 @@ test('describeGroups should handle errors from the API', async t => {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Describing groups failed.'), true)
+  }
+})
+
+test('describeGroups should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    // Attempt to describe groups - should fail with connection error
+    await admin.describeGroups({
+      groups: ['test-group']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('describeGroups should handle unavailable API errors (DescribeGroups)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DescribeGroups')
+
+  try {
+    // Attempt to describe groups - should fail with connection error
+    await admin.describeGroups({
+      groups: ['test-group']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DescribeGroups.'), true)
   }
 })
 
@@ -1095,7 +1188,7 @@ test('deleteGroups should handle errors from Connection.getFirstAvailable', asyn
 test('deleteGroups should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 3)
+  mockConnectionPoolGet(admin[kConnections], 4)
 
   try {
     // Attempt to delete groups - should fail with connection error
@@ -1105,5 +1198,37 @@ test('deleteGroups should handle errors from Connection.get', async t => {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Deleting groups failed.'), true)
+  }
+})
+
+test('deleteGroups should handle unavailable API errors (DeleteGroups)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DeleteGroups')
+
+  try {
+    // Attempt to delete groups - should fail with connection error
+    await admin.deleteGroups({ groups: ['non-existent'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DeleteGroups.'), true)
+  }
+})
+
+test('deleteGroups should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    // Attempt to delete groups - should fail with connection error
+    await admin.deleteGroups({ groups: ['non-existent'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
   }
 })

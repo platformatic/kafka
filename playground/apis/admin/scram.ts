@@ -1,5 +1,5 @@
-import { api as alterUserScramCredentialsV0 } from '../../../src/apis/admin/alter-user-scram-credentials.ts'
-import { api as describeUserScramCredentialsV0 } from '../../../src/apis/admin/describe-user-scram-credentials.ts'
+import { api as alterUserScramCredentialsV0 } from '../../../src/apis/admin/alter-user-scram-credentials-v0.ts'
+import { api as describeUserScramCredentialsV0 } from '../../../src/apis/admin/describe-user-scram-credentials-v0.ts'
 import { ScramMechanisms } from '../../../src/apis/enumerations.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'

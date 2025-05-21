@@ -1,8 +1,8 @@
-import { api as deleteGroupsV2 } from '../../../src/apis/admin/delete-groups.ts'
-import { api as describeGroupsV5 } from '../../../src/apis/admin/describe-groups.ts'
-import { api as listGroupsV5 } from '../../../src/apis/admin/list-groups.ts'
+import { api as deleteGroupsV2 } from '../../../src/apis/admin/delete-groups-v2.ts'
+import { api as describeGroupsV5 } from '../../../src/apis/admin/describe-groups-v5.ts'
+import { api as listGroupsV5 } from '../../../src/apis/admin/list-groups-v5.ts'
 import { FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
-import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator.ts'
+import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

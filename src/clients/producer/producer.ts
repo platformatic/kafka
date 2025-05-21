@@ -1,6 +1,6 @@
 import { ProduceAcks } from '../../apis/enumerations.ts'
-import { type InitProducerIdResponse, api as initProducerIdV5 } from '../../apis/producer/init-producer-id.ts'
-import { type ProduceResponse, api as produceV11 } from '../../apis/producer/produce.ts'
+import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
+import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
 import { createDiagnosticContext, producerInitIdempotentChannel, producerSendsChannel } from '../../diagnostic.ts'
 import { type GenericError, UserError } from '../../errors.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
@@ -14,6 +14,7 @@ import {
   kClearMetadata,
   kClosed,
   kConnections,
+  kGetApi,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -212,23 +213,30 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           retryCallback => {
             this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
               if (error) {
-                callback(error, undefined as unknown as ProducerInfo)
+                retryCallback(error, undefined as unknown as InitProducerIdResponse)
                 return
               }
 
-              initProducerIdV5(
-                connection,
-                null,
-                this[kOptions].timeout!,
-                options.producerId ?? this[kOptions].producerId ?? 0n,
-                options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
-                retryCallback
-              )
+              this[kGetApi]<InitProducerIdRequest, InitProducerIdResponse>('InitProducerId', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as InitProducerIdResponse)
+                  return
+                }
+
+                api(
+                  connection,
+                  null,
+                  this[kOptions].timeout!,
+                  options.producerId ?? this[kOptions].producerId ?? 0n,
+                  options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
+                  retryCallback
+                )
+              })
             })
           },
           (error, response) => {
             if (error) {
-              callback(error, undefined as unknown as ProducerInfo)
+              deduplicateCallback(error, undefined as unknown as ProducerInfo)
               return
             }
 
@@ -490,7 +498,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            produceV11(connection, acks, timeout, messages, produceOptions, retryCallback)
+            this[kGetApi]<ProduceRequest, ProduceResponse>('Produce', (error, api) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as ProduceResponse)
+                return
+              }
+
+              api(connection, acks, timeout, messages, produceOptions, retryCallback)
+            })
           })
         },
         (error, results) => {

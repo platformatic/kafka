@@ -1,26 +1,48 @@
 import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
-import { type Callback } from '../../apis/definitions.ts'
-import { api as metadataV12, type MetadataResponse } from '../../apis/metadata/metadata.ts'
-import { baseMetadataChannel, createDiagnosticContext, notifyCreation, type ClientType } from '../../diagnostic.ts'
+import { type API, type Callback } from '../../apis/definitions.ts'
+import * as apis from '../../apis/index.ts'
+import {
+  api as apiVersionsV3,
+  type ApiVersionsResponse,
+  type ApiVersionsResponseApi
+} from '../../apis/metadata/api-versions-v3.ts'
+import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
+import {
+  baseApisChannel,
+  baseMetadataChannel,
+  createDiagnosticContext,
+  notifyCreation,
+  type ClientType
+} from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
-import { MultipleErrors, NetworkError, UserError } from '../../errors.ts'
+import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
 import { kInstance } from '../../symbols.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
 import { type Metrics } from '../metrics.ts'
-import { baseOptionsValidator, defaultBaseOptions, defaultPort, metadataOptionsValidator } from './options.ts'
+import {
+  baseOptionsValidator,
+  clientSoftwareName,
+  clientSoftwareVersion,
+  defaultBaseOptions,
+  defaultPort,
+  metadataOptionsValidator
+} from './options.ts'
 import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
 
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
+export const kApis = Symbol('plt.kafka.base.apis')
+export const kGetApi = Symbol('plt.kafka.base.getApi')
 export const kOptions = Symbol('plt.kafka.base.options')
 export const kConnections = Symbol('plt.kafka.base.connections')
 export const kFetchConnections = Symbol('plt.kafka.base.fetchCnnections')
 export const kCreateConnectionPool = Symbol('plt.kafka.base.createConnectionPool')
 export const kClosed = Symbol('plt.kafka.base.closed')
+export const kListApis = Symbol('plt.kafka.base.listApis')
 export const kMetadata = Symbol('plt.kafka.base.metadata')
 export const kCheckNotClosed = Symbol('plt.kafka.base.checkNotClosed')
 export const kClearMetadata = Symbol('plt.kafka.base.clearMetadata')
@@ -44,6 +66,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kClientId]: string;
   [kClientType]: ClientType;
   [kBootstrapBrokers]: Broker[];
+  [kApis]: ApiVersionsResponseApi[];
   [kOptions]: OptionsType;
   [kConnections]: ConnectionPool;
   [kClosed]: boolean;
@@ -56,6 +79,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     super()
     this[kClientType] = 'base'
     this[kInstance] = currentInstance++
+    this[kApis] = []
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
@@ -118,6 +142,24 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return callback[kCallbackPromise]
   }
 
+  listApis (callback: CallbackWithPromise<ApiVersionsResponseApi[]>): void
+  listApis (): Promise<ApiVersionsResponseApi[]>
+  listApis (callback?: CallbackWithPromise<ApiVersionsResponseApi[]>): void | Promise<ApiVersionsResponseApi[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback<ApiVersionsResponseApi[]>()
+    }
+
+    baseApisChannel.traceCallback(
+      this[kListApis],
+      0,
+      createDiagnosticContext({ client: this, operation: 'listApis' }),
+      this,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
   metadata (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void
   metadata (options: MetadataOptions): Promise<ClusterMetadata>
   metadata (options: MetadataOptions, callback?: CallbackWithPromise<ClusterMetadata>): void | Promise<ClusterMetadata> {
@@ -155,6 +197,38 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return pool
   }
 
+  [kListApis] (callback: CallbackWithPromise<ApiVersionsResponseApi[]>): void {
+    this[kPerformDeduplicated](
+      'listApis',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<ApiVersionsResponse>(
+          'listApis',
+          retryCallback => {
+            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as ApiVersionsResponse)
+                return
+              }
+
+              // We use V3 to be able to get APIS from Kafka 2.4.0+
+              apiVersionsV3(connection, clientSoftwareName, clientSoftwareVersion, retryCallback)
+            })
+          },
+          (error: Error | null, metadata) => {
+            if (error) {
+              deduplicateCallback(error, undefined as unknown as ApiVersionsResponseApi[])
+              return
+            }
+
+            deduplicateCallback(null, metadata.apiKeys)
+          },
+          0
+        )
+      },
+      callback
+    )
+  }
+
   [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
     const metadataMaxAge = options.metadataMaxAge ?? this[kOptions].metadataMaxAge!
 
@@ -183,7 +257,14 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 return
               }
 
-              metadataV12(connection, options.topics, autocreateTopics, true, retryCallback)
+              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  return
+                }
+
+                api(connection, options.topics, autocreateTopics, true, retryCallback)
+              })
             })
           },
           (error: Error | null, metadata: MetadataResponse) => {
@@ -330,6 +411,54 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
 
     return callback[kCallbackPromise]
+  }
+
+  [kGetApi]<RequestArguments extends Array<unknown>, ResponseType>(
+    name: string,
+    callback: Callback<API<RequestArguments, ResponseType>>
+  ) {
+    // Make sure we have APIs informations
+    if (!this[kApis].length) {
+      this[kListApis]((error, apis) => {
+        if (error) {
+          callback(error, undefined as unknown as API<RequestArguments, ResponseType>)
+          return
+        }
+
+        this[kApis] = apis
+        this[kGetApi](name, callback)
+      })
+
+      return
+    }
+
+    const api = this[kApis].find(api => api.name === name)
+
+    if (!api) {
+      callback(
+        new UnsupportedApiError(`Unsupported API ${name}.`),
+        undefined as unknown as API<RequestArguments, ResponseType>
+      )
+      return
+    }
+
+    const { minVersion, maxVersion } = api
+
+    // Starting from the highest version, we need to find the first one that is supported
+    for (let i = maxVersion; i >= minVersion; i--) {
+      const apiName = (name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i) as keyof typeof apis
+      const candidate = apis[apiName]
+
+      if (candidate) {
+        callback(null, candidate.api)
+        return
+      }
+    }
+
+    callback(
+      new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }),
+      undefined as unknown as API<RequestArguments, ResponseType>
+    )
   }
 
   [kValidateOptions] (

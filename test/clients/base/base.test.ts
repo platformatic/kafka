@@ -1,14 +1,26 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
+import { kConnections, kGetApi } from '../../../src/clients/base/base.ts'
 import {
+  apiVersionsV3,
   Base,
+  baseApisChannel,
   baseMetadataChannel,
+  MultipleErrors,
   sleep,
+  UnsupportedApiError,
   type ClientDiagnosticEvent,
   type ClusterMetadata
 } from '../../../src/index.ts'
-import { createBase, createTracingChannelVerifier, mockedErrorMessage, mockedOperationId } from '../../helpers.ts'
+import {
+  createBase,
+  createTracingChannelVerifier,
+  mockAPI,
+  mockConnectionPoolGetFirstAvailable,
+  mockedErrorMessage,
+  mockedOperationId
+} from '../../helpers.ts'
 
 test('constructor should properly set getters', () => {
   const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9092'], strict: true })
@@ -111,6 +123,81 @@ test('close should properly terminate client', async t => {
   strictEqual(client.closed, true)
 })
 
+test('listApis should return a list of available APIs', async t => {
+  const client = createBase(t)
+
+  const apis = await client.listApis()
+
+  const produceApi = apis.find(api => api.name === 'Produce')!
+  deepStrictEqual(produceApi.name, 'Produce')
+  deepStrictEqual(produceApi.minVersion, 0)
+  ok(produceApi.maxVersion > 0)
+})
+
+test('listApis should support diagnostic channels', async t => {
+  const client = createBase(t)
+
+  const verifyTracingChannel = createTracingChannelVerifier(baseApisChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, { client, operation: 'listApis', operationId: mockedOperationId })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  // Fetch metadata for the cluster
+  const metadataPromise = client.listApis()
+
+  await metadataPromise
+  verifyTracingChannel()
+})
+
+test('listApis should support both callback and promise API', (t, done) => {
+  const client = createBase(t)
+
+  // Use callback API
+  client.listApis((err, apis) => {
+    strictEqual(err, null)
+    ok(Array.isArray(apis))
+
+    client
+      .close()
+      .then(() => done())
+      .catch(done)
+  })
+})
+
+test('listApis should handle errors from Connection.getFirstAvailable', async t => {
+  const client = createBase(t)
+
+  mockConnectionPoolGetFirstAvailable(client[kConnections])
+
+  // Attempt to find coordinator with the mocked connection
+  try {
+    await client.listApis()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('listApis should handle errors from the API (apiVersions)', async t => {
+  const client = createBase(t)
+
+  mockAPI(client[kConnections], apiVersionsV3.api.key)
+
+  // Attempt to commit with mocked error
+  try {
+    await client.listApis()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, mockedErrorMessage)
+  }
+})
+
 test('metadata should fetch cluster metadata', async t => {
   const client = createBase(t)
 
@@ -162,7 +249,7 @@ test('metadata should fetch topic metadata', async t => {
   strictEqual(Array.isArray(firstPartition.replicas), true)
 })
 
-test('should cache metadata according to metadataMaxAge', async t => {
+test('metadata should cache metadata according to metadataMaxAge', async t => {
   const client = createBase(t, {
     metadataMaxAge: 1000 // 1 second
   })
@@ -248,7 +335,7 @@ test('metadata should support diagnostic channels', async t => {
   verifyTracingChannel()
 })
 
-test('should support both callback and promise API for metadata', (t, done) => {
+test('metadata should support both callback and promise API', (t, done) => {
   const client = createBase(t)
 
   // Create a unique test topic
@@ -266,7 +353,7 @@ test('should support both callback and promise API for metadata', (t, done) => {
   })
 })
 
-test('should emit events', async t => {
+test('metadata should emit events', async t => {
   const client = createBase(t)
 
   // Create a promise that resolves when metadata event is emitted
@@ -332,6 +419,59 @@ test('metadata should return validation error in strict mode', async t => {
   strictEqual(typeof metadata.id, 'string')
 })
 
+test('metadata should handle connection failures to non-existent broker', async t => {
+  // Create a client with a non-existent broker
+  const client = createBase(t, {
+    bootstrapBrokers: [{ host: '192.0.2.1', port: 9092 }], // RFC 5737 reserved IP for documentation - guaranteed to not exist
+    connectTimeout: 1000, // 1 second timeout
+    retries: 2 // Minimal retries to make test faster
+  })
+
+  // Expect the metadata call to fail with a network error
+  try {
+    await client.metadata({ topics: [] })
+
+    // If we get here, the call unexpectedly succeeded
+    throw new Error('Expected metadata call to fail with connection error')
+  } catch (error: any) {
+    // Should be a MultipleErrors or AggregateError instance since we use performWithRetry
+    strictEqual(['MultipleErrors', 'AggregateError'].includes(error.name), true)
+
+    // Error message should indicate failure
+    strictEqual(error.message.includes('failed'), true)
+
+    // Should contain nested errors
+    strictEqual(Array.isArray(error.errors), true)
+    strictEqual(error.errors.length > 0, true)
+
+    // At least one error should be a network error
+    const hasNetworkError = error.errors.some(
+      (err: any) =>
+        err.message.includes('ECONNREFUSED') ||
+        err.message.includes('ETIMEDOUT') ||
+        err.message.includes('getaddrinfo') ||
+        err.message.includes('connect')
+    )
+
+    strictEqual(hasNetworkError, true)
+  }
+})
+
+test('listApis should handle errors from Connection.getFirstAvailable', async t => {
+  const client = createBase(t)
+
+  mockConnectionPoolGetFirstAvailable(client[kConnections], 2)
+
+  // Attempt to find coordinator with the mocked connection
+  try {
+    await client.metadata({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
 test('emitWithDebug should emit events directly when section is null', t => {
   const client = createBase(t)
 
@@ -379,44 +519,6 @@ test('emitWithDebug should emit events with section prefix when section is provi
   strictEqual(result, true)
 })
 
-test('metadata should handle connection failures to non-existent broker', async t => {
-  // Create a client with a non-existent broker
-  const client = createBase(t, {
-    bootstrapBrokers: [{ host: '192.0.2.1', port: 9092 }], // RFC 5737 reserved IP for documentation - guaranteed to not exist
-    connectTimeout: 1000, // 1 second timeout
-    retries: 2 // Minimal retries to make test faster
-  })
-
-  // Expect the metadata call to fail with a network error
-  try {
-    await client.metadata({ topics: [] })
-
-    // If we get here, the call unexpectedly succeeded
-    throw new Error('Expected metadata call to fail with connection error')
-  } catch (error: any) {
-    // Should be a MultipleErrors or AggregateError instance since we use performWithRetry
-    strictEqual(['MultipleErrors', 'AggregateError'].includes(error.name), true)
-
-    // Error message should indicate failure
-    strictEqual(error.message.includes('failed'), true)
-
-    // Should contain nested errors
-    strictEqual(Array.isArray(error.errors), true)
-    strictEqual(error.errors.length > 0, true)
-
-    // At least one error should be a network error
-    const hasNetworkError = error.errors.some(
-      (err: any) =>
-        err.message.includes('ECONNREFUSED') ||
-        err.message.includes('ETIMEDOUT') ||
-        err.message.includes('getaddrinfo') ||
-        err.message.includes('connect')
-    )
-
-    strictEqual(hasNetworkError, true)
-  }
-})
-
 test('operations can be aborted without a retry', async t => {
   // Create a client with a non-existent broker
   const client = createBase(t, {
@@ -434,4 +536,39 @@ test('operations can be aborted without a retry', async t => {
   } catch (error: any) {
     strictEqual(error.message, mockedErrorMessage)
   }
+})
+
+test('kGetApi should fail on unsupported API', (t, done) => {
+  const client = createBase(t)
+
+  client[kGetApi]('foo', (error, api) => {
+    ok(typeof api === 'undefined')
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error!.message, 'Unsupported API foo.')
+
+    done()
+  })
+})
+
+test('kGetApi should fail on unsupported API version', (t, done) => {
+  const client = createBase(t)
+
+  mockAPI(client[kConnections], apiVersionsV3.api.key, null, {
+    errorCode: 0,
+    throttleTimeMs: 0,
+    apiKeys: [
+      { name: 'Metadata', minVersion: 0, maxVersion: 11 },
+      { name: 'Produce', minVersion: 30, maxVersion: 40 }
+    ]
+  })
+
+  client[kGetApi]('Produce', (error, api) => {
+    ok(typeof api === 'undefined')
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual((error as UnsupportedApiError).message, 'No usable implementation found for API Produce.')
+    strictEqual((error as UnsupportedApiError).minVersion, 30)
+    strictEqual((error as UnsupportedApiError).maxVersion, 40)
+
+    done()
+  })
 })

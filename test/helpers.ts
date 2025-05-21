@@ -9,7 +9,7 @@ import {
   unsubscribe
 } from 'node:diagnostics_channel'
 import { type TestContext } from 'node:test'
-import { kMetadata } from '../src/clients/base/base.ts'
+import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
 import {
   Admin,
   type AdminOptions,
@@ -27,6 +27,7 @@ import {
   type ProducerOptions,
   type ResponseParser,
   type TracingChannelWithName,
+  UnsupportedApiError,
   type Writer
 } from '../src/index.ts'
 
@@ -196,9 +197,15 @@ export function mockAPI (
   }
 
   const originalGet = pool.get.bind(pool)
+  let mocked = false
 
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     originalGet(broker, (error: Error | null, connection: Connection) => {
+      if (mocked) {
+        callback(error, connection)
+        return
+      }
+
       if (error) {
         callback(error, undefined as unknown as Connection)
         return
@@ -238,6 +245,7 @@ export function mockAPI (
             connection.send = originalSend
             pool.get = originalGet
 
+            mocked = true
             callback(errorToMock, returnValue as ReturnType)
           }
           return
@@ -257,6 +265,32 @@ export function mockAPI (
       callback(null, connection)
     })
   } as typeof originalGet
+}
+
+export function mockUnavailableAPI (
+  target: Base,
+  api: string | ((api: string) => boolean),
+  fn: boolean | (() => boolean) = true
+): void {
+  const original = target[kGetApi].bind(target)
+
+  target[kGetApi] = function (name: string, callback: Callback<unknown>) {
+    const shouldMock = typeof api === 'function' ? api(name) : name === api
+
+    if (shouldMock) {
+      callback(new UnsupportedApiError(`Unsupported API ${name}.`), undefined)
+
+      const shouldRestore = typeof fn === 'function' ? fn() : fn
+
+      if (shouldRestore) {
+        target[kGetApi] = original
+      }
+
+      return
+    }
+
+    return original(name, callback)
+  } as typeof original
 }
 
 export function createCreationChannelVerifier<InstanceType> (
@@ -338,4 +372,14 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
       verifier(eventsData[label])
     }
   }
+}
+
+export function isKafka (version: string | string[]): boolean {
+  version = Array.isArray(version) ? version : [version]
+
+  return version.includes(process.env.KAFKA_VERSION as string)
+}
+
+export function isNotKafka (version: string | string[]): boolean {
+  return !isKafka(version)
 }

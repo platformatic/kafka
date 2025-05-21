@@ -1,4 +1,4 @@
-import { api as deleteTopicsV6 } from '../../../src/apis/admin/delete-topics.ts'
+import { api as deleteTopicsV6 } from '../../../src/apis/admin/delete-topics-v6.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

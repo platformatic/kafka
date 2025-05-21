@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream'
-import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch.ts'
+import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
 import {

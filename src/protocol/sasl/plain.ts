@@ -1,4 +1,4 @@
-import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate.ts'
+import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { type Connection } from '../../network/connection.ts'
 
 export function authenticate (

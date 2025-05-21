@@ -1,5 +1,5 @@
-import { api as initProducerIdV5 } from '../../../src/apis/producer/init-producer-id.ts'
-import { api as produceV11 } from '../../../src/apis/producer/produce.ts'
+import { api as initProducerIdV5 } from '../../../src/apis/producer/init-producer-id-v5.ts'
+import { api as produceV11 } from '../../../src/apis/producer/produce-v11.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 

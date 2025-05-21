@@ -61,6 +61,7 @@ export const connectionsApiChannel = createTracingChannel<ConnectionDiagnosticEv
 export const connectionsPoolGetsChannel = createTracingChannel<ConnectionPoolDiagnosticEvent>('connections:pool:get')
 
 // Base channels
+export const baseApisChannel = createTracingChannel<ClientDiagnosticEvent>('base:apis')
 export const baseMetadataChannel = createTracingChannel<ClientDiagnosticEvent>('base:metadata')
 
 // Admin channels

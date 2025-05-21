@@ -1,4 +1,4 @@
-import { type JoinGroupResponse } from './apis/consumer/join-group.ts'
+import { type JoinGroupResponse } from './apis/consumer/join-group-v9.ts'
 import { protocolAPIsById } from './protocol/apis.ts'
 import { protocolErrors, protocolErrorsCodesById } from './protocol/errors.ts'
 
@@ -16,6 +16,7 @@ export const errorCodes = [
   'PLT_KFK_TIMEOUT',
   'PLT_KFK_UNEXPECTED_CORRELATION_ID',
   'PLT_KFK_UNFINISHED_WRITE_BUFFER',
+  'PLT_KFK_UNSUPPORTED_API',
   'PLT_KFK_UNSUPPORTED_COMPRESSION',
   'PLT_KFK_UNSUPPORTED',
   'PLT_KFK_USER'
@@ -189,7 +190,7 @@ export class UnexpectedCorrelationIdError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_UNEXPECTED_CORRELATION_ID'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(UnexpectedCorrelationIdError.code, message, properties)
+    super(UnexpectedCorrelationIdError.code, message, { canRetry: false, ...properties })
   }
 }
 
@@ -197,7 +198,15 @@ export class UnfinishedWriteBufferError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_UNFINISHED_WRITE_BUFFER'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(UnfinishedWriteBufferError.code, message, properties)
+    super(UnfinishedWriteBufferError.code, message, { canRetry: false, ...properties })
+  }
+}
+
+export class UnsupportedApiError extends GenericError {
+  static code: ErrorCode = 'PLT_KFK_UNSUPPORTED_API'
+
+  constructor (message: string, properties: ErrorProperties = {}) {
+    super(UnsupportedApiError.code, message, { canRetry: false, ...properties })
   }
 }
 
@@ -205,7 +214,7 @@ export class UnsupportedCompressionError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_UNSUPPORTED_COMPRESSION'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(UnsupportedCompressionError.code, message, properties)
+    super(UnsupportedCompressionError.code, message, { canRetry: false, ...properties })
   }
 }
 
@@ -213,7 +222,7 @@ export class UnsupportedError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_UNSUPPORTED'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(UnsupportedError.code, message, properties)
+    super(UnsupportedError.code, message, { canRetry: false, ...properties })
   }
 }
 
@@ -221,6 +230,6 @@ export class UserError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_USER'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(UserError.code, message, properties)
+    super(UserError.code, message, { canRetry: false, ...properties })
   }
 }

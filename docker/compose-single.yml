@@ -2,7 +2,7 @@
 ---
 services:
   kafka:
-    image: apache/kafka:3.9.0
+    image: apache/kafka:${KAFKA_VERSION}
     ports:
       - '9092:9092' # PLAIN TEXT
       - '9093:9093' # SSL

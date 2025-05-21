@@ -1,20 +1,24 @@
 import {
-  api as createTopicsV7,
+  type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
   type CreateTopicsRequestTopicAssignment,
   type CreateTopicsResponse
-} from '../../apis/admin/create-topics.ts'
-import { api as deleteGroupsV2 } from '../../apis/admin/delete-groups.ts'
+} from '../../apis/admin/create-topics-v7.ts'
+import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
-  api as deleteTopicsV6,
+  type DeleteTopicsRequest,
   type DeleteTopicsRequestTopic,
   type DeleteTopicsResponse
-} from '../../apis/admin/delete-topics.ts'
-import { api as describeGroupsV5, type DescribeGroupsResponse } from '../../apis/admin/describe-groups.ts'
-import { api as listGroupsV5, type ListGroupsResponse } from '../../apis/admin/list-groups.ts'
+} from '../../apis/admin/delete-topics-v6.ts'
+import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../apis/admin/describe-groups-v5.ts'
+import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
+import {
+  type ListGroupsRequest as ListGroupsRequestV5,
+  type ListGroupsResponse
+} from '../../apis/admin/list-groups-v5.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
-import { api as findCoordinatorV6, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator.ts'
+import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
@@ -23,6 +27,7 @@ import {
   kBootstrapBrokers,
   kCheckNotClosed,
   kConnections,
+  kGetApi,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -254,13 +259,20 @@ export class Admin extends Base<AdminOptions> {
                 return
               }
 
-              createTopicsV7(
-                connection,
-                requests,
-                this[kOptions].timeout!,
-                false,
-                retryCallback as unknown as Callback<CreateTopicsResponse>
-              )
+              this[kGetApi]<CreateTopicsRequest, CreateTopicsResponse>('CreateTopics', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                  return
+                }
+
+                api(
+                  connection,
+                  requests,
+                  this[kOptions].timeout!,
+                  false,
+                  retryCallback as unknown as Callback<CreateTopicsResponse>
+                )
+              })
             })
           },
           (error: Error | null, response: CreateTopicsResponse) => {
@@ -314,12 +326,19 @@ export class Admin extends Base<AdminOptions> {
                 requests.push({ name: topic })
               }
 
-              deleteTopicsV6(
-                connection,
-                requests,
-                this[kOptions].timeout!,
-                retryCallback as unknown as Callback<DeleteTopicsResponse>
-              )
+              this[kGetApi]<DeleteTopicsRequest, DeleteTopicsResponse>('DeleteTopics', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as DeleteTopicsResponse)
+                  return
+                }
+
+                api(
+                  connection,
+                  requests,
+                  this[kOptions].timeout!,
+                  retryCallback as unknown as Callback<DeleteTopicsResponse>
+                )
+              })
             })
           },
           deduplicateCallback,
@@ -351,7 +370,22 @@ export class Admin extends Base<AdminOptions> {
             this[kPerformWithRetry]<ListGroupsResponse>(
               'listGroups',
               retryCallback => {
-                listGroupsV5(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
+                this[kGetApi]<ListGroupsRequestV4 | ListGroupsRequestV5, ListGroupsResponse>(
+                  'ListGroups',
+                  (error, api) => {
+                    if (error) {
+                      retryCallback(error, undefined as unknown as ListGroupsResponse)
+                      return
+                    }
+
+                    /* c8 ignore next 5 */
+                    if (api.version === 4) {
+                      api(connection, (options.states as ConsumerGroupState[]) ?? [], retryCallback)
+                    } else {
+                      api(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
+                    }
+                  }
+                )
               },
               concurrentCallback,
               0
@@ -420,7 +454,14 @@ export class Admin extends Base<AdminOptions> {
               this[kPerformWithRetry]<DescribeGroupsResponse>(
                 'describeGroups',
                 retryCallback => {
-                  describeGroupsV5(connection, groups, options.includeAuthorizedOperations ?? false, retryCallback)
+                  this[kGetApi]<DescribeGroupsRequest, DescribeGroupsResponse>('DescribeGroups', (error, api) => {
+                    if (error) {
+                      retryCallback(error, undefined as unknown as DescribeGroupsResponse)
+                      return
+                    }
+
+                    api(connection, groups, options.includeAuthorizedOperations ?? false, retryCallback)
+                  })
                 },
                 concurrentCallback,
                 0
@@ -525,7 +566,14 @@ export class Admin extends Base<AdminOptions> {
               this[kPerformWithRetry](
                 'deleteGroups',
                 retryCallback => {
-                  deleteGroupsV2(connection, groups, retryCallback)
+                  this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (error, api) => {
+                    if (error) {
+                      retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                      return
+                    }
+
+                    api(connection, groups, retryCallback)
+                  })
                 },
                 concurrentCallback,
                 0
@@ -548,7 +596,14 @@ export class Admin extends Base<AdminOptions> {
             return
           }
 
-          findCoordinatorV6(connection, FindCoordinatorKeyTypes.GROUP, groups, retryCallback)
+          this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (error, api) => {
+            if (error) {
+              retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+              return
+            }
+
+            api(connection, FindCoordinatorKeyTypes.GROUP, groups, retryCallback)
+          })
         })
       },
       (error, response) => {

@@ -6,13 +6,15 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 
 ## Events
 
-| Name                       | Description                                                 |
-| -------------------------- | ----------------------------------------------------------- |
-| `client:broker:connect`    | Emitted when connecting to a broker.                        |
-| `client:broker:disconnect` | Emitted when disconnecting from a broker.                   |
-| `client:broker:failed`     | Emitted when a broker connection fails.                     |
-| `client:broker:drain`      | Emitted when a broker is ready to be triggered by requests. |
-| `client:metadata`          | Emitted when metadata is retrieved.                         |
+| Name                                | Description                                                 |
+| ----------------------------------- | ----------------------------------------------------------- |
+| `client:broker:connect`             | Emitted when connecting to a broker.                        |
+| `client:broker:disconnect`          | Emitted when disconnecting from a broker.                   |
+| `client:broker:failed`              | Emitted when a broker connection fails.                     |
+| `client:broker:drain`               | Emitted when a broker is ready to be triggered by requests. |
+| `client:broker:sasl:handshake`      | Emitted when a broker completes SASL handshake.             |
+| `client:broker:sasl:authentication` | Emitted when a broker completes SASL authentication.        |
+| `client:metadata`                   | Emitted when metadata is retrieved.                         |
 
 ## Constructor
 
@@ -32,6 +34,7 @@ Creates a new base client.
 | `connectTimeout`   | `number`               | `5000`    | Client connection timeout.                                                                                                                       |
 | `maxInflights`     | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                   |
 | `tls`              | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                        |
+| `sasl`             | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                               |
 
 ## Methods
 
@@ -71,6 +74,27 @@ const producer = new Producer({
     rejectUnauthorized: false,
     cert: await readFile(resolve(import.meta.dirname, './ssl/client.pem')),
     key: await readFile(resolve(import.meta.dirname, './ssl/client.key'))
+  }
+})
+```
+
+## Connecting to Kafka via SASL
+
+To connect to a Kafka via SASL authentication, simply pass all relevant options in the `sasl` options when creating any subclass of `Base`.
+Example:
+
+```javascript
+import { readFile } from 'node:fs/promises'
+import { Producer, stringSerializers } from '@platformatic/kafka'
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializers,
+  sasl: {
+    mechanism: 'PLAIN', // Also SCRAM-SHA-256 and SCRAM-SHA-512 are supported
+    username: 'username',
+    password: 'password'
   }
 })
 ```

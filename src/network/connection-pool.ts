@@ -1,11 +1,11 @@
 import EventEmitter from 'node:events'
-import { type Callback } from '../apis/definitions.ts'
 import {
   createPromisifiedCallback,
   kCallbackPromise,
   runConcurrentCallbacks,
   type CallbackWithPromise
-} from '../clients/callbacks.ts'
+} from '../apis/callbacks.ts'
+import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { MultipleErrors } from '../errors.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
@@ -54,6 +54,8 @@ export class ConnectionPool extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
+  getFirstAvailable (brokers: Broker[], callback: CallbackWithPromise<Connection>): void
+  getFirstAvailable (brokers: Broker[]): Promise<Connection>
   getFirstAvailable (brokers: Broker[], callback?: CallbackWithPromise<Connection>): void | Promise<Connection> {
     if (!callback) {
       callback = createPromisifiedCallback<Connection>()
@@ -73,6 +75,8 @@ export class ConnectionPool extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
+  close (callback: CallbackWithPromise<void>): void
+  close (): Promise<void>
   close (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback()
@@ -135,6 +139,14 @@ export class ConnectionPool extends EventEmitter {
 
       this.emit('connect', eventPayload)
       callback(null, connection)
+    })
+
+    connection.on('sasl:handshake', mechanisms => {
+      this.emit('sasl:handshake', { ...eventPayload, mechanisms })
+    })
+
+    connection.on('sasl:authentication', authentication => {
+      this.emit('sasl:authentication', { ...eventPayload, authentication })
     })
 
     // Remove stale connections from the pool

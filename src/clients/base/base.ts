@@ -1,5 +1,6 @@
 import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
+import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type API, type Callback } from '../../apis/definitions.ts'
 import * as apis from '../../apis/index.ts'
 import {
@@ -18,10 +19,9 @@ import {
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
-import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
+import { type Broker, type Connection, type ConnectionOptions } from '../../network/connection.ts'
 import { kInstance } from '../../symbols.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
-import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../callbacks.ts'
 import { type Metrics } from '../metrics.ts'
 import {
   baseOptionsValidator,
@@ -37,6 +37,8 @@ export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
 export const kApis = Symbol('plt.kafka.base.apis')
 export const kGetApi = Symbol('plt.kafka.base.getApi')
+export const kGetConnection = Symbol('plt.kafka.base.getConnection')
+export const kGetBootstrapConnection = Symbol('plt.kafka.base.getBootstrapConnection')
 export const kOptions = Symbol('plt.kafka.base.options')
 export const kConnections = Symbol('plt.kafka.base.connections')
 export const kFetchConnections = Symbol('plt.kafka.base.fetchCnnections')
@@ -190,9 +192,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       ownerId: this[kInstance],
       ...(this[kOptions] as ConnectionOptions)
     })
-    for (const event of ['connect', 'disconnect', 'failed', 'drain']) {
-      pool.on(event, payload => this.emitWithDebug('client', `broker:${event}`, payload))
-    }
+
+    this.#forwardEvents(pool, ['connect', 'disconnect', 'failed', 'drain', 'sasl:handshake', 'sasl:authentication'])
 
     return pool
   }
@@ -204,7 +205,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         this[kPerformWithRetry]<ApiVersionsResponse>(
           'listApis',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as ApiVersionsResponse)
                 return
@@ -251,7 +252,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as MetadataResponse)
                 return
@@ -461,6 +462,14 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     )
   }
 
+  [kGetConnection] (broker: Broker, callback: Callback<Connection>): void {
+    this[kConnections].get(broker, callback)
+  }
+
+  [kGetBootstrapConnection] (callback: Callback<Connection>): void {
+    this[kConnections].getFirstAvailable(this[kBootstrapBrokers], callback)
+  }
+
   [kValidateOptions] (
     target: unknown,
     validator: ValidateFunction<unknown>,
@@ -498,5 +507,13 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kAfterCreate] (type: ClientType): void {
     this[kClientType] = type
     notifyCreation(type, this)
+  }
+
+  #forwardEvents (source: EventEmitter, events: string[]): void {
+    for (const event of events) {
+      source.on(event, (...args: unknown[]) => {
+        this.emitWithDebug('client', `broker:${event}`, ...args)
+      })
+    }
   }
 }

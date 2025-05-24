@@ -16,6 +16,12 @@ import {
   type ListGroupsRequest as ListGroupsRequestV5,
   type ListGroupsResponse
 } from '../../apis/admin/list-groups-v5.ts'
+import {
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks,
+  type CallbackWithPromise
+} from '../../apis/callbacks.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
@@ -24,10 +30,10 @@ import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
   kAfterCreate,
-  kBootstrapBrokers,
   kCheckNotClosed,
-  kConnections,
   kGetApi,
+  kGetBootstrapConnection,
+  kGetConnection,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -35,12 +41,6 @@ import {
   kValidateOptions
 } from '../base/base.ts'
 import { type BaseOptions } from '../base/types.ts'
-import {
-  createPromisifiedCallback,
-  kCallbackPromise,
-  runConcurrentCallbacks,
-  type CallbackWithPromise
-} from '../callbacks.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
   createTopicsOptionsValidator,
@@ -253,7 +253,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'createTopics',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as CreateTopicsResponse)
                 return
@@ -315,7 +315,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'deleteTopics',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined)
                 return
@@ -361,7 +361,7 @@ export class Admin extends Base<AdminOptions> {
         'Listing groups failed.',
         metadata.brokers,
         ([, broker], concurrentCallback) => {
-          this[kConnections].get(broker, (error, connection) => {
+          this[kGetConnection](broker, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as ListGroupsResponse)
               return
@@ -445,7 +445,7 @@ export class Admin extends Base<AdminOptions> {
           'Describing groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this[kConnections].get(metadata.brokers.get(node)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined as unknown as DescribeGroupsResponse)
                 return
@@ -557,7 +557,7 @@ export class Admin extends Base<AdminOptions> {
           'Deleting groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this[kConnections].get(metadata.brokers.get(node)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined)
                 return
@@ -590,7 +590,7 @@ export class Admin extends Base<AdminOptions> {
     this[kPerformWithRetry]<FindCoordinatorResponse>(
       'findGroupCoordinator',
       retryCallback => {
-        this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+        this[kGetBootstrapConnection]((error, connection) => {
           if (error) {
             retryCallback(error, undefined as unknown as FindCoordinatorResponse)
             return

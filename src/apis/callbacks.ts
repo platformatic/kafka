@@ -1,5 +1,5 @@
-import { type Callback } from '../apis/definitions.ts'
 import { MultipleErrors } from '../errors.ts'
+import { type Callback } from './definitions.ts'
 
 export const kCallbackPromise = Symbol('plt.kafka.callbackPromise')
 

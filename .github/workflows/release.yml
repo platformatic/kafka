@@ -38,7 +38,7 @@ jobs:
           path: ~/.pnpm-store
           key: node-modules-${{ hashFiles('package.json') }}
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Bump Version
         run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
         env:

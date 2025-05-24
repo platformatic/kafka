@@ -1,7 +1,7 @@
 # To listen on broker, run ./kafka-console-consumer.sh --property print.key=true --property print.value=true --property print.headers=true --property print.offset=true --bootstrap-server localhost:9092 ...
 ---
 services:
-  kafka:
+  localhost:
     image: apache/kafka:${KAFKA_VERSION}
     ports:
       - '9092:9092' # PLAIN TEXT
@@ -14,10 +14,10 @@ services:
       _JAVA_OPTIONS: '-XX:UseSVE=0'
       KAFKA_NODE_ID: 1
       KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:19092,MAIN://localhost:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,MAIN:PLAINTEXT'
       KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:29093'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
@@ -34,7 +34,7 @@ services:
       KAFKA_TRANSACTION_PARTITION_VERIFICATION_ENABLE: 'false'
       # SSL
       # KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:19092,MAIN://localhost:9092'
+      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
       # KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,MAIN:SSL'
       # KAFKA_SSL_TRUSTSTORE_LOCATION: /var/ssl/private/server.truststore.jks
       # KAFKA_SSL_TRUSTSTORE_PASSWORD: 12345678
@@ -43,7 +43,7 @@ services:
       # KAFKA_SSL_CLIENT_AUTH: required # This is to also enable mTLS
       # SASL
       # KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:19092,MAIN://localhost:9092'
+      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
       # KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:SASL_PLAINTEXT,MAIN:SASL_PLAINTEXT'
       # KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
       # KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { SASLMechanisms } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { type BaseOptions } from './types.ts'
 
@@ -37,6 +38,17 @@ export const baseOptionsSchema = {
     retries: { type: 'number', minimum: 0 },
     retryDelay: { type: 'number', minimum: 0 },
     maxInflights: { type: 'number', minimum: 0 },
+    tls: { type: 'object', additionalProperties: true }, // No validation as they come from Node.js
+    sasl: {
+      type: 'object',
+      properties: {
+        mechanism: { type: 'string', enum: SASLMechanisms },
+        username: { type: 'string' },
+        password: { type: 'string' }
+      },
+      required: ['mechanism', 'username', 'password'],
+      additionalProperties: false
+    },
     metadataMaxAge: { type: 'number', minimum: 0 },
     autocreateTopics: { type: 'boolean' },
     strict: { type: 'boolean' },

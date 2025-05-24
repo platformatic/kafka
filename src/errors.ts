@@ -124,7 +124,7 @@ export class AuthenticationError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_AUTHENTICATION'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(AuthenticationError.code, message, properties)
+    super(AuthenticationError.code, message, { canRetry: false, ...properties })
   }
 }
 

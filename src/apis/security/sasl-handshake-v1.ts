@@ -11,7 +11,7 @@ export interface SaslHandshakeResponse {
 }
 
 /*
-  SaslHandshake Request (Version: 0) => mechanism
+  SaslHandshake Request (Version: 1) => mechanism
     mechanism => STRING
 */
 export function createRequest (mechanism: string): Writer {

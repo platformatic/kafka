@@ -1,3 +1,9 @@
+import {
+  type CallbackWithPromise,
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks
+} from '../../apis/callbacks.ts'
 import { ProduceAcks } from '../../apis/enumerations.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
 import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
@@ -9,12 +15,12 @@ import { NumericMap } from '../../utils.ts'
 import {
   Base,
   kAfterCreate,
-  kBootstrapBrokers,
   kCheckNotClosed,
   kClearMetadata,
   kClosed,
-  kConnections,
   kGetApi,
+  kGetBootstrapConnection,
+  kGetConnection,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -23,12 +29,6 @@ import {
   kValidateOptions
 } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
-import {
-  type CallbackWithPromise,
-  createPromisifiedCallback,
-  kCallbackPromise,
-  runConcurrentCallbacks
-} from '../callbacks.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
 import { type Serializer, type SerializerWithHeaders } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
@@ -211,7 +211,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<InitProducerIdResponse>(
           'initProducerId',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as InitProducerIdResponse)
                 return
@@ -492,7 +492,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this[kPerformWithRetry]<boolean | ProduceResponse>(
         'produce',
         retryCallback => {
-          this[kConnections].get(metadata.brokers.get(leader)!, (error, connection) => {
+          this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
             if (error) {
               retryCallback(error, undefined as unknown as ProduceResponse)
               return

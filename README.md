@@ -137,6 +137,10 @@ await admin.deleteTopics({ topics: ['my-topic'] })
 await admin.close()
 ```
 
+## TLS and SASL
+
+See the relevant sections in the the [Base Client](./docs/base.md) page.
+
 ## Serialisation/Deserialisation
 
 `@platformatic/kafka` supports customisation of serialisation out of the box.

@@ -1,4 +1,5 @@
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
+import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type Connection } from '../../network/connection.ts'
@@ -88,14 +89,36 @@ export const defaultCrypto: ScramCryptoModule = {
 }
 
 // Implements https://datatracker.ietf.org/doc/html/rfc5802#section-9
-export async function authenticate (
+export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
   username: string,
   password: string,
-  crypto: ScramCryptoModule = defaultCrypto
-): Promise<SaslAuthenticateResponse> {
+  crypto: ScramCryptoModule,
+  callback: CallbackWithPromise<SaslAuthenticateResponse>
+): void
+export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
+  connection: Connection,
+  algorithm: ScramAlgorithm,
+  username: string,
+  password: string,
+  crypto?: ScramCryptoModule
+): Promise<SaslAuthenticateResponse>
+export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
+  connection: Connection,
+  algorithm: ScramAlgorithm,
+  username: string,
+  password: string,
+  crypto: ScramCryptoModule = defaultCrypto,
+  callback?: CallbackWithPromise<SaslAuthenticateResponse>
+): void | Promise<SaslAuthenticateResponse> {
+  if (!callback) {
+    callback = createPromisifiedCallback<SaslAuthenticateResponse>()
+  }
+
   const { h, hi, hmac, xor } = crypto
   const definition = ScramAlgorithms[algorithm]
 
@@ -107,56 +130,89 @@ export async function authenticate (
   const clientFirstMessageBare = `n=${sanitizeString(username)},r=${clientNonce}`
 
   // First of all, send the first message
-  const firstResponse = await authenticateAPI.async(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`))
-  const firstData = parseParameters(firstResponse.authBytes)
+  authenticateAPI(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`), (error, firstResponse) => {
+    if (error) {
+      callback(
+        new AuthenticationError('Authentication failed.', { cause: error }),
+        undefined as unknown as SaslAuthenticateResponse
+      )
+      return
+    }
 
-  // Extract some parameters
-  const salt = Buffer.from(firstData.s, 'base64')
-  const iterations = parseInt(firstData.i, 10)
-  const serverNonce = firstData.r
-  const serverFirstMessage = firstData.__original
+    const firstData = parseParameters(firstResponse.authBytes)
 
-  // Validate response
-  if (!serverNonce.startsWith(clientNonce)) {
-    throw new AuthenticationError('Server nonce does not start with client nonce.')
-  }
+    // Extract some parameters
+    const salt = Buffer.from(firstData.s, 'base64')
+    const iterations = parseInt(firstData.i, 10)
+    const serverNonce = firstData.r
+    const serverFirstMessage = firstData.__original
 
-  if (definition.minIterations > iterations) {
-    throw new AuthenticationError(
-      `Algorithm ${algorithm} requires at least ${definition.minIterations} iterations, while ${iterations} were requested.`
+    // Validate response
+    if (!serverNonce.startsWith(clientNonce)) {
+      callback(
+        new AuthenticationError('Server nonce does not start with client nonce.'),
+        undefined as unknown as SaslAuthenticateResponse
+      )
+      return
+    } else if (definition.minIterations > iterations) {
+      callback(
+        new AuthenticationError(
+          `Algorithm ${algorithm} requires at least ${definition.minIterations} iterations, while ${iterations} were requested.`
+        ),
+        undefined as unknown as SaslAuthenticateResponse
+      )
+
+      return
+    }
+
+    // SaltedPassword  := Hi(Normalize(password), salt, i)
+    // ClientKey       := HMAC(SaltedPassword, "Client Key")
+    // StoredKey       := H(ClientKey)
+    // AuthMessage     := ClientFirstMessageBare + "," ServerFirstMessage + "," + ClientFinalMessageWithoutProof
+    // ClientSignature := HMAC(StoredKey, AuthMessage)
+    // ClientProof     := ClientKey XOR ClientSignature
+    // ServerKey       := HMAC(SaltedPassword, "Server Key")
+    // ServerSignature := HMAC(ServerKey, AuthMessage)
+    const saltedPassword = hi(definition, password, salt, iterations)
+    const clientKey = hmac(definition, saltedPassword, HMAC_CLIENT_KEY)
+    const storedKey = h(definition, clientKey)
+    const clientFinalMessageWithoutProof = `c=${GS2_HEADER_BASE64},r=${serverNonce}`
+    const authMessage = `${clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageWithoutProof}`
+    const clientSignature = hmac(definition, storedKey, authMessage)
+    const clientProof = xor(clientKey, clientSignature)
+    const serverKey = hmac(definition, saltedPassword, HMAC_SERVER_KEY)
+    const serverSignature = hmac(definition, serverKey, authMessage)
+
+    authenticateAPI(
+      connection,
+      Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`),
+      (error, lastResponse) => {
+        if (error) {
+          callback(
+            new AuthenticationError('Authentication failed.', { cause: error }),
+            undefined as unknown as SaslAuthenticateResponse
+          )
+          return
+        }
+
+        // Send the last message to the server
+        const lastData = parseParameters(lastResponse.authBytes)
+
+        if (lastData.e) {
+          callback(new AuthenticationError(lastData.e), undefined as unknown as SaslAuthenticateResponse)
+          return
+        } else if (lastData.v !== serverSignature.toString('base64')) {
+          callback(
+            new AuthenticationError('Invalid server signature.'),
+            undefined as unknown as SaslAuthenticateResponse
+          )
+          return
+        }
+
+        callback(null, lastResponse)
+      }
     )
-  }
+  })
 
-  // SaltedPassword  := Hi(Normalize(password), salt, i)
-  // ClientKey       := HMAC(SaltedPassword, "Client Key")
-  // StoredKey       := H(ClientKey)
-  // AuthMessage     := ClientFirstMessageBare + "," ServerFirstMessage + "," + ClientFinalMessageWithoutProof
-  // ClientSignature := HMAC(StoredKey, AuthMessage)
-  // ClientProof     := ClientKey XOR ClientSignature
-  // ServerKey       := HMAC(SaltedPassword, "Server Key")
-  // ServerSignature := HMAC(ServerKey, AuthMessage)
-  const saltedPassword = hi(definition, password, salt, iterations)
-  const clientKey = hmac(definition, saltedPassword, HMAC_CLIENT_KEY)
-  const storedKey = h(definition, clientKey)
-  const clientFinalMessageWithoutProof = `c=${GS2_HEADER_BASE64},r=${serverNonce}`
-  const authMessage = `${clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageWithoutProof}`
-  const clientSignature = hmac(definition, storedKey, authMessage)
-  const clientProof = xor(clientKey, clientSignature)
-  const serverKey = hmac(definition, saltedPassword, HMAC_SERVER_KEY)
-  const serverSignature = hmac(definition, serverKey, authMessage)
-
-  // Send the last message to the server
-  const lastResponse = await authenticateAPI.async(
-    connection,
-    Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`)
-  )
-  const lastData = parseParameters(lastResponse.authBytes)
-
-  if (lastData.e) {
-    throw new AuthenticationError(lastData.e)
-  } else if (lastData.v !== serverSignature.toString('base64')) {
-    throw new AuthenticationError('Invalid server signature.')
-  }
-
-  return lastResponse
+  return callback[kCallbackPromise]
 }

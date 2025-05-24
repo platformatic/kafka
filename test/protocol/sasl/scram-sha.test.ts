@@ -1,7 +1,14 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from 'node:assert'
 import { randomBytes } from 'node:crypto'
 import test from 'node:test'
-import { AuthenticationError, type Connection, type saslAuthenticateV2, saslScramSha } from '../../../src/index.ts'
+import { type SaslAuthenticateResponse } from '../../../src/apis/security/sasl-authenticate-v2.ts'
+import {
+  AuthenticationError,
+  type CallbackWithPromise,
+  type Connection,
+  type saslAuthenticateV2,
+  saslScramSha
+} from '../../../src/index.ts'
 import * as scramShaModule from '../../../src/protocol/sasl/scram-sha.ts'
 import { defaultCrypto, type ScramAlgorithmDefinition } from '../../../src/protocol/sasl/scram-sha.ts'
 
@@ -159,26 +166,26 @@ test('xor should throw when buffer lengths are different', () => {
 test('authenticate should check for minimum required iterations', async () => {
   // Replace with implementation that returns matching nonce but too few iterations
   let callCount = 0
-  const api = {
-    async (_: Connection, payload: Buffer | null) {
-      callCount++
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    callCount++
 
-      if (callCount === 1) {
-        // Extract client nonce from first message
-        const clientNonce = payload!.toString().split('r=')[1]
+    if (callCount === 1) {
+      // Extract client nonce from first message
+      const clientNonce = payload!.toString().split('r=')[1]
 
-        // First call - return server response with matching nonce but too few iterations
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: Buffer.from(`r=${clientNonce}server,s=c2FsdA==,i=100`), // i=100 is below minimum
-          sessionLifetimeMs: 3600000n
-        }
-      }
+      // First call - return server response with matching nonce but too few iterations
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from(`r=${clientNonce}server,s=c2FsdA==,i=100`), // i=100 is below minimum
+        sessionLifetimeMs: 3600000n
+      })
 
-      // Should not get here
-      return {} as any
+      return
     }
+
+    // Should not get here
+    callback(null, {})
   }
 
   const mockConnection = {}
@@ -210,7 +217,7 @@ test('authenticate should throw for unsupported algorithm', async () => {
   await rejects(
     async () => {
       await authenticate(
-        {} as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
+        (() => {}) as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
         mockConnection as any,
         'INVALID-ALGO' as any,
         'testuser',
@@ -230,13 +237,11 @@ test('authenticate should include username in initial message', async () => {
   let firstMessage: string = ''
 
   // Replace the saslAuthenticateV2 function to catch the first message
-  const api = {
-    async (_: Connection, payload: Buffer | null) {
-      firstMessage = payload!.toString()
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    firstMessage = payload!.toString()
 
-      // Throw error to stop the authentication process
-      throw new Error('Stop the test early')
-    }
+    // Throw error to stop the authentication process
+    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
   }
 
   const mockConnection = {}
@@ -263,13 +268,11 @@ test('authenticate should escape special characters in username', async () => {
   let firstMessage: string = ''
 
   // Replace the saslAuthenticateV2 function to catch the first message
-  const api = {
-    async (_: Connection, payload: Buffer | null) {
-      firstMessage = payload!.toString()
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    firstMessage = payload!.toString()
 
-      // Throw error to stop the authentication process
-      throw new Error('Stop the test early')
-    }
+    // Throw error to stop the authentication process
+    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
   }
 
   const mockConnection = {}
@@ -297,16 +300,14 @@ test('authenticate should escape special characters in username', async () => {
 // Test error handling for server nonce mismatch
 test('authenticate should check server nonce starts with client nonce', async () => {
   // Replace with implementation that returns invalid nonce
-  const api = {
-    async (_connection: Connection, _buffer: Buffer | null) {
-      // First call - return server response with different nonce
-      return {
-        errorCode: 0,
-        errorMessage: null,
-        authBytes: Buffer.from('r=different-nonce,s=c2FsdA==,i=4096'),
-        sessionLifetimeMs: 3600000n
-      }
-    }
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    // First call - return server response with different nonce
+    callback(null, {
+      errorCode: 0,
+      errorMessage: null,
+      authBytes: Buffer.from('r=different-nonce,s=c2FsdA==,i=4096'),
+      sessionLifetimeMs: 3600000n
+    })
   }
 
   const mockConnection = {}
@@ -336,30 +337,28 @@ test('authenticate should handle server error messages', async () => {
   let callCount = 0
 
   // Replace with implementation that returns error in second response
-  const api = {
-    async (_: Connection, payload: Buffer | null) {
-      callCount++
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    callCount++
 
-      if (callCount === 1) {
-        // First call - normal response with a nonce that matches client-nonce
-        // Extract client nonce from payload (format: "n,,n=user,r=client-nonce")
-        const clientNonce = payload!.toString().split('r=')[1]
+    if (callCount === 1) {
+      // First call - normal response with a nonce that matches client-nonce
+      // Extract client nonce from payload (format: "n,,n=user,r=client-nonce")
+      const clientNonce = payload!.toString().split('r=')[1]
 
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: Buffer.from(`r=${clientNonce}1234,s=c2FsdA==,i=4096`),
-          sessionLifetimeMs: 3600000n
-        }
-      } else {
-        // Second call - return error
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: Buffer.from('e=Authentication failed'),
-          sessionLifetimeMs: 3600000n
-        }
-      }
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from(`r=${clientNonce}1234,s=c2FsdA==,i=4096`),
+        sessionLifetimeMs: 3600000n
+      })
+    } else {
+      // Second call - return error
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from('e=Authentication failed'),
+        sessionLifetimeMs: 3600000n
+      })
     }
   }
 
@@ -384,37 +383,81 @@ test('authenticate should handle server error messages', async () => {
   )
 })
 
+test('authenticate should handle server failures', async () => {
+  // Mock function with two different responses
+  let callCount = 0
+
+  // Replace with implementation that returns error in second response
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    callCount++
+
+    if (callCount === 1) {
+      // First call - normal response with a nonce that matches client-nonce
+      // Extract client nonce from payload (format: "n,,n=user,r=client-nonce")
+      const clientNonce = payload!.toString().split('r=')[1]
+
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from(`r=${clientNonce}1234,s=c2FsdA==,i=4096`),
+        sessionLifetimeMs: 3600000n
+      })
+    } else {
+      // Second call - return error
+      callback(new Error('Authentication failed'), undefined as unknown as SaslAuthenticateResponse)
+    }
+  }
+
+  const mockConnection = {}
+
+  // Should throw with server's error message
+  await rejects(
+    async () => {
+      await authenticate(
+        api as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
+        mockConnection as any,
+        'SHA-256',
+        'testuser',
+        'testpass'
+      )
+    },
+    (err: Error) => {
+      strictEqual(err instanceof AuthenticationError, true)
+      strictEqual(err.message, 'Authentication failed.')
+      return true
+    }
+  )
+})
+
 // Test validate server signature
 test('authenticate should check server signature validity', async () => {
   // Mock function with two different responses
   let callCount = 0
 
   // Replace with implementation that returns invalid server signature
-  const api = {
-    async (_: Connection, payload: Buffer | null) {
-      callCount++
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    callCount++
 
-      if (callCount === 1) {
-        // First call - normal response with a nonce that matches client-nonce
-        // Extract client nonce from payload
-        const clientNonce = payload!.toString().split('r=')[1]
+    if (callCount === 1) {
+      // First call - normal response with a nonce that matches client-nonce
+      // Extract client nonce from payload
+      const clientNonce = payload!.toString().split('r=')[1]
 
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: Buffer.from(`r=${clientNonce}1234,s=c2FsdA==,i=4096`),
-          sessionLifetimeMs: 3600000n
-        }
-      } else {
-        // Second call - return invalid signature
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          // v= is the server signature verification - incorrect value
-          authBytes: Buffer.from('v=invalidSignature'),
-          sessionLifetimeMs: 3600000n
-        }
-      }
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from(`r=${clientNonce}1234,s=c2FsdA==,i=4096`),
+        sessionLifetimeMs: 3600000n
+      })
+    } else {
+      // Second call - return invalid signature
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        // v= is the server signature verification - incorrect value
+        authBytes: Buffer.from('v=invalidSignature'),
+        sessionLifetimeMs: 3600000n
+      })
     }
   }
 
@@ -445,46 +488,50 @@ test('authenticate should return the last response on successful authentication'
 
   let serverSignature: Buffer
 
-  const api = {
-    async (_: Connection, payload: Buffer) {
-      callsCount++
+  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+    callsCount++
 
-      if (callsCount === 1) {
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: Buffer.from(
-            `s=${randomBytes(10).toString('base64')},i=4096,r=${payload.toString().split('r=')[1]}`
-          ),
-          sessionLifetimeMs: 3600000n
-        }
-      } else {
-        return {
-          errorCode: 0,
-          errorMessage: null,
-          authBytes: `v=${serverSignature.toString('base64')}`,
-          sessionLifetimeMs: 3600000n
-        }
-      }
+    if (callsCount === 1) {
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: Buffer.from(`s=${randomBytes(10).toString('base64')},i=4096,r=${payload.toString().split('r=')[1]}`),
+        sessionLifetimeMs: 3600000n
+      })
+    } else {
+      callback(null, {
+        errorCode: 0,
+        errorMessage: null,
+        authBytes: `v=${serverSignature.toString('base64')}`,
+        sessionLifetimeMs: 3600000n
+      })
     }
-  } as unknown as saslAuthenticateV2.SASLAuthenticationAPI
+  }
+
   const mockConnection = {} as Connection
 
   // Call authenticate with any parameters, our mock will bypass all checks
-  const response = await scramShaModule.authenticate(api, mockConnection, 'SHA-256', 'testuser', 'testpass', {
-    ...defaultCrypto,
-    hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer) {
-      const computed = defaultCrypto.hmac(definition, key, data)
+  const response = await scramShaModule.authenticate(
+    api as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
+    mockConnection,
+    'SHA-256',
+    'testuser',
+    'testpass',
+    {
+      ...defaultCrypto,
+      hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer) {
+        const computed = defaultCrypto.hmac(definition, key, data)
 
-      hmacCounts++
+        hmacCounts++
 
-      if (hmacCounts === 4) {
-        serverSignature = computed
+        if (hmacCounts === 4) {
+          serverSignature = computed
+        }
+
+        return computed
       }
-
-      return computed
     }
-  })
+  )
 
   // This specifically tests lines 145-146 where no error is thrown and the lastResponse is returned
   strictEqual(response.errorCode, 0, 'Response should have errorCode 0')

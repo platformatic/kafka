@@ -2,19 +2,33 @@ import fastq from 'fastq'
 import EventEmitter from 'node:events'
 import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
+import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
-import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../clients/callbacks.ts'
+import { type SASLMechanism, SASLMechanisms } from '../apis/enumerations.ts'
+import { saslAuthenticateV2, saslHandshakeV1 } from '../apis/index.ts'
+import { type SaslAuthenticateResponse } from '../apis/security/sasl-authenticate-v2.ts'
 import {
   connectionsApiChannel,
   connectionsConnectsChannel,
   createDiagnosticContext,
+  type DiagnosticContext,
   notifyCreation
 } from '../diagnostic.ts'
-import { NetworkError, TimeoutError, UnexpectedCorrelationIdError } from '../errors.ts'
+import {
+  AuthenticationError,
+  type MultipleErrors,
+  NetworkError,
+  type ProtocolError,
+  TimeoutError,
+  UnexpectedCorrelationIdError,
+  UserError
+} from '../errors.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
+import { saslPlain, saslScramSha } from '../protocol/index.ts'
 import { Reader } from '../protocol/reader.ts'
+import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
 
@@ -23,10 +37,17 @@ export interface Broker {
   port: number
 }
 
+export interface SASLOptions {
+  mechanism: SASLMechanism
+  username: string
+  password: string
+}
+
 export interface ConnectionOptions {
   connectTimeout?: number
   maxInflights?: number
   tls?: TLSConnectionOptions
+  sasl?: SASLOptions
   ownerId?: number
 }
 
@@ -45,6 +66,7 @@ export interface Request {
 export const ConnectionStatuses = {
   NONE: 'none',
   CONNECTING: 'connecting',
+  AUTHENTICATING: 'authenticating',
   CONNECTED: 'connected',
   CLOSED: 'closed',
   CLOSING: 'closing',
@@ -152,16 +174,8 @@ export class Connection extends EventEmitter {
         connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
       }
 
-      const connectionErrorHandler = (e: Error) => {
-        const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause: e })
-        diagnosticContext.error = error
-
-        this.#status = ConnectionStatuses.ERROR
-
-        connectionsConnectsChannel.error.publish(diagnosticContext)
-        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
-        this.emit('error', error)
-        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+      const connectionErrorHandler = (error: Error) => {
+        this.#onConnectionError(host, port, diagnosticContext, error)
       }
 
       this.emit('connecting')
@@ -182,11 +196,11 @@ export class Connection extends EventEmitter {
 
         this.#socket.setTimeout(0)
 
-        this.#status = ConnectionStatuses.CONNECTED
-
-        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
-        this.emit('connect')
-        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+        if (this.#options.sasl) {
+          this.#authenticate(host, port, diagnosticContext)
+        } else {
+          this.#onConnectionSucceed(diagnosticContext)
+        }
       })
 
       this.#socket.once('timeout', connectionTimeoutHandler)
@@ -205,6 +219,8 @@ export class Connection extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
+  ready (callback: CallbackWithPromise<void>): void
+  ready (): Promise<void>
   ready (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback()
@@ -229,6 +245,8 @@ export class Connection extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
+  close (callback: CallbackWithPromise<void>): void
+  close (): Promise<void>
   close (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback()
@@ -305,6 +323,57 @@ export class Connection extends EventEmitter {
     }, callback)
   }
 
+  #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
+    this.#status = ConnectionStatuses.AUTHENTICATING
+
+    const { mechanism, username, password } = this.#options.sasl!
+
+    if (!SASLMechanisms.includes(mechanism)) {
+      this.#onConnectionError(
+        host,
+        port,
+        diagnosticContext,
+        new UserError(`SASL mechanism ${mechanism} not supported.`)
+      )
+
+      return
+    }
+
+    saslHandshakeV1.api(this, mechanism, (error, response) => {
+      if (error) {
+        this.#onConnectionError(
+          host,
+          port,
+          diagnosticContext,
+          new AuthenticationError('Cannot find a suitable SASL mechanism.', { cause: error })
+        )
+        return
+      }
+
+      this.emit('sasl:handshake', response.mechanisms)
+
+      if (mechanism === 'PLAIN') {
+        saslPlain.authenticate(
+          saslAuthenticateV2.api,
+          this,
+          username,
+          password,
+          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+        )
+      } else {
+        saslScramSha.authenticate(
+          saslAuthenticateV2.api,
+          this,
+          mechanism.substring(6) as ScramAlgorithm,
+          username,
+          password,
+          defaultCrypto,
+          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+        )
+      }
+    })
+  }
+
   /*
     Request => Size [Request Header v2] [payload]
     Request Header v2 => request_api_key request_api_version correlation_id client_id TAG_BUFFER
@@ -317,7 +386,7 @@ export class Connection extends EventEmitter {
     connectionsApiChannel.start.publish(request.diagnostic)
 
     try {
-      if (this.#status !== ConnectionStatuses.CONNECTED) {
+      if (this.#status !== ConnectionStatuses.CONNECTED && this.#status !== ConnectionStatuses.AUTHENTICATING) {
         request.callback(new NetworkError('Connection closed'), undefined)
         return false
       }
@@ -347,7 +416,7 @@ export class Connection extends EventEmitter {
         this.#inflightRequests.set(correlationId, request)
       }
 
-      loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Sending request.')
+      loggers.protocol('Sending request.', { apiKey: protocolAPIsById[apiKey], correlationId, request })
 
       for (const buf of writer.buffers) {
         if (!this.#socket.write(buf)) {
@@ -377,6 +446,49 @@ export class Connection extends EventEmitter {
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }
+  }
+
+  #onConnectionSucceed (diagnosticContext: DiagnosticContext): void {
+    this.#status = ConnectionStatuses.CONNECTED
+
+    connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
+    this.emit('connect')
+    connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+  }
+
+  #onConnectionError (host: string, port: number, diagnosticContext: DiagnosticContext, cause: Error): void {
+    const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause })
+    this.#status = ConnectionStatuses.ERROR
+
+    diagnosticContext.error = error
+    connectionsConnectsChannel.error.publish(diagnosticContext)
+    connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
+    this.emit('error', error)
+    connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+
+    this.#socket.end()
+  }
+
+  #onSaslAuthenticate (
+    host: string,
+    port: number,
+    diagnosticContext: DiagnosticContext,
+    error: Error | null,
+    response: SaslAuthenticateResponse
+  ): void {
+    if (error) {
+      const protocolError = (error as MultipleErrors).errors[0] as ProtocolError
+
+      if (protocolError.apiId === 'SASL_AUTHENTICATION_FAILED') {
+        error = new AuthenticationError('SASL authentication failed.', { cause: error })
+      }
+
+      this.#onConnectionError(host, port, diagnosticContext, error)
+      return
+    }
+
+    this.emit('sasl:authentication', response.authBytes)
+    this.#onConnectionSucceed(diagnosticContext)
   }
 
   /*
@@ -455,7 +567,7 @@ export class Connection extends EventEmitter {
       //   correlationId
       // })
 
-      loggers.protocol({ apiKey: protocolAPIsById[apiKey], correlationId, request }, 'Received response.')
+      loggers.protocol('Received response.', { apiKey: protocolAPIsById[apiKey], correlationId, request, deserialized })
 
       if (responseError) {
         request.diagnostic.error = responseError

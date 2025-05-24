@@ -185,6 +185,66 @@ export function mockMetadata (
   mockMethod(client, kMetadata, callToMock, errorToMock, returnValue, fn)
 }
 
+export function mockConnectionAPI (
+  connection: Connection,
+  apiKeyToMock: number | ((current: number) => boolean),
+  errorToMock?: Error | null,
+  returnValue?: unknown,
+  fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
+) {
+  if (typeof errorToMock === 'undefined') {
+    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')])
+  }
+
+  const originalSend = connection.send.bind(connection)
+
+  connection.send = function <ReturnType>(
+    apiKey: number,
+    apiVersion: number,
+    payload: () => Writer,
+    responseParser: ResponseParser<ReturnType>,
+    hasRequestHeaderTaggedFields: boolean,
+    hasResponseHeaderTaggedFields: boolean,
+    callback: Callback<ReturnType>
+  ) {
+    const shouldMock = typeof apiKeyToMock === 'function' ? apiKeyToMock(apiKey) : apiKey === apiKeyToMock
+
+    if (shouldMock) {
+      if (fn) {
+        const shouldKeepMock = fn(
+          originalSend,
+          apiKey,
+          apiVersion,
+          payload,
+          responseParser,
+          hasRequestHeaderTaggedFields,
+          hasResponseHeaderTaggedFields,
+          callback
+        )
+
+        if (!shouldKeepMock) {
+          connection.send = originalSend
+        }
+      } else {
+        connection.send = originalSend
+
+        callback(errorToMock, returnValue as ReturnType)
+      }
+      return
+    }
+
+    originalSend(
+      apiKey,
+      apiVersion,
+      payload,
+      responseParser,
+      hasRequestHeaderTaggedFields,
+      hasResponseHeaderTaggedFields,
+      callback
+    )
+  } as typeof originalSend
+}
+
 export function mockAPI (
   pool: ConnectionPool,
   apiKeyToMock: number | ((current: number) => boolean),
@@ -197,14 +257,15 @@ export function mockAPI (
   }
 
   const originalGet = pool.get.bind(pool)
-  let mocked = false
+  const mocked = new Set<number>()
 
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     originalGet(broker, (error: Error | null, connection: Connection) => {
-      if (mocked) {
-        callback(error, connection)
+      if (mocked.has(connection.instanceId)) {
+        callback(null, connection)
         return
       }
+      mocked.add(connection.instanceId)
 
       if (error) {
         callback(error, undefined as unknown as Connection)
@@ -245,7 +306,6 @@ export function mockAPI (
             connection.send = originalSend
             pool.get = originalGet
 
-            mocked = true
             callback(errorToMock, returnValue as ReturnType)
           }
           return

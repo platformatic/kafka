@@ -22,7 +22,7 @@ export type ClientDiagnosticEvent<InstanceType extends Base = Base, Attributes =
 
 export type TracingChannelWithName<EventType extends object> = TracingChannel<string, EventType> & { name: string }
 
-export type DiagnosticContext<BaseContext> = BaseContext & {
+export type DiagnosticContext<BaseContext = {}> = BaseContext & {
   operationId: bigint
   result?: unknown
   error?: unknown
@@ -32,7 +32,7 @@ export const channelsNamespace = 'plt:kafka' as const
 
 let operationId = 0n
 
-export function createDiagnosticContext<BaseContext> (context: BaseContext): DiagnosticContext<BaseContext> {
+export function createDiagnosticContext<BaseContext = {}> (context: BaseContext): DiagnosticContext<BaseContext> {
   return { operationId: operationId++, ...context }
 }
 

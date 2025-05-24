@@ -1,3 +1,7 @@
+// SASL Authentication
+export const SASLMechanisms = ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'] as const
+export type SASLMechanism = (typeof SASLMechanisms)[number]
+
 // Metadata API
 // ./metadata/find-coordinator.ts
 export const FindCoordinatorKeyTypes = { GROUP: 0, TRANSACTION: 1, SHARE: 2 } as const

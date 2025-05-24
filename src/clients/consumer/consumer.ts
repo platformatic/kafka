@@ -1,4 +1,10 @@
 import { type ValidateFunction } from 'ajv'
+import {
+  type CallbackWithPromise,
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks
+} from '../../apis/callbacks.ts'
 import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
@@ -46,14 +52,14 @@ import { Writer } from '../../protocol/writer.ts'
 import {
   Base,
   kAfterCreate,
-  kBootstrapBrokers,
   kCheckNotClosed,
   kClosed,
-  kConnections,
   kCreateConnectionPool,
   kFetchConnections,
   kFormatValidationErrors,
   kGetApi,
+  kGetBootstrapConnection,
+  kGetConnection,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -63,12 +69,6 @@ import {
 } from '../base/base.ts'
 import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
-import {
-  type CallbackWithPromise,
-  createPromisifiedCallback,
-  kCallbackPromise,
-  runConcurrentCallbacks
-} from '../callbacks.ts'
 import { ensureMetric, type Gauge } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
@@ -639,7 +639,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this[kPerformWithRetry]<ListOffsetsResponse>(
             'listOffsets',
             retryCallback => {
-              this[kConnections].get(metadata.brokers.get(leader)!, (error, connection) => {
+              this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
                 if (error) {
                   retryCallback(error, undefined as unknown as ListOffsetsResponse)
                   return
@@ -918,7 +918,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<FindCoordinatorResponse>(
           'findGroupCoordinator',
           retryCallback => {
-            this[kConnections].getFirstAvailable(this[kBootstrapBrokers], (error, connection) => {
+            this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as FindCoordinatorResponse)
                 return
@@ -1264,7 +1264,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<ReturnType>(
           operationId,
           retryCallback => {
-            this[kConnections].get(metadata.brokers.get(coordinatorId)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(coordinatorId)!, (error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as ReturnType)
                 return

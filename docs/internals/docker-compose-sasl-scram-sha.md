@@ -5,7 +5,6 @@ Create a JAAS file, like `data/jaas/sasl.conf` with the following contents:
 ```
 KafkaServer {
   org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin" user_admin="admin";
-  org.apache.kafka.common.security.scram.Plain required username="admin" password="admin";
   org.apache.kafka.common.security.scram.ScramLoginModule required username="admin" password="admin";
 };
 

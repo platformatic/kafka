@@ -22,6 +22,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
       - name: Use supported Node.js Version
         uses: actions/setup-node@v4
         with:
@@ -33,10 +37,6 @@ jobs:
         with:
           path: ~/.pnpm-store
           key: node-modules-${{ hashFiles('package.json') }}
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
       - name: Install dependencies
         run: pnpm install
       - name: Bump Version

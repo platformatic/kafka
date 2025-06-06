@@ -85,6 +85,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
+
+    if (typeof this[kOptions].retries === 'boolean') {
+      this[kOptions].retries = this[kOptions].retries ? Number.POSITIVE_INFINITY : 0
+    }
+
     this[kValidateOptions](this[kOptions], baseOptionsValidator, '/options')
     this[kClientId] = options.clientId
 
@@ -353,7 +358,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean
   ): void | Promise<ReturnType> {
-    const retries = this[kOptions].retries!
+    const retries = this[kOptions].retries! as number
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {

@@ -203,3 +203,11 @@ We've identified three common scenarios that can lead to missed heartbeats while
 - Complex asynchronous message processing – When user code performs long or delayed async tasks while handling messages, it may block the driver from sending timely heartbeats. If the client does not decouple fetching from processing, heartbeats can be lost. Solutions like KafkaJS require users to manually send heartbeats during processing, which is error-prone. In contrast, @platformatic/kafka fully decouples message fetching from processing to prevent this issue entirely.
 
 - CPU-intensive operations – In Node.js, blocking the event loop with heavy computations prevents any I/O operations, including heartbeats. If such operations are unavoidable, the recommended solution is to offload them to a separate thread using Node.js Worker Threads.
+
+### How do I handle reconnections when the connections fail or the brokers crash?
+
+By default, `@platformatic/kafka` retries an operation three times with a waiting time of 250 milliseconds (these are the default of the `retries` and `retryDelay` options). This is to ensure that connection error are properly reported to the user. If the operation fails, the `error` event is emitted on the stream. After that, the stream is no longer usable, but the consumer still is (thanks to the internal decoupled architecture) and therefore you just have to invoke `consume` again to obtain a new stream and start processing messages again.
+
+If you instead want it to handle reconnections automatically, you just have to change the values of `retries` to a higher value or `true` to set it to "infinite retries". Also, increase `retryDelay` to at least a second to avoid opening too many TCP connections in short period of time if the broker is down.
+
+You can change those values in the `Consumer` constructor (and, similarly, to any other `@platformatic/kafka` client).

@@ -30,7 +30,7 @@ export interface BaseOptions extends ConnectionOptions {
   clientId: string
   bootstrapBrokers: Broker[] | string[]
   timeout?: number
-  retries?: number
+  retries?: number | boolean
   retryDelay?: number
   metadataMaxAge?: number
   autocreateTopics?: boolean

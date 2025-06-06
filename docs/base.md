@@ -25,7 +25,7 @@ Creates a new base client.
 | `clientId`         | `string`               |           | Client ID.                                                                                                                                       |
 | `bootstrapBrokers` | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.       |
 | `timeout`          | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                           |
-| `retries`          | `number`               | `3`       | Number of times to retry an operation before failing.                                                                                            |
+| `retries`          | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                             |
 | `retryDelay`       | `number`               | `250`     | Amount of time in milliseconds to wait between retries.                                                                                          |
 | `metadataMaxAge`   | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                            |
 | `autocreateTopics` | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                  |

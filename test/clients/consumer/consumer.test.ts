@@ -298,7 +298,7 @@ test('close should support both promise and callback API', t => {
 })
 
 test('close should leave consumer group if currently joined', async t => {
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, { retries: true })
 
   // Join a group first
   await consumer.joinGroup({})

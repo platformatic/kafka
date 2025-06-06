@@ -35,7 +35,7 @@ export const baseOptionsSchema = {
     },
     timeout: { type: 'number', minimum: 0 },
     connectTimeout: { type: 'number', minimum: 0 },
-    retries: { type: 'number', minimum: 0 },
+    retries: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'boolean' }] },
     retryDelay: { type: 'number', minimum: 0 },
     maxInflights: { type: 'number', minimum: 0 },
     tls: { type: 'object', additionalProperties: true }, // No validation as they come from Node.js

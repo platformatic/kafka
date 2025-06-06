@@ -5,7 +5,7 @@ import { alterUserScramCredentialsV0, Base, Connection, MultipleErrors, ScramMec
 import { hi, ScramAlgorithms } from '../../../src/protocol/sasl/scram-sha.ts'
 
 test('should not connect to SASL protected broker by default', async t => {
-  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:3012'], strict: true, retries: 0 })
+  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:3012'], strict: true, retries: false })
   t.after(() => base.close())
 
   await rejects(() => base.metadata({ topics: [] }))

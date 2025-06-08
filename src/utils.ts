@@ -1,8 +1,6 @@
-import { Unpromise } from '@watchable/unpromise'
 import ajvErrors from 'ajv-errors'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import debug from 'debug'
-import { setTimeout as sleep } from 'node:timers/promises'
 import { inspect } from 'node:util'
 import { type DynamicBuffer } from './protocol/dynamic-buffer.ts'
 
@@ -181,17 +179,4 @@ export function setDebugDumpLogger (logger: DebugDumpLogger) {
 
 export function debugDump (...values: unknown[]) {
   debugDumpLogger(new Date().toISOString(), ...values.map(v => (typeof v === 'string' ? v : inspect(v, false, 10))))
-}
-
-export async function executeWithTimeout<T = unknown> (
-  promise: Promise<T>,
-  timeout: number,
-  timeoutValue = 'timeout'
-): Promise<T | string> {
-  const ac = new AbortController()
-
-  return Unpromise.race([promise, sleep(timeout, timeoutValue, { signal: ac.signal, ref: false })]).then((value: T) => {
-    ac.abort()
-    return value
-  })
 }

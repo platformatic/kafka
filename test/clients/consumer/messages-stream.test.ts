@@ -11,7 +11,6 @@ import {
   type ConsumerOptions,
   consumerReceivesChannel,
   type Deserializers,
-  executeWithTimeout,
   instancesChannel,
   jsonDeserializer,
   type KafkaRecord,
@@ -37,7 +36,8 @@ import {
   createTracingChannelVerifier,
   mockedErrorMessage,
   mockedOperationId,
-  mockMetadata
+  mockMetadata,
+  executeWithTimeout
 } from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {

@@ -9,6 +9,8 @@ import {
   unsubscribe
 } from 'node:diagnostics_channel'
 import { type TestContext } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { Unpromise } from '@watchable/unpromise'
 import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
 import {
   Admin,
@@ -442,4 +444,17 @@ export function isKafka (version: string | string[]): boolean {
 
 export function isNotKafka (version: string | string[]): boolean {
   return !isKafka(version)
+}
+
+export async function executeWithTimeout<T = unknown> (
+  promise: Promise<T>,
+  timeout: number,
+  timeoutValue = 'timeout'
+): Promise<T | string> {
+  const ac = new AbortController()
+
+  return Unpromise.race([promise, sleep(timeout, timeoutValue, { signal: ac.signal, ref: false })]).then((value: T) => {
+    ac.abort()
+    return value
+  })
 }

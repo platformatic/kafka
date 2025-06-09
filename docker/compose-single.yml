@@ -1,57 +1,48 @@
-# To listen on broker, run ./kafka-console-consumer.sh --property print.key=true --property print.value=true --property print.headers=true --property print.offset=true --bootstrap-server localhost:9092 ...
----
 services:
-  localhost:
-    image: apache/kafka:${KAFKA_VERSION}
+  kafka:
+    image: bitnami/kafka:${KAFKA_VERSION}
     ports:
       - '9092:9092' # PLAIN TEXT
-      - '9093:9093' # SSL
-      - '9094:9094' # SASL
+      - '9095:9095' # SASL
+      - '9098:9098' # SSL
     volumes:
-      - ./data/ssl:/var/ssl/private
-      - ./data/jaas:/var/jaas
+      - './data/jaas/jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
+      - './data/ssl/server.keystore.jks:/opt/bitnami/kafka/config/certs/kafka.keystore.jks:ro'
+      - './data/ssl/server.truststore.jks:/opt/bitnami/kafka/config/certs/kafka.truststore.jks:ro'
     environment:
-      _JAVA_OPTIONS: '-XX:UseSVE=0'
-      KAFKA_NODE_ID: 1
-      KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,MAIN:PLAINTEXT'
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:29093'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
-      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-      # Enable the following to being able to test ConsumerHeartbeat
-      # See: https://cwiki.apache.org/confluence/display/KAFKA/The+Next+Generation+of+the+Consumer+Rebalance+Protocol+%28KIP-848%29+-+Early+Access+Release+Notes
-      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer'
-      KAFKA_TRANSACTION_PARTITION_VERIFICATION_ENABLE: 'false'
-      # SSL
-      # KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
-      # KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,MAIN:SSL'
-      # KAFKA_SSL_TRUSTSTORE_LOCATION: /var/ssl/private/server.truststore.jks
-      # KAFKA_SSL_TRUSTSTORE_PASSWORD: 12345678
-      # KAFKA_SSL_KEYSTORE_LOCATION: /var/ssl/private/server.keystore.jks
-      # KAFKA_SSL_KEYSTORE_PASSWORD: 12345678
-      # KAFKA_SSL_CLIENT_AUTH: required # This is to also enable mTLS
+      # General options
+      _JAVA_OPTIONS: '-XX:UseSVE=0' #Needed for Docker on Apple Silicon
+      ALLOW_PLAINTEXT_LISTENER: 'yes'
+      KAFKA_ENABLE_KRAFT: 'yes'
+      KAFKA_KRAFT_CLUSTER_ID: 'abcdefghijklmnopqrstuv'
+      KAFKA_CFG_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CFG_NODE_ID: '1'
+      # Ports configuration
+      KAFKA_CFG_LISTENERS: 'PLAINTEXT://:9092,SASL_PLAINTEXT://:9095,SSL://:9098,CONTROLLER://:29092'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SSL:SSL,CONTROLLER:PLAINTEXT'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092,SASL_PLAINTEXT://localhost:9095,SSL://localhost:9098'
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@kafka:29092'
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_PARTITION_VERIFICATION_ENABLE: 'false'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      # Consumer group options
+      KAFKA_CFG_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer'
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
       # SASL
-      # KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT://:19092,MAIN://:9092'
-      # KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:19092,MAIN://localhost:9092'
-      # KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:SASL_PLAINTEXT,MAIN:SASL_PLAINTEXT'
-      # KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
-      # KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: false
-      # # KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
-      # # KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
-      # # KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
-      # KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
-      # KAFKA_SASL_ENABLED_MECHANISMS: PLAIN,SCRAM-SHA-256
-      # KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
-      # KAFKA_SUPER_USERS: 'User:ANONYMOUS;User:admin'
-      # KAFKA_OPTS: '-Djava.security.auth.login.config=/var/jaas/jaas.conf'
+      KAFKA_CLIENT_USERS: 'admin'
+      KAFKA_CLIENT_PASSWORDS: 'admin'
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: 'PLAIN,SCRAM-SHA-256,SCRAM-SHA-512'
+      KAFKA_CFG_SUPER_USERS: 'User:admin'
+      KAFKA_CFG_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'false'
+      KAFKA_CFG_SASL_MECHANISM_CONTROLLER_PROTOCOL: 'PLAIN'
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: 'PLAIN'
+      # SSL
+      KAFKA_CFG_SSL_KEYSTORE_PASSWORD: 12345678
+      KAFKA_CFG_SSL_TRUSTSTORE_PASSWORD: 12345678
+      KAFKA_CFG_SSL_CLIENT_AUTH: required # This is to also enable mTLS

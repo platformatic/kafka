@@ -20,7 +20,7 @@ KafkaClient {
 Ensure the following mapping is enabled in the docker-compose volumes:
 
 ```
-- ./data/jaas:/var/jaas
+- './data/jaas/jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
 ```
 
 If you need to run the ACL tools within the docker container, you will need a `admin.conf` structured like this:

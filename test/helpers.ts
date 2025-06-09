@@ -1,4 +1,5 @@
 import { deepStrictEqual } from 'node:assert'
+import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
   type Channel,
@@ -36,6 +37,7 @@ import {
 export const kafkaBootstrapServers = ['localhost:9092']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
+let kafkaVersion = process.env.KAFKA_VERSION
 
 export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
   const options: BaseOptions = {
@@ -437,9 +439,14 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
 }
 
 export function isKafka (version: string | string[]): boolean {
+  if (!kafkaVersion) {
+    const kafkaImage = execSync(' docker inspect --format "{{.Config.Image}}" broker-1', { encoding: 'utf8' }).trim()
+    kafkaVersion = kafkaImage.split(':')[1]
+  }
+
   version = Array.isArray(version) ? version : [version]
 
-  return version.includes(process.env.KAFKA_VERSION as string)
+  return version.includes(kafkaVersion)
 }
 
 export function isNotKafka (version: string | string[]): boolean {

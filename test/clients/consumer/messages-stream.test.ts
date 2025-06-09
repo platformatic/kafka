@@ -33,6 +33,7 @@ import {
 } from '../../../src/index.ts'
 import {
   createCreationChannelVerifier,
+  createTopic,
   createTracingChannelVerifier,
   mockedErrorMessage,
   mockedOperationId,
@@ -68,7 +69,7 @@ function createProducer<K = string, V = string, HK = string, HV = string> (
     clientId: `test-producer-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers,
     serializers: stringSerializers as Serializers<K, V, HK, HV>,
-    autocreateTopics: true,
+    autocreateTopics: false,
     ...options
   })
 
@@ -187,7 +188,7 @@ test('should be an instance of Readable', async t => {
     instancesChannel,
     (data: { type: string }) => data.type === 'messages-stream'
   )
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -242,7 +243,7 @@ test('should throw error when not specifying offsets with MANUAL mode', async t 
 
 test('should support diagnostic channels', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic, 1)
@@ -296,7 +297,7 @@ test('should support diagnostic channels', async t => {
 
 test('should support autocommit and COMMITTED mode', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -327,7 +328,7 @@ test('should support autocommit and COMMITTED mode', async t => {
 
 test('should support timed autocommits', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -360,7 +361,7 @@ test('should support timed autocommits', async t => {
 
 test('should support timed empty autocommits', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -379,7 +380,7 @@ test('should support timed empty autocommits', async t => {
 
 test('should support manual commits', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -415,10 +416,7 @@ test('should support manual commits', async t => {
 
 test('should consume messages with LATEST mode', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
-
-  // Produce test messages
-  await produceTestMessages(t, topic)
+  const topic = await createTopic(t, true)
 
   // LATEST by default
   let messages = []
@@ -464,7 +462,7 @@ test('should consume messages with LATEST mode', async t => {
 
 test('should consume messages with EARLIEST mode', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -489,7 +487,7 @@ test('should consume messages with EARLIEST mode', async t => {
 
 test('should consume messages with MANUAL mode', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -539,7 +537,7 @@ test('should support different fallback modes', async t => {
   const groupIdFail = createTestGroupId()
   const groupIdLatest = createTestGroupId()
   const groupIdEarliest = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -580,14 +578,11 @@ test('should support different fallback modes', async t => {
 
 test('should ignore part of records batchs already consumed', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages - Note that these are parte of the same batch
   // Create a producer with string serializers (uppercase values)
-  const producer = createProducer(t, {
-    serializers: stringSerializers,
-    autocreateTopics: true
-  })
+  const producer = createProducer(t, { serializers: stringSerializers })
 
   // Produce messages
   const messages = []
@@ -633,7 +628,7 @@ test('should ignore part of records batchs already consumed', async t => {
 
 test('should support asyncIterator interface', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -666,13 +661,10 @@ test('should support asyncIterator interface', async t => {
 
 test('should handle deserialization errors', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Create a producer with string serializers (uppercase values)
-  const producer = createProducer(t, {
-    serializers: stringSerializers,
-    autocreateTopics: true
-  })
+  const producer = createProducer(t, { serializers: stringSerializers })
 
   // Produce messages
   const messages = []
@@ -709,13 +701,10 @@ test('should handle deserialization errors', async t => {
 
 test('should allow resuming deserialization errors', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Create a producer with string serializers (uppercase values)
-  const producer = createProducer(t, {
-    serializers: stringSerializers,
-    autocreateTopics: true
-  })
+  const producer = createProducer(t, { serializers: stringSerializers })
 
   // Produce messages
   const messages = []
@@ -763,7 +752,7 @@ test('should allow resuming deserialization errors', async t => {
 
 test('should support custom deserializers', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Create a producer with custom serializers (uppercase values)
   const producer = createProducer(t, {
@@ -772,8 +761,7 @@ test('should support custom deserializers', async t => {
       value: (value?: string) => Buffer.from(value!.toUpperCase()),
       headerKey: (key?: string) => Buffer.from(key!),
       headerValue: (value?: string) => Buffer.from(value!)
-    },
-    autocreateTopics: true
+    }
   })
 
   // Produce test messages
@@ -819,7 +807,7 @@ test('should support custom deserializers', async t => {
 
 test('should properly handle close', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic, 1)
@@ -872,7 +860,7 @@ test('should properly handle close', async t => {
 
 test('should properly handle going back and forth to empty assignments', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic, 1)
@@ -921,7 +909,7 @@ test('should properly handle going back and forth to empty assignments', async t
 
 test('should handle errors from Base.metadata', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -947,7 +935,7 @@ test('should handle errors from Base.metadata', async t => {
 
 test('should handle errors from Consumer.fetch', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -978,7 +966,7 @@ test('should handle errors from Consumer.fetch', async t => {
 
 test('should handle errors from Consumer.commit', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -1010,7 +998,7 @@ test('should handle errors from Consumer.commit', async t => {
 
 test('should handle errors from Consumer.listOffsets', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -1041,7 +1029,7 @@ test('should handle errors from Consumer.listOffsets', async t => {
 
 test('should handle errors from Consumer.listCommittedOffsets', async t => {
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)
@@ -1073,7 +1061,7 @@ test('should handle errors from Consumer.listCommittedOffsets', async t => {
 test('metrics should track the number of consumed messages', async t => {
   const registry = new Prometheus.Registry()
   const groupId = createTestGroupId()
-  const topic = createTestTopic()
+  const topic = await createTopic(t, true)
 
   // Produce test messages
   await produceTestMessages(t, topic)

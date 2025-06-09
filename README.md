@@ -13,6 +13,10 @@ A modern, high-performance, pure TypeScript/JavaScript type safe client for Apac
 - **Connection Management**: Automatic connection pooling and recovery.
 - **Low Dependencies**: Minimal external dependencies.
 
+## Supported Kafka Version
+
+Supported Kafka version are from **3.5.0** to **4.0.0** and equivalent, edges included.
+
 ## Installation
 
 ```bash

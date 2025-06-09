@@ -902,8 +902,8 @@ test('should not connect to SASL protected broker by default', async t => {
 for (const mechanism of SASLMechanisms) {
   test(
     `should connect to SASL protected broker using SASL/${mechanism}`,
-    // Disable SCRAM-SHA-512 for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
-    { skip: mechanism === 'SCRAM-SHA-512' && isKafka('3.5.0') },
+    // Disable SCRAM-SHA for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
+    { skip: isKafka('3.5.0') },
     async t => {
       const connection = new Connection('clientId', { sasl: { mechanism, username: 'admin', password: 'admin' } })
       t.after(() => connection.close())

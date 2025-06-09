@@ -81,6 +81,9 @@ importers:
       semver:
         specifier: ^7.7.1
         version: 7.7.1
+      table:
+        specifier: ^6.9.0
+        version: 6.9.0
       typescript:
         specifier: ^5.7.3
         version: 5.8.3

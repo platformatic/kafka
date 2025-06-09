@@ -1,31 +1,27 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
-import { randomBytes } from 'node:crypto'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { type TestContext } from 'node:test'
 import {
-  alterUserScramCredentialsV0,
   AuthenticationError,
-  metadataV12,
-  saslHandshakeV1,
-  ScramMechanisms
-} from '../../src/index.ts'
-import { hi, ScramAlgorithms } from '../../src/protocol/sasl/scram-sha.ts'
-
-import {
   Connection,
   type ConnectionDiagnosticEvent,
   connectionsApiChannel,
   connectionsConnectsChannel,
   ConnectionStatuses,
   instancesChannel,
+  metadataV12,
   NetworkError,
   type Reader,
+  saslHandshakeV1,
+  SASLMechanisms,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
+
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
+  isKafka,
   mockConnectionAPI,
   mockedErrorMessage,
   mockedOperationId
@@ -899,55 +895,24 @@ test('should not connect to SASL protected broker by default', async t => {
   const connection = new Connection('clientId')
   t.after(() => connection.close())
 
-  await connection.connect('localhost', 3012)
+  await connection.connect('localhost', 9095)
   await rejects(() => metadataV12.api.async(connection, []))
 })
 
-test('should connect to SASL protected broker using SASL/PLAIN', async t => {
-  const connection = new Connection('clientId', { sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' } })
-  t.after(() => connection.close())
+for (const mechanism of SASLMechanisms) {
+  test(
+    `should connect to SASL protected broker using SASL/${mechanism}`,
+    // Disable SCRAM-SHA-512 for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
+    { skip: mechanism === 'SCRAM-SHA-512' && isKafka('3.5.0') },
+    async t => {
+      const connection = new Connection('clientId', { sasl: { mechanism, username: 'admin', password: 'admin' } })
+      t.after(() => connection.close())
 
-  await connection.connect('localhost', 3012)
-  await metadataV12.api.async(connection, [])
-})
-
-test('should connect to SASL protected broker using SASL/SCRAM-SHA-256', async t => {
-  // To use SCRAM-SHA-256, we need to create the user via the alterUserScramCredentialsV0 API
-  {
-    const connection = new Connection('clientId', {
-      sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' }
-    })
-
-    const iterations = ScramAlgorithms['SHA-256'].minIterations
-    const salt = randomBytes(10)
-    const saltedPassword = hi(ScramAlgorithms['SHA-256'], 'admin', salt, iterations)
-    await connection.connect('localhost', 3012)
-
-    await alterUserScramCredentialsV0.api.async(
-      connection,
-      [],
-      [
-        {
-          name: 'admin',
-          mechanism: ScramMechanisms.SCRAM_SHA_256,
-          iterations: ScramAlgorithms['SHA-256'].minIterations,
-          salt,
-          saltedPassword
-        }
-      ]
-    )
-
-    await connection.close()
-  }
-
-  const connection = new Connection('clientId', {
-    sasl: { mechanism: 'SCRAM-SHA-256', username: 'admin', password: 'admin' }
-  })
-  t.after(() => connection.close())
-
-  await connection.connect('localhost', 3012)
-  await metadataV12.api.async(connection, [])
-})
+      await connection.connect('localhost', 9095)
+      await metadataV12.api.async(connection, [])
+    }
+  )
+}
 
 test('should reject unsupported mechanisms', async t => {
   const connection = new Connection('clientId', {
@@ -956,7 +921,7 @@ test('should reject unsupported mechanisms', async t => {
   })
 
   try {
-    await connection.connect('localhost', 3012)
+    await connection.connect('localhost', 9095)
     throw new Error('Expected error not thrown')
   } catch (error) {
     deepStrictEqual(error.cause!.message, 'SASL mechanism WHATEVER not supported.')
@@ -972,7 +937,7 @@ test('should handle handshake errors', async t => {
   mockConnectionAPI(connection, saslHandshakeV1.api.key)
 
   try {
-    await connection.connect('localhost', 3012)
+    await connection.connect('localhost', 9095)
     throw new Error('Expected error not thrown')
   } catch (error) {
     ok(error instanceof NetworkError)
@@ -989,7 +954,7 @@ test('should handle authentication errors', async t => {
   t.after(() => connection.close())
 
   try {
-    await connection.connect('localhost', 3012)
+    await connection.connect('localhost', 9095)
     throw new Error('Expected error not thrown')
   } catch (error) {
     ok(error instanceof NetworkError)

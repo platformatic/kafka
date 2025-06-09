@@ -4,11 +4,9 @@ async function main () {
   const client = new Base({
     clientId: 'clientId',
     groupId: 'groupId',
-    bootstrapBrokers: ['localhost:9095'],
-    sasl: {
-      mechanism: 'SCRAM-SHA-256',
-      username: 'admin',
-      password: 'admin'
+    bootstrapBrokers: ['localhost:9098'],
+    tls: {
+      rejectUnauthorized: false
     },
     retries: 0
   })

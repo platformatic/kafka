@@ -1,80 +1,42 @@
 import { deepStrictEqual, ok, rejects } from 'node:assert'
-import { randomBytes } from 'node:crypto'
 import { test } from 'node:test'
-import { alterUserScramCredentialsV0, Base, Connection, MultipleErrors, ScramMechanisms } from '../../../src/index.ts'
-import { hi, ScramAlgorithms } from '../../../src/protocol/sasl/scram-sha.ts'
+import { Base, MultipleErrors, SASLMechanisms } from '../../../src/index.ts'
+import { isKafka } from '../../helpers.ts'
 
 test('should not connect to SASL protected broker by default', async t => {
-  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:3012'], strict: true, retries: false })
+  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9095'], strict: true, retries: false })
   t.after(() => base.close())
 
   await rejects(() => base.metadata({ topics: [] }))
 })
 
-test('should connect to SASL protected broker using SASL/PLAIN', async t => {
-  const base = new Base({
-    clientId: 'clientId',
-    bootstrapBrokers: ['localhost:3012'],
-    strict: true,
-    retries: 0,
-    sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' }
-  })
+for (const mechanism of SASLMechanisms) {
+  test(
+    `should connect to SASL protected broker using SASL/${mechanism}`,
+    // Disable SCRAM-SHA-512 for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
+    { skip: mechanism === 'SCRAM-SHA-512' && isKafka('3.5.0') },
+    async t => {
+      const base = new Base({
+        clientId: 'clientId',
+        bootstrapBrokers: ['localhost:9095'],
+        strict: true,
+        retries: 0,
+        sasl: { mechanism, username: 'admin', password: 'admin' }
+      })
 
-  t.after(() => base.close())
+      t.after(() => base.close())
 
-  const metadata = await base.metadata({ topics: [] })
+      const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9092 })
-})
-
-test('should connect to SASL protected broker using SASL/SCRAM-SHA-256', async t => {
-  // To use SCRAM-SHA-256, we need to create the user via the alterUserScramCredentialsV0 API
-  {
-    const connection = new Connection('clientId', {
-      sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' }
-    })
-
-    const iterations = ScramAlgorithms['SHA-256'].minIterations
-    const salt = randomBytes(10)
-    const saltedPassword = hi(ScramAlgorithms['SHA-256'], 'admin', salt, iterations)
-    await connection.connect('localhost', 3012)
-
-    await alterUserScramCredentialsV0.api.async(
-      connection,
-      [],
-      [
-        {
-          name: 'admin',
-          mechanism: ScramMechanisms.SCRAM_SHA_256,
-          iterations: ScramAlgorithms['SHA-256'].minIterations,
-          salt,
-          saltedPassword
-        }
-      ]
-    )
-
-    await connection.close()
-  }
-
-  const base = new Base({
-    clientId: 'clientId',
-    bootstrapBrokers: ['localhost:3012'],
-    strict: true,
-    retries: 0,
-    sasl: { mechanism: 'SCRAM-SHA-256', username: 'admin', password: 'admin' }
-  })
-
-  t.after(() => base.close())
-
-  const metadata = await base.metadata({ topics: [] })
-
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9092 })
-})
+      deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9092 })
+    }
+  )
+}
 
 test('should handle authentication errors', async t => {
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:3012'],
+    bootstrapBrokers: ['localhost:9095'],
     retries: 0,
     sasl: { mechanism: 'PLAIN', username: 'admin', password: 'invalid' }
   })

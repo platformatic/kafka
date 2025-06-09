@@ -1,7 +1,3 @@
-# Keep this in sync with the compose-multiple.yml file, with the following modifications:
-#
-#   1. remove "_JAVA_OPTIONS: '-XX:UseSVE=0'" from the environment variables of the brokers.
-#
 services:
   broker-1:
     image: bitnami/kafka:${KAFKA_VERSION}
@@ -32,6 +28,8 @@ services:
       # Consumer group options
       KAFKA_CFG_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer'
       KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      # Do not use this in GitHub CI - Needed for Docker on Apple Silicon
+      _JAVA_OPTIONS: '-XX:UseSVE=0'
 
   broker-2:
     image: bitnami/kafka:${KAFKA_VERSION}

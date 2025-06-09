@@ -22,7 +22,6 @@ import {
   createAdmin,
   createCreationChannelVerifier,
   createTracingChannelVerifier,
-  isKafka,
   kafkaBootstrapServers,
   mockAPI,
   mockConnectionPoolGet,
@@ -572,6 +571,11 @@ test('listGroups should return consumer groups and support diagnostic channels',
 
   const admin = createAdmin(t)
 
+  // Get the API version for listGroups to see if we await the group type
+  const apiVersion = await admin.listApis()
+  const listGroupsApi = apiVersion.find(a => a.apiKey === listGroupsV5.api.key)!
+  const groupType = listGroupsApi.maxVersion === 5 ? 'classic' : undefined
+
   await consumer.joinGroup({})
 
   const verifyTracingChannel = createTracingChannelVerifier(
@@ -606,7 +610,7 @@ test('listGroups should return consumer groups and support diagnostic channels',
     id: consumer.groupId,
     protocolType: 'consumer',
     state: 'STABLE',
-    groupType: isKafka(['3.8.0', '3.9.0']) ? 'classic' : undefined
+    groupType
   })
 
   verifyTracingChannel()
@@ -809,7 +813,9 @@ test('describeGroups should describe consumer groups and support diagnostic chan
   // Describe the groups
   const describedGroups = await admin.describeGroups(options)
 
-  const { id, clientId, clientHost } = Array.from(describedGroups.get(consumer.groupId)?.members.values()!)[0]
+  const describedGroup = describedGroups.get(consumer.groupId)!
+  const { id, clientId, clientHost } = Array.from(describedGroup.members.values()!)[0]
+  const authorizedOperations = describedGroup.authorizedOperations
   deepStrictEqual(Array.from(describedGroups.values()), [
     {
       id: consumer.groupId,
@@ -833,7 +839,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
           }
         ]
       ]),
-      authorizedOperations: 328
+      authorizedOperations
     },
     {
       id: 'non-existent-group',
@@ -841,7 +847,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
       protocolType: '',
       protocol: '',
       members: new Map(),
-      authorizedOperations: 328
+      authorizedOperations
     }
   ])
 

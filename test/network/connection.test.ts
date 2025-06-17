@@ -55,6 +55,8 @@ test('Connection constructor', () => {
 
   deepStrictEqual(connection.status, ConnectionStatuses.NONE)
   ok(typeof connection.instanceId === 'number')
+  ok(typeof connection.host, undefined)
+  ok(typeof connection.port, undefined)
   deepStrictEqual(created(), { type: 'connection', instance: connection })
 })
 
@@ -66,6 +68,8 @@ test('Connection.connect should establish a connection', async t => {
   await connection.connect('localhost', port)
 
   deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
   ok(connection.socket instanceof Socket)
 })
 

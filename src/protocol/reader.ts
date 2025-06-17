@@ -280,7 +280,10 @@ export class Reader {
   }
 
   readVarIntBytes (): Buffer {
-    const length = this.readVarInt()
+    let length = this.readVarInt()
+    if (length === -1) {
+      length = 0
+    }
     const value = this.buffer.slice(this.position, this.position + length)
 
     this.position += length

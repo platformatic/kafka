@@ -84,6 +84,8 @@ export const defaultOptions: ConnectionOptions = {
 let currentInstance = 0
 
 export class Connection extends EventEmitter {
+  #host: string | undefined
+  #port: number | undefined
   #options: ConnectionOptions
   #status: ConnectionStatusValue
   #instanceId: number
@@ -119,6 +121,14 @@ export class Connection extends EventEmitter {
     this.#socketMustBeDrained = false
 
     notifyCreation('connection', this)
+  }
+
+  get host (): string | undefined {
+    return this.#status === ConnectionStatuses.CONNECTED ? this.#host : undefined
+  }
+
+  get port (): number | undefined {
+    return this.#status === ConnectionStatuses.CONNECTED ? this.#port : undefined
   }
 
   get instanceId (): number {
@@ -180,6 +190,9 @@ export class Connection extends EventEmitter {
 
       this.emit('connecting')
       /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
+
+      this.#host = host
+      this.#port = port
       this.#socket = this.#options.tls
         ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
         : createConnection({ ...connectionOptions, port, host })
@@ -578,7 +591,7 @@ export class Connection extends EventEmitter {
 
       connectionsApiChannel.asyncStart.publish(request.diagnostic)
       callback(responseError, deserialized)
-      connectionsApiChannel.asyncStart.publish(request.diagnostic)
+      connectionsApiChannel.asyncEnd.publish(request.diagnostic)
     }
   }
 

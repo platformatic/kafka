@@ -458,14 +458,22 @@ test('readBytes', () => {
 
 test('readVarIntBytes', () => {
   const buffer = Buffer.from([
-    // length as VarInt (1 - ZigZag encoded would be 2, but for length it's not ZigZag)
     2, // This is the actual encoding for length 1 in VarInt
     // Buffer content [10]
-    10
+    10,
+    1, // This is the actual encoding for length -1 in VarInt
+    // Buffer content is empty
+    0, // This is the actual encoding for length 0 in VarInt
+    // Buffer content is empty
+    4, // This is the actual encoding for length 2 in VarInt
+    1, 2 // Buffer content [1, 2]
   ])
 
   const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(reader.readVarIntBytes(), Buffer.from([10]))
+  deepStrictEqual(reader.readVarIntBytes(), Buffer.from([]))
+  deepStrictEqual(reader.readVarIntBytes(), Buffer.from([]))
+  deepStrictEqual(reader.readVarIntBytes(), Buffer.from([1, 2]))
 })
 
 test('readNullableArray', () => {

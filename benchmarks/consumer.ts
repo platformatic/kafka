@@ -1,6 +1,7 @@
-import RDKafka from '@platformatic/rdkafka'
+import ConfluentKafka from '@confluentinc/kafka-javascript'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS, logLevel } from 'kafkajs'
+import RDKafka from 'node-rdkafka'
 import { randomUUID } from 'node:crypto'
 import { Consumer, MessagesStreamModes } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
@@ -106,6 +107,105 @@ function rdkafkaStream (): Promise<Result> {
   return promise
 }
 
+function confluentKafkaEvented (): Promise<Result> {
+  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const tracker = new Tracker()
+
+  const consumer = new ConfluentKafka.KafkaConsumer(
+    {
+      'client.id': 'benchmarks',
+      'group.id': randomUUID(),
+      'metadata.broker.list': brokers.join(','),
+      'enable.auto.commit': false,
+      'fetch.min.bytes': 1,
+      'fetch.message.max.bytes': 200,
+      'fetch.wait.max.ms': 10
+    },
+    { 'auto.offset.reset': 'earliest' }
+  )
+
+  let i = 0
+  let last = process.hrtime.bigint()
+  consumer.on('data', () => {
+    i++
+    tracker.track(last)
+    last = process.hrtime.bigint()
+
+    if (i === iterations) {
+      consumer.removeAllListeners('data')
+      consumer.pause([
+        {
+          topic,
+          partition: 0
+        },
+        {
+          topic,
+          partition: 1
+        },
+        {
+          topic,
+          partition: 2
+        }
+      ])
+
+      setTimeout(() => {
+        consumer.disconnect()
+        resolve(tracker.results)
+      }, 100)
+    }
+  })
+
+  consumer.on('ready', () => {
+    consumer.subscribe([topic])
+    consumer.consume()
+  })
+
+  consumer.on('event.error', reject)
+
+  consumer.connect()
+
+  return promise
+}
+
+function confluentKafkaStream (): Promise<Result> {
+  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const tracker = new Tracker()
+
+  const stream = ConfluentKafka.KafkaConsumer.createReadStream(
+    {
+      'client.id': 'benchmarks',
+      'group.id': randomUUID(),
+      'metadata.broker.list': brokers.join(','),
+      'enable.auto.commit': false,
+      'fetch.min.bytes': 1,
+      'fetch.message.max.bytes': 200,
+      'fetch.wait.max.ms': 10
+    },
+    { 'auto.offset.reset': 'earliest' },
+    { topics: [topic], waitInterval: 0, highWaterMark: 1024, objectMode: true }
+  )
+
+  let i = 0
+  let last = process.hrtime.bigint()
+  stream.on('data', () => {
+    i++
+    tracker.track(last)
+    last = process.hrtime.bigint()
+
+    if (i === iterations) {
+      stream.removeAllListeners('data')
+      stream.pause()
+
+      stream.destroy()
+      resolve(tracker.results)
+    }
+  })
+
+  stream.on('error', reject)
+
+  return promise
+}
+
 async function kafkajs (): Promise<Result> {
   const { promise, resolve, reject } = Promise.withResolvers<Result>()
   const tracker = new Tracker()
@@ -177,6 +277,8 @@ async function platformaticKafka (): Promise<Result> {
 const results = {
   'node-rdkafka (evented)': await rdkafkaEvented(),
   'node-rdkafka (stream)': await rdkafkaStream(),
+  'confluent-kafka-javascript (evented)': await confluentKafkaEvented(),
+  'confluent-kafka-javascript (stream)': await confluentKafkaStream(),
   kafkajs: await kafkajs(),
   '@platformatic/kafka': await platformaticKafka()
 }

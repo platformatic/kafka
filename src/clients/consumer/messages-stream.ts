@@ -1,5 +1,10 @@
 import { Readable } from 'node:stream'
-import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../../apis/callbacks.ts'
+import {
+  createPromisifiedCallback,
+  kCallbackPromise,
+  noopCallback,
+  type CallbackWithPromise
+} from '../../apis/callbacks.ts'
 import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
@@ -475,7 +480,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             consumerReceivesChannel.asyncStart.publish(diagnosticContext)
 
-            canPush = this.push(message)
+            if (!(this.#shouldClose || this.closed || this.destroyed)) {
+              canPush = this.push(message)
+            }
 
             consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
           } catch (error) {

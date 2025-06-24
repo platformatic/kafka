@@ -1,6 +1,7 @@
-import RDKafka from '@platformatic/rdkafka'
+import ConfluentKafka from '@confluentinc/kafka-javascript'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
+import RDKafka from 'node-rdkafka'
 import { ProduceAcks, Producer, stringSerializers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
@@ -15,7 +16,6 @@ function rdkafka (): Promise<Result> {
     {
       'client.id': 'benchmarks',
       'metadata.broker.list': brokers.join(','),
-      'queue.buffering.max.messages': iterations,
       dr_cb: true
     },
     {
@@ -24,6 +24,9 @@ function rdkafka (): Promise<Result> {
   )
 
   producer.on('event.error', reject)
+  producer.on('event.log', function (log) {
+    console.log(`[${log.severity}] ${log.fac}: ${log.message}`)
+  })
 
   let i = 0
   let last = process.hrtime.bigint()
@@ -47,12 +50,77 @@ function rdkafka (): Promise<Result> {
     }
   })
 
+  let j = 0
+  function enqueueMessage () {
+    j++
+
+    producer.produce(topic, 0, Buffer.from('222'), '111-' + j, 0, null, [{ a: '123', b: '456' }])
+
+    if (j < iterations) {
+      producer.flush(1, enqueueMessage)
+    }
+  }
+
   producer.connect({}, () => {
     producer.setPollInterval(1)
+    enqueueMessage()
+  })
 
-    for (let j = 0; j < iterations; j++) {
-      producer.produce(topic, 0, Buffer.from('222'), '111-' + j, 0, null, [{ a: '123', b: '456' }])
+  return promise
+}
+
+function confluentKafka (): Promise<Result> {
+  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const tracker = new Tracker()
+
+  const producer = new ConfluentKafka.Producer({
+    'client.id': 'benchmarks',
+    'metadata.broker.list': brokers.join(','),
+    dr_cb: true,
+    acks: 0
+  })
+
+  producer.on('event.error', reject)
+  producer.on('event.log', function (log) {
+    console.log(`[${log.severity}] ${log.fac}: ${log.message}`)
+  })
+
+  let i = 0
+  let last = process.hrtime.bigint()
+  producer.on('delivery-report', () => {
+    i++
+
+    if (i % batchSize === 0) {
+      tracker.track(last)
+      last = process.hrtime.bigint()
     }
+
+    if (i === iterations) {
+      producer.disconnect(error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve(tracker.results)
+      })
+    }
+  })
+
+  let j = 0
+  function enqueueMessage () {
+    j++
+
+    producer.produce(topic, 0, Buffer.from('222'), '111-' + j, 0, null, [{ a: '123', b: '456' }])
+
+    if (j < iterations) {
+      producer.flush(1, enqueueMessage)
+    }
+  }
+
+  producer.connect({}, () => {
+    producer.setPollInterval(1)
+    enqueueMessage()
   })
 
   return promise
@@ -123,6 +191,7 @@ async function platformaticKafka (): Promise<Result> {
 
 const results = {
   'node-rdkafka': await rdkafka(),
+  'confluent-kafka-javascript': await confluentKafka(),
   kafkajs: await kafkajs(),
   '@platformatic/kafka': await platformaticKafka()
 }

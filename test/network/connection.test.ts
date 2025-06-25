@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
+import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { type TestContext } from 'node:test'
+import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
   AuthenticationError,
   Connection,
@@ -17,7 +19,6 @@ import {
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
-
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
@@ -29,6 +30,31 @@ import {
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
+  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
+  const sockets: Socket[] = []
+
+  server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
+  server.once('error', reject)
+  server.on('connection', socket => {
+    sockets.push(socket)
+  })
+
+  t.after((_, cb) => {
+    for (const socket of sockets) {
+      socket.end()
+    }
+    server.close(cb)
+  })
+
+  server.listen(0)
+  return promise
+}
+
+async function createTLSServer (t: TestContext): Promise<{ server: Server; port: number }> {
+  const server = createSecureServer({
+    key: await readFile(new URL('../fixtures/tls-key.pem', import.meta.url)),
+    cert: await readFile(new URL('../fixtures/tls-cert.pem', import.meta.url))
+  })
   const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
@@ -722,8 +748,7 @@ test('Connection should handle request serialization errors', async t => {
       false,
       false,
       () => {}
-    )
-  )
+    ))
 
   verifyTracingChannel()
 })
@@ -895,7 +920,7 @@ test('Connection should handle send when not connected', async t => {
   })
 })
 
-test('should not connect to SASL protected broker by default', async t => {
+test('Connection.connect should not connect to SASL protected broker by default', async t => {
   const connection = new Connection('clientId')
   t.after(() => connection.close())
 
@@ -905,7 +930,7 @@ test('should not connect to SASL protected broker by default', async t => {
 
 for (const mechanism of SASLMechanisms) {
   test(
-    `should connect to SASL protected broker using SASL/${mechanism}`,
+    `Connection.connect should connect to SASL protected broker using SASL/${mechanism}`,
     // Disable SCRAM-SHA for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
     { skip: isKafka('3.5.0') },
     async t => {
@@ -918,7 +943,7 @@ for (const mechanism of SASLMechanisms) {
   )
 }
 
-test('should reject unsupported mechanisms', async t => {
+test('Connection.connect should reject unsupported mechanisms', async t => {
   const connection = new Connection('clientId', {
     // @ts-expect-error - Purposefully using an invalid mechanism
     sasl: { mechanism: 'WHATEVER', username: 'admin', password: 'admin' }
@@ -932,7 +957,7 @@ test('should reject unsupported mechanisms', async t => {
   }
 })
 
-test('should handle handshake errors', async t => {
+test('Connection.connect should handle handshake errors', async t => {
   const connection = new Connection('clientId', {
     sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' }
   })
@@ -951,7 +976,7 @@ test('should handle handshake errors', async t => {
   }
 })
 
-test('should handle authentication errors', async t => {
+test('Connection.connect should handle authentication errors', async t => {
   const connection = new Connection('clientId', {
     sasl: { mechanism: 'PLAIN', username: 'admin', password: 'invalid' }
   })
@@ -965,4 +990,78 @@ test('should handle authentication errors', async t => {
     ok(error.cause instanceof AuthenticationError)
     deepStrictEqual(error.cause.message, 'SASL authentication failed.')
   }
+})
+
+test('Connection.connect should connect to a TLS host without forwarding the servername', async t => {
+  const { server, port } = await createTLSServer(t)
+
+  const hostPromise = Promise.withResolvers()
+  server.on('secureConnection', socket => {
+    hostPromise.resolve(socket.servername)
+  })
+
+  const connection = new Connection('test-client', {
+    tls: {
+      rejectUnauthorized: false
+    }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
+  ok(connection.socket instanceof TLSSocket)
+  deepStrictEqual(await hostPromise.promise, false)
+})
+
+test('Connection.connect should connect to a TLS host without forwarding the host as the servername', async t => {
+  const { server, port } = await createTLSServer(t)
+
+  const hostPromise = Promise.withResolvers()
+  server.on('secureConnection', socket => {
+    hostPromise.resolve(socket.servername)
+  })
+
+  const connection = new Connection('test-client', {
+    tls: {
+      rejectUnauthorized: false
+    },
+    tlsServerName: true
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
+  ok(connection.socket instanceof TLSSocket)
+  deepStrictEqual(await hostPromise.promise, 'localhost')
+})
+
+test('Connection.connect should connect to a TLS host without using a custom host as the servername', async t => {
+  const { server, port } = await createTLSServer(t)
+
+  const hostPromise = Promise.withResolvers()
+  server.on('secureConnection', socket => {
+    hostPromise.resolve(socket.servername)
+  })
+
+  const connection = new Connection('test-client', {
+    tls: {
+      rejectUnauthorized: false
+    },
+    tlsServerName: 'anotherhost'
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
+  ok(connection.socket instanceof TLSSocket)
+  deepStrictEqual(await hostPromise.promise, 'anotherhost')
 })

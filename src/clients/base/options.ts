@@ -39,6 +39,7 @@ export const baseOptionsSchema = {
     retryDelay: { type: 'number', minimum: 0 },
     maxInflights: { type: 'number', minimum: 0 },
     tls: { type: 'object', additionalProperties: true }, // No validation as they come from Node.js
+    tlsServerName: { oneOf: [{ type: 'boolean' }, { type: 'string' }] },
     sasl: {
       type: 'object',
       properties: {

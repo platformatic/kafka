@@ -34,6 +34,7 @@ Creates a new base client.
 | `connectTimeout`   | `number`               | `5000`    | Client connection timeout.                                                                                                                       |
 | `maxInflights`     | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                   |
 | `tls`              | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                        |
+| `tlsServerName`    | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                 |
 | `sasl`             | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                               |
 
 ## Methods

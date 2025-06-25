@@ -47,6 +47,7 @@ export interface ConnectionOptions {
   connectTimeout?: number
   maxInflights?: number
   tls?: TLSConnectionOptions
+  tlsServerName?: string | boolean
   sasl?: SASLOptions
   ownerId?: number
 }
@@ -166,8 +167,13 @@ export class Connection extends EventEmitter {
 
       this.#status = ConnectionStatuses.CONNECTING
 
-      const connectionOptions: Partial<NetConnectOpts> = {
+      const connectionOptions: Partial<NetConnectOpts & TLSConnectionOptions> = {
         timeout: this.#options.connectTimeout
+      }
+
+      if (this.#options.tlsServerName) {
+        connectionOptions.servername =
+          typeof this.#options.tlsServerName === 'string' ? this.#options.tlsServerName : host
       }
 
       const connectionTimeoutHandler = () => {
@@ -198,7 +204,7 @@ export class Connection extends EventEmitter {
         : createConnection({ ...connectionOptions, port, host })
       this.#socket.setNoDelay(true)
 
-      this.#socket.once('connect', () => {
+      this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
         this.#socket.removeListener('timeout', connectionTimeoutHandler)
         this.#socket.removeListener('error', connectionErrorHandler)
 

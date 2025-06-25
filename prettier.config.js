@@ -4,5 +4,6 @@ export default {
   singleQuote: true,
   bracketSpacing: true,
   trailingComma: 'none',
-  arrowParens: 'avoid'
+  arrowParens: 'avoid',
+  plugins: ['prettier-plugin-space-before-function-paren']
 }

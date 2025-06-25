@@ -8,6 +8,7 @@ import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
   type ClientDiagnosticEvent,
+  type ClusterMetadata,
   Consumer,
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -16,8 +17,10 @@ import {
   consumerHeartbeatChannel,
   consumerOffsetsChannel,
   defaultConsumerOptions,
+  type ExtendedGroupProtocolSubscription,
   fetchV17,
   findCoordinatorV6,
+  type GroupPartitionsAssignments,
   heartbeatV4,
   instancesChannel,
   joinGroupV9,
@@ -1854,6 +1857,57 @@ test('joinGroup should setup assignment with a round robin policy', async t => {
     deepStrictEqual(consumer1.assignments, [{ topic, partitions: [1] }])
     deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 2] }])
   }
+})
+
+test('joinGroup should setup assignment with a custom policy', async t => {
+  const topic = await createTopic(t, true, 3)
+  const groupId = createGroupId()
+
+  function partitionAssigner (
+    _current: string,
+    members: Map<string, ExtendedGroupProtocolSubscription>,
+    topics: Set<string>,
+    metadata: ClusterMetadata
+  ): GroupPartitionsAssignments[] {
+    const assignments: GroupPartitionsAssignments[] = []
+
+    // Assign all partitions to all members. This is conceptually incorrect, but we just want to test the assigner.
+    for (const memberId of members.keys()) {
+      const member = { memberId, assignments: new Map() }
+      assignments.push(member)
+
+      for (const topic of topics) {
+        const partitionsCount = metadata.topics.get(topic)!.partitionsCount
+
+        for (let i = 0; i < partitionsCount; i++) {
+          let topicAssignments = member.assignments.get(topic)
+
+          if (!topicAssignments) {
+            topicAssignments = { topic, partitions: [] }
+            member.assignments.set(topic, topicAssignments)
+          }
+
+          topicAssignments?.partitions.push(i)
+        }
+      }
+    }
+
+    return assignments
+  }
+
+  const consumer1 = createConsumer(t, { groupId, partitionAssigner })
+  const consumer2 = createConsumer(t, { groupId, partitionAssigner })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+
+  await consumer1.joinGroup({ protocols: [{ name: 'roundrobin', version: 1, metadata: '123' }] })
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup({ protocols: [{ name: 'roundrobin', version: 1, metadata: Buffer.from('123') }] })
+  await rejoinPromise
+
+  deepStrictEqual(consumer1.assignments, [{ topic, partitions: [0, 1, 2] }])
+  deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 1, 2] }])
 })
 
 test('joinGroup might receive no assignment', async t => {

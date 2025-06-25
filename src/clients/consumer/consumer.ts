@@ -82,6 +82,7 @@ import {
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
 } from './options.ts'
+import { roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
@@ -91,16 +92,12 @@ import {
   type FetchOptions,
   type GroupAssignment,
   type GroupOptions,
+  type GroupPartitionsAssigner,
   type GroupProtocolSubscription,
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets
 } from './types.ts'
-
-interface GroupRequestAssignment {
-  memberId: string
-  assignments: Map<string, GroupAssignment>
-}
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
   ConsumerOptions<Key, Value, HeaderKey, HeaderValue>
@@ -117,7 +114,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #protocol: string | null
   #coordinatorId: number | null
   #heartbeatInterval: NodeJS.Timeout | null
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>;
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  #partitionsAssigner: GroupPartitionsAssigner;
   /*
     The following requests are blocking in Kafka:
 
@@ -155,8 +153,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#protocol = null
     this.#coordinatorId = null
     this.#heartbeatInterval = null
-
     this.#streams = new Set()
+    this.#partitionsAssigner = this[kOptions].partitionAssigner ?? roundRobinAssigner
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
@@ -1168,7 +1166,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#performSyncGroup(this.#roundRobinAssignments(metadata), callback)
+          this.#performSyncGroup(this.#createAssignments(metadata), callback)
         })
 
         return
@@ -1230,7 +1228,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #performDeduplicateGroupOperaton<ReturnType>(
+  #performDeduplicateGroupOperaton<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
@@ -1244,7 +1242,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #performGroupOperation<ReturnType>(
+  #performGroupOperation<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
@@ -1326,7 +1324,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     ).buffer
   }
 
-  #roundRobinAssignments (metadata: ClusterMetadata): SyncGroupRequestAssignment[] {
+  #createAssignments (metadata: ClusterMetadata): SyncGroupRequestAssignment[] {
     const partitionTracker: Map<string, { next: number; max: number }> = new Map()
 
     // First of all, layout topics-partitions in a list
@@ -1352,44 +1350,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return [{ memberId: this.memberId!, assignment: this.#encodeProtocolAssignment(assignments) }]
     }
 
-    // Flat the list of members and subscribed topics
-    const members: GroupRequestAssignment[] = []
-    const subscribedTopics = new Set<string>()
-    for (const [memberId, subscription] of this.#members) {
-      members.push({ memberId, assignments: new Map() })
-
-      for (const topic of subscription.topics!) {
-        subscribedTopics.add(topic)
-      }
-    }
-
-    // Assign topic-partitions in round robin
-    let currentMember = 0
-    for (const topic of subscribedTopics) {
-      const partitionsCount = metadata.topics.get(topic)!.partitionsCount
-
-      for (let i = 0; i < partitionsCount; i++) {
-        const member = members[currentMember++ % membersSize]
-        let topicAssignments = member.assignments.get(topic)
-
-        if (!topicAssignments) {
-          topicAssignments = { topic, partitions: [] }
-          member.assignments.set(topic, topicAssignments)
-        }
-
-        topicAssignments?.partitions.push(i)
-      }
-    }
-
-    const assignments: SyncGroupRequestAssignment[] = []
-    for (const member of members) {
-      assignments.push({
+    const encodedAssignments: SyncGroupRequestAssignment[] = []
+    for (const member of this.#partitionsAssigner(this.memberId!, this.#members, this.topics.current, metadata)) {
+      encodedAssignments.push({
         memberId: member.memberId,
         assignment: this.#encodeProtocolAssignment(Array.from(member.assignments.values()))
       })
     }
 
-    return assignments
+    return encodedAssignments
   }
 
   #getRejoinError (error: Error): ProtocolError | null {

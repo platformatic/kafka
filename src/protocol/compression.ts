@@ -5,7 +5,6 @@ import { DynamicBuffer } from './dynamic-buffer.ts'
 
 const require = createRequire(import.meta.url)
 
-// @ts-ignore
 const { zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
 
 export type SyncCompressionPhase = (data: Buffer | DynamicBuffer) => Buffer

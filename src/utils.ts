@@ -1,8 +1,14 @@
-import ajvErrors from 'ajv-errors'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import debug from 'debug'
 import { inspect } from 'node:util'
 import { type DynamicBuffer } from './protocol/dynamic-buffer.ts'
+
+export interface EnumerationDefinition<T> {
+  allowed: T[]
+  errorMessage?: string
+}
+
+export type KeywordSchema<T> = { schema: T }
 
 // See: ajv/dist/types/index.d.ts
 export interface DataValidationContext {
@@ -25,9 +31,6 @@ export const loggers: Record<string, debug.Debugger> = {
   'consumer:heartbeat': debug('plt:kafka:consumer:heartbeat'),
   admin: debug('plt:kafka:admin')
 }
-
-// @ts-ignore
-ajvErrors(ajv)
 
 let debugDumpLogger: DebugDumpLogger = console.error
 
@@ -78,7 +81,7 @@ ajv.addKeyword({
     return current >= root[property]
   },
   error: {
-    message ({ schema }: { schema: string }): string {
+    message ({ schema }: KeywordSchema<string>): string {
       return `must be greater than or equal to $dataVar$/${schema}`
     }
   }
@@ -91,8 +94,20 @@ ajv.addKeyword({
     return current < root[property]
   },
   error: {
-    message ({ schema }: { schema: string }): string {
+    message ({ schema }: KeywordSchema<string>): string {
       return `must be less than or equal to $dataVar$/${schema}`
+    }
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'enumeration', // This mimics the enum keyword but defines a custom error message
+  validate (property: EnumerationDefinition<string | number>, current: string | number) {
+    return property.allowed.includes(current)
+  },
+  error: {
+    message ({ schema }: KeywordSchema<EnumerationDefinition<string>>): string {
+      return schema.errorMessage!
     }
   }
 })

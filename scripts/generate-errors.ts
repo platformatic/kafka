@@ -23,12 +23,12 @@ async function loadErrors (root: string): Promise<ProtocolError[]> {
   // html -> body -> table -> tbody
 
   return (
-    // @ts-ignore
+    // @ts-ignore - Wrong parse5 types
     contents.childNodes[0].childNodes[1].childNodes[0].childNodes[0].childNodes
-      // @ts-ignore
+      // @ts-ignore - Wrong parse5 types
       .filter(n => n.nodeName === 'tr')
       .slice(1) // Discard the header row
-      // @ts-ignore
+      // @ts-ignore - Wrong parse5 types
       .map(row => {
         return {
           id: row.childNodes[0].childNodes[0].value,

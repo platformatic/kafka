@@ -1351,7 +1351,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const encodedAssignments: SyncGroupRequestAssignment[] = []
-    for (const member of this.#partitionsAssigner(this.memberId!, this.#members, this.topics.current, metadata)) {
+    for (const member of this.#partitionsAssigner(
+      this.memberId!,
+      this.#members,
+      new Set(this.topics.current),
+      metadata
+    )) {
       encodedAssignments.push({
         memberId: member.memberId,
         assignment: this.#encodeProtocolAssignment(Array.from(member.assignments.values()))

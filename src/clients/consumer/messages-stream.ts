@@ -1,5 +1,10 @@
 import { Readable } from 'node:stream'
-import { createPromisifiedCallback, kCallbackPromise, noopCallback, type CallbackWithPromise } from '../../apis/callbacks.ts'
+import {
+  createPromisifiedCallback,
+  kCallbackPromise,
+  noopCallback,
+  type CallbackWithPromise
+} from '../../apis/callbacks.ts'
 import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'

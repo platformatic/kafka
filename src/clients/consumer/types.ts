@@ -27,6 +27,7 @@ export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSub
 }
 
 export type Offsets = Map<string, bigint[]>
+export type OffsetsWithTimestamps = Map<string, Map<number, { offset: bigint; timestamp: bigint }>>
 
 export type CorruptedMessageHandler = (
   record: KafkaRecord,
@@ -117,6 +118,7 @@ export interface ListCommitsOptions {
 
 export interface ListOffsetsOptions {
   topics: string[]
+  partitions?: Record<string, number[]>
   timestamp?: bigint
   isolationLevel?: FetchIsolationLevel
 }

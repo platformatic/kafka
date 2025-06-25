@@ -16,11 +16,13 @@ import {
   instancesChannel,
   listGroupsV5,
   MultipleErrors,
+  sleep,
   UnsupportedApiError
 } from '../../../src/index.ts'
 import {
   createAdmin,
   createCreationChannelVerifier,
+  createTopic,
   createTracingChannelVerifier,
   kafkaBootstrapServers,
   mockAPI,
@@ -83,6 +85,15 @@ test('all operations should fail when admin is closed', async t => {
   // Close the admin first
   await admin.close()
 
+  // Attempt to call listTopics on closed admin
+  try {
+    await admin.listTopics()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about admin being closed
+    strictEqual(error.message, 'Client is closed.')
+  }
+
   // Attempt to call createTopics on closed admin
   try {
     await admin.createTopics({
@@ -132,6 +143,75 @@ test('all operations should fail when admin is closed', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
+  }
+})
+
+test('listTopics should list topics and support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+
+  const topic1 = await createTopic(t, true)
+  const topic2 = await createTopic(t, true)
+  const topic3 = await createTopic(t, true)
+
+  // It might take a little while for the metadata to propagate, let's retry a few times
+  let topics: string[] = []
+  for (let i = 0; i < 5; i++) {
+    await sleep(500)
+    topics = await admin.listTopics()
+
+    if (topics.includes(topic1) && topics.includes(topic2) && topics.includes(topic3)) {
+      break
+    }
+  }
+
+  ok(topics.length >= 3)
+  ok(topics.includes(topic1))
+  ok(topics.includes(topic2))
+  ok(topics.includes(topic3))
+})
+
+test('listTopics should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with wrong type (includeInternals)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.listTopics({ includeInternals: 'WTF' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('includeInternals'), true)
+  }
+})
+
+test('listTopics should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections])
+
+  try {
+    // Attempt to create a topic - should fail with connection error
+    await admin.listTopics()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('listTopics should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'Metadata')
+
+  try {
+    // Attempt to create a topic - should fail with connection error
+    await admin.listTopics({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API Metadata.'), true)
   }
 })
 

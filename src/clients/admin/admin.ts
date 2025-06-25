@@ -25,6 +25,7 @@ import {
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
+import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import { adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
@@ -47,7 +48,8 @@ import {
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
   describeGroupsOptionsValidator,
-  listGroupsOptionsValidator
+  listGroupsOptionsValidator,
+  listTopicsOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -58,13 +60,47 @@ import {
   type DescribeGroupsOptions,
   type Group,
   type GroupBase,
-  type ListGroupsOptions
+  type ListGroupsOptions,
+  type ListTopicsOptions
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
   constructor (options: AdminOptions) {
     super(options as BaseOptions)
     this[kAfterCreate]('admin')
+  }
+
+  listTopics (options: ListTopicsOptions, callback: Callback<string[]>): void
+  listTopics (options?: ListTopicsOptions): Promise<string[]>
+  listTopics (options?: ListTopicsOptions, callback?: CallbackWithPromise<string[]>): void | Promise<string[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback<string[]>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!options) {
+      options = {}
+    }
+
+    const validationError = this[kValidateOptions](options, listTopicsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as string[])
+      return callback[kCallbackPromise]
+    }
+
+    adminTopicsChannel.traceCallback(
+      this.#listTopics,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listTopics', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
   }
 
   createTopics (options: CreateTopicsOptions, callback: Callback<CreatedTopic[]>): void
@@ -227,6 +263,57 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
+  #listTopics (options: ListTopicsOptions, callback: CallbackWithPromise<string[]>): void {
+    const includeInternals = options.includeInternals ?? false
+
+    this[kPerformDeduplicated](
+      'metadata',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<MetadataResponse>(
+          'metadata',
+          retryCallback => {
+            this[kGetBootstrapConnection]((error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as MetadataResponse)
+                return
+              }
+
+              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  return
+                }
+
+                api(connection, null, false, false, retryCallback)
+              })
+            })
+          },
+          (error: Error | null, metadata: MetadataResponse) => {
+            if (error) {
+              deduplicateCallback(error, undefined as unknown as string[])
+              return
+            }
+
+            const topics: Set<string> = new Set()
+
+            for (const { name, isInternal } of metadata.topics) {
+              /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
+              if (isInternal && !includeInternals) {
+                continue
+              }
+
+              topics.add(name!)
+            }
+
+            deduplicateCallback(null, Array.from(topics).sort())
+          },
+          0
+        )
+      },
+      callback
+    )
+  }
+
   #createTopics (options: CreateTopicsOptions, callback: CallbackWithPromise<CreatedTopic[]>): void {
     const numPartitions = options.partitions ?? 1
     const replicationFactor = options.replicas ?? 1
@@ -370,22 +457,22 @@ export class Admin extends Base<AdminOptions> {
             this[kPerformWithRetry]<ListGroupsResponse>(
               'listGroups',
               retryCallback => {
-                this[kGetApi]<ListGroupsRequestV4 | ListGroupsRequestV5, ListGroupsResponse>(
-                  'ListGroups',
-                  (error, api) => {
-                    if (error) {
-                      retryCallback(error, undefined as unknown as ListGroupsResponse)
-                      return
-                    }
-
-                    /* c8 ignore next 5 */
-                    if (api.version === 4) {
-                      api(connection, (options.states as ConsumerGroupState[]) ?? [], retryCallback)
-                    } else {
-                      api(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
-                    }
+                this[kGetApi]<ListGroupsRequestV4 | ListGroupsRequestV5, ListGroupsResponse>('ListGroups', (
+                  error,
+                  api
+                ) => {
+                  if (error) {
+                    retryCallback(error, undefined as unknown as ListGroupsResponse)
+                    return
                   }
-                )
+
+                  /* c8 ignore next 5 */
+                  if (api.version === 4) {
+                    api(connection, (options.states as ConsumerGroupState[]) ?? [], retryCallback)
+                  } else {
+                    api(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
+                  }
+                })
               },
               concurrentCallback,
               0

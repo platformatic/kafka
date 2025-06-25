@@ -189,10 +189,10 @@ export class Connection extends EventEmitter {
       }
 
       this.emit('connecting')
-      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
 
       this.#host = host
       this.#port = port
+      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
       this.#socket = this.#options.tls
         ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
         : createConnection({ ...connectionOptions, port, host })
@@ -297,7 +297,7 @@ export class Connection extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
-  send<ReturnType>(
+  send<ReturnType> (
     apiKey: number,
     apiVersion: number,
     payload: () => Writer,

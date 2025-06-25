@@ -10,13 +10,17 @@ export const produceOptionsProperties = {
   idempotent: { type: 'boolean' },
   acks: {
     type: 'number',
-    enum: Object.values(ProduceAcks),
-    errorMessage: enumErrorMessage(ProduceAcks)
+    enumeration: {
+      allowed: Object.values(ProduceAcks),
+      errorMessage: enumErrorMessage(ProduceAcks)
+    }
   },
   compression: {
     type: 'string',
-    enum: Object.keys(compressionsAlgorithms),
-    errorMessage: enumErrorMessage(compressionsAlgorithms, true)
+    enumeration: {
+      allowed: Object.keys(compressionsAlgorithms),
+      errorMessage: enumErrorMessage(compressionsAlgorithms, true)
+    }
   },
   partitioner: { function: true },
   autocreateTopics: { type: 'boolean' },

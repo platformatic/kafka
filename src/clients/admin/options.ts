@@ -50,8 +50,10 @@ export const listGroupsOptionsSchema = {
       type: 'array',
       items: {
         type: 'string',
-        enum: ConsumerGroupStates,
-        errorMessage: listErrorMessage(ConsumerGroupStates as unknown as string[])
+        enumeration: {
+          allowed: ConsumerGroupStates,
+          errorMessage: listErrorMessage(ConsumerGroupStates as unknown as string[])
+        }
       },
       minItems: 0
     },

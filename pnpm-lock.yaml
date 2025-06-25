@@ -11,9 +11,6 @@ importers:
       ajv:
         specifier: ^8.17.1
         version: 8.17.1
-      ajv-errors:
-        specifier: ^3.0.0
-        version: 3.0.0(ajv@8.17.1)
       debug:
         specifier: ^4.4.0
         version: 4.4.0
@@ -569,11 +566,6 @@ packages:
   acquerello@3.0.1:
     resolution: {integrity: sha512-kCVAPKHhg29sK3fOSCwSjVDcPXQSLVVztcMKbjMRBawA3Bzy/J1xApBwLSa/eYdLHKEYx7/r2H8xGrAunHYyGg==}
     engines: {node: '>= 20.18.0'}
-
-  ajv-errors@3.0.0:
-    resolution: {integrity: sha512-V3wD15YHfHz6y0KdhYFjyy9vWtEVALT9UrxfN3zqlI6dMioHnJrqOYfyPKol3oqrnCM9uwkcdCwkJ0WUcbLMTQ==}
-    peerDependencies:
-      ajv: ^8.0.1
 
   ajv@6.12.6:
     resolution: {integrity: sha512-j3fVLgvTo527anyYyJOGTYJbG+vnnQYvE0m5mmkc1TK+nxAppkCLMIL0aZ4dblVCNoGShhm+kzE4ZUykBoMg4g==}
@@ -2144,10 +2136,6 @@ snapshots:
   acorn@8.14.1: {}
 
   acquerello@3.0.1: {}
-
-  ajv-errors@3.0.0(ajv@8.17.1):
-    dependencies:
-      ajv: 8.17.1
 
   ajv@6.12.6:
     dependencies:

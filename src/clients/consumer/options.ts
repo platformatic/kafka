@@ -22,7 +22,8 @@ export const groupOptionsProperties = {
         metadata: { oneOf: [{ type: 'string' }, { buffer: true }] }
       }
     }
-  }
+  },
+  partitionAssigner: { function: true }
 }
 
 export const groupOptionsAdditionalValidations = {

@@ -1,7 +1,7 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
 import { type FetchIsolationLevel } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
-import { type BaseOptions, type TopicWithPartitionAndOffset } from '../base/types.ts'
+import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
 
 export interface GroupProtocolSubscription {
@@ -13,6 +13,11 @@ export interface GroupProtocolSubscription {
 export interface GroupAssignment {
   topic: string
   partitions: number[]
+}
+
+export interface GroupPartitionsAssignments {
+  memberId: string
+  assignments: Map<string, GroupAssignment>
 }
 
 export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSubscription, 'name'> {
@@ -31,6 +36,13 @@ export type CorruptedMessageHandler = (
   firstOffset: bigint,
   commit: Message['commit']
 ) => boolean
+
+export type GroupPartitionsAssigner = (
+  current: string,
+  members: Map<string, ExtendedGroupProtocolSubscription>,
+  topics: Set<string>,
+  metadata: ClusterMetadata
+) => GroupPartitionsAssignments[]
 
 export const MessagesStreamModes = {
   LATEST: 'latest',
@@ -54,6 +66,7 @@ export interface GroupOptions {
   rebalanceTimeout?: number
   heartbeatInterval?: number
   protocols?: GroupProtocolSubscription[]
+  partitionAssigner?: GroupPartitionsAssigner
 }
 
 export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {

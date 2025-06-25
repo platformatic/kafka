@@ -12,6 +12,18 @@ It supports all the constructor options of `Base`.
 
 ## Methods
 
+### `listTopics([options[, callback]])`
+
+List all topics available on the cluster.
+
+The return value is a list of available topics.
+
+Options:
+
+| Property           | Type      | Description                                                    |
+| ------------------ | --------- | -------------------------------------------------------------- |
+| `includeInternals` | `boolean` | Whether to include internal Kafka topics in the returned list. |
+
 ### `createTopics(options[, callback])`
 
 Creates one or more topics.

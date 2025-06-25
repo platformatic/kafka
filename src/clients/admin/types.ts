@@ -48,6 +48,10 @@ export interface CreateTopicsOptions {
   assignments?: BrokerAssignment[]
 }
 
+export interface ListTopicsOptions {
+  includeInternals?: boolean
+}
+
 export interface DeleteTopicsOptions {
   topics: string[]
 }

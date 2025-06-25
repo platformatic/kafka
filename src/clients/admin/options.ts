@@ -34,6 +34,14 @@ export const createTopicOptionsSchema = {
   additionalProperties: false
 }
 
+export const listTopicOptionsSchema = {
+  type: 'object',
+  properties: {
+    includeInternals: { type: 'boolean', default: false }
+  },
+  additionalProperties: false
+}
+
 export const deleteTopicOptionsSchema = {
   type: 'object',
   properties: {
@@ -84,6 +92,7 @@ export const deleteGroupsOptionsSchema = {
 }
 
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
+export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
 export const listGroupsOptionsValidator = ajv.compile(listGroupsOptionsSchema)
 export const describeGroupsOptionsValidator = ajv.compile(describeGroupsOptionsSchema)

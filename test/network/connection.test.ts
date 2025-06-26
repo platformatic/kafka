@@ -376,7 +376,8 @@ test('Connection.send should enqueue request and process response', async t => {
       parser,
       true, // hasRequestHeaderTaggedFields
       true, // hasResponseHeaderTaggedFields
-      (err, data) => {
+      (...args) => {
+        const [err, data] = args
         if (err) {
           reject(err)
           return
@@ -429,7 +430,8 @@ test('Connection.send should handle requests with no response', async t => {
       }, // Dummy parser
       false, // hasRequestHeaderTaggedFields
       false, // hasResponseHeaderTaggedFields
-      (err, canWrite) => {
+      (...args) => {
+        const [err, canWrite] = args
         if (err) {
           reject(err)
           return
@@ -664,7 +666,8 @@ test('Connection should handle close with in-flight and after-drain requests', a
       },
       false,
       false,
-      err => {
+      (...args) => {
+        const [err] = args
         if (err) {
           reject(err)
         }
@@ -684,7 +687,8 @@ test('Connection should handle close with in-flight and after-drain requests', a
       },
       false,
       false,
-      err => {
+      (...args) => {
+        const [err] = args
         if (err) {
           reject(err)
         }
@@ -809,7 +813,8 @@ test('Connection should handle response parsing errors', async t => {
       parser,
       false,
       false,
-      err => {
+      (...args) => {
+        const [err] = args
         try {
           ok(err instanceof Error)
           strictEqual(err.message, 'Parser error')
@@ -868,7 +873,8 @@ test('Connection should handle response with tagged fields', async t => {
       parser,
       false, // hasRequestHeaderTaggedFields
       true, // hasResponseHeaderTaggedFields - Important!
-      (err, data) => {
+      (...args) => {
+        const [err, data] = args
         if (err) {
           reject(err)
           return
@@ -907,7 +913,8 @@ test('Connection should handle send when not connected', async t => {
       },
       false,
       false,
-      err => {
+      (...args) => {
+        const [err] = args
         try {
           ok(err instanceof NetworkError)
           strictEqual(err.message, 'Connection closed')
@@ -943,7 +950,7 @@ for (const mechanism of SASLMechanisms) {
   )
 }
 
-test('Connection.connect should reject unsupported mechanisms', async t => {
+test('Connection.connect should reject unsupported mechanisms', async () => {
   const connection = new Connection('clientId', {
     // @ts-expect-error - Purposefully using an invalid mechanism
     sasl: { mechanism: 'WHATEVER', username: 'admin', password: 'admin' }

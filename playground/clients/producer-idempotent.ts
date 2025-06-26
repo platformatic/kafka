@@ -23,7 +23,8 @@ function callbackProduce (cb?: Function): void {
       ],
       acks: ProduceAcks.ALL
     },
-    (error, result) => {
+    (...args) => {
+      const [error, result] = args
       if (error) {
         console.error('ERROR', error)
         return

@@ -176,7 +176,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
     const validationError = this[kValidateOptions](options, metadataOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as ClusterMetadata)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -210,9 +210,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         this[kPerformWithRetry]<ApiVersionsResponse>(
           'listApis',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as ApiVersionsResponse)
+                retryCallback(error)
                 return
               }
 
@@ -220,9 +221,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
               apiVersionsV3(connection, clientSoftwareName, clientSoftwareVersion, retryCallback)
             })
           },
-          (error: Error | null, metadata) => {
+          (...args) => {
+            const [error, metadata] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as ApiVersionsResponseApi[])
+              deduplicateCallback(error)
               return
             }
 
@@ -257,15 +259,17 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as MetadataResponse)
+                retryCallback(error)
                 return
               }
 
-              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -273,9 +277,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
               })
             })
           },
-          (error: Error | null, metadata: MetadataResponse) => {
+          (...args) => {
+            const [error, metadata] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as ClusterMetadata)
+              deduplicateCallback(error)
               return
             }
 
@@ -326,7 +331,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kCheckNotClosed] (callback: CallbackWithPromise<any>): boolean {
     if (this[kClosed]) {
       const error = new NetworkError('Client is closed.', { closed: true, instance: this[kInstance] })
-      callback(error, undefined)
+      callback(error)
       return true
     }
 
@@ -361,7 +366,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     const retries = this[kOptions].retries! as number
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
-    operation((error, result) => {
+    operation((...args) => {
+      const [error, result] = args
       if (error) {
         const genericError = error as GenericError
         const retriable = genericError.findBy?.('code', NetworkError.code) || genericError.findBy?.('canRetry', true)
@@ -373,11 +379,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
           }, this[kOptions].retryDelay)
         } else {
           if (attempt === 0) {
-            callback(error, undefined as ReturnType)
+            callback(error)
             return
           }
 
-          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors), undefined as ReturnType)
+          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
         }
 
         return
@@ -405,11 +411,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
     if (inflights.length === 1) {
       this.emitWithDebug('client', 'performDeduplicated', operationId)
-      operation((error, result) => {
+      operation((...args) => {
         this.#inflightDeduplications.set(operationId, [])
 
         for (const cb of inflights!) {
-          cb(error, result)
+          cb(...args)
         }
 
         inflights = []
@@ -425,9 +431,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   ) {
     // Make sure we have APIs informations
     if (!this[kApis].length) {
-      this[kListApis]((error, apis) => {
+      this[kListApis]((...args) => {
+        const [error, apis] = args
         if (error) {
-          callback(error, undefined as unknown as API<RequestArguments, ResponseType>)
+          callback(error)
           return
         }
 
@@ -441,10 +448,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     const api = this[kApis].find(api => api.name === name)
 
     if (!api) {
-      callback(
-        new UnsupportedApiError(`Unsupported API ${name}.`),
-        undefined as unknown as API<RequestArguments, ResponseType>
-      )
+      callback(new UnsupportedApiError(`Unsupported API ${name}.`))
       return
     }
 
@@ -461,10 +465,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       }
     }
 
-    callback(
-      new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }),
-      undefined as unknown as API<RequestArguments, ResponseType>
-    )
+    callback(new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }))
   }
 
   [kGetConnection] (broker: Broker, callback: Callback<Connection>): void {

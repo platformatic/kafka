@@ -835,7 +835,8 @@ test('should properly handle close', async t => {
 
   // Close the stream - Issue a second call before the first has completed
   const promise = new Promise<void>((resolve, reject) => {
-    stream.close(error => {
+    stream.close((...args) => {
+      const [error] = args
       if (error) {
         reject(error)
         return
@@ -948,7 +949,7 @@ test('should handle errors from Consumer.fetch', async t => {
   consumer.fetch = function (_options: any, callback: CallbackWithPromise<any>) {
     const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
-    callback(connectionError, undefined)
+    callback(connectionError)
   } as typeof consumer.fetch
 
   const stream = await consumer.consume({
@@ -979,7 +980,7 @@ test('should handle errors from Consumer.commit', async t => {
   consumer.commit = function (_options: any, callback: CallbackWithPromise<any>) {
     const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
-    callback(connectionError, undefined)
+    callback(connectionError)
   } as typeof consumer.commit
 
   const stream = await consumer.consume({
@@ -1011,7 +1012,7 @@ test('should handle errors from Consumer.listOffsets', async t => {
   consumer.listOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
     const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
-    callback(connectionError, undefined)
+    callback(connectionError)
   } as typeof consumer.listOffsets
 
   const stream = await consumer.consume({
@@ -1042,7 +1043,7 @@ test('should handle errors from Consumer.listCommittedOffsets', async t => {
   consumer.listCommittedOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
     const connectionError = new MultipleErrors(mockedErrorMessage, [new Error('Connection failed to localhost:9092')])
 
-    callback(connectionError, undefined)
+    callback(connectionError)
   } as typeof consumer.listCommittedOffsets
 
   const stream = await consumer.consume({

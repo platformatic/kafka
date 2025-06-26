@@ -185,6 +185,7 @@ test('authenticate should check for minimum required iterations', async () => {
     }
 
     // Should not get here
+    // @ts-ignore
     callback(null, {})
   }
 
@@ -241,7 +242,7 @@ test('authenticate should include username in initial message', async () => {
     firstMessage = payload!.toString()
 
     // Throw error to stop the authentication process
-    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
+    callback(new Error('Stop the test early'))
   }
 
   const mockConnection = {}
@@ -272,7 +273,7 @@ test('authenticate should escape special characters in username', async () => {
     firstMessage = payload!.toString()
 
     // Throw error to stop the authentication process
-    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
+    callback(new Error('Stop the test early'))
   }
 
   const mockConnection = {}
@@ -300,7 +301,7 @@ test('authenticate should escape special characters in username', async () => {
 // Test error handling for server nonce mismatch
 test('authenticate should check server nonce starts with client nonce', async () => {
   // Replace with implementation that returns invalid nonce
-  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+  function api (_: Connection, __: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
     // First call - return server response with different nonce
     callback(null, {
       errorCode: 0,
@@ -404,7 +405,7 @@ test('authenticate should handle server failures', async () => {
       })
     } else {
       // Second call - return error
-      callback(new Error('Authentication failed'), undefined as unknown as SaslAuthenticateResponse)
+      callback(new Error('Authentication failed'))
     }
   }
 
@@ -488,7 +489,7 @@ test('authenticate should return the last response on successful authentication'
 
   let serverSignature: Buffer
 
-  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+  function api (_: Connection, payload: Buffer, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
     callsCount++
 
     if (callsCount === 1) {
@@ -502,7 +503,7 @@ test('authenticate should return the last response on successful authentication'
       callback(null, {
         errorCode: 0,
         errorMessage: null,
-        authBytes: `v=${serverSignature.toString('base64')}`,
+        authBytes: Buffer.from(`v=${serverSignature.toString('base64')}`),
         sessionLifetimeMs: 3600000n
       })
     }

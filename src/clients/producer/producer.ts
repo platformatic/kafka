@@ -28,7 +28,6 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
-import { type ClusterMetadata } from '../base/types.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
 import { type Serializer, type SerializerWithHeaders } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
@@ -111,13 +110,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     if (this[kClosed]) {
-      callback(null)
+      callback(null, undefined)
       return callback[kCallbackPromise]
     }
 
     this[kClosed] = true
 
-    super.close(error => {
+    super.close((...args) => {
+      const [error] = args
       if (error) {
         this[kClosed] = false
         callback(error)
@@ -128,7 +128,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_producers', 'Number of active Kafka producers').dec()
       }
 
-      callback(null)
+      callback(null, undefined)
     })
 
     return callback[kCallbackPromise]
@@ -153,7 +153,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, produceOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as ProducerInfo)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -185,7 +185,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, sendOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as ProduceResult)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -211,15 +211,17 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<InitProducerIdResponse>(
           'initProducerId',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as InitProducerIdResponse)
+                retryCallback(error)
                 return
               }
 
-              this[kGetApi]<InitProducerIdRequest, InitProducerIdResponse>('InitProducerId', (error, api) => {
+              this[kGetApi]<InitProducerIdRequest, InitProducerIdResponse>('InitProducerId', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as InitProducerIdResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -234,9 +236,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               })
             })
           },
-          (error, response) => {
+          (...args) => {
+            const [error, response] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as ProducerInfo)
+              deduplicateCallback(error)
               return
             }
 
@@ -268,9 +271,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       if (!this.#producerInfo) {
         const { messages, ...initOptions } = options
 
-        this.initIdempotentProducer(initOptions, error => {
+        this.initIdempotentProducer(initOptions, (...args) => {
+          const [error] = args
           if (error) {
-            callback(error, undefined as unknown as ProduceResult)
+            callback(error)
             return
           }
 
@@ -281,19 +285,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       if (typeof options.producerId !== 'undefined' || typeof options.producerEpoch !== 'undefined') {
-        callback(
-          new UserError('Cannot specify producerId or producerEpoch when using idempotent producer.'),
-          undefined as unknown as ProduceResult
-        )
+        callback(new UserError('Cannot specify producerId or producerEpoch when using idempotent producer.'))
 
         return
       }
 
       if (options.acks !== ProduceAcks.ALL) {
-        callback(
-          new UserError('Idempotent producer requires acks to be ALL (-1).'),
-          undefined as unknown as ProduceResult
-        )
+        callback(new UserError('Idempotent producer requires acks to be ALL (-1).'))
 
         return
       }
@@ -373,9 +371,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // Get the metadata with the topic/partitions informations
     this[kMetadata](
       { topics, autocreateTopics: sendOptions.autocreateTopics },
-      (error: Error | null, metadata: ClusterMetadata) => {
+      (...args) => {
+        const [error, metadata] = args
         if (error) {
-          callback(error, undefined as unknown as ProduceResult)
+          callback(error)
           return
         }
 
@@ -422,9 +421,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               concurrentCallback
             )
           },
-          (error, apiResults) => {
+          (...args) => {
+            const [error, apiResults] = args
             if (error) {
-              callback(error, undefined as unknown as ProduceResult)
+              callback(error)
               return
             }
 
@@ -480,9 +480,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
     // Get the metadata with the topic/partitions informations
-    this[kMetadata]({ topics, autocreateTopics }, (error: Error | null, metadata: ClusterMetadata) => {
+    this[kMetadata]({ topics, autocreateTopics }, (...args) => {
+      const [error, metadata] = args
       if (error) {
-        callback(error, undefined as unknown as ProduceResponse)
+        callback(error)
         return
       }
 
@@ -492,15 +493,17 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this[kPerformWithRetry]<boolean | ProduceResponse>(
         'produce',
         retryCallback => {
-          this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
+          this[kGetConnection](metadata.brokers.get(leader)!, (...args) => {
+            const [error, connection] = args
             if (error) {
-              retryCallback(error, undefined as unknown as ProduceResponse)
+              retryCallback(error)
               return
             }
 
-            this[kGetApi]<ProduceRequest, ProduceResponse>('Produce', (error, api) => {
+            this[kGetApi]<ProduceRequest, ProduceResponse>('Produce', (...args) => {
+              const [error, api] = args
               if (error) {
-                retryCallback(error, undefined as unknown as ProduceResponse)
+                retryCallback(error)
                 return
               }
 
@@ -508,7 +511,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             })
           })
         },
-        (error, results) => {
+        (...args) => {
+          const [error, results] = args
           if (error) {
             // If the last error was due to stale metadata, we retry the operation with this set of messages
             // since the partition is already set, it should attempt on the new destination
@@ -529,7 +533,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            callback(error, undefined as unknown as ProduceResponse)
+            callback(error)
             return
           }
 

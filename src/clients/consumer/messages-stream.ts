@@ -118,7 +118,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // will have changed so we may have gone from last  with no assignments to
     // having some.
     this.#consumer.on('consumer:group:join', () => {
-      this.#refreshOffsets((error: Error | null) => {
+      this.#refreshOffsets((...args) => {
+        const error = args[0]
         /* c8 ignore next 4 - Hard to test */
         if (error) {
           this.destroy(error)
@@ -149,7 +150,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (this.closed || this.destroyed) {
-      callback(null)
+      callback(null, undefined)
       return callback[kCallbackPromise]
     }
 
@@ -306,7 +307,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return
     }
 
-    this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
+    this.#consumer.metadata({ topics: this.#consumer.topics.current }, (...args) => {
+      const [error, metadata] = args
       if (error) {
         // The stream has been closed, ignore any error
         /* c8 ignore next 4 - Hard to test */
@@ -376,7 +378,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const [leader, leaderRequests] of requests) {
         this.#inflightNodes.add(leader)
-        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests }, (error, response) => {
+        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests }, (...args) => {
+          const [error, response] = args
           this.#inflightNodes.delete(leader)
 
           if (error) {
@@ -553,7 +556,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     const offsets = Array.from(this.#offsetsToCommit.values())
     this.#offsetsToCommit.clear()
 
-    this.#consumer.commit({ offsets }, error => {
+    this.#consumer.commit({ offsets }, (...args) => {
+      const [error] = args
       this.#autocommitInflight = false
 
       if (error) {
@@ -569,7 +573,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #refreshOffsets (callback: Callback<void>) {
     /* c8 ignore next 4 - Hard to test */
     if (this.#topics.length === 0) {
-      callback(null)
+      callback(null, undefined)
       return
     }
 
@@ -583,7 +587,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             ? ListOffsetTimestamps.EARLIEST
             : ListOffsetTimestamps.LATEST
       },
-      (error, offsets) => {
+      (...args) => {
+        const [error, offsets] = args
         if (error) {
           callback(error)
           return
@@ -611,7 +616,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           return
         }
 
-        this.#consumer.listCommittedOffsets({ topics }, (error, commits) => {
+        this.#consumer.listCommittedOffsets({ topics }, (...args) => {
+          const [error, commits] = args
           if (error) {
             callback(error)
             return
@@ -650,7 +656,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
-    callback(null)
+    callback(null, undefined)
   }
 
   #assignmentsForTopic (topic: string): GroupAssignment | undefined {
@@ -659,6 +665,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   #invokeCloseCallbacks (error: Error | null) {
     for (const callback of this.#closeCallbacks) {
+      // @ts-ignore
       callback(error)
     }
 

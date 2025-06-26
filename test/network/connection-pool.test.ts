@@ -3,6 +3,7 @@ import { type AddressInfo, createServer as createNetworkServer, type Server, typ
 import { mock, test, type TestContext } from 'node:test'
 import {
   type Broker,
+  type Callback,
   type CallbackWithPromise,
   Connection,
   ConnectionPool,
@@ -108,7 +109,8 @@ test('get should handle connecting error and return same error', (t, done) => {
   // First call will start connecting
   const errors: (Error | null)[] = []
 
-  function callback (error: Error | null) {
+  const callback: Callback<Connection> = (...args) => {
+    const [error] = args
     errors.push(error)
 
     if (errors.length === 2) {
@@ -359,13 +361,14 @@ test('getFirstAvailable with callback parameter', async t => {
 
   // Mock get method to simulate failure
   mock.method(connectionPool, 'get', (_: Broker, callback: CallbackWithPromise<Connection>) => {
-    if (callback) callback(new Error('Connection failed'), undefined as unknown as Connection)
+    if (callback) callback(new Error('Connection failed'))
     return undefined
   })
 
   // Test with callback
   let callbackCalled = false
-  connectionPool.getFirstAvailable(brokers, err => {
+  connectionPool.getFirstAvailable(brokers, (...args) => {
+    const [err] = args
     callbackCalled = true
     ok(err instanceof Error)
   })

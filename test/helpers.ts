@@ -232,6 +232,7 @@ export function mockConnectionAPI (
       } else {
         connection.send = originalSend
 
+        // @ts-ignore
         callback(errorToMock, returnValue as ReturnType)
       }
       return
@@ -264,17 +265,18 @@ export function mockAPI (
   const mocked = new Set<number>()
 
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    originalGet(broker, (error: Error | null, connection: Connection) => {
+    originalGet(broker, (...args) => {
+      const [error, connection] = args
+      if (error) {
+        callback(error)
+        return
+      }
+
       if (mocked.has(connection.instanceId)) {
         callback(null, connection)
         return
       }
       mocked.add(connection.instanceId)
-
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
 
       const originalSend = connection.send.bind(connection)
 
@@ -310,6 +312,7 @@ export function mockAPI (
             connection.send = originalSend
             pool.get = originalGet
 
+            // @ts-ignore
             callback(errorToMock, returnValue as ReturnType)
           }
           return
@@ -342,7 +345,7 @@ export function mockUnavailableAPI (
     const shouldMock = typeof api === 'function' ? api(name) : name === api
 
     if (shouldMock) {
-      callback(new UnsupportedApiError(`Unsupported API ${name}.`), undefined)
+      callback(new UnsupportedApiError(`Unsupported API ${name}.`))
 
       const shouldRestore = typeof fn === 'function' ? fn() : fn
 

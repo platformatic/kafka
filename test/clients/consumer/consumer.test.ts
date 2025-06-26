@@ -277,7 +277,8 @@ test('close should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.close(err => {
+    consumer.close((...args) => {
+      const [err] = args
       if (err) {
         reject(err)
         return
@@ -477,7 +478,8 @@ test('consume should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.consume({ topics: [] }, (err, stream) => {
+    consumer.consume({ topics: [] }, (...args) => {
+      const [err, stream] = args
       if (err) {
         reject(err)
         return
@@ -761,7 +763,8 @@ test('fetch should support both promise and callback API', async t => {
           }
         ]
       },
-      (err, result) => {
+      (...args) => {
+        const [err, result] = args
         if (err) {
           reject(err)
           return
@@ -1099,7 +1102,8 @@ test('commit should support both promise and callback API', async t => {
         }
 
         // Test callback API
-        consumer.commit(commitOptions, err => {
+        consumer.commit(commitOptions, (...args) => {
+          const [err] = args
           if (err) {
             reject(err)
             return
@@ -1290,7 +1294,8 @@ test('listOffsets should support both promise and callback API', async t => {
 
   // Test callback API
   await new Promise<void>((resolve, reject) => {
-    consumer.listOffsets({ topics: [topic] }, (err, offsets) => {
+    consumer.listOffsets({ topics: [topic] }, (...args) => {
+      const [err, offsets] = args
       if (err) {
         reject(err)
         return
@@ -1613,7 +1618,8 @@ test('listCommittedOffsets should support both promise and callback API', async 
 
   // Test callback API
   await new Promise<void>((resolve, reject) => {
-    consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] }, (err, committed) => {
+    consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] }, (...args) => {
+      const [err, committed] = args
       if (err) {
         reject(err)
         return
@@ -1791,7 +1797,8 @@ test('findGroupCoordinator should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.findGroupCoordinator((err, coordinatorId) => {
+    consumer.findGroupCoordinator((...args) => {
+      const [err, coordinatorId] = args
       if (err) {
         reject(err)
         return
@@ -2049,7 +2056,8 @@ test('joinGroup should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.joinGroup({}, (err, memberId) => {
+    consumer.joinGroup({}, (...args) => {
+      const [err, memberId] = args
       if (err) {
         reject(err)
         return
@@ -2396,14 +2404,16 @@ test('leaveGroup should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // First join the group
-    consumer.joinGroup({}, joinErr => {
+    consumer.joinGroup({}, (...args) => {
+      const [joinErr] = args
       if (joinErr) {
         reject(joinErr)
         return
       }
 
       // Now test the callback API for leaving
-      consumer.leaveGroup(leaveErr => {
+      consumer.leaveGroup((...args) => {
+        const [leaveErr] = args
         if (leaveErr) {
           reject(leaveErr)
           return

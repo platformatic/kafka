@@ -78,7 +78,8 @@ test('authenticate should create proper payload with username and password - cal
     mockConnection as any,
     'testuser',
     'testpass',
-    (error, result) => {
+    (...args) => {
+      const [error, result] = args
       ifError(error)
 
       // Verify the function was called

@@ -192,12 +192,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       force = false
     }
 
+    force ??= false
+
     if (!callback) {
       callback = createPromisifiedCallback<void>()
     }
 
     if (this[kClosed]) {
-      callback(null)
+      callback(null, undefined)
       return callback[kCallbackPromise]
     }
 
@@ -206,24 +208,27 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     const closer = this.#membershipActive
       ? this.#leaveGroup.bind(this)
       : function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
-        callback(null)
+        callback(null, undefined)
       }
 
-    closer(force as boolean, error => {
+    closer(force, (...args) => {
+      const [error] = args
       if (error) {
         this[kClosed] = false
         callback(error)
         return
       }
 
-      this[kFetchConnections].close(error => {
+      this[kFetchConnections].close((...args) => {
+        const [error] = args
         if (error) {
           this[kClosed] = false
           callback(error)
           return
         }
 
-        super.close(error => {
+        super.close((...args) => {
+          const [error] = args
           if (error) {
             this[kClosed] = false
             callback(error)
@@ -236,7 +241,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
           }
 
-          callback(null)
+          callback(null, undefined)
         })
       })
     })
@@ -265,7 +270,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, consumeOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -295,7 +300,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, fetchOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as FetchResponse)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -353,7 +358,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as Offsets)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -386,7 +391,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as OffsetsWithTimestamps)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -416,7 +421,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, listCommitsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as Offsets)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -466,7 +471,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const validationError = this[kValidateOptions](options, groupOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as string)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -491,6 +496,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       force = false
     }
 
+    force ??= false
+
     if (!callback) {
       callback = createPromisifiedCallback<void>()
     }
@@ -500,14 +507,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#membershipActive = false
-    this.#leaveGroup(force as boolean, error => {
+    this.#leaveGroup(force, (...args) => {
+      const [error] = args
       if (error) {
         this.#membershipActive = true
         callback(error)
         return
       }
 
-      callback(null)
+      callback(null, undefined)
     })
 
     return callback[kCallbackPromise]
@@ -535,31 +543,31 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kPerformWithRetry]<FetchResponse>(
       'fetch',
       retryCallback => {
-        this[kMetadata]({ topics: this.topics.current }, (error, metadata: ClusterMetadata) => {
+        this[kMetadata]({ topics: this.topics.current }, (...args) => {
+          const [error, metadata] = args
           if (error) {
-            retryCallback(error, undefined as unknown as FetchResponse)
+            retryCallback(error)
             return
           }
 
           const broker = metadata.brokers.get(options.node)
 
           if (!broker) {
-            retryCallback(
-              new UserError(`Cannot find broker with node id ${options.node}`),
-              undefined as unknown as FetchResponse
-            )
+            retryCallback(new UserError(`Cannot find broker with node id ${options.node}`))
             return
           }
 
-          this[kFetchConnections].get(broker, (error, connection) => {
+          this[kFetchConnections].get(broker, (...args) => {
+            const [error, connection] = args
             if (error) {
-              retryCallback(error, undefined as unknown as FetchResponse)
+              retryCallback(error)
               return
             }
 
-            this[kGetApi]<FetchRequest, FetchResponse>('Fetch', (error, api) => {
+            this[kGetApi]<FetchRequest, FetchResponse>('Fetch', (...args) => {
+              const [error, api] = args
               if (error) {
-                retryCallback(error, undefined as unknown as FetchResponse)
+                retryCallback(error)
                 return
               }
 
@@ -606,9 +614,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           })
         }
 
-        this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (error, api) => {
+        this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as OffsetCommitResponse)
+            groupCallback(error)
             return
           }
 
@@ -623,8 +632,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         })
       },
-      error => {
-        callback(error)
+      (...args) => {
+        // @ts-ignore
+        callback(...args)
       }
     )
   }
@@ -634,9 +644,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: ListOffsetsOptions,
     callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
   ): void {
-    this[kMetadata]({ topics: options.topics }, (error, metadata) => {
+    this[kMetadata]({ topics: options.topics }, (...args) => {
+      const [error, metadata] = args
       if (error) {
-        callback(error, undefined as unknown as Offsets)
+        callback(error)
         return
       }
 
@@ -682,15 +693,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this[kPerformWithRetry]<ListOffsetsResponse>(
             'listOffsets',
             retryCallback => {
-              this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
+              this[kGetConnection](metadata.brokers.get(leader)!, (...args) => {
+                const [error, connection] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as ListOffsetsResponse)
+                  retryCallback(error)
                   return
                 }
 
-                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
+                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (...args) => {
+                  const [error, api] = args
                   if (error) {
-                    retryCallback(error, undefined as unknown as ListOffsetsResponse)
+                    retryCallback(error)
                     return
                   }
 
@@ -708,9 +721,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             0
           )
         },
-        (error, responses) => {
+        (...args) => {
+          const [error, responses] = args
           if (error) {
-            callback(error, undefined as unknown as Offsets)
+            callback(error)
             return
           }
 
@@ -768,9 +782,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performGroupOperation<OffsetFetchResponse>(
       'listCommits',
       (connection, groupCallback) => {
-        this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (error, api) => {
+        this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as OffsetFetchResponse)
+            groupCallback(error)
             return
           }
 
@@ -783,9 +798,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         })
       },
-      (error, response) => {
+      (...args) => {
+        const [error, response] = args
         if (error) {
-          callback(error, undefined as unknown as Offsets)
+          callback(error)
           return
         }
 
@@ -874,16 +890,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
 
-        this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (error, api) => {
+        this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as HeartbeatResponse)
+            groupCallback(error)
             return
           }
 
           api(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
         })
       },
-      error => {
+      (...args) => {
+        const [error] = args
         // The heartbeat has been aborted elsewhere, ignore the response
         if (this.#heartbeatInterval === null || !this.#membershipActive) {
           this.emitWithDebug('consumer:heartbeat', 'cancel', eventPayload)
@@ -899,7 +917,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               retryCallback => {
                 this.#joinGroup(options, retryCallback)
               },
-              error => {
+              (...args) => {
+                const [error] = args
                 if (error) {
                   this.emitWithDebug(null, 'error', error)
                 }
@@ -947,9 +966,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // If we need to (re)join the group, do that first and then try again
     if (joinNeeded) {
-      this.joinGroup(options, error => {
+      this.joinGroup(options, (...args) => {
+        const [error] = args
         if (error) {
-          callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
+          callback(error)
           return
         }
 
@@ -982,15 +1002,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<FindCoordinatorResponse>(
           'findGroupCoordinator',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                retryCallback(error)
                 return
               }
 
-              this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (error, api) => {
+              this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -998,9 +1020,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               })
             })
           },
-          (error, response) => {
+          (...args) => {
+            const [error, response] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as number)
+              deduplicateCallback(error)
               return
             }
 
@@ -1034,9 +1057,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
       'joinGroup',
       (connection, groupCallback) => {
-        this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
+        this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as JoinGroupResponse)
+            groupCallback(error)
             return
           }
 
@@ -1054,7 +1078,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         })
       },
-      (error, response) => {
+      (...args) => {
+        const [error, response] = args
         if (!this.#membershipActive) {
           callback(null, undefined as unknown as string)
           return
@@ -1066,7 +1091,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          callback(error, undefined as unknown as string)
+          callback(error)
           return
         }
 
@@ -1083,7 +1108,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         // Send a syncGroup request
-        this.#syncGroup((error, response) => {
+        this.#syncGroup((...args) => {
+          const [error, response] = args
           if (!this.#membershipActive) {
             callback(null, undefined as unknown as string)
             return
@@ -1095,7 +1121,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            callback(error, undefined as unknown as string)
+            callback(error)
             return
           }
 
@@ -1122,7 +1148,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
     if (!this.memberId) {
-      callback(null)
+      callback(null, undefined)
       return
     }
 
@@ -1145,7 +1171,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         (stream, concurrentCallback) => {
           stream.close(concurrentCallback)
         },
-        error => {
+        (...args) => {
+          const [error] = args
           if (error) {
             callback(error)
             return
@@ -1164,16 +1191,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
       'leaveGroup',
       (connection, groupCallback) => {
-        this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
+        this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as LeaveGroupResponse)
+            groupCallback(error)
             return
           }
 
           api(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
         })
       },
-      error => {
+      (...args) => {
+        const [error] = args
         if (error) {
           const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
 
@@ -1194,7 +1223,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.generationId = 0
         this.assignments = null
 
-        callback(null)
+        callback(null, undefined)
       }
     )
   }
@@ -1226,9 +1255,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
         }
 
-        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
+        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (...args) => {
+          const [error, metadata] = args
           if (error) {
-            callback(error, undefined as unknown as GroupAssignment[])
+            callback(error)
             return
           }
 
@@ -1245,9 +1275,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<SyncGroupResponse>(
       'syncGroup',
       (connection, groupCallback) => {
-        this[kGetApi]<SyncGroupRequest, SyncGroupResponse>('SyncGroup', (error, api) => {
+        this[kGetApi]<SyncGroupRequest, SyncGroupResponse>('SyncGroup', (...args) => {
+          const [error, api] = args
           if (error) {
-            groupCallback(error, undefined as unknown as SyncGroupResponse)
+            groupCallback(error)
             return
           }
 
@@ -1264,14 +1295,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         })
       },
-      (error, response) => {
+      (...args) => {
+        const [error, response] = args
         if (!this.#membershipActive) {
-          callback(null, undefined as unknown as GroupAssignment[])
+          callback(new UserError('Cannot sync group, consumer is not a member of a group.'))
           return
         }
 
         if (error) {
-          callback(error, undefined as unknown as GroupAssignment[])
+          callback(error)
           return
         }
 
@@ -1313,24 +1345,27 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
   ): void | Promise<ReturnType> {
-    this.#findGroupCoordinator((error, coordinatorId) => {
+    this.#findGroupCoordinator((...args) => {
+      const [error, coordinatorId] = args
       if (error) {
-        callback(error, undefined as unknown as ReturnType)
+        callback(error)
         return
       }
 
-      this[kMetadata]({ topics: this.topics.current }, (error: Error | null, metadata: ClusterMetadata) => {
+      this[kMetadata]({ topics: this.topics.current }, (...args) => {
+        const [error, metadata] = args
         if (error) {
-          callback(error, undefined as unknown as ReturnType)
+          callback(error)
           return
         }
 
         this[kPerformWithRetry]<ReturnType>(
           operationId,
           retryCallback => {
-            this[kGetConnection](metadata.brokers.get(coordinatorId)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(coordinatorId)!, (...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as ReturnType)
+                retryCallback(error)
                 return
               }
 

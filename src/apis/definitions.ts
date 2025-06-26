@@ -3,7 +3,7 @@ import { type Connection } from '../network/connection.ts'
 import { type Reader } from '../protocol/reader.ts'
 import { type Writer } from '../protocol/writer.ts'
 
-export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
+export type Callback<ReturnType> = (...args: [error: Error] | [error: null, value: ReturnType]) => void
 
 export type CallbackArguments<ReturnType> = [cb: Callback<ReturnType>]
 

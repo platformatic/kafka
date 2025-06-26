@@ -41,18 +41,22 @@ export function runConcurrentCallbacks<ReturnType> (
 
   let i = 0
 
-  function operationCallback (index: number, e: Error | null, result: ReturnType): void {
+  function operationCallback (index: number, e: Error | null, result?: ReturnType): void {
     if (e) {
       hasErrors = true
       errors[index] = e
     } else {
-      results[index] = result
+      results[index] = result!
     }
 
     remaining--
 
     if (remaining === 0) {
-      callback(hasErrors ? new MultipleErrors(errorMessage, errors) : null, results)
+      if (hasErrors) {
+        callback(new MultipleErrors(errorMessage, errors))
+      } else {
+        callback(null, results)
+      }
     }
   }
 

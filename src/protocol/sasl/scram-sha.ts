@@ -130,12 +130,10 @@ export function authenticate (
   const clientFirstMessageBare = `n=${sanitizeString(username)},r=${clientNonce}`
 
   // First of all, send the first message
-  authenticateAPI(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`), (error, firstResponse) => {
+  authenticateAPI(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`), (...args) => {
+    const [error, firstResponse] = args
     if (error) {
-      callback(
-        new AuthenticationError('Authentication failed.', { cause: error }),
-        undefined as unknown as SaslAuthenticateResponse
-      )
+      callback(new AuthenticationError('Authentication failed.', { cause: error }))
       return
     }
 
@@ -149,18 +147,10 @@ export function authenticate (
 
     // Validate response
     if (!serverNonce.startsWith(clientNonce)) {
-      callback(
-        new AuthenticationError('Server nonce does not start with client nonce.'),
-        undefined as unknown as SaslAuthenticateResponse
-      )
+      callback(new AuthenticationError('Server nonce does not start with client nonce.'))
       return
     } else if (definition.minIterations > iterations) {
-      callback(
-        new AuthenticationError(
-          `Algorithm ${algorithm} requires at least ${definition.minIterations} iterations, while ${iterations} were requested.`
-        ),
-        undefined as unknown as SaslAuthenticateResponse
-      )
+      callback(new AuthenticationError(`Algorithm ${algorithm} requires at least ${definition.minIterations} iterations, while ${iterations} were requested.`))
 
       return
     }
@@ -186,12 +176,10 @@ export function authenticate (
     authenticateAPI(
       connection,
       Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`),
-      (error, lastResponse) => {
+      (...args) => {
+        const [error, lastResponse] = args
         if (error) {
-          callback(
-            new AuthenticationError('Authentication failed.', { cause: error }),
-            undefined as unknown as SaslAuthenticateResponse
-          )
+          callback(new AuthenticationError('Authentication failed.', { cause: error }))
           return
         }
 
@@ -199,13 +187,10 @@ export function authenticate (
         const lastData = parseParameters(lastResponse.authBytes)
 
         if (lastData.e) {
-          callback(new AuthenticationError(lastData.e), undefined as unknown as SaslAuthenticateResponse)
+          callback(new AuthenticationError(lastData.e))
           return
         } else if (lastData.v !== serverSignature.toString('base64')) {
-          callback(
-            new AuthenticationError('Invalid server signature.'),
-            undefined as unknown as SaslAuthenticateResponse
-          )
+          callback(new AuthenticationError('Invalid server signature.'))
           return
         }
 

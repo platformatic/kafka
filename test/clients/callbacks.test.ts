@@ -1,6 +1,7 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { test } from 'node:test'
 import {
+  type Callback,
   createPromisifiedCallback,
   kCallbackPromise,
   MultipleErrors,
@@ -34,7 +35,7 @@ test('createPromisifiedCallback rejects promise on error', async () => {
 
   // Schedule error callback call for later
   setTimeout(() => {
-    callback(new Error('test-error'), undefined as unknown as string)
+    callback(new Error('test-error'))
   }, 10)
 
   // Ensure promise rejects with the right error
@@ -49,7 +50,7 @@ test('createPromisifiedCallback rejects promise on error', async () => {
 test('runConcurrentCallbacks with array works correctly', async () => {
   const testArray = ['item1', 'item2', 'item3']
 
-  const operation = (item: string, cb: (error: Error | null, result?: string) => void) => {
+  const operation = (item: string, cb: Callback<string>) => {
     // Simulate async operation
     setTimeout(() => {
       cb(null, item.toUpperCase())
@@ -57,7 +58,8 @@ test('runConcurrentCallbacks with array works correctly', async () => {
   }
 
   await new Promise<void>(resolve => {
-    runConcurrentCallbacks('Test error message', testArray, operation, (error, results) => {
+    runConcurrentCallbacks('Test error message', testArray, operation, (...args) => {
+      const [error, results] = args
       strictEqual(error, null)
       deepStrictEqual(results, ['ITEM1', 'ITEM2', 'ITEM3'])
       resolve()
@@ -68,7 +70,7 @@ test('runConcurrentCallbacks with array works correctly', async () => {
 test('runConcurrentCallbacks with Set works correctly', async () => {
   const testSet = new Set(['item1', 'item2', 'item3'])
 
-  const operation = (item: string, cb: (error: Error | null, result?: string) => void) => {
+  const operation = (item: string, cb: Callback<string>) => {
     // Simulate async operation
     setTimeout(() => {
       cb(null, item.toUpperCase())
@@ -76,7 +78,8 @@ test('runConcurrentCallbacks with Set works correctly', async () => {
   }
 
   await new Promise<void>(resolve => {
-    runConcurrentCallbacks('Test error message', testSet, operation, (error, results) => {
+    runConcurrentCallbacks('Test error message', testSet, operation, (...args) => {
+      const [error, results] = args
       strictEqual(error, null)
       // Set iteration order is guaranteed to be insertion order
       deepStrictEqual(results, ['ITEM1', 'ITEM2', 'ITEM3'])
@@ -92,7 +95,7 @@ test('runConcurrentCallbacks with Map works correctly', async () => {
     ['key3', 'value3']
   ])
 
-  const operation = (entry: [string, string], cb: (error: Error | null, result?: string) => void) => {
+  const operation = (entry: [string, string], cb: Callback<string>) => {
     // Simulate async operation
     setTimeout(() => {
       cb(null, `${entry[0]}-${entry[1]}`.toUpperCase())
@@ -100,7 +103,8 @@ test('runConcurrentCallbacks with Map works correctly', async () => {
   }
 
   await new Promise<void>(resolve => {
-    runConcurrentCallbacks('Test error message', testMap, operation, (error, results) => {
+    runConcurrentCallbacks('Test error message', testMap, operation, (...args) => {
+      const [error, results] = args
       strictEqual(error, null)
       // Map iteration order is guaranteed to be insertion order
       deepStrictEqual(results, ['KEY1-VALUE1', 'KEY2-VALUE2', 'KEY3-VALUE3'])
@@ -112,7 +116,7 @@ test('runConcurrentCallbacks with Map works correctly', async () => {
 test('runConcurrentCallbacks handles errors correctly', async () => {
   const testArray = ['item1', 'error-item', 'item3']
 
-  const operation = (item: string, cb: (error: Error | null, result?: string) => void) => {
+  const operation = (item: string, cb: Callback<string>) => {
     // Simulate async operation
     setTimeout(() => {
       if (item === 'error-item') {
@@ -124,9 +128,11 @@ test('runConcurrentCallbacks handles errors correctly', async () => {
   }
 
   await new Promise<void>(resolve => {
-    runConcurrentCallbacks('Test error message', testArray, operation, (error, results) => {
+    runConcurrentCallbacks('Test error message', testArray, operation, (...args) => {
+      const [error, results] = args
       strictEqual(error instanceof MultipleErrors, true)
       // Even with errors, all results should be populated
+      ok(results)
       strictEqual(Array.isArray(results), true)
       strictEqual(results.length, 3)
       strictEqual(results[0], 'ITEM1')
@@ -154,7 +160,8 @@ test('runConcurrentCallbacks with empty collection', () => {
       // This should never be called
       throw new Error('Should not be called')
     },
-    (error, results) => {
+    (...args) => {
+      const [error, results] = args
       strictEqual(error, null)
       deepStrictEqual(results, [])
     }
@@ -164,7 +171,7 @@ test('runConcurrentCallbacks with empty collection', () => {
 test('runConcurrentCallbacks with multiple errors', async () => {
   const testArray = ['error-1', 'item2', 'error-3']
 
-  const operation = (item: string, cb: (error: Error | null, result?: string) => void) => {
+  const operation = (item: string, cb: Callback<string>) => {
     // Simulate async operation
     setTimeout(() => {
       if (item.startsWith('error-')) {
@@ -176,8 +183,10 @@ test('runConcurrentCallbacks with multiple errors', async () => {
   }
 
   await new Promise<void>(resolve => {
-    runConcurrentCallbacks('Multiple errors occurred', testArray, operation, (error, results) => {
+    runConcurrentCallbacks('Multiple errors occurred', testArray, operation, (...args) => {
+      const [error, results] = args
       strictEqual(error instanceof MultipleErrors, true)
+      ok(results)
       strictEqual(Array.isArray(results), true)
       strictEqual(results.length, 3)
       strictEqual(results[1], 'ITEM2')

@@ -17,7 +17,8 @@ test('any API should work in promise mode or callback mode', async t => {
   const promiseResponse = await api.async(connection, 'test-client', '1.0.0')
 
   const callbackResponse = await new Promise((resolve, reject) => {
-    api(connection, 'test-client', '1.0.0', (error, response) => {
+    api(connection, 'test-client', '1.0.0', (...args) => {
+      const [error, response] = args
       if (error) {
         reject(error)
       } else {

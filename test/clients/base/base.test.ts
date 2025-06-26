@@ -157,7 +157,8 @@ test('listApis should support both callback and promise API', (t, done) => {
   const client = createBase(t)
 
   // Use callback API
-  client.listApis((err, apis) => {
+  client.listApis((...args) => {
+    const [err, apis] = args
     strictEqual(err, null)
     ok(Array.isArray(apis))
 
@@ -342,7 +343,8 @@ test('metadata should support both callback and promise API', (t, done) => {
   const testTopic = `test-topic-${randomUUID()}`
 
   // Use callback API
-  client.metadata({ topics: [testTopic], autocreateTopics: true }, (err, metadata) => {
+  client.metadata({ topics: [testTopic], autocreateTopics: true }, (...args) => {
+    const [err, metadata] = args
     strictEqual(err, null)
     strictEqual(metadata.topics.has(testTopic), true)
 
@@ -541,10 +543,12 @@ test('operations can be aborted without a retry', async t => {
 test('kGetApi should fail on unsupported API', (t, done) => {
   const client = createBase(t)
 
-  client[kGetApi]('foo', (error, api) => {
+  client[kGetApi]('foo', (...args) => {
+    const [error, api] = args
     ok(typeof api === 'undefined')
+    ok(error)
     strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error!.message, 'Unsupported API foo.')
+    strictEqual(error.message, 'Unsupported API foo.')
 
     done()
   })
@@ -562,7 +566,8 @@ test('kGetApi should fail on unsupported API version', (t, done) => {
     ]
   })
 
-  client[kGetApi]('Produce', (error, api) => {
+  client[kGetApi]('Produce', (...args) => {
+    const [error, api] = args
     ok(typeof api === 'undefined')
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual((error as UnsupportedApiError).message, 'No usable implementation found for API Produce.')

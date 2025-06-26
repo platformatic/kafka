@@ -87,7 +87,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, listTopicsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as string[])
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -119,7 +119,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, createTopicsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as CreatedTopic[])
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -148,7 +148,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, deleteTopicsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as void)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -184,7 +184,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, listGroupsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as Map<string, GroupBase>)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -218,7 +218,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, describeGroupsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as Map<string, Group>)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -247,7 +247,7 @@ export class Admin extends Base<AdminOptions> {
 
     const validationError = this[kValidateOptions](options, deleteGroupsOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as void)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -272,15 +272,17 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as MetadataResponse)
+                retryCallback(error)
                 return
               }
 
-              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -288,9 +290,10 @@ export class Admin extends Base<AdminOptions> {
               })
             })
           },
-          (error: Error | null, metadata: MetadataResponse) => {
+          (...args) => {
+            const [error, metadata] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as string[])
+              deduplicateCallback(error)
               return
             }
 
@@ -337,18 +340,20 @@ export class Admin extends Base<AdminOptions> {
     this[kPerformDeduplicated](
       'createTopics',
       deduplicateCallback => {
-        this[kPerformWithRetry](
+        this[kPerformWithRetry]<CreateTopicsResponse>(
           'createTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                retryCallback(error)
                 return
               }
 
-              this[kGetApi]<CreateTopicsRequest, CreateTopicsResponse>('CreateTopics', (error, api) => {
+              this[kGetApi]<CreateTopicsRequest, CreateTopicsResponse>('CreateTopics', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -357,14 +362,15 @@ export class Admin extends Base<AdminOptions> {
                   requests,
                   this[kOptions].timeout!,
                   false,
-                  retryCallback as unknown as Callback<CreateTopicsResponse>
+                  retryCallback
                 )
               })
             })
           },
-          (error: Error | null, response: CreateTopicsResponse) => {
+          (...args) => {
+            const [error, response] = args
             if (error) {
-              deduplicateCallback(error, undefined as unknown as CreatedTopic[])
+              deduplicateCallback(error)
               return
             }
 
@@ -402,9 +408,10 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'deleteTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetBootstrapConnection]((...args) => {
+              const [error, connection] = args
               if (error) {
-                retryCallback(error, undefined)
+                retryCallback(error)
                 return
               }
 
@@ -413,9 +420,10 @@ export class Admin extends Base<AdminOptions> {
                 requests.push({ name: topic })
               }
 
-              this[kGetApi]<DeleteTopicsRequest, DeleteTopicsResponse>('DeleteTopics', (error, api) => {
+              this[kGetApi]<DeleteTopicsRequest, DeleteTopicsResponse>('DeleteTopics', (...args) => {
+                const [error, api] = args
                 if (error) {
-                  retryCallback(error, undefined as unknown as DeleteTopicsResponse)
+                  retryCallback(error)
                   return
                 }
 
@@ -432,15 +440,16 @@ export class Admin extends Base<AdminOptions> {
           0
         )
       },
-      error => callback(error)
+      callback
     )
   }
 
   #listGroups (options: ListGroupsOptions, callback: CallbackWithPromise<Map<string, GroupBase>>): void {
     // Find all the brokers in the cluster
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (...args) => {
+      const [error, metadata] = args
       if (error) {
-        callback(error, undefined as unknown as Map<string, GroupBase>)
+        callback(error)
         return
       }
 
@@ -448,21 +457,20 @@ export class Admin extends Base<AdminOptions> {
         'Listing groups failed.',
         metadata.brokers,
         ([, broker], concurrentCallback) => {
-          this[kGetConnection](broker, (error, connection) => {
+          this[kGetConnection](broker, (...args) => {
+            const [error, connection] = args
             if (error) {
-              concurrentCallback(error, undefined as unknown as ListGroupsResponse)
+              concurrentCallback(error)
               return
             }
 
             this[kPerformWithRetry]<ListGroupsResponse>(
               'listGroups',
               retryCallback => {
-                this[kGetApi]<ListGroupsRequestV4 | ListGroupsRequestV5, ListGroupsResponse>('ListGroups', (
-                  error,
-                  api
-                ) => {
+                this[kGetApi]<ListGroupsRequestV4 | ListGroupsRequestV5, ListGroupsResponse>('ListGroups', (...args) => {
+                  const [error, api] = args
                   if (error) {
-                    retryCallback(error, undefined as unknown as ListGroupsResponse)
+                    retryCallback(error)
                     return
                   }
 
@@ -479,9 +487,10 @@ export class Admin extends Base<AdminOptions> {
             )
           })
         },
-        (error, results) => {
+        (...args) => {
+          const [error, results] = args
           if (error) {
-            callback(error, undefined as unknown as Map<string, GroupBase>)
+            callback(error)
             return
           }
 
@@ -504,15 +513,17 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #describeGroups (options: DescribeGroupsOptions, callback: CallbackWithPromise<Map<string, Group>>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (...args) => {
+      const [error, metadata] = args
       if (error) {
-        callback(error, undefined as unknown as Map<string, Group>)
+        callback(error)
         return
       }
 
-      this.#findGroupCoordinator(options.groups, (error, response) => {
+      this.#findGroupCoordinator(options.groups, (...args) => {
+        const [error, response] = args
         if (error) {
-          callback(error, undefined as unknown as Map<string, Group>)
+          callback(error)
           return
         }
 
@@ -532,18 +543,20 @@ export class Admin extends Base<AdminOptions> {
           'Describing groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(node)!, (...args) => {
+              const [error, connection] = args
               if (error) {
-                concurrentCallback(error, undefined as unknown as DescribeGroupsResponse)
+                concurrentCallback(error)
                 return
               }
 
               this[kPerformWithRetry]<DescribeGroupsResponse>(
                 'describeGroups',
                 retryCallback => {
-                  this[kGetApi]<DescribeGroupsRequest, DescribeGroupsResponse>('DescribeGroups', (error, api) => {
+                  this[kGetApi]<DescribeGroupsRequest, DescribeGroupsResponse>('DescribeGroups', (...args) => {
+                    const [error, api] = args
                     if (error) {
-                      retryCallback(error, undefined as unknown as DescribeGroupsResponse)
+                      retryCallback(error)
                       return
                     }
 
@@ -555,9 +568,10 @@ export class Admin extends Base<AdminOptions> {
               )
             })
           },
-          (error, results) => {
+          (...args) => {
+            const [error, results] = args
             if (error) {
-              callback(error, undefined as unknown as Map<string, Group>)
+              callback(error)
               return
             }
 
@@ -616,13 +630,15 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #deleteGroups (options: DeleteGroupsOptions, callback: CallbackWithPromise<void>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [] }, (...args) => {
+      const [error, metadata] = args
       if (error) {
         callback(error)
         return
       }
 
-      this.#findGroupCoordinator(options.groups, (error, response) => {
+      this.#findGroupCoordinator(options.groups, (...args) => {
+        const [error, response] = args
         if (error) {
           callback(error)
           return
@@ -640,22 +656,24 @@ export class Admin extends Base<AdminOptions> {
           coordinator.push(group)
         }
 
-        runConcurrentCallbacks(
+        runConcurrentCallbacks<DeleteGroupsResponse>(
           'Deleting groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
-            this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
+            this[kGetConnection](metadata.brokers.get(node)!, (...args) => {
+              const [error, connection] = args
               if (error) {
-                concurrentCallback(error, undefined)
+                concurrentCallback(error)
                 return
               }
 
-              this[kPerformWithRetry](
+              this[kPerformWithRetry]<DeleteGroupsResponse>(
                 'deleteGroups',
                 retryCallback => {
-                  this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (error, api) => {
+                  this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (...args) => {
+                    const [error, api] = args
                     if (error) {
-                      retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                      retryCallback(error)
                       return
                     }
 
@@ -667,7 +685,8 @@ export class Admin extends Base<AdminOptions> {
               )
             })
           },
-          error => callback(error)
+          // @ts-ignore
+          (...args) => callback(args[0], undefined)
         )
       })
     })
@@ -677,15 +696,17 @@ export class Admin extends Base<AdminOptions> {
     this[kPerformWithRetry]<FindCoordinatorResponse>(
       'findGroupCoordinator',
       retryCallback => {
-        this[kGetBootstrapConnection]((error, connection) => {
+        this[kGetBootstrapConnection]((...args) => {
+          const [error, connection] = args
           if (error) {
-            retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+            retryCallback(error)
             return
           }
 
-          this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (error, api) => {
+          this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (...args) => {
+            const [error, api] = args
             if (error) {
-              retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+              retryCallback(error)
               return
             }
 
@@ -693,9 +714,10 @@ export class Admin extends Base<AdminOptions> {
           })
         })
       },
-      (error, response) => {
+      (...args) => {
+        const [error, response] = args
         if (error) {
-          callback(error, undefined as unknown as FindCoordinatorResponse)
+          callback(error)
           return
         }
 

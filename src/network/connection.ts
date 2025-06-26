@@ -155,7 +155,7 @@ export class Connection extends EventEmitter {
 
     try {
       if (this.#status === ConnectionStatuses.CONNECTED) {
-        callback(null)
+        callback(null, undefined)
         return callback[kCallbackPromise]
       }
 
@@ -248,7 +248,7 @@ export class Connection extends EventEmitter {
     const onConnect = () => {
       this.removeListener('error', onError)
 
-      callback!(null)
+      callback(null, undefined)
     }
 
     const onError = (error: Error) => {
@@ -276,11 +276,11 @@ export class Connection extends EventEmitter {
       this.#status === ConnectionStatuses.ERROR ||
       this.#status === ConnectionStatuses.NONE
     ) {
-      callback(null)
+      callback(null, undefined)
       return callback[kCallbackPromise]
     } else if (this.#status === ConnectionStatuses.CLOSING) {
       this.once('close', () => {
-        callback(null)
+        callback(null, undefined)
       })
 
       return callback[kCallbackPromise]
@@ -293,7 +293,7 @@ export class Connection extends EventEmitter {
     this.#socket.once('close', () => {
       this.#status = ConnectionStatuses.CLOSED
       this.emit('close')
-      callback(null)
+      callback(null, undefined)
     })
 
     this.#status = ConnectionStatuses.CLOSING
@@ -339,6 +339,7 @@ export class Connection extends EventEmitter {
       }
 
       return this.#sendRequest(request)
+      // @ts-ignore
     }, callback)
   }
 
@@ -358,7 +359,8 @@ export class Connection extends EventEmitter {
       return
     }
 
-    saslHandshakeV1.api(this, mechanism, (error, response) => {
+    saslHandshakeV1.api(this, mechanism, (...args) => {
+      const [error, response] = args
       if (error) {
         this.#onConnectionError(
           host,
@@ -377,6 +379,7 @@ export class Connection extends EventEmitter {
           this,
           username,
           password,
+          // @ts-ignore
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
       } else {
@@ -387,6 +390,7 @@ export class Connection extends EventEmitter {
           username,
           password,
           defaultCrypto,
+          // @ts-ignore
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
       }
@@ -406,7 +410,7 @@ export class Connection extends EventEmitter {
 
     try {
       if (this.#status !== ConnectionStatuses.CONNECTED && this.#status !== ConnectionStatuses.AUTHENTICATING) {
-        request.callback(new NetworkError('Connection closed'), undefined)
+        request.callback(new NetworkError('Connection closed'))
         return false
       }
 
@@ -596,6 +600,7 @@ export class Connection extends EventEmitter {
       }
 
       connectionsApiChannel.asyncStart.publish(request.diagnostic)
+      // @ts-ignore
       callback(responseError, deserialized)
       connectionsApiChannel.asyncEnd.publish(request.diagnostic)
     }
@@ -627,12 +632,12 @@ export class Connection extends EventEmitter {
       const payload = request.payload()
 
       if (!payload.context.noResponse) {
-        request.callback(error, undefined)
+        request.callback(error)
       }
     }
 
     for (const inflight of this.#inflightRequests.values()) {
-      inflight.callback(error, undefined)
+      inflight.callback(error)
     }
   }
 

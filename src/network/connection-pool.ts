@@ -83,18 +83,19 @@ export class ConnectionPool extends EventEmitter {
     }
 
     if (this.#connections.size === 0) {
-      callback(null)
+      callback(null, undefined)
       return callback[kCallbackPromise]
     }
 
-    runConcurrentCallbacks<void>(
+    runConcurrentCallbacks(
       'Closing connections failed.',
       this.#connections,
       ([key, connection]: [string, Connection], cb: Callback<void>) => {
         connection.close(cb)
         this.#connections.delete(key)
       },
-      error => callback(error)
+      // @ts-ignore
+      (...args) => callback(args[0], undefined)
     )
 
     return callback[kCallbackPromise]
@@ -106,9 +107,10 @@ export class ConnectionPool extends EventEmitter {
 
     if (existing) {
       if (existing.status !== ConnectionStatuses.CONNECTED) {
-        existing.ready(error => {
+        existing.ready((...args) => {
+          const error = args[0]
           if (error) {
-            callback(error, undefined as unknown as Connection)
+            callback(error)
             return
           }
 
@@ -128,12 +130,13 @@ export class ConnectionPool extends EventEmitter {
 
     this.emit('connecting', eventPayload)
 
-    connection.connect(broker.host, broker.port, error => {
+    connection.connect(broker.host, broker.port, (...args) => {
+      const error = args[0]
       if (error) {
         this.#connections.delete(key)
         this.emit('failed', eventPayload)
 
-        callback(error, undefined as unknown as Connection)
+        callback(error)
         return
       }
 
@@ -170,12 +173,13 @@ export class ConnectionPool extends EventEmitter {
     errors: Error[] = [],
     callback: CallbackWithPromise<Connection>
   ): void {
-    this.get(brokers[current], (error, connection) => {
+    this.get(brokers[current], (...args) => {
+      const [error, connection] = args
       if (error) {
         errors.push(error)
 
         if (current === brokers.length - 1) {
-          callback(new MultipleErrors('Cannot connect to any broker.', errors), undefined as unknown as Connection)
+          callback(new MultipleErrors('Cannot connect to any broker.', errors))
           return
         }
 

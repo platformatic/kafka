@@ -42,7 +42,7 @@ import {
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
-function noopSerializer (data?: Buffer): Buffer | undefined {
+export function noopSerializer (data?: Buffer): Buffer | undefined {
   return data
 }
 

@@ -128,11 +128,12 @@ The return value is a map where keys are in the form `$topic:$partition` and val
 
 Options:
 
-| Property       | Type       | Description                                                                                                                                                                                                                                            |
-| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| topics         | `string[]` | Topics to check.                                                                                                                                                                                                                                       |
-| timestamp      | `bigint`   | Timestamp of the offsets to retrieve.<br/><br/> If it is `-1`, it will return the last available offset; if it is `-2`, it will return the first available offset.<br/><br/> These special values are also defined in the `ListOffsetTimestamps` enum. |
-| isolationLevel | `string`   | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration. Default is `READ_COMMITTED`.                                  |
+| Property       | Type                       | Description                                                                                                                                                                                                                                            |
+| -------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| topics         | `string[]`                 | Topics to check.                                                                                                                                                                                                                                       |
+| partition      | `Record<string, number[]>` | Partitions to get for each topic. By default it fetches all the partitions of the topic.                                                                                                                                                               |
+| timestamp      | `bigint`                   | Timestamp of the offsets to retrieve.<br/><br/> If it is `-1`, it will return the last available offset; if it is `-2`, it will return the first available offset.<br/><br/> These special values are also defined in the `ListOffsetTimestamps` enum. |
+| isolationLevel | `string`                   | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration. Default is `READ_COMMITTED`.                                  |
 
 ### `listCommittedOffsets(options[, callback])`
 

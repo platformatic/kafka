@@ -31,6 +31,7 @@ import {
   offsetCommitV9,
   offsetFetchV9,
   type Offsets,
+  type OffsetsWithTimestamps,
   ProtocolError,
   syncGroupV5,
   UnsupportedApiError,
@@ -1427,6 +1428,121 @@ test('listOffsets should use custom isolation level when provided', async t => {
   // Verification is implicit - if the call doesn't throw, it succeeded
   strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
   strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+})
+
+test('listOffsetsWithTimestamps should return offset values for topics and partitions and support diagnostic channels', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true, 2)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerOffsetsChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'listOffsets',
+        options: { topics: [topic] },
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      deepStrictEqual((context.result as OffsetsWithTimestamps).get(topic)!.get(0), { offset: 0n, timestamp: -1n })
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  // Get offsets for the test topic
+  const offsets = await consumer.listOffsetsWithTimestamps({ topics: [topic] })
+
+  // Verify the offsets structure
+  strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+  strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+
+  const topicOffsets = offsets.get(topic)!
+  strictEqual(topicOffsets instanceof Map, true, 'Should return a Map of partition offsets')
+  strictEqual(topicOffsets.size, 2, 'Should have offsets for all partitions')
+
+  // For new topics, offsets should typically be 0
+  strictEqual(typeof topicOffsets.get(0)!.offset, 'bigint', 'Offset should be a bigint')
+  strictEqual(typeof topicOffsets.get(0)!.timestamp, 'bigint', 'Timestamp should be a bigint')
+
+  verifyTracingChannel()
+})
+
+test('listOffsetsWithTimestamps should support filtering out partitions', async t => {
+  const consumer = createConsumer(t, { strict: true })
+  const topic = await createTopic(t, true, 2)
+
+  // Get offsets for the test topic
+  const offsets = await consumer.listOffsetsWithTimestamps({ topics: [topic], partitions: { [topic]: [1] } })
+
+  // Verify the offsets structure
+  strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+  strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+
+  const topicOffsets = offsets.get(topic)!
+  strictEqual(topicOffsets instanceof Map, true, 'Should return a Map of partition offsets')
+  strictEqual(topicOffsets.size, 1, 'Should have offsets only for selected partitions')
+
+  strictEqual(typeof topicOffsets.get(0), 'undefined', 'No information for partition 0')
+  strictEqual(typeof topicOffsets.get(1)!.offset, 'bigint', 'Offset should be a bigint')
+  strictEqual(typeof topicOffsets.get(1)!.timestamp, 'bigint', 'Timestamp should be a bigint')
+})
+
+test('listOffsets should validate the supplied options', async t => {
+  const consumer = createConsumer(t, { strict: true })
+
+  // Test with missing topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await consumer.listOffsetsWithTimestamps({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topics type
+  try {
+    await consumer.listOffsetsWithTimestamps({
+      // @ts-expect-error - Intentionally passing invalid option
+      topics: 'not-an-array'
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid timestamp type
+  try {
+    await consumer.listOffsetsWithTimestamps({
+      topics: ['test-topic'],
+      // @ts-expect-error - Intentionally passing invalid option
+      timestamp: 'not-a-bigint'
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('timestamp'), true)
+  }
+})
+
+test('listOffsetsWithTimestamps should fail when consumer is closed', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  // Close the consumer first
+  await consumer.close()
+
+  // Attempt to list offsets with a closed consumer
+  try {
+    await consumer.listOffsetsWithTimestamps({ topics: [topic] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof NetworkError, true)
+    strictEqual(error.message, 'Client is closed.')
+  }
 })
 
 test('listCommittedOffsets should return committed offset values for topics and partitions and support diagnostic channels', async t => {

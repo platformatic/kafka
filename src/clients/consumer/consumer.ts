@@ -96,7 +96,8 @@ import {
   type GroupProtocolSubscription,
   type ListCommitsOptions,
   type ListOffsetsOptions,
-  type Offsets
+  type Offsets,
+  type OffsetsWithTimestamps
 } from './types.ts'
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
@@ -358,11 +359,45 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     consumerOffsetsChannel.traceCallback(
       this.#listOffsets,
-      1,
+      2,
       createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
       this,
+      false,
       options,
-      callback
+      callback as CallbackWithPromise<Offsets | OffsetsWithTimestamps>
+    )
+
+    return callback![kCallbackPromise]
+  }
+
+  listOffsetsWithTimestamps (options: ListOffsetsOptions, callback: CallbackWithPromise<OffsetsWithTimestamps>): void
+  listOffsetsWithTimestamps (options: ListOffsetsOptions): Promise<OffsetsWithTimestamps>
+  listOffsetsWithTimestamps (
+    options: ListOffsetsOptions,
+    callback?: CallbackWithPromise<OffsetsWithTimestamps>
+  ): void | Promise<OffsetsWithTimestamps> {
+    if (!callback) {
+      callback = createPromisifiedCallback<OffsetsWithTimestamps>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as OffsetsWithTimestamps)
+      return callback[kCallbackPromise]
+    }
+
+    consumerOffsetsChannel.traceCallback(
+      this.#listOffsets,
+      2,
+      createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
+      this,
+      true,
+      options,
+      callback as CallbackWithPromise<Offsets | OffsetsWithTimestamps>
     )
 
     return callback![kCallbackPromise]
@@ -594,7 +629,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<Offsets>): void {
+  #listOffsets (
+    withTimestamps: boolean,
+    options: ListOffsetsOptions,
+    callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
+  ): void {
     this[kMetadata]({ topics: options.topics }, (error, metadata) => {
       if (error) {
         callback(error, undefined as unknown as Offsets)
@@ -605,8 +644,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       for (const name of options.topics) {
         const topic = metadata.topics.get(name)!
+        const toInclude = options.partitions?.[name] ?? []
+        const hasPartitionsFilter = toInclude.length > 0
 
         for (let i = 0; i < topic.partitionsCount; i++) {
+          if (hasPartitionsFilter && !toInclude.includes(i)) {
+            continue
+          }
+
           const partition = topic.partitions[i]
           const { leader, leaderEpoch } = partition
 
@@ -669,19 +714,40 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          const offsets: Offsets = new Map()
+          let offsets: Offsets | OffsetsWithTimestamps = new Map()
 
-          for (const response of responses) {
-            for (const { name: topic, partitions } of response.topics) {
-              let topicOffsets = offsets.get(topic)
+          if (withTimestamps) {
+            offsets = new Map() as OffsetsWithTimestamps
 
-              if (!topicOffsets) {
-                topicOffsets = Array(metadata.topics.get(topic)!.partitionsCount)
-                offsets.set(topic, topicOffsets)
+            for (const response of responses) {
+              for (const { name: topic, partitions } of response.topics) {
+                let topicOffsets = offsets.get(topic)
+
+                if (!topicOffsets) {
+                  topicOffsets = new Map()
+                  offsets.set(topic, topicOffsets)
+                }
+
+                for (const { partitionIndex: index, offset, timestamp } of partitions) {
+                  topicOffsets.set(index, { offset, timestamp })
+                }
               }
+            }
+          } else {
+            offsets = new Map() as Offsets
 
-              for (const { partitionIndex: index, offset } of partitions) {
-                topicOffsets[index] = offset
+            for (const response of responses) {
+              for (const { name: topic, partitions } of response.topics) {
+                let topicOffsets = offsets.get(topic)
+
+                if (!topicOffsets) {
+                  topicOffsets = Array(metadata.topics.get(topic)!.partitionsCount)
+                  offsets.set(topic, topicOffsets)
+                }
+
+                for (const { partitionIndex: index, offset } of partitions) {
+                  topicOffsets[index] = offset
+                }
               }
             }
           }

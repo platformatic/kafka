@@ -189,6 +189,13 @@ export const listOffsetsOptionsSchema = {
   type: 'object',
   properties: {
     topics: { type: 'array', items: idProperty },
+    partitions: {
+      type: 'object',
+      additionalProperties: {
+        type: 'array',
+        items: { type: 'number', minimum: 0 }
+      }
+    },
     isolationLevel: { type: 'string', enum: Object.keys(FetchIsolationLevels) },
     timestamp: { bigint: true }
   },

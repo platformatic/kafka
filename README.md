@@ -224,6 +224,10 @@ await consumer.close()
 await producer.close()
 ```
 
+### Avro
+
+An example on how to use [Avro]() for (de)serialisation can be found in the [examples](./examples) folder.
+
 ### Error Handling
 
 `@platformatic/kafka` defines its hierarchy of errors.

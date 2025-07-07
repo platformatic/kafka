@@ -29,7 +29,9 @@ import {
   type ConsumeOptions,
   type CorruptedMessageHandler,
   type GroupAssignment,
-  type Offsets
+  type Offsets,
+  type MessagesStreamBreakModeValue,
+  MessagesStreamBreakModes
 } from './types.ts'
 
 // Don't move this function as being in the same file will enable V8 to remove.
@@ -46,6 +48,7 @@ export function defaultCorruptedMessageHandler (): boolean {
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
+  #breakMode: MessagesStreamBreakModeValue
   #fallbackMode: string
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
@@ -82,6 +85,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     super({ objectMode: true, highWaterMark: options.highWaterMark ?? defaultConsumerOptions.highWaterMark })
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
+    this.#breakMode = options.breakMode ?? MessagesStreamBreakModes.MANUAL
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
     this.#topics = structuredClone(options.topics)
@@ -283,6 +287,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super[Symbol.asyncIterator]()
   }
 
+  collect (): Promise<Message<Key, Value, HeaderKey, HeaderValue>[]> {
+    if (this.#breakMode === MessagesStreamBreakModes.MANUAL) {
+      throw new UserError('Cannot collect messages when the stream is in MANUAL break mode.')
+    }
+    return Array.fromAsync(this)
+  }
+
   _construct (callback: (error?: Error) => void) {
     this.#refreshOffsets(callback as Callback<void>)
   }
@@ -402,6 +413,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           }
 
           this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+
+          if (this.#breakMode === MessagesStreamBreakModes.AFTER_FIRST_BATCH && this.#inflightNodes.size === 0) {
+            this.push(null)
+          }
         })
       }
     })
@@ -520,7 +535,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.#autocommit()
     }
 
-    if (canPush && !(this.#shouldClose || this.closed || this.destroyed)) {
+    if (canPush && this.#breakMode !== MessagesStreamBreakModes.AFTER_FIRST_BATCH && !(this.#shouldClose || this.closed || this.destroyed)) {
       process.nextTick(() => {
         this.#fetch()
       })

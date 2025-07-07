@@ -62,6 +62,14 @@ export const MessagesStreamFallbackModes = {
 export type MessagesStreamFallbackMode = keyof typeof MessagesStreamFallbackModes
 export type MessagesStreamFallbackModeValue =
   (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
+
+export const MessagesStreamBreakModes = {
+  MANUAL: 'manual',
+  AFTER_FIRST_BATCH: 'after-first-batch',
+} as const
+export type MessagesStreamBreakMode = keyof typeof MessagesStreamBreakModes
+export type MessagesStreamBreakModeValue = (typeof MessagesStreamBreakModes)[keyof typeof MessagesStreamBreakModes]
+
 export interface GroupOptions {
   sessionTimeout?: number
   rebalanceTimeout?: number
@@ -83,6 +91,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
 export interface StreamOptions {
   topics: string[]
   mode?: MessagesStreamModeValue
+  breakMode?: MessagesStreamBreakModeValue
   fallbackMode?: MessagesStreamFallbackModeValue
   offsets?: TopicWithPartitionAndOffset[]
   onCorruptedMessage?: CorruptedMessageHandler

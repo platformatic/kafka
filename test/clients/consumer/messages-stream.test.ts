@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
+import { deepStrictEqual, equal, ok, rejects, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
@@ -657,6 +657,83 @@ test('should support asyncIterator interface', async t => {
     deepStrictEqual(messages[i].key, `key-${i}`, `Message ${i} should have correct key`)
     deepStrictEqual(messages[i].value, `value-${i}`, `Message ${i} should have correct value`)
   }
+})
+
+test('should automatically break in non-manual break mode', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000,
+    breakMode: 'after-first-batch',
+  })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+})
+
+test('should collect messages', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000,
+    breakMode: 'after-first-batch',
+  })
+
+  const messages = await stream.collect()
+  equal(messages.length > 0, true, 'Should collect messages from the stream')
+})
+
+test('collecting messages should throw an error if breakMode is manual', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000,
+    breakMode: 'manual',
+  })
+
+  await throws(
+    () => stream.collect(),
+    (error: any) => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Cannot collect messages when the stream is in MANUAL break mode.')
+      return true
+    }
+  )
 })
 
 test('should handle deserialization errors', async t => {

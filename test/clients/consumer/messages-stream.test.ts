@@ -38,7 +38,8 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
-  executeWithTimeout
+  executeWithTimeout,
+  createAdmin
 } from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
@@ -856,6 +857,37 @@ test('should properly handle close', async t => {
 
   // Subsequent call to close are no harm
   await stream.close()
+})
+
+test.only('should properly handle deleting topics in between', async t => {
+  const admin = createAdmin(t)
+  const topic1 = await createTopic(t)
+  const consumer = createConsumer(t)
+  await admin.createTopics({ topics: [topic1] })
+
+  await consumer.consume({
+    topics: [topic1],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+
+  await admin.deleteTopics({ topics: [topic1] })
+
+  const topic2 = await createTopic(t)
+  await admin.createTopics({ topics: [topic2] })
+
+  await consumer.consume({
+    topics: [topic2],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+
+  // For some unknown reason this is necessary, otherwise the test hangs
+  // I guess the previous test had the same issue
+  // TODO: Investigate why this is necessary
+  await new Promise(resolve => setTimeout(resolve, 1000))
 })
 
 test('should properly handle going back and forth to empty assignments', async t => {

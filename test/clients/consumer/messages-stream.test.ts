@@ -865,7 +865,7 @@ test.only('should properly handle deleting topics in between', async t => {
   const consumer = createConsumer(t)
   await admin.createTopics({ topics: [topic1] })
 
-  await consumer.consume({
+  const stream1 = await consumer.consume({
     topics: [topic1],
     mode: MessagesStreamModes.EARLIEST,
     autocommit: true,
@@ -877,12 +877,15 @@ test.only('should properly handle deleting topics in between', async t => {
   const topic2 = await createTopic(t)
   await admin.createTopics({ topics: [topic2] })
 
-  await consumer.consume({
+  const stream2 = await consumer.consume({
     topics: [topic2],
     mode: MessagesStreamModes.EARLIEST,
     autocommit: true,
     maxWaitTime: 1000
   })
+
+  stream1.destroy()
+  stream2.destroy()
 
   // For some unknown reason this is necessary, otherwise the test hangs
   // I guess the previous test had the same issue

@@ -938,6 +938,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     let joinNeeded = this.memberId === null
 
     if (trackTopics) {
+      this.topics.untrackAll(...this.topics.current)
       for (const topic of options.topics) {
         if (this.topics.track(topic)) {
           joinNeeded = true

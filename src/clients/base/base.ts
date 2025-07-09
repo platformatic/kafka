@@ -252,7 +252,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     const autocreateTopics = options.autocreateTopics ?? this[kOptions].autocreateTopics
 
     this[kPerformDeduplicated](
-      'metadata',
+      `metadata:${options.topics.join(',')}`,
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',

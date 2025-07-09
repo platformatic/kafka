@@ -859,7 +859,7 @@ test('should properly handle close', async t => {
   await stream.close()
 })
 
-test.only('should properly handle deleting topics in between', async t => {
+test('should properly handle deleting topics in between', async t => {
   const admin = createAdmin(t)
   const topic1 = await createTopic(t)
   const consumer = createConsumer(t)

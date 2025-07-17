@@ -169,7 +169,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
   metadata (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void
   metadata (options: MetadataOptions): Promise<ClusterMetadata>
-  metadata (options: MetadataOptions, callback?: CallbackWithPromise<ClusterMetadata>): void | Promise<ClusterMetadata> {
+  metadata (
+    options: MetadataOptions,
+    callback?: CallbackWithPromise<ClusterMetadata>
+  ): void | Promise<ClusterMetadata> {
     if (!callback) {
       callback = createPromisifiedCallback<ClusterMetadata>()
     }
@@ -236,16 +239,29 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   }
 
   [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
-    const metadataMaxAge = options.metadataMaxAge ?? this[kOptions].metadataMaxAge!
+    const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
+    let topicsToFetch = []
 
-    const isStale =
-      options.forceUpdate ||
-      !this.#metadata ||
-      Date.now() > this.#metadata.lastUpdate + metadataMaxAge ||
-      options.topics.some(topic => !this.#metadata?.topics.has(topic))
+    // Determine which topics we need to fetch
+    if (!this.#metadata || options.forceUpdate) {
+      topicsToFetch = options.topics
+    } else {
+      for (const topic of options.topics) {
+        const existingTopic = this.#metadata.topics.get(topic)
 
-    if (!isStale) {
-      callback(null, this.#metadata!)
+        if (!existingTopic || existingTopic.lastUpdate < expiralDate) {
+          topicsToFetch.push(topic)
+        }
+      }
+    }
+
+    // All topics are already up-to-date, simply return them
+    if (this.#metadata && !topicsToFetch.length) {
+      callback(null, {
+        ...this.#metadata!,
+        topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
+      })
+
       return
     }
 
@@ -279,14 +295,30 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
               return
             }
 
-            const brokers: ClusterMetadata['brokers'] = new Map()
-            const topics: ClusterMetadata['topics'] = new Map()
+            const lastUpdate = Date.now()
 
+            if (!this.#metadata) {
+              this.#metadata = {
+                id: metadata.clusterId!,
+                brokers: new Map(),
+                topics: new Map(),
+                lastUpdate
+              }
+            } else {
+              this.#metadata.lastUpdate = lastUpdate
+            }
+
+            const brokers: ClusterMetadata['brokers'] = new Map()
+
+            // This should never change, but we act defensively here
             for (const broker of metadata.brokers) {
               const { host, port } = broker
               brokers.set(broker.nodeId, { host, port })
             }
 
+            this.#metadata.brokers = brokers
+
+            // Update all the topics in the cache
             for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
               /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
               if (isInternal) {
@@ -303,18 +335,17 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 }
               }
 
-              topics.set(name!, { id, partitions, partitionsCount: rawPartitions.length })
+              this.#metadata.topics.set(name!, { id, partitions, partitionsCount: rawPartitions.length, lastUpdate })
             }
 
-            this.#metadata = {
-              id: metadata.clusterId!,
-              brokers,
-              topics,
-              lastUpdate: Date.now()
+            // Now build the object to return
+            const updatedMetadata = {
+              ...this.#metadata,
+              topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
             }
 
-            this.emitWithDebug('client', 'metadata', this.#metadata)
-            deduplicateCallback(null, this.#metadata)
+            this.emitWithDebug('client', 'metadata', updatedMetadata)
+            deduplicateCallback(null, updatedMetadata)
           },
           0
         )
@@ -350,7 +381,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return broker
   }
 
-  [kPerformWithRetry]<ReturnType>(
+  [kPerformWithRetry]<ReturnType> (
     operationId: string,
     operation: (callback: Callback<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>,
@@ -389,7 +420,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return callback[kCallbackPromise]
   }
 
-  [kPerformDeduplicated]<ReturnType>(
+  [kPerformDeduplicated]<ReturnType> (
     operationId: string,
     operation: (callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
@@ -419,7 +450,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return callback[kCallbackPromise]
   }
 
-  [kGetApi]<RequestArguments extends Array<unknown>, ResponseType>(
+  [kGetApi]<RequestArguments extends Array<unknown>, ResponseType> (
     name: string,
     callback: Callback<API<RequestArguments, ResponseType>>
   ) {

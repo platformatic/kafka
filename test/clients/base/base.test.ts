@@ -286,6 +286,64 @@ test('metadata should cache metadata according to metadataMaxAge', async t => {
   strictEqual(metadata3.lastUpdate > lastUpdate1, true)
 })
 
+test('metadata should only fetch missing topics if requested to', async t => {
+  const client = createBase(t, {
+    metadataMaxAge: 2000 // 2 second
+  })
+
+  // Create two unique test topics
+  const testTopic1 = `test-topic-${randomUUID()}`
+  const testTopic2 = `test-topic-${randomUUID()}`
+
+  // First metadata request should fetch from broker
+  const metadata1 = await client.metadata({
+    topics: [testTopic1],
+    autocreateTopics: true
+  })
+
+  // Record the last update timestamp
+  const lastUpdate1 = metadata1.lastUpdate
+
+  // Second immediate request should use cache
+  const metadata2 = await client.metadata({
+    topics: [testTopic1]
+  })
+
+  // The timestamps should be the same if cache was used
+  strictEqual(metadata2.lastUpdate, lastUpdate1)
+
+  // Third request for a different topic should fetch from broker
+  const metadata3 = await client.metadata({
+    topics: [testTopic2],
+    autocreateTopics: true
+  })
+
+  const lastUpdate2 = metadata3.lastUpdate
+
+  strictEqual(metadata3.lastUpdate, lastUpdate2)
+  ok(metadata3.lastUpdate > lastUpdate1)
+
+  // Fourth request for the first topic should still use cache
+  const metadata4 = await client.metadata({
+    topics: [testTopic1, testTopic2]
+  })
+
+  strictEqual(metadata4.lastUpdate, lastUpdate2)
+  strictEqual(metadata4.topics.get(testTopic1)!.lastUpdate, lastUpdate1)
+  strictEqual(metadata4.topics.get(testTopic2)!.lastUpdate, lastUpdate2)
+
+  // Wait for cache to expire
+  await sleep(2500)
+
+  // Third request after delay should fetch from broker again
+  const metadata5 = await client.metadata({
+    topics: [testTopic1, testTopic2]
+  })
+
+  // The timestamp should be updated
+  strictEqual(metadata5.lastUpdate > lastUpdate2, true)
+})
+
 test('metadata should support force update option', async t => {
   const client = createBase(t, {
     metadataMaxAge: 60000 // 1 minute

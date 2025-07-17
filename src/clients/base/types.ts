@@ -17,6 +17,7 @@ export interface ClusterTopicMetadata {
   id: string
   partitions: ClusterPartitionMetadata[]
   partitionsCount: number
+  lastUpdate: number
 }
 
 export interface ClusterMetadata {

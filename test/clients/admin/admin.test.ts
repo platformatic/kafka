@@ -374,6 +374,29 @@ test('createTopics with multiple partitions', async t => {
   await admin.deleteTopics({ topics: [topicName] })
 })
 
+test('createTopics with custom configuration', async t => {
+  const admin = createAdmin(t)
+
+  // Generate a unique topic name for testing
+  const topicName = `test-topic-${randomUUID()}`
+
+  // Create a topic with custom configuration
+  const created = await admin.createTopics({
+    topics: [topicName],
+    configs: [
+      {
+        name: 'cleanup.policy',
+        value: 'compact'
+      }
+    ]
+  })
+
+  strictEqual(created[0].configuration['cleanup.policy'], 'compact')
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
 test('createTopics using assignments', async t => {
   const admin = createAdmin(t)
 

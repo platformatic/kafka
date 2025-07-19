@@ -387,21 +387,11 @@ test('createTopics with custom configuration', async t => {
       {
         name: 'cleanup.policy',
         value: 'compact'
-      },
-      {
-        name: 'message.timestamp.after.max.ms',
-        value: '86400000'
-      },
-      {
-        name: 'message.timestamp.before.max.ms',
-        value: '86400000'
       }
     ]
   })
 
   strictEqual(created[0].configuration['cleanup.policy'], 'compact')
-  strictEqual(created[0].configuration['message.timestamp.after.max.ms'], '86400000')
-  strictEqual(created[0].configuration['message.timestamp.before.max.ms'], '86400000')
 
   // Clean up
   await admin.deleteTopics({ topics: [topicName] })

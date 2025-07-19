@@ -32,12 +32,13 @@ The return value is a list of created topics, each containing `id`, `name`, `par
 
 Options:
 
-| Property      | Type                 | Description                                                                                                  |
-| ------------- | -------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `topics`      | `string[]`           | Topics to create.                                                                                            |
-| `partitions`  | `number`             | Number of partitions for each topic.                                                                         |
-| `replicas`    | `number`             | Number of replicas for each topic.                                                                           |
-| `assignments` | `BrokerAssignment[]` | Assignments of partitions.<br/><br/> Each assignment is an object with `partition` and `brokers` properties. |
+| Property      | Type                               | Description                                                                                                  |
+| ------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `topics`      | `string[]`                         | Topics to create.                                                                                            |
+| `partitions`  | `number`                           | Number of partitions for each topic.                                                                         |
+| `replicas`    | `number`                           | Number of replicas for each topic.                                                                           |
+| `assignments` | `BrokerAssignment[]`               | Assignments of partitions.<br/><br/> Each assignment is an object with `partition` and `brokers` properties. |
+| `configs`     | `CreateTopicsRequestTopicConfig[]` | Topic configurations.<br/><br/> Each configuration is an object with `name` and `value` properties.          |
 
 ### `deleteTopics(options[, callback])`
 

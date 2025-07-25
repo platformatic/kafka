@@ -56,6 +56,10 @@ export function runConcurrentCallbacks<ReturnType> (
     }
   }
 
+  if (remaining === 0) {
+    callback(null, results)
+  }
+
   for (const item of collection) {
     operation(item, operationCallback.bind(null, i++))
   }

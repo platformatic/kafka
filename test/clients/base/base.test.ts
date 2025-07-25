@@ -249,6 +249,26 @@ test('metadata should fetch topic metadata', async t => {
   strictEqual(Array.isArray(firstPartition.replicas), true)
 })
 
+test('metadata requests with different topics should stay independent', async t => {
+  const client = createBase(t)
+
+  const testTopic1 = `test-topic-${randomUUID()}`
+  const testTopic2 = `test-topic-${randomUUID()}`
+
+  client.metadata({
+    topics: [testTopic1],
+    autocreateTopics: true
+  })
+
+  const mp2 = client.metadata({
+    topics: [testTopic2],
+    autocreateTopics: true
+  })
+
+  const metadata2 = await mp2
+  strictEqual(metadata2.topics.has(testTopic2), true)
+})
+
 test('metadata should cache metadata according to metadataMaxAge', async t => {
   const client = createBase(t, {
     metadataMaxAge: 1000 // 1 second

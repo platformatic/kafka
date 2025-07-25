@@ -644,11 +644,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       for (const name of options.topics) {
         const topic = metadata.topics.get(name)!
-        const toInclude = options.partitions?.[name] ?? []
-        const hasPartitionsFilter = toInclude.length > 0
+        const toInclude = new Set(options.partitions?.[name] ?? [])
+        const hasPartitionsFilter = toInclude.size > 0
 
         for (let i = 0; i < topic.partitionsCount; i++) {
-          if (hasPartitionsFilter && !toInclude.includes(i)) {
+          if (hasPartitionsFilter && !toInclude.delete(i)) {
             continue
           }
 
@@ -672,6 +672,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             currentLeaderEpoch: leaderEpoch,
             timestamp: options.timestamp ?? -1n
           })
+        }
+        if (toInclude.size > 0) {
+          callback(new UserError(`Specified partition(s) not found in topic ${name}`), undefined as unknown as Offsets)
+          return
         }
       }
 

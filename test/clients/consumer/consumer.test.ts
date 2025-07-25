@@ -1545,6 +1545,19 @@ test('listOffsetsWithTimestamps should fail when consumer is closed', async t =>
   }
 })
 
+test('listOffsetsWithTimestamps should fail if partition does not exist', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  try {
+    await consumer.listOffsetsWithTimestamps({ topics: [topic], partitions: { [topic]: [0, 4] } })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, `Specified partition(s) not found in topic ${topic}`)
+  }
+})
+
 test('listCommittedOffsets should return committed offset values for topics and partitions and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true, 2)

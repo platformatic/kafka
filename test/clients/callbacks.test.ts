@@ -143,7 +143,7 @@ test('runConcurrentCallbacks handles errors correctly', async () => {
   })
 })
 
-test('runConcurrentCallbacks with empty collection', () => {
+test('runConcurrentCallbacks with empty collection', { timeout: 200 }, (_, done) => {
   const testArray: string[] = []
 
   // With empty collection, the callback should be called immediately
@@ -157,6 +157,7 @@ test('runConcurrentCallbacks with empty collection', () => {
     (error, results) => {
       strictEqual(error, null)
       deepStrictEqual(results, [])
+      done()
     }
   )
 })

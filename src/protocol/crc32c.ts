@@ -70,18 +70,16 @@ const CRC: number[] = [
   0xbe2da0a5, 0x4c4623a6, 0x5f16d052, 0xad7d5351
 ]
 
-export function crc32c (data: Buffer | DynamicBuffer): number {
-  let crc = 0 ^ -1
+export function crc32c (data: Buffer | Uint8Array | DynamicBuffer): number {
+  const bytes: Uint8Array = DynamicBuffer.isDynamicBuffer(data)
+    ? ((data as DynamicBuffer).buffer as Uint8Array)
+    : new Uint8Array(data as Uint8Array)
 
-  if (DynamicBuffer.isDynamicBuffer(data)) {
-    for (let i = 0; i < data.length; i++) {
-      crc = CRC[(crc ^ (data as DynamicBuffer).get(i)) & 0xff] ^ (crc >>> 8)
-    }
-  } else {
-    for (let i = 0; i < data.length; i++) {
-      crc = CRC[(crc ^ (data as Buffer)[i]) & 0xff] ^ (crc >>> 8)
-    }
+  let crc = 0xffffffff
+
+  for (let i = 0, len = bytes.length; i < len; ++i) {
+    crc = CRC[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8)
   }
 
-  return Uint32Array.from([(crc ^ -1) >>> 0])[0]
+  return (crc ^ 0xffffffff) >>> 0
 }

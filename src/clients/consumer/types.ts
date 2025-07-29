@@ -84,6 +84,7 @@ export interface StreamOptions {
   topics: string[]
   mode?: MessagesStreamModeValue
   fallbackMode?: MessagesStreamFallbackModeValue
+  maxFetches?: number
   offsets?: TopicWithPartitionAndOffset[]
   onCorruptedMessage?: CorruptedMessageHandler
 }

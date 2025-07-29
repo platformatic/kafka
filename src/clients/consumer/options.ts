@@ -76,6 +76,7 @@ export const consumeOptionsSchema = {
     topics: { type: 'array', items: idProperty },
     mode: { type: 'string', enum: Object.values(MessagesStreamModes) },
     fallbackMode: { type: 'string', enum: Object.values(MessagesStreamFallbackModes) },
+    maxFetches: { type: 'number', minimum: 0, default: 0 },
     offsets: {
       type: 'array',
       items: {

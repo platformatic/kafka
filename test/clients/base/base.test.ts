@@ -8,6 +8,7 @@ import {
   Base,
   baseApisChannel,
   baseMetadataChannel,
+  Connection,
   MultipleErrors,
   sleep,
   UnsupportedApiError,
@@ -18,6 +19,7 @@ import {
   createBase,
   createTracingChannelVerifier,
   mockAPI,
+  mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
   mockedErrorMessage,
   mockedOperationId
@@ -513,6 +515,63 @@ test('metadata should handle connection failures to non-existent broker', async 
     )
 
     strictEqual(hasNetworkError, true)
+  }
+})
+
+test.only('connectToBrokers should connect to all brokers by default', async t => {
+  const otherClient = createBase(t)
+  const metadata = await otherClient.metadata({ topics: [] })
+
+  const client = createBase(t)
+  const connections = await client.connectToBrokers()
+
+  for (const [nodeId, nodeInfo] of metadata.brokers) {
+    const connection = connections.get(nodeId)
+
+    ok(connection instanceof Connection)
+    strictEqual(connection.host, nodeInfo.host)
+    strictEqual(connection.port, nodeInfo.port)
+  }
+})
+
+test.only('connectToBrokers should connect to only select brokers and ignore invalid brokers', async t => {
+  const otherClient = createBase(t)
+  const metadata = await otherClient.metadata({ topics: [] })
+  const firstBroker = metadata.brokers.keys().next().value!
+
+  const client = createBase(t)
+  const connections = await client.connectToBrokers([firstBroker, Math.random()])
+
+  deepStrictEqual(Array.from(connections.keys()), [firstBroker])
+})
+
+test.only('connectToBrokers should handle errors from Connection.getFirstAvailable', async t => {
+  const client = createBase(t)
+
+  mockConnectionPoolGetFirstAvailable(client[kConnections])
+
+  // Attempt to find coordinator with the mocked connection
+  try {
+    await client.connectToBrokers()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test.only('connectToBrokers should handle errors from Connection.get', async t => {
+  const client = createBase(t)
+
+  mockConnectionPoolGet(client[kConnections], 3)
+
+  // Attempt to find coordinator with the mocked connection
+  try {
+    await client.connectToBrokers()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes(mockedErrorMessage), true)
   }
 })
 

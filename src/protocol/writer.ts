@@ -201,14 +201,14 @@ export class Writer {
     return this
   }
 
-  appendArray<InputType>(
+  appendArray<InputType> (
     value: InputType[] | null | undefined,
     entryWriter: EntryWriter<InputType>,
     compact: boolean = true,
     appendTrailingTaggedFields = true
   ): this {
     if (value == null) {
-      return compact ? this.appendUnsignedVarInt(0) : this.appendInt32(0)
+      return compact ? this.appendUnsignedVarInt(0) : this.appendInt32(-1)
     }
 
     const length = value.length
@@ -230,14 +230,14 @@ export class Writer {
     return this
   }
 
-  appendMap<Key, Value>(
+  appendMap<Key, Value> (
     value: Map<Key, Value> | null | undefined,
     entryWriter: EntryWriter<[Key, Value]>,
     compact: boolean = true,
     appendTrailingTaggedFields = true
   ): this {
     if (value == null) {
-      return compact ? this.appendUnsignedVarInt(0) : this.appendInt32(0)
+      return compact ? this.appendUnsignedVarInt(0) : this.appendInt32(-1)
     }
 
     const length = value.size
@@ -260,7 +260,7 @@ export class Writer {
     return this
   }
 
-  appendVarIntArray<InputType>(value: InputType[] | null | undefined, entryWriter: EntryWriter<InputType>): this {
+  appendVarIntArray<InputType> (value: InputType[] | null | undefined, entryWriter: EntryWriter<InputType>): this {
     if (value == null) {
       return this.appendVarInt(0)
     }
@@ -274,7 +274,10 @@ export class Writer {
     return this
   }
 
-  appendVarIntMap<Key, Value>(value: Map<Key, Value> | null | undefined, entryWriter: EntryWriter<[Key, Value]>): this {
+  appendVarIntMap<Key, Value> (
+    value: Map<Key, Value> | null | undefined,
+    entryWriter: EntryWriter<[Key, Value]>
+  ): this {
     if (value == null) {
       return this.appendVarInt(0)
     }

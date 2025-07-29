@@ -144,6 +144,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
 
     this[kClosed] = true
+    this.emitWithDebug('client', 'close')
     this[kConnections].close(callback)
 
     return callback[kCallbackPromise]
@@ -399,9 +400,20 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
-          setTimeout(() => {
+          this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries)
+
+          function onClose () {
+            clearTimeout(timeout)
+            errors.push(new UserError(`Client closed while retrying ${operationId}.`))
+            callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors), undefined as ReturnType)
+          }
+
+          const timeout = setTimeout(() => {
+            this.removeListener('client:close', onClose)
             this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
           }, this[kOptions].retryDelay)
+
+          this.once('client:close', onClose)
         } else {
           if (attempt === 0) {
             callback(error, undefined as ReturnType)

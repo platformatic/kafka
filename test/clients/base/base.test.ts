@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
 import { test } from 'node:test'
 import { kConnections, kGetApi } from '../../../src/clients/base/base.ts'
 import {
@@ -629,4 +630,22 @@ test('kGetApi should fail on unsupported API version', (t, done) => {
 
     done()
   })
+})
+
+test('kPerformWithRetry should not leak timers', async t => {
+  const client = createBase(t, { retries: 1, retryDelay: 10000 })
+  const promise = client.metadata({ topics: [`test-topic-${randomUUID()}`] }).catch(e => e)
+
+  // Wait for the first request to fail
+  await once(client, 'client:performWithRetry:retry')
+
+  // Forcefully close the client to ensure all operations are aborted
+  await client.close()
+
+  // If the timeout was already resolved, the test runner would complain
+  const error = await promise
+
+  ok(error instanceof MultipleErrors)
+  strictEqual(error.errors.length, 2)
+  ok(error.errors[1].message.startsWith('Client closed while retrying'))
 })

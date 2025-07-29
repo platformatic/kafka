@@ -15,6 +15,7 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 | `client:broker:sasl:handshake`      | Emitted when a broker completes SASL handshake.             |
 | `client:broker:sasl:authentication` | Emitted when a broker completes SASL authentication.        |
 | `client:metadata`                   | Emitted when metadata is retrieved.                         |
+| `client:close`                      | Emitted when client is closed.                              |
 
 ## Constructor
 

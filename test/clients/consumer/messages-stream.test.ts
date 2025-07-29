@@ -35,10 +35,10 @@ import {
   createCreationChannelVerifier,
   createTopic,
   createTracingChannelVerifier,
+  executeWithTimeout,
   mockedErrorMessage,
   mockedOperationId,
-  mockMetadata,
-  executeWithTimeout
+  mockMetadata
 } from '../../helpers.ts'
 
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
@@ -574,6 +574,49 @@ test('should support different fallback modes', async t => {
 
   // With EARLIEST fallback, we should get all messages
   strictEqual(earliestMessages.length, 3, 'With EARLIEST fallback, should consume all messages')
+})
+
+test('should support maxFetches option', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 5)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  const stream1 = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000,
+    maxFetches: 2
+  })
+
+  const messages1 = []
+
+  for await (const message of stream1) {
+    messages1.push(message)
+  }
+
+  const stream2 = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000
+  })
+
+  const messages2 = []
+  for await (const message of stream2) {
+    messages2.push(message)
+
+    if (messages2.length === 3) {
+      break
+    }
+  }
+
+  strictEqual(messages2.length, 3)
 })
 
 test('should ignore part of records batchs already consumed', async t => {

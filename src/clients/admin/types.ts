@@ -1,3 +1,4 @@
+import { type CreateTopicsRequestTopicConfig } from '../../apis/admin/create-topics-v7.ts'
 import { type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
@@ -46,6 +47,7 @@ export interface CreateTopicsOptions {
   partitions?: number
   replicas?: number
   assignments?: BrokerAssignment[]
+  configs?: CreateTopicsRequestTopicConfig[]
 }
 
 export interface ListTopicsOptions {

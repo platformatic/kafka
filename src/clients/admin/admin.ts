@@ -318,6 +318,7 @@ export class Admin extends Base<AdminOptions> {
     const numPartitions = options.partitions ?? 1
     const replicationFactor = options.replicas ?? 1
     const assignments: CreateTopicsRequestTopicAssignment[] = []
+    const configs = options.configs ?? []
 
     for (const { partition, brokers } of options.assignments ?? []) {
       assignments.push({ partitionIndex: partition, brokerIds: brokers })
@@ -330,7 +331,7 @@ export class Admin extends Base<AdminOptions> {
         numPartitions,
         replicationFactor,
         assignments,
-        configs: []
+        configs
       })
     }
 

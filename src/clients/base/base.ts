@@ -79,6 +79,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
   constructor (options: OptionsType) {
     super()
+    this.setMaxListeners(0)
+
     this[kClientType] = 'base'
     this[kInstance] = currentInstance++
     this[kApis] = []

@@ -518,7 +518,7 @@ test('metadata should handle connection failures to non-existent broker', async 
   }
 })
 
-test.only('connectToBrokers should connect to all brokers by default', async t => {
+test('connectToBrokers should connect to all brokers by default', async t => {
   const otherClient = createBase(t)
   const metadata = await otherClient.metadata({ topics: [] })
 
@@ -534,7 +534,7 @@ test.only('connectToBrokers should connect to all brokers by default', async t =
   }
 })
 
-test.only('connectToBrokers should connect to only select brokers and ignore invalid brokers', async t => {
+test('connectToBrokers should connect to only select brokers and ignore invalid brokers', async t => {
   const otherClient = createBase(t)
   const metadata = await otherClient.metadata({ topics: [] })
   const firstBroker = metadata.brokers.keys().next().value!
@@ -545,7 +545,7 @@ test.only('connectToBrokers should connect to only select brokers and ignore inv
   deepStrictEqual(Array.from(connections.keys()), [firstBroker])
 })
 
-test.only('connectToBrokers should handle errors from Connection.getFirstAvailable', async t => {
+test('connectToBrokers should handle errors from Connection.getFirstAvailable', async t => {
   const client = createBase(t)
 
   mockConnectionPoolGetFirstAvailable(client[kConnections])
@@ -560,7 +560,7 @@ test.only('connectToBrokers should handle errors from Connection.getFirstAvailab
   }
 })
 
-test.only('connectToBrokers should handle errors from Connection.get', async t => {
+test('connectToBrokers should handle errors from Connection.get', async t => {
   const client = createBase(t)
 
   mockConnectionPoolGet(client[kConnections], 3)

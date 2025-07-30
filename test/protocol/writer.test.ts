@@ -578,7 +578,7 @@ test('appendArray', () => {
   strictEqual(buffer[pos++], 0) // Tagged field
 
   // Non-compact null array (length 0 as int32)
-  strictEqual(buffer.readInt32BE(pos), 0)
+  strictEqual(buffer.readInt32BE(pos), -1)
   pos += 4
 
   // Non-compact array [4, 5] (length 2 as int32, then 2 elements + tagged fields)
@@ -625,7 +625,7 @@ test('appendArray - undefined', () => {
   strictEqual(buffer[0], 0)
 
   // Non-compact undefined array (length 0 as int32)
-  strictEqual(buffer.readInt32BE(1), 0)
+  strictEqual(buffer.readInt32BE(1), -1)
 })
 
 test('appendMap', () => {
@@ -707,7 +707,7 @@ test('appendMap', () => {
   strictEqual(buffer[pos++], 0) // Tagged field
 
   // Non-compact null map (length 0 as int32)
-  strictEqual(buffer.readInt32BE(pos), 0)
+  strictEqual(buffer.readInt32BE(pos), -1)
   pos += 4
 
   // Non-compact map with one entry (length 1 as int32, then 1 element + tagged field)
@@ -788,7 +788,7 @@ test('appendMap - undefined', () => {
   strictEqual(buffer[0], 0)
 
   // Non-compact undefined map (length 0 as int32)
-  strictEqual(buffer.readInt32BE(1), 0)
+  strictEqual(buffer.readInt32BE(1), -1)
 })
 
 test('appendVarIntArray', () => {

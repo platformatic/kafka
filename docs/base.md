@@ -40,6 +40,16 @@ Creates a new base client.
 
 ## Methods
 
+### `connectToBrokers([nodeIds][, callback])`
+
+Establish a connection to one or more brokers in the cluster.
+
+The return value is a `Map<number, Connection>` object.
+
+| Property | Type               | Default | Description                                                                                               |
+| -------- | ------------------ | ------- | --------------------------------------------------------------------------------------------------------- |
+| `nodes`  | `number[] \| null` | null    | The nodes to connect to. Valid IDs can be obtained via the `metadata` method and invalid IDs are ignored. |
+
 ### `metadata(options[, callback])`
 
 Fetches information about the cluster and the topics.
@@ -51,7 +61,7 @@ The return value is a [`ClusterMetadata`](./other.md#clustermetadata) object.
 | `topics`           | `string[]` |           | Topics to get.                                                           |
 | `forceUpdate`      | `boolean`  | `false`   | Whether to retrieve metadata even if the in-memory cache is still valid. |
 | `autocreateTopics` | `boolean`  | `false`   | Whether to autocreate missing topics.                                    |
-| `metadataMaxAge`   | `number`   | 5 minutes | Maximum lifetime of cluster metadata.                                    |
+| `metadataMaxAge`   | `number`   | 5 seconds | Maximum lifetime of cluster metadata.                                    |
 
 ### `close([callback])`
 

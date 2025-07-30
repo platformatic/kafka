@@ -1,6 +1,11 @@
 import { type ValidateFunction } from 'ajv'
 import { EventEmitter } from 'node:events'
-import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
+import {
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks,
+  type CallbackWithPromise
+} from '../../apis/callbacks.ts'
 import { type API, type Callback } from '../../apis/definitions.ts'
 import * as apis from '../../apis/index.ts'
 import {
@@ -194,6 +199,62 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       options,
       callback
     )
+
+    return callback[kCallbackPromise]
+  }
+
+  connectToBrokers (nodeIds: number[] | null, callback: CallbackWithPromise<Map<number, Connection>>): void
+  connectToBrokers (nodeIds?: number[] | null): Promise<Map<number, Connection>>
+  connectToBrokers (
+    nodeIds: number[] | null | undefined,
+    callback?: CallbackWithPromise<Map<number, Connection>>
+  ): void | Promise<Map<number, Connection>> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Map<number, Connection>>()
+    }
+
+    // Fetch the metadata
+    this[kMetadata]({ topics: [] }, (error: Error | null, metadata: ClusterMetadata) => {
+      if (error) {
+        callback(error, undefined as unknown as Map<number, Connection>)
+        return
+      }
+
+      let nodes: number[] = []
+
+      if (nodeIds?.length) {
+        for (const node of nodeIds) {
+          if (metadata.brokers.has(node)) {
+            nodes.push(node)
+          }
+        }
+      } else {
+        nodes = Array.from(metadata.brokers.keys())
+      }
+
+      runConcurrentCallbacks<[number, Connection]>(
+        'Connecting to brokers failed.',
+        nodes,
+        (nodeId: number, concurrentCallback) => {
+          this[kGetConnection](metadata.brokers.get(nodeId)!, (error, connection) => {
+            if (error) {
+              concurrentCallback(error, undefined as unknown as [number, Connection])
+              return
+            }
+
+            concurrentCallback(null, [nodeId, connection])
+          })
+        },
+        (error, connections) => {
+          if (error) {
+            callback(error, undefined as unknown as Map<number, Connection>)
+            return
+          }
+
+          return callback(null, new Map(connections))
+        }
+      )
+    })
 
     return callback[kCallbackPromise]
   }

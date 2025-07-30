@@ -82,7 +82,7 @@ export const defaultBaseOptions: Partial<BaseOptions> = {
   timeout: 5000,
   retries: 3,
   retryDelay: 1000,
-  metadataMaxAge: 5000, // 5 minutes
+  metadataMaxAge: 5000, // 5 seconds
   autocreateTopics: false,
   strict: false
 }

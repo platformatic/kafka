@@ -1279,21 +1279,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           return
         }
 
-        // Read the assignment back
-        const reader = Reader.from(response.assignment)
-
-        const assignments: GroupAssignment[] = reader.readArray(
-          r => {
-            return {
-              topic: r.readString(),
-              partitions: r.readArray(r => r.readInt32(), true, false)
-            }
-          },
-          true,
-          false
-        )
-
-        callback(error, assignments)
+        callback(error, this.#decodeProtocolAssignment(response.assignment))
       }
     )
   }
@@ -1380,18 +1366,38 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   /*
-    This follows:
+    The following two methods follow:
     https://github.com/apache/kafka/blob/trunk/clients/src/main/resources/common/message/ConsumerProtocolAssignment.json
   */
   #encodeProtocolAssignment (assignments: GroupAssignment[]): Buffer {
-    return Writer.create().appendArray(
-      assignments,
-      (w, { topic, partitions }) => {
-        w.appendString(topic).appendArray(partitions, (w, a) => w.appendInt32(a), true, false)
+    return Writer.create()
+      .appendInt16(0) // Version information
+      .appendArray(
+        assignments,
+        (w, { topic, partitions }) => {
+          w.appendString(topic, false).appendArray(partitions, (w, a) => w.appendInt32(a), false, false)
+        },
+        false,
+        false
+      )
+      .appendInt32(0).buffer // No user data
+  }
+
+  #decodeProtocolAssignment (buffer: Buffer): GroupAssignment[] {
+    const reader = Reader.from(buffer)
+
+    reader.skip(2) // Ignore Version information
+
+    return reader.readArray(
+      r => {
+        return {
+          topic: r.readString(false),
+          partitions: r.readArray(r => r.readInt32(), false, false)
+        }
       },
-      true,
+      false,
       false
-    ).buffer
+    )
   }
 
   #createAssignments (metadata: ClusterMetadata): SyncGroupRequestAssignment[] {

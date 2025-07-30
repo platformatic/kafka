@@ -584,16 +584,19 @@ export class Admin extends Base<AdminOptions> {
                   }
 
                   reader.reset(member.memberAssignment)
+                  reader.skip(2) // Ignore Version information
 
                   const memberAssignments: Map<string, GroupAssignment> = reader.readMap(
                     r => {
-                      const topic = r.readString()
+                      const topic = r.readString(false)
 
-                      return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), true, false) }]
+                      return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
                     },
-                    true,
+                    false,
                     false
                   )
+
+                  reader.readBytes() // Ignore the user data
 
                   group.members.set(member.memberId, {
                     id: member.memberId,

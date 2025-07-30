@@ -508,6 +508,27 @@ test('send should support messages with headers', async t => {
   strictEqual(result2.offsets?.length, 1)
 })
 
+test('send should support messages with no key and no partition', async t => {
+  const topic = await createTopic(t, true, 4)
+  const producer = createProducer(t)
+
+  const results = await producer.send({
+    messages: [
+      {
+        topic,
+        value: Buffer.from('message-value')
+      },
+      {
+        topic,
+        value: Buffer.from('message-value')
+      }
+    ]
+  })
+
+  strictEqual(results.offsets![0].partition, 0)
+  strictEqual(results.offsets![1].partition, 1)
+})
+
 test('send should support no response', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)

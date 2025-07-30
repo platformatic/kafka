@@ -53,6 +53,7 @@ import {
   Base,
   kAfterCreate,
   kCheckNotClosed,
+  kClearMetadata,
   kClosed,
   kCreateConnectionPool,
   kFetchConnections,
@@ -714,7 +715,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         },
         (error, responses) => {
           if (error) {
-            callback(error, undefined as unknown as Offsets)
+            callback(this.#handleMetadataError(error), undefined as unknown as Offsets)
             return
           }
 
@@ -789,7 +790,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, response) => {
         if (error) {
-          callback(error, undefined as unknown as Offsets)
+          callback(this.#handleMetadataError(error), undefined as unknown as Offsets)
           return
         }
 
@@ -973,6 +974,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#metricActiveStreams?.inc()
     stream.once('close', () => {
       this.#metricActiveStreams?.dec()
+      this.topics.untrackAll(...options.topics)
       this.#streams.delete(stream)
     })
 
@@ -1232,7 +1234,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
           if (error) {
-            callback(error, undefined as unknown as GroupAssignment[])
+            callback(this.#handleMetadataError(error), undefined as unknown as GroupAssignment[])
             return
           }
 
@@ -1311,7 +1313,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       this[kMetadata]({ topics: this.topics.current }, (error: Error | null, metadata: ClusterMetadata) => {
         if (error) {
-          callback(error, undefined as unknown as ReturnType)
+          callback(this.#handleMetadataError(error), undefined as unknown as ReturnType)
           return
         }
 
@@ -1465,5 +1467,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return protocolError
+  }
+
+  #handleMetadataError (error: Error | null): Error | null {
+    if (error && (error as GenericError)?.findBy('hasStaleMetadata', true)) {
+      this[kClearMetadata]()
+    }
+
+    return error
   }
 }

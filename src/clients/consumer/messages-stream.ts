@@ -315,7 +315,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       if (error) {
         // The stream has been closed, ignore any error
         /* c8 ignore next 4 - Hard to test */
-        if (this.#shouldClose) {
+        if (this.#shouldClose || this.closed || this.destroyed) {
           this.push(null)
           return
         }
@@ -387,7 +387,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           if (error) {
             // The stream has been closed, ignore the error
             /* c8 ignore next 4 - Hard to test */
-            if (this.#shouldClose) {
+            if (this.#shouldClose || this.closed || this.destroyed) {
               this.push(null)
               return
             }
@@ -594,6 +594,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       },
       (error, offsets) => {
         if (error) {
+          /* c8 ignore next 4 - Hard to test */
+          if (this.#shouldClose || this.closed || this.destroyed) {
+            callback(null)
+            return
+          }
+
           callback(error)
           return
         }
@@ -622,6 +628,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
         this.#consumer.listCommittedOffsets({ topics }, (error, commits) => {
           if (error) {
+            /* c8 ignore next 4 - Hard to test */
+            if (this.#shouldClose || this.closed || this.destroyed) {
+              callback(null)
+              return
+            }
+
             callback(error)
             return
           }

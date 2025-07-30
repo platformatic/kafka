@@ -54,7 +54,7 @@ export class GenericError extends Error {
     Reflect.defineProperty(this, kGenericError, { value: true, enumerable: false })
   }
 
-  findBy<ErrorType extends GenericError = GenericError>(property: string, value: unknown): ErrorType | null {
+  findBy<ErrorType extends GenericError = GenericError> (property: string, value: unknown): ErrorType | null {
     if (this[property] === value) {
       return this as unknown as ErrorType
     }
@@ -100,7 +100,7 @@ export class MultipleErrors extends AggregateError {
     Reflect.defineProperty(this, kMultipleErrors, { value: true, enumerable: false })
   }
 
-  findBy<ErrorType extends GenericError | MultipleErrors = MultipleErrors>(
+  findBy<ErrorType extends GenericError | MultipleErrors = MultipleErrors> (
     property: string,
     value: unknown
   ): ErrorType | null {
@@ -109,8 +109,14 @@ export class MultipleErrors extends AggregateError {
     }
 
     for (const error of this.errors) {
-      if (error[kGenericError] ? error.findBy(property, value) : error[property] === value) {
+      if (error[property] === value) {
         return error as unknown as ErrorType
+      }
+
+      const found = error[kGenericError] ? error.findBy(property, value) : undefined
+
+      if (found) {
+        return found as unknown as ErrorType
       }
     }
 
@@ -137,11 +143,13 @@ export class NetworkError extends GenericError {
 }
 
 export class ProtocolError extends GenericError {
+  static code: ErrorCode = 'PLT_KFK_PROTOCOL'
+
   constructor (codeOrId: string | number, properties: ErrorProperties = {}, response: unknown = undefined) {
     const { id, code, message, canRetry } =
       protocolErrors[typeof codeOrId === 'number' ? protocolErrorsCodesById[codeOrId] : codeOrId]
 
-    super('PLT_KFK_PROTOCOL', message, {
+    super(ProtocolError.code, message, {
       apiId: id,
       apiCode: code,
       canRetry,

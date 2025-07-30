@@ -304,7 +304,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
   [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
     const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
-    let topicsToFetch = []
+    let topicsToFetch: string[] = []
 
     // Determine which topics we need to fetch
     if (!this.#metadata || options.forceUpdate) {
@@ -349,12 +349,20 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                   return
                 }
 
-                api(connection, options.topics, autocreateTopics, true, retryCallback)
+                api(connection, topicsToFetch, autocreateTopics, true, retryCallback)
               })
             })
           },
           (error: Error | null, metadata: MetadataResponse) => {
             if (error) {
+              const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
+
+              // Stale metadata, we need to fetch everything again
+              if (hasStaleMetadata) {
+                this[kClearMetadata]()
+                topicsToFetch = options.topics
+              }
+
               deduplicateCallback(error, undefined as unknown as ClusterMetadata)
               return
             }

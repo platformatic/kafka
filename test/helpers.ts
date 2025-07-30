@@ -1,3 +1,4 @@
+import { Unpromise } from '@watchable/unpromise'
 import { deepStrictEqual } from 'node:assert'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -11,7 +12,6 @@ import {
 } from 'node:diagnostics_channel'
 import { type TestContext } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { Unpromise } from '@watchable/unpromise'
 import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
 import {
   Admin,
@@ -38,6 +38,7 @@ export const kafkaBootstrapServers = ['localhost:9092']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION
+let topicCounter = 0
 
 export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
   const options: BaseOptions = {
@@ -109,7 +110,7 @@ export function createGroupId () {
 }
 
 export async function createTopic (t: TestContext, create: boolean = false, partitions: number = 1) {
-  const topic = `test-topic-${randomUUID()}`
+  const topic = `test-topic-${randomUUID()}-${++topicCounter}`
 
   if (create) {
     const admin = createAdmin(t)

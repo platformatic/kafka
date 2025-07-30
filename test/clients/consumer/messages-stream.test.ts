@@ -32,6 +32,7 @@ import {
   UserError
 } from '../../../src/index.ts'
 import {
+  createAdmin,
   createCreationChannelVerifier,
   createTopic,
   createTracingChannelVerifier,
@@ -1151,4 +1152,49 @@ test('metrics should track the number of consumed messages', async t => {
 
     deepStrictEqual(consumedMessages.values[0].value, 6)
   }
+})
+
+test('should properly handle deleting topics in between', async t => {
+  const admin = createAdmin(t)
+  const topic1 = await createTopic(t)
+  const topic2 = await createTopic(t)
+  const topic3 = await createTopic(t)
+
+  const consumer = createConsumer(t)
+  await admin.createTopics({ topics: [topic1, topic2, topic3] })
+
+  const stream1 = await consumer.consume({
+    topics: [topic1],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+  t.after(() => stream1.close())
+
+  const errorPromise = once(stream1, 'error')
+
+  await admin.deleteTopics({ topics: [topic1] })
+
+  // Create a second stream. Since it adds a new topic, it will force a metadata refresh
+  const stream2 = await consumer.consume({
+    topics: [topic2],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+  t.after(() => stream2.close())
+
+  // Wait for the first stream to error out due to the topic deletion
+  const [error] = await errorPromise
+  const protocolError = error.findBy('hasStaleMetadata', true)
+  strictEqual(protocolError.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
+
+  // Create a third stream. Since it adds a new topic, it will force a metadata refresh
+  const stream3 = await consumer.consume({
+    topics: [topic3],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+  t.after(() => stream3.close())
 })

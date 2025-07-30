@@ -123,13 +123,10 @@ test('MultipleErrors.findBy - recursively finds properties in nested errors', ()
   // Should find middleError directly in outerError.errors array
   deepStrictEqual(outerError.findBy('middleProp', 'middle-value'), middleError)
 
-  // The current implementation of findBy doesn't return the original error object but the error itself
-  // In this case, the findBy should return the middleError since it contains an error with deepProp
   const foundNested = outerError.findBy('deepProp', 'value')
   ok(foundNested)
-  deepStrictEqual(foundNested.code, 'PLT_KFK_MULTIPLE') // middleError.code
+  deepStrictEqual(foundNested.code, 'PLT_KFK_USER') // innerError.code
 
-  // But the innerError can be found directly from middleError
   const foundFromMiddle = middleError.findBy('deepProp', 'value')!
   deepStrictEqual(foundFromMiddle, innerError)
   deepStrictEqual(foundFromMiddle.code, 'PLT_KFK_USER')

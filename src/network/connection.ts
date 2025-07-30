@@ -144,6 +144,10 @@ export class Connection extends EventEmitter {
     return this.#socket
   }
 
+  isConnected (): boolean {
+    return this.#status === ConnectionStatuses.CONNECTED
+  }
+
   connect (host: string, port: number, callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback()

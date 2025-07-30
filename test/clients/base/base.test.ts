@@ -126,6 +126,48 @@ test('close should properly terminate client', async t => {
   strictEqual(client.closed, true)
 })
 
+test('isActive should return true when client is not closed', t => {
+  const client = createBase(t)
+
+  // Client should be ready when not closed
+  strictEqual(client.isActive(), true)
+})
+
+test('isActive should return false when client is closed', async t => {
+  const client = createBase(t)
+
+  // Close the client
+  await client.close()
+
+  // Client should not be ready when closed
+  strictEqual(client.isActive(), false)
+})
+
+test('isConnected should return false when client is closed', async t => {
+  const client = createBase(t)
+
+  // Close the client
+  await client.close()
+
+  // Client should not be live when closed
+  strictEqual(client.isConnected(), false)
+})
+
+test('isConnected should delegate to connection pool when client is not closed', t => {
+  const client = createBase(t)
+
+  let isConnectedCalled = false
+  client[kConnections].isConnected = function () {
+    isConnectedCalled = true
+    return true
+  }
+
+  const result = client.isConnected()
+
+  strictEqual(isConnectedCalled, true)
+  strictEqual(result, true)
+})
+
 test('listApis should return a list of available APIs', async t => {
   const client = createBase(t)
 

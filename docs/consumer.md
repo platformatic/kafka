@@ -44,6 +44,12 @@ It also supports all the constructor options of `Base`.
 
 ## Basic Methods
 
+### `isActive`
+
+Returns `true` if the consumer is not closed and it is currently an active member of a consumer group.
+
+This method will return `false` during consumer group rebalacing.
+
 ### `consume<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
 
 Creates a stream to consume messages from topics.

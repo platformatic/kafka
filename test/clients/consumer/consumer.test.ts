@@ -416,6 +416,65 @@ test('close with force=true should force close all resources', async t => {
   strictEqual(stream.closed, true)
 })
 
+test('isActive should return false when base client is not live', async t => {
+  const consumer = await createConsumer(t)
+
+  // Close the consumer to make base not ready
+  await consumer.close()
+
+  // Consumer should not be ready when base is not ready
+  strictEqual(consumer.isActive(), false)
+})
+
+test('isActive should return false when consumer is not in group', async t => {
+  const consumer = await createConsumer(t)
+
+  // Consumer should not be ready when not in a group (no group membership)
+  strictEqual(consumer.isActive(), false)
+})
+
+test('isActive should return true when consumer is in active membership', async t => {
+  const consumer = await createConsumer(t)
+
+  await consumer.joinGroup({})
+
+  strictEqual(consumer.isActive(), true)
+})
+
+test('isActive should return false after the consumer leaves the group', async t => {
+  const consumer = await createConsumer(t)
+
+  await consumer.joinGroup({})
+
+  strictEqual(consumer.isActive(), true)
+
+  await consumer.leaveGroup()
+
+  strictEqual(consumer.isActive(), false)
+})
+
+test('isActive should return false during rebalance', async t => {
+  const groupId = createGroupId()
+  const consumer = await createConsumer(t, { groupId })
+  const otherConsumer = await createConsumer(t, { groupId })
+
+  await consumer.joinGroup({})
+
+  strictEqual(consumer.isActive(), true)
+
+  const otherJoin = otherConsumer.joinGroup({})
+
+  await once(consumer, 'consumer:group:rebalance')
+  strictEqual(consumer.isActive(), false)
+  strictEqual(otherConsumer.isActive(), false)
+
+  await once(consumer, 'consumer:group:join')
+  strictEqual(consumer.isActive(), true)
+
+  await otherJoin
+  strictEqual(otherConsumer.isActive(), true)
+})
+
 test('consume should return a MessagesStream instance and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 
@@ -2612,6 +2671,7 @@ test('#heartbeat should regularly trigger events and support diagnostic channels
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:end')
 
+  ok(consumer.lastHeartbeat !== null)
   verifyTracingChannel()
 })
 

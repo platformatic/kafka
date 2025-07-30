@@ -1198,3 +1198,49 @@ test('should properly handle deleting topics in between', async t => {
   })
   t.after(() => stream3.close())
 })
+
+test('should report correct isActive status', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  const consumer = createConsumer(t, groupId)
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000
+  })
+
+  // Stream should be live when consumer is live and stream is not closed
+  ok(consumer.isActive())
+  ok(stream.isActive())
+
+  // Close the stream
+  await stream.close()
+
+  // Stream should not be live after close
+  strictEqual(stream.isActive(), false)
+})
+
+test('should report correct isConnected status', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  const consumer = createConsumer(t, groupId)
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000
+  })
+
+  // Stream should be connect when consumer is connected and stream is not closed
+  ok(consumer.isConnected())
+  ok(stream.isConnected())
+
+  // Close the stream
+  await stream.close()
+
+  // Stream should not be live after close
+  strictEqual(stream.isConnected(), false)
+})

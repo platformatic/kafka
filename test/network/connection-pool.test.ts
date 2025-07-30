@@ -198,7 +198,7 @@ test('get should handle errors and remove connection', async t => {
   deepStrictEqual(failedSpy.mock.calls.length, 2)
 })
 
-test('ConnectionPool.get should support diagnostic channels', async t => {
+test('get should support diagnostic channels', async t => {
   const { port } = await createServer(t)
   const broker = { host: 'localhost', port }
 
@@ -400,7 +400,7 @@ test('close should handle empty pool', async () => {
   await connectionPool.close()
 })
 
-test('ConnectionPool emits connecting and connect events', async t => {
+test('emits connecting and connect events', async t => {
   const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client')
@@ -427,7 +427,7 @@ test('ConnectionPool emits connecting and connect events', async t => {
   await connection.close()
 })
 
-test('ConnectionPool emits failed event on connection failure', async t => {
+test('emits failed event on connection failure', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())
 
@@ -443,4 +443,120 @@ test('ConnectionPool emits failed event on connection failure', async t => {
 
   // Verify failed event was emitted
   deepStrictEqual(failedSpy.mock.calls.length, 1)
+})
+
+test('isActive should return false when no connections exist', () => {
+  const connectionPool = new ConnectionPool('test-client')
+
+  // Pool should not be ready when empty
+  deepStrictEqual(connectionPool.isActive(), false)
+})
+
+test('isActive should return true when connections exist', async t => {
+  const { port } = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Before connection
+  deepStrictEqual(connectionPool.isActive(), false)
+
+  // Get a connection
+  const connection = await connectionPool.get(broker)
+
+  // After connection
+  deepStrictEqual(connectionPool.isActive(), true)
+
+  await connection.close()
+})
+
+test('isActive should return false after closing all connections', async t => {
+  const { port } = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Get a connection
+  await connectionPool.get(broker)
+  deepStrictEqual(connectionPool.isActive(), true)
+
+  // Close all connections
+  await connectionPool.close()
+
+  // After closing
+  deepStrictEqual(connectionPool.isActive(), false)
+})
+
+test('isConnected should return false when no connections exist', () => {
+  const connectionPool = new ConnectionPool('test-client')
+
+  // Pool should not be live when empty
+  deepStrictEqual(connectionPool.isConnected(), false)
+})
+
+test('isConnected should return true when all connections are live', async t => {
+  const { port } = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Before connection
+  deepStrictEqual(connectionPool.isConnected(), false)
+
+  // Get a connection
+  const connection = await connectionPool.get(broker)
+
+  // After connection
+  deepStrictEqual(connectionPool.isConnected(), true)
+
+  await connection.close()
+})
+
+test('isConnected should handle connection removal after close', async t => {
+  const server1 = await createServer(t)
+  const server2 = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker1 = { host: 'localhost', port: server1.port }
+  const broker2 = { host: 'localhost', port: server2.port }
+
+  // Get two connections
+  const connection1 = await connectionPool.get(broker1)
+  const connection2 = await connectionPool.get(broker2)
+
+  // Both connections are live
+  deepStrictEqual(connectionPool.isConnected(), true)
+
+  // Close one connection - it will be removed from the pool automatically
+  await connection1.close()
+
+  // Pool should still be live because the closed connection is removed,
+  // and the remaining connection is live
+  deepStrictEqual(connectionPool.isConnected(), true)
+
+  await connection2.close()
+
+  deepStrictEqual(connectionPool.isConnected(), false)
+})
+
+test('isConnected should return false after closing the pool', async t => {
+  const { port } = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Get a connection
+  await connectionPool.get(broker)
+  deepStrictEqual(connectionPool.isConnected(), true)
+
+  // Close the pool
+  await connectionPool.close()
+
+  // After closing
+  deepStrictEqual(connectionPool.isConnected(), false)
 })

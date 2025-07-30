@@ -85,6 +85,7 @@ export class ConnectionPool extends EventEmitter {
     }
 
     if (this.#closed || this.#connections.size === 0) {
+      this.#closed = true
       callback(null)
       return callback[kCallbackPromise]
     }

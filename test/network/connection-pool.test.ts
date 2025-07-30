@@ -232,6 +232,17 @@ test('get should support diagnostic channels', async t => {
   verifyTracingChannel()
 })
 
+test('get fail when the pool is closed', async t => {
+  const { port } = await createServer(t)
+  const broker = { host: 'localhost', port }
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+  await connectionPool.close()
+
+  await rejects(() => connectionPool.get(broker) as Promise<unknown>, { message: 'Connection pool is closed.' })
+})
+
 test('getFirstAvailable should try multiple brokers until one succeeds', async t => {
   const { port } = await createServer(t)
 
@@ -513,6 +524,25 @@ test('isConnected should return true when all connections are live', async t => 
   deepStrictEqual(connectionPool.isConnected(), true)
 
   await connection.close()
+})
+
+test('isConnected should return true when connection is connecting', async t => {
+  const { port } = await createServer(t)
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  // Before connection
+  deepStrictEqual(connectionPool.isConnected(), false)
+
+  // Get a connection but do not wait for it to connect
+  const connectionPromise = connectionPool.get(broker)
+  deepStrictEqual(connectionPool.isConnected(), false)
+
+  // Complete the connection
+  await connectionPromise
+  deepStrictEqual(connectionPool.isConnected(), true)
 })
 
 test('isConnected should handle connection removal after close', async t => {

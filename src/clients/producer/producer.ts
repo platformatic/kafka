@@ -337,7 +337,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           partition = murmur2(key) >>> 0
         } else {
           // Use the roundrobin
-          partition = this.#partitionsRoundRobin.postIncrement(topic, 1, -1)
+          partition = this.#partitionsRoundRobin.postIncrement(topic, 1, 0)
         }
       } else {
         partition = message.partition

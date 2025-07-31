@@ -8,9 +8,9 @@ type RegistryContentType =
 // Unused in this package
 export interface Metric {
   name?: string
-  get(): Promise<unknown>
+  get (): Promise<unknown>
   reset: () => void
-  labels(labels: any): any
+  labels (labels: any): any
 }
 
 export interface Counter extends Metric {
@@ -30,17 +30,17 @@ export interface Registry {
   getSingleMetric: (name: string) => Counter | Gauge | any
 
   // Unused in this package
-  metrics(): Promise<string>
-  clear(): void
-  resetMetrics(): void
-  registerMetric(metric: Metric): void
-  getMetricsAsJSON(): Promise<any>
-  getMetricsAsArray(): any[]
-  removeSingleMetric(name: string): void
-  setDefaultLabels(labels: object): void
-  getSingleMetricAsString(name: string): Promise<string>
+  metrics (): Promise<string>
+  clear (): void
+  resetMetrics (): void
+  registerMetric (metric: Metric): void
+  getMetricsAsJSON (): Promise<any>
+  getMetricsAsArray (): any[]
+  removeSingleMetric (name: string): void
+  setDefaultLabels (labels: object): void
+  getSingleMetricAsString (name: string): Promise<string>
   readonly contentType: RegistryContentType
-  setContentType(contentType: RegistryContentType): void
+  setContentType (contentType: RegistryContentType): void
 }
 
 export interface Prometheus {

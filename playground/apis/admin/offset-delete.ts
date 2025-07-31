@@ -15,7 +15,6 @@ await performAPICallWithRetry('OffsetDelete', () =>
         }
       ]
     }
-  ])
-)
+  ]))
 
 await connection.close()

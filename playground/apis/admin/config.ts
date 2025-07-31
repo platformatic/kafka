@@ -20,8 +20,7 @@ await performAPICallWithRetry('DescribeConfigs', () =>
     ],
     false,
     false
-  )
-)
+  ))
 
 await performAPICallWithRetry('AlterConfig', () =>
   alterConfigsV2.async(
@@ -39,8 +38,7 @@ await performAPICallWithRetry('AlterConfig', () =>
       }
     ],
     false
-  )
-)
+  ))
 
 await performAPICallWithRetry('IncrementalAlterConfig', () =>
   incrementalAlterConfigsV1.async(
@@ -59,8 +57,7 @@ await performAPICallWithRetry('IncrementalAlterConfig', () =>
       }
     ],
     false
-  )
-)
+  ))
 
 await performAPICallWithRetry('DescribeConfigs', () =>
   describeConfigsV4.async(
@@ -74,7 +71,6 @@ await performAPICallWithRetry('DescribeConfigs', () =>
     ],
     false,
     false
-  )
-)
+  ))
 
 await connection.close()

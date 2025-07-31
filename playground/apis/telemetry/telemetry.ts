@@ -9,8 +9,7 @@ const connection = new Connection('123')
 await connection.connect('localhost', 9092)
 
 const { clientInstanceId, subscriptionId } = await performAPICallWithRetry('GetTelemetrySubscriptions', () =>
-  getTelemetrySubscriptionsV0.async(connection)
-)
+  getTelemetrySubscriptionsV0.async(connection))
 
 await performAPICallWithRetry('ListClientMetricsResources', () => listClientMetricsResourcesV0.async(connection))
 
@@ -22,6 +21,5 @@ await performAPICallWithRetry('PushTelemetry', () =>
     false,
     CompressionTypes.None,
     Buffer.from('metrics')
-  )
-)
+  ))
 await connection.close()

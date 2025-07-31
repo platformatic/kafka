@@ -466,7 +466,8 @@ test('readVarIntBytes', () => {
     0, // This is the actual encoding for length 0 in VarInt
     // Buffer content is empty
     4, // This is the actual encoding for length 2 in VarInt
-    1, 2 // Buffer content [1, 2]
+    1,
+    2 // Buffer content [1, 2]
   ])
 
   const reader = new Reader(new DynamicBuffer(buffer))

@@ -19,8 +19,7 @@ if (sasl) {
   await performAPICallWithRetry('SaslHandshake', () => saslHandshakeV1.async(connection, 'SCRAM-SHA-256'))
 
   await performAPICallWithRetry('SaslAuthenticate', () =>
-    authenticate(saslAuthenticateV2, connection, 'SHA-256', 'client', 'client')
-  )
+    authenticate(saslAuthenticateV2, connection, 'SHA-256', 'client', 'client'))
 }
 
 await performAPICallWithRetry('Metadata', () => metadataV12.async(connection, null, false, true))

@@ -14,7 +14,6 @@ await performAPICallWithRetry('DeleteTopics', () =>
       }
     ],
     1000
-  )
-)
+  ))
 
 await connection.close()

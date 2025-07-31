@@ -26,8 +26,7 @@ if (performCreatePartitions) {
       ],
       1000,
       true
-    )
-  )
+    ))
 }
 
 if (performAlterPartition) {
@@ -45,8 +44,7 @@ if (performAlterPartition) {
           }
         ]
       }
-    ])
-  )
+    ]))
 }
 
 await connection.close()

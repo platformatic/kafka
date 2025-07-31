@@ -18,8 +18,7 @@ await performAPICallWithRetry('DescribeClientQuotas', () =>
       }
     ],
     false
-  )
-)
+  ))
 
 await performAPICallWithRetry('AlterClientQuotas', () =>
   alterClientQuotasV1.async(
@@ -42,8 +41,7 @@ await performAPICallWithRetry('AlterClientQuotas', () =>
       }
     ],
     false
-  )
-)
+  ))
 
 await performAPICallWithRetry('DescribeClientQuotas', () =>
   describeClientQuotasV0.async(
@@ -56,7 +54,6 @@ await performAPICallWithRetry('DescribeClientQuotas', () =>
       }
     ],
     false
-  )
-)
+  ))
 
 await connection.close()

@@ -19,7 +19,6 @@ await performAPICallWithRetry('CreateTopics', () =>
     ],
     1000,
     false
-  )
-)
+  ))
 
 await connection.close()

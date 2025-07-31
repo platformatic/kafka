@@ -12,8 +12,7 @@ await connection.connect('localhost', 9092)
 const groupId = 'g2'
 
 await performAPICallWithRetry('FindCoordinator (GROUP)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId]))
 
 await performAPICallWithRetry('DescribeGroups', () => describeGroupsV5.async(connection, [groupId], true))
 

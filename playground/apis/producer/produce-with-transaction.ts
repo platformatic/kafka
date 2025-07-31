@@ -15,12 +15,10 @@ const transactionalId = '11'
 const groupId = 'g1'
 
 await performAPICallWithRetry('FindCoordinator (TRANSACTION)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId]))
 
 const { producerId, producerEpoch } = await performAPICallWithRetry('InitProducerId', () =>
-  initProducerIdV5.async(connection, transactionalId, 15000, -1n, -1)
-)
+  initProducerIdV5.async(connection, transactionalId, 15000, -1n, -1))
 
 await performAPICallWithRetry('AddPartitionsToTnx', () =>
   addPartitionsToTxnV5.async(connection, [
@@ -31,8 +29,7 @@ await performAPICallWithRetry('AddPartitionsToTnx', () =>
       verifyOnly: false,
       topics: [{ name: 'temp', partitions: [0] }]
     }
-  ])
-)
+  ]))
 
 await performAPICallWithRetry('Produce', () =>
   produceV11.async(
@@ -53,8 +50,7 @@ await performAPICallWithRetry('Produce', () =>
       { topic: 'temp', partition: 0, key: Buffer.from('333'), value: Buffer.from('444'), timestamp: 12345678n }
     ],
     { compression: 'zstd', producerId, producerEpoch, transactionalId }
-  )
-)
+  ))
 
 await performAPICallWithRetry('Produce', () =>
   produceV11.async(
@@ -75,12 +71,10 @@ await performAPICallWithRetry('Produce', () =>
       { topic: 'temp', partition: 0, key: Buffer.from('444'), value: Buffer.from('555'), timestamp: 12345678n }
     ],
     { compression: 'gzip', producerId, producerEpoch, transactionalId, firstSequence: 2 }
-  )
-)
+  ))
 
 await performAPICallWithRetry('AddOffsetsToTnx', () =>
-  addOffsetsToTxnV4.async(connection, transactionalId, producerId, producerEpoch, groupId)
-)
+  addOffsetsToTxnV4.async(connection, transactionalId, producerId, producerEpoch, groupId))
 
 // This is only needed if the transactional producer is also a consumer
 // await performAPICallWithRetry('TxnOffsetCommitV4', () =>
@@ -94,8 +88,7 @@ await performAPICallWithRetry('AddOffsetsToTnx', () =>
 
 // Commit
 await performAPICallWithRetry('EndTxn', () =>
-  endTxnV4.async(connection, transactionalId, producerId, producerEpoch, true)
-)
+  endTxnV4.async(connection, transactionalId, producerId, producerEpoch, true))
 
 // Abort
 // await performAPICallWithRetry('EndTxn', () =>

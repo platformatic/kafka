@@ -28,8 +28,7 @@ if (performDescribeQuorum) {
         topicName: 'temp',
         partitions: [{ partitionIndex: 0 }]
       }
-    ])
-  )
+    ]))
 }
 
 if (performUpdateFeatures) {
@@ -45,8 +44,7 @@ if (performUpdateFeatures) {
         }
       ],
       false
-    )
-  )
+    ))
 }
 
 if (performEnvelope) {
@@ -56,17 +54,14 @@ if (performEnvelope) {
       Buffer.from('request_data'),
       Buffer.from('request_principal'),
       Buffer.from('127.0.0.1:80')
-    )
-  )
+    ))
 }
 
 await performAPICallWithRetry('DescribeCluster (BROKERS)', () =>
-  describeClusterV1.async(connection, true, DescribeClusterEndpointTypes.BROKERS)
-)
+  describeClusterV1.async(connection, true, DescribeClusterEndpointTypes.BROKERS))
 
 await performAPICallWithRetry('DescribeProducers', () =>
-  describeProducersV0.async(connection, [{ name: 'temp', partitionIndexes: [0] }])
-)
+  describeProducersV0.async(connection, [{ name: 'temp', partitionIndexes: [0] }]))
 
 if (performUnregisterBroker) {
   await performAPICallWithRetry('UnregisterBroker', () => unregisterBrokerV0.async(connection, 1))
@@ -84,7 +79,6 @@ await performAPICallWithRetry('DescribeTopicPartitions', () =>
   describeTopicPartitionsV0.async(connection, [{ name: 'temp' }], 0, {
     topicName: 'temp',
     partitionIndex: 0
-  })
-)
+  }))
 
 await connection.close()

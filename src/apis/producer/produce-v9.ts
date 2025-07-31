@@ -68,16 +68,16 @@ export function createRequest (
     .appendInt16(acks)
     .appendInt32(timeout)
     .appendArray(groupByProperty<string, MessageRecord>(topicData, 'topic'), (w, [topic, messages]) => {
-      w.appendString(topic).appendArray(
-        groupByProperty<number, MessageRecord>(messages, 'partition'),
-        (w, [partition, messages]) => {
-          const records = createRecordsBatch(messages, options)
+      w.appendString(topic).appendArray(groupByProperty<number, MessageRecord>(messages, 'partition'), (
+        w,
+        [partition, messages]
+      ) => {
+        const records = createRecordsBatch(messages, options)
 
-          w.appendInt32(partition)
-            .appendUnsignedVarInt(records.length + 1)
-            .appendFrom(records)
-        }
-      )
+        w.appendInt32(partition)
+          .appendUnsignedVarInt(records.length + 1)
+          .appendFrom(records)
+      })
     })
     .appendTaggedFields()
 

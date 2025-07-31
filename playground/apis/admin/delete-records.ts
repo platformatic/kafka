@@ -20,7 +20,6 @@ await performAPICallWithRetry('DeleteRecords', () =>
       }
     ],
     1000
-  )
-)
+  ))
 
 await connection.close()

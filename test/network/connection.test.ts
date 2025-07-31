@@ -945,7 +945,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
   )
 }
 
-test(`Connection.connect should connect to SASL protected broker using SASL/OAUTHBEARER`, async t => {
+test('Connection.connect should connect to SASL protected broker using SASL/OAUTHBEARER', async t => {
   const connection = new Connection('clientId', {
     sasl: { mechanism: 'OAUTHBEARER', token: 'token' }
   })

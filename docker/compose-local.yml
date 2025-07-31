@@ -4,6 +4,12 @@ services:
     container_name: broker-cluster-1
     ports:
       - '9092:9092'
+    healthcheck: &health_check # Health_check
+      test: ['CMD', '/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh', '--bootstrap-server', 'localhost:19092']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     environment: &common_config # Broker specific options
       KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092,DOCKER://broker-cluster-1:9092'
       KAFKA_CFG_NODE_ID: '1'
@@ -36,6 +42,7 @@ services:
     container_name: broker-cluster-2
     ports:
       - '9093:9092'
+    healthcheck: *health_check
     environment:
       <<: *common_config
       KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9093,DOCKER://broker-cluster-2:19092'
@@ -46,6 +53,7 @@ services:
     container_name: broker-cluster-3
     ports:
       - '9094:9092'
+    healthcheck: *health_check
     environment:
       <<: *common_config
       KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9094,DOCKER://broker-cluster-3:19092'
@@ -56,9 +64,13 @@ services:
     container_name: broker-single
     ports:
       - '9091:9092'
+    healthcheck:
+      <<: *health_check
+      test: ['CMD', '/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh', '--bootstrap-server', 'localhost:9092']
     environment:
       <<: *common_config
       KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9094,DOCKER://broker-single:19092'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-single:29092'
       # Replication options
       KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
       KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
@@ -71,6 +83,7 @@ services:
     container_name: broker-sasl
     ports:
       - '9095:9092'
+    healthcheck: *health_check
     volumes:
       - './data/jaas/jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
     environment:
@@ -100,6 +113,7 @@ services:
     image: bitnami/kafka:${KAFKA_VERSION}
     ports:
       - '9096:9092' # SASL
+    healthcheck: *health_check
     volumes:
       - './data/jaas/jaas-oauthbearer.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
     environment:

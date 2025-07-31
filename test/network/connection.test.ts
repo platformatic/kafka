@@ -15,7 +15,7 @@ import {
   NetworkError,
   type Reader,
   saslHandshakeV1,
-  SASLMechanisms,
+  type SASLMechanism,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
@@ -928,13 +928,15 @@ test('Connection.connect should not connect to SASL protected broker by default'
   await rejects(() => metadataV12.api.async(connection, []))
 })
 
-for (const mechanism of SASLMechanisms) {
+for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
   test(
     `Connection.connect should connect to SASL protected broker using SASL/${mechanism}`,
     // Disable SCRAM-SHA for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
     { skip: isKafka('3.5.0') },
     async t => {
-      const connection = new Connection('clientId', { sasl: { mechanism, username: 'admin', password: 'admin' } })
+      const connection = new Connection('clientId', {
+        sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
+      })
       t.after(() => connection.close())
 
       await connection.connect('localhost', 9095)
@@ -942,6 +944,16 @@ for (const mechanism of SASLMechanisms) {
     }
   )
 }
+
+test('Connection.connect should connect to SASL protected broker using SASL/OAUTHBEARER', async t => {
+  const connection = new Connection('clientId', {
+    sasl: { mechanism: 'OAUTHBEARER', token: 'token' }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', 9096)
+  await metadataV12.api.async(connection, [])
+})
 
 test('Connection.connect should reject unsupported mechanisms', async t => {
   const connection = new Connection('clientId', {

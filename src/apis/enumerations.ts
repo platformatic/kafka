@@ -1,5 +1,5 @@
 // SASL Authentication
-export const SASLMechanisms = ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512'] as const
+export const SASLMechanisms = ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512', 'OAUTHBEARER'] as const
 export type SASLMechanism = (typeof SASLMechanisms)[number]
 
 // Metadata API

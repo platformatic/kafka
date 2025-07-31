@@ -26,7 +26,7 @@ import {
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
-import { saslPlain, saslScramSha } from '../protocol/index.ts'
+import { saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
 import { Reader } from '../protocol/reader.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'
 import { Writer } from '../protocol/writer.ts'
@@ -39,8 +39,9 @@ export interface Broker {
 
 export interface SASLOptions {
   mechanism: SASLMechanism
-  username: string
-  password: string
+  username?: string
+  password?: string
+  token?: string
 }
 
 export interface ConnectionOptions {
@@ -349,7 +350,7 @@ export class Connection extends EventEmitter {
   #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
     this.#status = ConnectionStatuses.AUTHENTICATING
 
-    const { mechanism, username, password } = this.#options.sasl!
+    const { mechanism, username, password, token } = this.#options.sasl!
 
     if (!SASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
@@ -379,8 +380,15 @@ export class Connection extends EventEmitter {
         saslPlain.authenticate(
           saslAuthenticateV2.api,
           this,
-          username,
-          password,
+          username!,
+          password!,
+          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+        )
+      } else if (mechanism === 'OAUTHBEARER') {
+        saslOAuthBearer.authenticate(
+          saslAuthenticateV2.api,
+          this,
+          token!,
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
       } else {
@@ -388,8 +396,8 @@ export class Connection extends EventEmitter {
           saslAuthenticateV2.api,
           this,
           mechanism.substring(6) as ScramAlgorithm,
-          username,
-          password,
+          username!,
+          password!,
           defaultCrypto,
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )

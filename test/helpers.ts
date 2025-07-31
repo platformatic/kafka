@@ -441,7 +441,8 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
 
 export function isKafka (version: string | string[]): boolean {
   if (!kafkaVersion) {
-    const kafkaImage = execSync(' docker inspect --format "{{.Config.Image}}" broker-1', { encoding: 'utf8' }).trim()
+    const inspectCommand = 'docker inspect --format "{{.Config.Image}}" broker-cluster-1'
+    const kafkaImage = execSync(inspectCommand, { encoding: 'utf8' }).trim()
     kafkaVersion = kafkaImage.split(':')[1]
   }
 

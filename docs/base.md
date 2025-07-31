@@ -112,9 +112,10 @@ const producer = new Producer({
   bootstrapBrokers: ['localhost:9092'],
   serializers: stringSerializers,
   sasl: {
-    mechanism: 'PLAIN', // Also SCRAM-SHA-256 and SCRAM-SHA-512 are supported
-    username: 'username',
-    password: 'password'
+    mechanism: 'PLAIN', // Also SCRAM-SHA-256, SCRAM-SHA-512 and OAUTHBEARER are supported
+    username: 'username', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
+    password: 'password', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
+    token: 'token' // This is used from OAUTHBEARER
   }
 })
 ```

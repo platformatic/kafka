@@ -7,7 +7,8 @@ jobs:
       matrix:
         node-version: [22, 24]
         os: [ubuntu-latest]
-        kafka-version: ['3.5.0', '3.6.0', '3.7.0', '3.8.0', '3.9.0']
+        # Support for 3.6.0 is not available in CI since the Docker image has issues with option management in regard of SASL/OAUTHBEARER.
+        kafka-version: ['3.5.0', '3.7.0', '3.8.0', '3.9.0', '4.0.0']
     runs-on: ${{matrix.os}}
     timeout-minutes: 10
     steps:
@@ -29,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
-        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094 tcp:9095
+        run: docker compose -f docker/compose-ci.yml up -d --wait
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
       - name: Run Tests

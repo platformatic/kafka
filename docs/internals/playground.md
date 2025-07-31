@@ -16,7 +16,7 @@ The `playground/clients/admin-topics-single.ts` can be used to ensure the presen
 
 The `playground/clients/admin-topics-multiple.ts` can be used to ensure the presence of `temp1` and `temp2` topics, used in other scripts.
 
-It will try to specifically assign partitions to different brokers (as specified in `docker-compose-multiple.yml`).
+It will try to specifically assign partitions to different brokers.
 
 ### Consumer group and rebalancing management
 

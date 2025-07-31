@@ -1,0 +1,144 @@
+# Keep this in sync with the compose-local.yml file, with the following modifications:
+#
+#   1. remove "_JAVA_OPTIONS: '-XX:UseSVE=0'" from the environment variables of the brokers.
+#
+services:
+  broker-cluster-1:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-cluster-1
+    ports:
+      - '9092:9092'
+    healthcheck: &health_check # Health_check
+      test: ['CMD', '/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh', '--bootstrap-server', 'localhost:19092']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment: &common_config # Broker specific options
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092,DOCKER://broker-cluster-1:9092'
+      KAFKA_CFG_NODE_ID: '1'
+      # General options
+      ALLOW_PLAINTEXT_LISTENER: 'yes'
+      KAFKA_ENABLE_KRAFT: 'yes'
+      KAFKA_KRAFT_CLUSTER_ID: 'abcdefghijklmnopqrstuv'
+      KAFKA_CFG_PROCESS_ROLES: 'broker,controller'
+      # Ports configuration
+      KAFKA_CFG_LISTENERS: 'PLAINTEXT://:9092,DOCKER://:19092,CONTROLLER://:29092'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-cluster-1:29092,2@broker-cluster-2:29092,3@broker-cluster-3:29092'
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'DOCKER'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '3'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
+      KAFKA_CFG_TRANSACTION_PARTITION_VERIFICATION_ENABLE: 'false'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '3'
+      # Consumer group options
+      KAFKA_CFG_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer'
+      KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+
+  broker-cluster-2:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-cluster-2
+    ports:
+      - '9093:9092'
+    healthcheck: *health_check
+    environment:
+      <<: *common_config
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9093,DOCKER://broker-cluster-2:19092'
+      KAFKA_CFG_NODE_ID: '2'
+
+  broker-cluster-3:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-cluster-3
+    ports:
+      - '9094:9092'
+    healthcheck: *health_check
+    environment:
+      <<: *common_config
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9094,DOCKER://broker-cluster-3:19092'
+      KAFKA_CFG_NODE_ID: '3'
+
+  broker-single:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-single
+    ports:
+      - '9091:9092'
+    healthcheck:
+      <<: *health_check
+      test: ['CMD', '/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh', '--bootstrap-server', 'localhost:9092']
+    environment:
+      <<: *common_config
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9094,DOCKER://broker-single:19092'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-single:29092'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+
+  broker-sasl:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-sasl
+    ports:
+      - '9095:9092'
+    healthcheck: *health_check
+    volumes:
+      - './data/jaas/jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
+    environment:
+      <<: *common_config
+      # Ports configuration
+      KAFKA_CFG_LISTENERS: 'SASL_PLAINTEXT://:9092,PLAINTEXT://:19092,CONTROLLER://:29092'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL_PLAINTEXT:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9092,PLAINTEXT://localhost:19092'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl:29092'
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      # SASL
+      KAFKA_CLIENT_USERS: 'admin'
+      KAFKA_CLIENT_PASSWORDS: 'admin'
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: 'PLAIN,SCRAM-SHA-256,SCRAM-SHA-512'
+      KAFKA_CFG_SUPER_USERS: 'User:admin'
+      KAFKA_CFG_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'false'
+      KAFKA_CFG_SASL_MECHANISM_CONTROLLER_PROTOCOL: 'PLAIN'
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: 'PLAIN'
+
+  broker-sasl-oauthbearer:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    ports:
+      - '9096:9092' # SASL
+    healthcheck: *health_check
+    volumes:
+      - './data/jaas/jaas-oauthbearer.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
+    environment:
+      <<: *common_config
+      # Ports configuration
+      KAFKA_CFG_LISTENERS: 'SASL_PLAINTEXT://:9092,PLAINTEXT://:19092,CONTROLLER://:29092'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL_PLAINTEXT:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9092,PLAINTEXT://localhost:19092'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl-oauthbearer:29092'
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      # SASL
+      KAFKA_CLIENT_USERS: 'admin'
+      KAFKA_CLIENT_PASSWORDS: 'admin'
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: 'OAUTHBEARER'
+      KAFKA_CFG_SUPER_USERS: 'User:admin'
+      KAFKA_CFG_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'false'
+      KAFKA_CFG_SASL_MECHANISM_CONTROLLER_PROTOCOL: 'PLAIN'
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: 'PLAIN'
+      KAFKA_CFG_SASL_OAUTHBEARER_EXPECTED_ISSUER: kafka
+      KAFKA_CFG_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: users

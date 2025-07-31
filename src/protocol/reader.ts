@@ -290,7 +290,7 @@ export class Reader {
     return value
   }
 
-  readNullableArray<OutputType>(
+  readNullableArray<OutputType> (
     reader: EntryReader<OutputType>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -326,7 +326,7 @@ export class Reader {
     return value
   }
 
-  readNullableMap<Key, Value>(
+  readNullableMap<Key, Value> (
     reader: EntryReader<[Key, Value]>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -363,7 +363,7 @@ export class Reader {
     return map
   }
 
-  readArray<OutputType>(
+  readArray<OutputType> (
     reader: EntryReader<OutputType>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -371,7 +371,7 @@ export class Reader {
     return this.readNullableArray(reader, compact, discardTrailingTaggedFields) || []
   }
 
-  readMap<Key, Value>(
+  readMap<Key, Value> (
     reader: EntryReader<[Key, Value]>,
     compact: boolean = true,
     discardTrailingTaggedFields = true
@@ -379,7 +379,7 @@ export class Reader {
     return this.readNullableMap(reader, compact, discardTrailingTaggedFields) ?? new Map()
   }
 
-  readVarIntArray<OutputType>(reader: EntryReader<OutputType>): OutputType[] {
+  readVarIntArray<OutputType> (reader: EntryReader<OutputType>): OutputType[] {
     const length = this.readVarInt()
     const value: OutputType[] = []
 
@@ -390,7 +390,7 @@ export class Reader {
     return value
   }
 
-  readVarIntMap<Key, Value>(reader: EntryReader<[Key, Value]>): Map<Key, Value> {
+  readVarIntMap<Key, Value> (reader: EntryReader<[Key, Value]>): Map<Key, Value> {
     const length = this.readVarInt()
     const map = new Map<Key, Value>()
 

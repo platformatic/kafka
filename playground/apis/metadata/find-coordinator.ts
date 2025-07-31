@@ -7,11 +7,9 @@ const connection = new Connection('foo')
 await connection.connect('localhost', 9092)
 
 await performAPICallWithRetry('FindCoordinator (GROUP)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, ['f1'])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, ['f1']))
 
 await performAPICallWithRetry('FindCoordinator (TRANSACTION)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, ['f1'])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, ['f1']))
 
 await connection.close()

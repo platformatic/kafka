@@ -20,11 +20,9 @@ await performAPICallWithRetry('AlterUserScramCredentials', () =>
         saltedPassword: Buffer.alloc(20)
       }
     ]
-  )
-)
+  ))
 
 await performAPICallWithRetry('DescribeUserScramCredentials', () =>
-  describeUserScramCredentialsV0.async(connection, [{ name: 'user' }])
-)
+  describeUserScramCredentialsV0.async(connection, [{ name: 'user' }]))
 
 await connection.close()

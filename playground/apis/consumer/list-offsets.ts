@@ -8,7 +8,6 @@ await connection.connect('localhost', 9092)
 await performAPICallWithRetry('ListOffsets', () =>
   listOffsetsV9.async(connection, -1, 0, [
     { name: 'temp', partitions: [{ partitionIndex: 0, currentLeaderEpoch: -1, timestamp: -1n }] }
-  ])
-)
+  ]))
 
 await connection.close()

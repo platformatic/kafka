@@ -371,102 +371,102 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<ProduceResult>
   ): void {
     // Get the metadata with the topic/partitions informations
-    this[kMetadata](
-      { topics, autocreateTopics: sendOptions.autocreateTopics },
-      (error: Error | null, metadata: ClusterMetadata) => {
-        if (error) {
-          callback(error, undefined as unknown as ProduceResult)
-          return
-        }
-
-        const messagesByDestination = new Map<number, MessageRecord[]>()
-
-        // Track the number of messages per partition so we can update the sequence number
-        const messagesPerPartition = new NumericMap()
-
-        // Normalize the partition of all messages, then enqueue them to their destination
-        for (const message of messages) {
-          message.partition! %= metadata.topics.get(message.topic)!.partitionsCount
-
-          const { topic, partition } = message
-          const leader = metadata.topics.get(topic)!.partitions[partition!].leader
-
-          let destination = messagesByDestination.get(leader)
-          if (!destination) {
-            destination = []
-            messagesByDestination.set(leader, destination)
-          }
-
-          const messagePartitionKey = `${message.topic}:${partition}`
-          messagesPerPartition.postIncrement(messagePartitionKey, 1, 0)
-          destination.push(message)
-        }
-
-        // Track nodes so that we can get their ID for delayed write reporting
-        const nodes: number[] = []
-
-        runConcurrentCallbacks<ProduceResponse | boolean>(
-          'Producing messages failed.',
-          messagesByDestination,
-          ([destination, destinationMessages], concurrentCallback) => {
-            nodes.push(destination)
-
-            this.#performSingleDestinationSend(
-              topics,
-              destinationMessages,
-              this[kOptions].timeout!,
-              sendOptions.acks,
-              sendOptions.autocreateTopics,
-              sendOptions.repeatOnStaleMetadata,
-              produceOptions,
-              concurrentCallback
-            )
-          },
-          (error, apiResults) => {
-            if (error) {
-              callback(error, undefined as unknown as ProduceResult)
-              return
-            }
-
-            this.#metricsProducedMessages?.inc(messages.length)
-            const results: ProduceResult = {}
-
-            if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
-              const unwritableNodes = []
-
-              for (let i = 0; i < apiResults.length; i++) {
-                if (apiResults[i] === false) {
-                  unwritableNodes.push(nodes[i])
-                }
-              }
-
-              results.unwritableNodes = unwritableNodes
-            } else {
-              const topics: ProduceResult['offsets'] = []
-
-              for (const result of apiResults) {
-                for (const { name, partitionResponses } of (result as ProduceResponse).responses) {
-                  for (const partitionResponse of partitionResponses) {
-                    topics.push({
-                      topic: name,
-                      partition: partitionResponse.index,
-                      offset: partitionResponse.baseOffset
-                    })
-
-                    const partitionKey = `${name}:${partitionResponse.index}`
-                    this.#sequences.postIncrement(partitionKey, messagesPerPartition.get(partitionKey)!, 0)
-                  }
-                }
-
-                results.offsets = topics
-              }
-            }
-
-            callback(null, results)
-          }
-        )
+    this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics }, (
+      error: Error | null,
+      metadata: ClusterMetadata
+    ) => {
+      if (error) {
+        callback(error, undefined as unknown as ProduceResult)
+        return
       }
-    )
+
+      const messagesByDestination = new Map<number, MessageRecord[]>()
+
+      // Track the number of messages per partition so we can update the sequence number
+      const messagesPerPartition = new NumericMap()
+
+      // Normalize the partition of all messages, then enqueue them to their destination
+      for (const message of messages) {
+        message.partition! %= metadata.topics.get(message.topic)!.partitionsCount
+
+        const { topic, partition } = message
+        const leader = metadata.topics.get(topic)!.partitions[partition!].leader
+
+        let destination = messagesByDestination.get(leader)
+        if (!destination) {
+          destination = []
+          messagesByDestination.set(leader, destination)
+        }
+
+        const messagePartitionKey = `${message.topic}:${partition}`
+        messagesPerPartition.postIncrement(messagePartitionKey, 1, 0)
+        destination.push(message)
+      }
+
+      // Track nodes so that we can get their ID for delayed write reporting
+      const nodes: number[] = []
+
+      runConcurrentCallbacks<ProduceResponse | boolean>(
+        'Producing messages failed.',
+        messagesByDestination,
+        ([destination, destinationMessages], concurrentCallback) => {
+          nodes.push(destination)
+
+          this.#performSingleDestinationSend(
+            topics,
+            destinationMessages,
+            this[kOptions].timeout!,
+            sendOptions.acks,
+            sendOptions.autocreateTopics,
+            sendOptions.repeatOnStaleMetadata,
+            produceOptions,
+            concurrentCallback
+          )
+        },
+        (error, apiResults) => {
+          if (error) {
+            callback(error, undefined as unknown as ProduceResult)
+            return
+          }
+
+          this.#metricsProducedMessages?.inc(messages.length)
+          const results: ProduceResult = {}
+
+          if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
+            const unwritableNodes = []
+
+            for (let i = 0; i < apiResults.length; i++) {
+              if (apiResults[i] === false) {
+                unwritableNodes.push(nodes[i])
+              }
+            }
+
+            results.unwritableNodes = unwritableNodes
+          } else {
+            const topics: ProduceResult['offsets'] = []
+
+            for (const result of apiResults) {
+              for (const { name, partitionResponses } of (result as ProduceResponse).responses) {
+                for (const partitionResponse of partitionResponses) {
+                  topics.push({
+                    topic: name,
+                    partition: partitionResponse.index,
+                    offset: partitionResponse.baseOffset
+                  })
+
+                  const partitionKey = `${name}:${partitionResponse.index}`
+                  this.#sequences.postIncrement(partitionKey, messagesPerPartition.get(partitionKey)!, 0)
+                }
+              }
+
+              results.offsets = topics
+            }
+          }
+
+          callback(null, results)
+        }
+      )
+    })
   }
 
   #performSingleDestinationSend (

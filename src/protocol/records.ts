@@ -35,7 +35,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   extends Required<MessageBase<Key, Value>> {
   headers: Map<HeaderKey, HeaderValue>
   offset: bigint
-  commit(callback?: (error?: Error) => void): void | Promise<void>
+  commit (callback?: (error?: Error) => void): void | Promise<void>
 }
 
 export interface MessageRecord {

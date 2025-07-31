@@ -17,8 +17,7 @@ await performAPICallWithRetry('AlterPartitionReassignments', () =>
         }
       ]
     }
-  ])
-)
+  ]))
 
 await performAPICallWithRetry('ListPartitionReassignments', () =>
   listPartitionReassignmentsV0.async(connection, 1000, [
@@ -26,7 +25,6 @@ await performAPICallWithRetry('ListPartitionReassignments', () =>
       name: 'temp',
       partitionIndexes: [0]
     }
-  ])
-)
+  ]))
 
 await connection.close()

@@ -25,15 +25,13 @@ const metadata = await performAPICallWithRetry(
 const topicId = metadata.topics.find(t => t.name === topicName)!.topicId
 
 await performAPICallWithRetry('FindCoordinator (GROUP)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId]))
 
 const joinGroupResponse = await joinGroup(connection, groupId, true)
 const memberId = joinGroupResponse.memberId!
 
 await performAPICallWithRetry('SyncGroup', () =>
-  syncGroupV5.async(connection, groupId, joinGroupResponse.generationId, memberId, null, 'whatever', 'whatever', [])
-)
+  syncGroupV5.async(connection, groupId, joinGroupResponse.generationId, memberId, null, 'whatever', 'whatever', []))
 
 const offsetFetch = await performAPICallWithRetry('OffsetFetch', () =>
   offsetFetchV9.async(
@@ -52,8 +50,7 @@ const offsetFetch = await performAPICallWithRetry('OffsetFetch', () =>
       }
     ],
     true
-  )
-)
+  ))
 
 let fetchOffset = offsetFetch.groups[0].topics[0].partitions[0].committedOffset
 
@@ -124,7 +121,6 @@ await performAPICallWithRetry('OffsetCommit', () =>
       name: topicName,
       partitions: [{ partitionIndex: 0, committedOffset: fetchOffset, committedLeaderEpoch: -1, committedMetadata: '' }]
     }
-  ])
-)
+  ]))
 
 await connection.close()

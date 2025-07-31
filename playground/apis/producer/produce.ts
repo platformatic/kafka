@@ -34,8 +34,7 @@ for (let i = 0; i < NUM_RECORDS; i++) {
         value: Buffer.from(Math.floor(Math.random() * 1e5).toString()),
         headers: new Map([[Buffer.from('key'), Buffer.from('value')]])
       }
-    ])
-  )
+    ]))
 }
 
 await connection.close()

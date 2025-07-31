@@ -1,6 +1,12 @@
 ---
 name: Run Tests
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches:
+      - main
+      - v1.x
+  pull_request:
+  workflow_dispatch:
 jobs:
   ci:
     strategy:

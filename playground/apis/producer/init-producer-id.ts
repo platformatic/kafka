@@ -10,11 +10,9 @@ const connection = new Connection('111')
 await connection.connect('localhost', 9092)
 
 await performAPICallWithRetry('FindCoordinator (TRANSACTION)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId]))
 
 await performAPICallWithRetry('InitProducerId', () =>
-  initProducerIdV5.async(connection, transactionalId, 60000, -1n, -1)
-)
+  initProducerIdV5.async(connection, transactionalId, 60000, -1n, -1))
 
 await connection.close()

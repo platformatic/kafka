@@ -29,8 +29,7 @@ await performAPICallWithRetry('Produce', () =>
       { topic: 'temp1', partition: 0, key: Buffer.from('333'), value: Buffer.from('444'), timestamp: 12345678n }
     ],
     { compression: 'zstd', producerId, producerEpoch }
-  )
-)
+  ))
 
 await performAPICallWithRetry('Produce', () =>
   produceV11.async(
@@ -51,7 +50,6 @@ await performAPICallWithRetry('Produce', () =>
       { topic: 'temp1', partition: 0, key: Buffer.from('333'), value: Buffer.from('444'), timestamp: 12345678n }
     ],
     { compression: 'zstd', producerId, producerEpoch }
-  )
-)
+  ))
 
 await connection.close()

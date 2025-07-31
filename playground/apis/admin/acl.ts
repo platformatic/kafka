@@ -24,8 +24,7 @@ await performAPICallWithRetry('CreateAcls', () =>
       operation: AclOperations.READ,
       permissionType: AclPermissionTypes.DENY
     }
-  ])
-)
+  ]))
 
 await performAPICallWithRetry('DescribeAcls', () =>
   describeAclsV3.async(
@@ -37,8 +36,7 @@ await performAPICallWithRetry('DescribeAcls', () =>
     null,
     AclOperations.READ,
     AclPermissionTypes.DENY
-  )
-)
+  ))
 
 await performAPICallWithRetry('DescribeAcls', () =>
   describeAclsV3.async(
@@ -50,8 +48,7 @@ await performAPICallWithRetry('DescribeAcls', () =>
     null,
     AclOperations.READ,
     AclPermissionTypes.ALLOW
-  )
-)
+  ))
 
 await performAPICallWithRetry('DeleteAcls', () =>
   deleteAclsV3.async(connection, [
@@ -64,7 +61,6 @@ await performAPICallWithRetry('DeleteAcls', () =>
       operation: AclOperations.READ,
       permissionType: AclPermissionTypes.DENY
     }
-  ])
-)
+  ]))
 
 await connection.close()

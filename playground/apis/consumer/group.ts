@@ -16,25 +16,21 @@ const topicName = 'temp'
 const groupId = 'g2'
 
 await performAPICallWithRetry('FindCoordinator (GROUP)', () =>
-  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId])
-)
+  findCoordinatorV6.async(connection, FindCoordinatorKeyTypes.GROUP, [groupId]))
 
 const joinGroupResponse = await joinGroup(connection, groupId)
 const memberId = joinGroupResponse.memberId!
 
 await performAPICallWithRetry('Heartbeat', () =>
-  heartbeatV4.async(connection, groupId, joinGroupResponse.generationId, memberId)
-)
+  heartbeatV4.async(connection, groupId, joinGroupResponse.generationId, memberId))
 
 if (performConsumerHeartbeat) {
   await performAPICallWithRetry('ConsumerHeartbeat', () =>
-    consumerGroupHeartbeatV0.async(connection, groupId, memberId, 0, null, null, 60000, [topicName], null, [])
-  )
+    consumerGroupHeartbeatV0.async(connection, groupId, memberId, 0, null, null, 60000, [topicName], null, []))
 }
 
 await performAPICallWithRetry('SyncGroup', () =>
-  syncGroupV5.async(connection, groupId, joinGroupResponse.generationId, memberId, null, 'whatever', 'whatever', [])
-)
+  syncGroupV5.async(connection, groupId, joinGroupResponse.generationId, memberId, null, 'whatever', 'whatever', []))
 
 await performAPICallWithRetry('LeaveGroup', () => leaveGroupV5.async(connection, groupId, [{ memberId }]))
 

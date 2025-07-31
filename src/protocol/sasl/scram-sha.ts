@@ -183,35 +183,31 @@ export function authenticate (
     const serverKey = hmac(definition, saltedPassword, HMAC_SERVER_KEY)
     const serverSignature = hmac(definition, serverKey, authMessage)
 
-    authenticateAPI(
-      connection,
-      Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`),
-      (error, lastResponse) => {
-        if (error) {
-          callback(
-            new AuthenticationError('Authentication failed.', { cause: error }),
-            undefined as unknown as SaslAuthenticateResponse
-          )
-          return
-        }
-
-        // Send the last message to the server
-        const lastData = parseParameters(lastResponse.authBytes)
-
-        if (lastData.e) {
-          callback(new AuthenticationError(lastData.e), undefined as unknown as SaslAuthenticateResponse)
-          return
-        } else if (lastData.v !== serverSignature.toString('base64')) {
-          callback(
-            new AuthenticationError('Invalid server signature.'),
-            undefined as unknown as SaslAuthenticateResponse
-          )
-          return
-        }
-
-        callback(null, lastResponse)
+    authenticateAPI(connection, Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`), (
+      error,
+      lastResponse
+    ) => {
+      if (error) {
+        callback(
+          new AuthenticationError('Authentication failed.', { cause: error }),
+          undefined as unknown as SaslAuthenticateResponse
+        )
+        return
       }
-    )
+
+      // Send the last message to the server
+      const lastData = parseParameters(lastResponse.authBytes)
+
+      if (lastData.e) {
+        callback(new AuthenticationError(lastData.e), undefined as unknown as SaslAuthenticateResponse)
+        return
+      } else if (lastData.v !== serverSignature.toString('base64')) {
+        callback(new AuthenticationError('Invalid server signature.'), undefined as unknown as SaslAuthenticateResponse)
+        return
+      }
+
+      callback(null, lastResponse)
+    })
   })
 
   return callback[kCallbackPromise]

@@ -146,7 +146,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     notifyCreation('messages-stream', this)
   }
 
-  close (callback?: CallbackWithPromise<void>): void
+  close (callback: CallbackWithPromise<void>): void
   close (): Promise<void>
   close (callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (!callback) {

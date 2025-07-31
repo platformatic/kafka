@@ -1065,3 +1065,71 @@ test('Connection.connect should connect to a TLS host without using a custom hos
   ok(connection.socket instanceof TLSSocket)
   deepStrictEqual(await hostPromise.promise, 'anotherhost')
 })
+
+test('Connection.isConnected should return false when connection is not connected', () => {
+  const connection = new Connection('test-client')
+
+  // Connection should not be live when not connected
+  strictEqual(connection.isConnected(), false)
+})
+
+test('Connection.isConnected should return true when connection is connected', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  // Before connection
+  strictEqual(connection.isConnected(), false)
+
+  // Connect to server
+  await connection.connect('localhost', port)
+
+  // After connection
+  strictEqual(connection.isConnected(), true)
+})
+
+test('Connection.isConnected should return false when connection is closed', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  // Connect to server
+  await connection.connect('localhost', port)
+  strictEqual(connection.isConnected(), true)
+
+  // Close the connection
+  await connection.close()
+
+  // After closing
+  strictEqual(connection.isConnected(), false)
+})
+
+test('Connection.isConnected should return false when connection is in error state', async t => {
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  // Try to connect to non-existent port
+  await rejects(() => connection.connect('localhost', 100) as Promise<unknown>)
+
+  // Connection should not be live after error
+  strictEqual(connection.isConnected(), false)
+  strictEqual(connection.status, ConnectionStatuses.ERROR)
+})
+
+test('Connection.isConnected should return false when connection is connecting', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  // Start connection but don't wait for it
+  const connectPromise = connection.connect('localhost', port)
+
+  // During connection attempt
+  if (connection.status === ConnectionStatuses.CONNECTING) {
+    strictEqual(connection.isConnected(), false)
+  }
+
+  // Complete the connection
+  await connectPromise
+  strictEqual(connection.isConnected(), true)
+})

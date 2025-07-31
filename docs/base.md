@@ -69,6 +69,14 @@ Closes the client and all its connections.
 
 The return value is `void`.
 
+### `isActive`
+
+Returns `true` if the client is not closed.
+
+### `isConnected`
+
+Returns `true` if all client's connections are currently connected and the client is connected to at least one broker.
+
 ## Connecting to Kafka via TLS connection
 
 To connect to a Kafka via TLS connection, simply pass all relevant options in the `tls` options when creating any subclass of `Base`.

@@ -259,6 +259,22 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return callback[kCallbackPromise]
   }
 
+  isActive (): boolean {
+    if (this[kClosed]) {
+      return false
+    }
+
+    return true
+  }
+
+  isConnected (): boolean {
+    if (this[kClosed]) {
+      return false
+    }
+
+    return this[kConnections].isConnected()
+  }
+
   [kCreateConnectionPool] (): ConnectionPool {
     const pool = new ConnectionPool(this[kClientId], {
       ownerId: this[kInstance],

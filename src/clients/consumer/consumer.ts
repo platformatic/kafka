@@ -116,6 +116,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #protocol: string | null
   #coordinatorId: number | null
   #heartbeatInterval: NodeJS.Timeout | null
+  #lastHeartbeat: Date | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #partitionsAssigner: GroupPartitionsAssigner;
   /*
@@ -155,6 +156,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#protocol = null
     this.#coordinatorId = null
     this.#heartbeatInterval = null
+    this.#lastHeartbeat = null
     this.#streams = new Set()
     this.#partitionsAssigner = this[kOptions].partitionAssigner ?? roundRobinAssigner
 
@@ -183,6 +185,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get streamsCount (): number {
     return this.#streams.size
+  }
+
+  get lastHeartbeat (): Date | null {
+    return this.#lastHeartbeat
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -243,6 +249,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
 
     return callback[kCallbackPromise]
+  }
+
+  isActive (): boolean {
+    const baseReady = super.isActive()
+
+    if (!baseReady) {
+      return false
+    }
+
+    // We consider the group ready if we have a groupId, a memberId and heartbeat interval
+    return this.#membershipActive && Boolean(this.groupId) && Boolean(this.memberId) && this.#heartbeatInterval !== null
   }
 
   consume (
@@ -508,6 +525,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
+      this.#lastHeartbeat = null
       callback(null)
     })
 
@@ -921,6 +939,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           // Note that here we purposely do not return, since it was not a group related problem we schedule another heartbeat
         } else {
+          this.#lastHeartbeat = new Date()
           this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
         }
 

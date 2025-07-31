@@ -15,6 +15,7 @@ let currentInstance = 0
 export class ConnectionPool extends EventEmitter {
   #instanceId: number
   #clientId: string
+  #closed: boolean
   // @ts-ignore This is used just for debugging
   #ownerId: number | undefined
   #connections: Map<string, Connection>
@@ -22,6 +23,7 @@ export class ConnectionPool extends EventEmitter {
 
   constructor (clientId: string, connectionOptions: ConnectionOptions = {}) {
     super()
+    this.#closed = false
     this.#instanceId = currentInstance++
     this.#clientId = clientId
     this.#ownerId = connectionOptions.ownerId
@@ -82,10 +84,13 @@ export class ConnectionPool extends EventEmitter {
       callback = createPromisifiedCallback()
     }
 
-    if (this.#connections.size === 0) {
+    if (this.#closed || this.#connections.size === 0) {
+      this.#closed = true
       callback(null)
       return callback[kCallbackPromise]
     }
+
+    this.#closed = true
 
     runConcurrentCallbacks<void>(
       'Closing connections failed.',
@@ -100,7 +105,34 @@ export class ConnectionPool extends EventEmitter {
     return callback[kCallbackPromise]
   }
 
+  isActive (): boolean {
+    if (this.#connections.size === 0) {
+      return false
+    }
+
+    return true
+  }
+
+  isConnected (): boolean {
+    if (this.#connections.size === 0) {
+      return false
+    }
+
+    for (const connection of this.#connections.values()) {
+      if (!connection.isConnected()) {
+        return false
+      }
+    }
+
+    return true
+  }
+
   #get (broker: Broker, callback: Callback<Connection>): void {
+    if (this.#closed) {
+      callback(new Error('Connection pool is closed.'), undefined as unknown as Connection)
+      return
+    }
+
     const key = `${broker.host}:${broker.port}`
     const existing = this.#connections.get(key)
 

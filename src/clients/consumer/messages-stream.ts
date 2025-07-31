@@ -204,6 +204,22 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]
   }
 
+  isActive (): boolean {
+    if (this.#shouldClose || this.closed || this.destroyed) {
+      return false
+    }
+
+    return this.#consumer.isActive()
+  }
+
+  isConnected (): boolean {
+    if (this.#shouldClose || this.closed || this.destroyed) {
+      return false
+    }
+
+    return this.#consumer.isConnected()
+  }
+
   /*
     TypeScript support - Extracted from node @types/node/stream.d.ts
 

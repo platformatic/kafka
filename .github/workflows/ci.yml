@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
-        run: docker compose -f docker/compose-github-ci.yml up -d && pnpx wait-on tcp:9092 tcp:9093 tcp:9094 tcp:9095
+        run: docker compose -f docker/compose-ci.yml up -d && pnpx wait-on tcp:9091 tcp:9092 tcp:9093 tcp:9094 tcp:9095 tcp:9096
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
       - name: Run Tests

@@ -45,9 +45,10 @@ export const baseOptionsSchema = {
       properties: {
         mechanism: { type: 'string', enum: SASLMechanisms },
         username: { type: 'string' },
-        password: { type: 'string' }
+        password: { type: 'string' },
+        token: { type: 'string' }
       },
-      required: ['mechanism', 'username', 'password'],
+      required: ['mechanism'],
       additionalProperties: false
     },
     metadataMaxAge: { type: 'number', minimum: 0 },

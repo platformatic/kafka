@@ -24,7 +24,7 @@ const {
   args: scriptArgs,
   options: {
     version: { type: 'string', short: 'v', default: '3.9.0' },
-    configuration: { type: 'string', short: 'c', default: 'cluster' }
+    configuration: { type: 'string', short: 'c', default: 'local' }
   }
 })
 

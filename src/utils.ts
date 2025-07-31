@@ -159,24 +159,19 @@ export function enumErrorMessage (type: Record<string, unknown>, keysOnly: boole
   )}`
 }
 
-export function groupByProperty<Key, Value> (entries: Value[], property: keyof Value): [Key, Value[]][] {
-  const grouped: Map<Key, Value[]> = new Map()
-  const result: [Key, Value[]][] = []
+export function groupByProperty<Key extends PropertyKey, Value> (
+  entries: readonly Value[],
+  property: keyof Value
+): [Key, Value[]][] {
+  const buckets: Record<Key, Value[]> = Object.create(null)
 
-  for (const entry of entries) {
-    const value = entry[property] as Key
-    let values = grouped.get(value)
-
-    if (!values) {
-      values = []
-      grouped.set(value, values)
-      result.push([value, values])
-    }
-
-    values.push(entry)
+  for (let i = 0, len = entries.length; i < len; ++i) {
+    const e = entries[i]
+    const key = e[property] as unknown as Key
+    ;(buckets[key] ||= []).push(e)
   }
 
-  return result
+  return Object.entries(buckets) as unknown as [Key, Value[]][]
 }
 
 export function humanize (label: string, buffer: Buffer | DynamicBuffer): string {

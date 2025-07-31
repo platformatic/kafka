@@ -35,7 +35,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   extends Required<MessageBase<Key, Value>> {
   headers: Map<HeaderKey, HeaderValue>
   offset: bigint
-  commit(callback?: (error?: Error) => void): void | Promise<void>
+  commit (callback?: (error?: Error) => void): void | Promise<void>
 }
 
 export interface MessageRecord {
@@ -177,19 +177,17 @@ export function createRecordsBatch (
   options: Partial<CreateRecordsBatchOptions> = {}
 ): Writer {
   const now = BigInt(Date.now())
-  const timestamps = []
-
-  for (let i = 0; i < messages.length; i++) {
-    timestamps.push(messages[i].timestamp ?? now)
-  }
-
-  messages.sort()
-
-  const firstTimestamp = timestamps[0]
-  const maxTimestamp = timestamps[timestamps.length - 1]
+  let firstTimestamp = messages[0].timestamp ?? now
+  let maxTimestamp = firstTimestamp
 
   let buffer = new DynamicBuffer()
   for (let i = 0; i < messages.length; i++) {
+    let ts = messages[i].timestamp ?? now
+    if (typeof ts === 'number') ts = BigInt(ts)
+    messages[i].timestamp = ts
+
+    if (ts > maxTimestamp) maxTimestamp = ts
+
     const record = createRecord(messages[i], i, firstTimestamp)
     buffer.appendFrom(record.dynamicBuffer)
   }

@@ -3,7 +3,7 @@ import { Kafka as KafkaJS } from 'kafkajs'
 import { ProduceAcks, Producer, stringSerializers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
-const iterations = 100_000
+const iterations = 1000_000
 const batchSize = 100
 const batches = Math.ceil(iterations / batchSize)
 

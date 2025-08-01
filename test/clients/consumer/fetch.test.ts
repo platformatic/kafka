@@ -139,7 +139,7 @@ async function fetchFromOffset ({
   })
 }
 
-test('fetch should retrieve messages', { only: true }, async t => {
+test('fetch should retrieve messages', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)
   const count = 9

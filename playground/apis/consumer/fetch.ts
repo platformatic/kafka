@@ -5,6 +5,7 @@ import { api as syncGroupV5 } from '../../../src/apis/consumer/sync-group-v5.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
 import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
 import { api as metadataV12 } from '../../../src/apis/metadata/metadata-v12.ts'
+import type { KafkaRecord } from '../../../src/index.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { joinGroup, performAPICallWithRetry } from '../../utils.ts'
 
@@ -96,19 +97,25 @@ for (let i = 0; i < 3; i++) {
     true
   )
 
-  const records = response.responses[0].partitions[0].records
+  const batches = response.responses[0].partitions[0].records
 
-  if (!records?.length) {
+  if (!batches?.length) {
     break
   }
 
-  fetchOffset = records.firstOffset + BigInt(records.records.length)
+  const { nextOffset, records } = batches.reduce<{ nextOffset: bigint, records: KafkaRecord[] }>((acc, batch) => {
+    acc.nextOffset = batch.firstOffset + BigInt(batch.records.length)
+    acc.records.push(...batch.records)
+    return acc
+  }, { nextOffset: fetchOffset, records: [] })
+
+  fetchOffset = nextOffset
   console.log(
     'Fetch',
-    records.records.map(r => [r.key.toString(), r.value.toString()])
+    records.map(r => [r.key.toString(), r.value.toString()])
   )
 
-  if (!records.records?.length) {
+  if (!records.length) {
     break
   }
 }

@@ -452,91 +452,94 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)!
 
-      for (const { records, partitionIndex: partition } of topicResponse.partitions) {
-        if (!records) {
+      for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+        if (!recordsBatches) {
           continue
         }
 
-        const firstTimestamp = records.firstTimestamp
-        const firstOffset = records.firstOffset
-        const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
+        for (const batch of recordsBatches) {
+          const firstTimestamp = batch.firstTimestamp
+          const firstOffset = batch.firstOffset
+          const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
-        for (const record of records.records) {
-          const offset = records.firstOffset + BigInt(record.offsetDelta)
+          for (const record of batch.records) {
+            const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
-          if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
-            // Thi is a duplicate message, ignore it
-            continue
-          }
-
-          diagnosticContext = createDiagnosticContext({
-            client: this.#consumer,
-            stream: this,
-            operation: 'receive',
-            raw: record
-          })
-
-          consumerReceivesChannel.start.publish(diagnosticContext)
-
-          const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
-
-          try {
-            const headers = new Map()
-            for (const [headerKey, headerValue] of record.headers) {
-              headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+            if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
+              // Thi is a duplicate message, ignore it
+              continue
             }
-            const key = keyDeserializer(record.key, headers)
-            const value = valueDeserializer(record.value, headers)
 
-            this.#metricsConsumedMessages?.inc()
+            diagnosticContext = createDiagnosticContext({
+              client: this.#consumer,
+              stream: this,
+              operation: 'receive',
+              raw: record
+            })
 
-            const message: Message = {
-              key,
-              value,
-              headers,
-              topic,
-              partition,
-              timestamp: firstTimestamp + record.timestampDelta,
-              offset,
-              commit
-            } as Message
+            consumerReceivesChannel.start.publish(diagnosticContext)
 
-            diagnosticContext.result = message
+            const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
 
-            consumerReceivesChannel.asyncStart.publish(diagnosticContext)
+            try {
+              const headers = new Map()
+              for (const [headerKey, headerValue] of record.headers) {
+                headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+              }
+              const key = keyDeserializer(record.key, headers)
+              const value = valueDeserializer(record.value, headers)
 
-            canPush = this.push(message)
+              this.#metricsConsumedMessages?.inc()
 
-            consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
-          } catch (error) {
-            const shouldDestroy = this.#corruptedMessageHandler(
-              record,
-              topic,
-              partition,
-              firstTimestamp,
-              firstOffset,
-              commit as Message['commit']
-            )
+              const message: Message = {
+                key,
+                value,
+                headers,
+                topic,
+                partition,
+                timestamp: firstTimestamp + record.timestampDelta,
+                offset,
+                commit
+              } as Message
 
-            if (shouldDestroy) {
-              diagnosticContext.error = error
-              consumerReceivesChannel.error.publish(diagnosticContext)
+              diagnosticContext.result = message
 
-              this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
-              return
+              consumerReceivesChannel.asyncStart.publish(diagnosticContext)
+
+              canPush = this.push(message)
+
+              consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
+            } catch (error) {
+              const shouldDestroy = this.#corruptedMessageHandler(
+                record,
+                topic,
+                partition,
+                firstTimestamp,
+                firstOffset,
+                commit as Message['commit']
+              )
+
+              if (shouldDestroy) {
+                diagnosticContext.error = error
+                consumerReceivesChannel.error.publish(diagnosticContext)
+
+                this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
+                return
+              }
+            } finally {
+              consumerReceivesChannel.end.publish(diagnosticContext)
             }
-          } finally {
-            consumerReceivesChannel.end.publish(diagnosticContext)
           }
-        }
+          if (batch === recordsBatches[recordsBatches.length - 1]) {
+            // Track the last read offset
+            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
+            this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
 
-        // Track the last read offset
-        const lastOffset = records.firstOffset + BigInt(records.lastOffsetDelta)
-        this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
-
-        // Autocommit if needed
-        if (autocommit) {
-          this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
+            // Autocommit if needed
+            if (autocommit) {
+              this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
+            }
+          }
         }
       }
     }

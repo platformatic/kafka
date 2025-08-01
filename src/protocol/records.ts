@@ -177,7 +177,7 @@ export function createRecordsBatch (
   options: Partial<CreateRecordsBatchOptions> = {}
 ): Writer {
   const now = BigInt(Date.now())
-  let firstTimestamp = messages[0].timestamp ?? now
+  const firstTimestamp = messages[0].timestamp ?? now
   let maxTimestamp = firstTimestamp
 
   let buffer = new DynamicBuffer()

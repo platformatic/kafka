@@ -1,7 +1,7 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, partialDeepStrictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import * as Prometheus from 'prom-client'
 import { type FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
@@ -26,19 +26,25 @@ import {
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
+  type MessageToProduce,
   MultipleErrors,
   NetworkError,
   offsetCommitV9,
   offsetFetchV9,
   type Offsets,
   type OffsetsWithTimestamps,
+  type ProducerOptions,
+  ProduceAcks,
   ProtocolError,
+  type RecordsBatch,
+  sleep,
   syncGroupV5,
   UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
 import {
   createConsumer,
+  createProducer,
   createCreationChannelVerifier,
   createGroupId,
   createTopic,
@@ -50,8 +56,71 @@ import {
   mockedOperationId,
   mockMetadata,
   mockMethod,
-  mockUnavailableAPI
+  mockUnavailableAPI,
 } from '../../helpers.ts'
+
+// This function produces sample messages to a topic for testing the consumer
+async function produceTestMessages ({
+  t,
+  messages,
+  batchSize = 3,
+  delay = 0,
+  overrideOptions
+}: {
+  t: TestContext,
+  messages: MessageToProduce<string, string, string, string>[],
+  batchSize?: number,
+  delay?: number,
+  overrideOptions?: Partial<ProducerOptions<Buffer, Buffer, Buffer, Buffer>>
+}): Promise<void> {
+  const producer = createProducer(t, overrideOptions)
+
+  for (let i = 0; i < messages.length; i += batchSize) {
+    await producer.send({
+      messages: messages.slice(i, i + batchSize).map(msg => ({
+        topic: msg.topic,
+        key: Buffer.from(msg.key ?? ''),
+        value: Buffer.from(msg.value ?? ''),
+        headers: new Map(Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)]))
+      })),
+      acks: ProduceAcks.LEADER
+    })
+    await sleep(delay)
+  }
+}
+
+async function fetchFromOffset ({
+  consumer,
+  topic,
+  fetchOffset = 0n,
+  partition = 0
+}: {
+  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>,
+  topic: string,
+  fetchOffset: bigint,
+  partition?: number
+}): Promise<FetchResponse> {
+  const metadata = await consumer.metadata({ topics: [topic] })
+  const { id: topicId, partitions } = metadata.topics.get(topic)!
+  const reqPartition = partitions[partition]
+  return consumer.fetch({
+    node: reqPartition.leader,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition,
+            currentLeaderEpoch: reqPartition.leaderEpoch,
+            fetchOffset,
+            lastFetchedEpoch: -1,
+            partitionMaxBytes: 1048576 // Default max bytes per partition
+          }
+        ]
+      }
+    ]
+  })
+}
 
 test('constructor should initialize properly with default options', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -1108,6 +1177,75 @@ test('fetch should handle unavailable API errors', async t => {
   } catch (error) {
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual(error.message.includes('Unsupported API Fetch.'), true)
+  }
+})
+
+test('fetch should retrieve messages from multiple batches', async t => {
+  const topic = await createTopic(t, true)
+  const count = 9
+  const batchSize = 3
+
+  const messages = Array.from({ length: count }, (_, i) => ({
+    topic,
+    key: `key-${i}`,
+    value: `value-${i}`,
+    headers: { [`headerKey-${i}`]: `headerValue-${i}` }
+  }))
+
+  // Produce test messages
+  await produceTestMessages({
+    t,
+    messages,
+    batchSize,
+    delay: 100,
+    overrideOptions: {
+      partitioner: () => 0
+    }
+  })
+
+  const consumer = createConsumer(
+    t,
+    {
+      minBytes: 1024 * 1024,
+      maxBytes: 1024 * 1024 * 10,
+      maxWaitTime: 500
+    }
+  )
+  const fetchResult = await fetchFromOffset({
+    consumer,
+    topic,
+    fetchOffset: 0n,
+    partition: 0
+  })
+
+  strictEqual(fetchResult.errorCode, 0, 'Should succeed fetching')
+  strictEqual(fetchResult.responses.length, 1, 'Should return one topic')
+  strictEqual(fetchResult.responses[0].partitions.length, 1, 'Should return one partition')
+  const fetchPartition = fetchResult.responses[0].partitions[0]!
+  strictEqual(fetchPartition.errorCode, 0, 'Should succeed fetching partition')
+  strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
+  for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
+    const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
+    partialDeepStrictEqual(recordsBatch, {
+      attributes: 0,
+      magic: 2,
+      firstOffset: BigInt(batchNo * batchSize),
+      lastOffsetDelta: batchSize - 1,
+      length: 184
+    }, 'Should return records batch with correct metadata')
+    const records = recordsBatch.records
+    strictEqual(records.length, batchSize, 'Should get all messages in batch')
+
+    const fetchMessages = records.map((record, i) => {
+      strictEqual(record.offsetDelta, i, 'Should have correct offset delta for each record')
+      return {
+        topic,
+        key: record.key.toString('utf-8'),
+        value: record.value.toString('utf-8'),
+        headers: Object.fromEntries(record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')]))
+      }
+    })
+    deepStrictEqual(fetchMessages, messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize), 'Should match produced messages in batch')
   }
 })
 

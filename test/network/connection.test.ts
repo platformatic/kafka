@@ -451,7 +451,7 @@ test('Connection should handle socket drain events', async t => {
   const connection = new Connection('test-client')
   t.after(() => connection.close())
 
-  const writesPerRequest = 7
+  const writesPerRequest = 1
 
   server.on('connection', socket => {
     socket.resume()
@@ -474,7 +474,6 @@ test('Connection should handle socket drain events', async t => {
 
     return originalWrite.call(connection.socket, ...(args as unknown as Parameters<typeof originalWrite>))
   }
-
   // Create payload
   function payloadFn () {
     const writer = Writer.create()

@@ -422,58 +422,39 @@ export class Connection extends EventEmitter {
         return false
       }
 
-      let canWrite = true
-
-      const { correlationId, apiKey, apiVersion, payload: payloadFn, hasRequestHeaderTaggedFields } = request
-
       const writer = Writer.create()
-        .appendInt16(apiKey)
-        .appendInt16(apiVersion)
-        .appendInt32(correlationId)
+      writer
+        .appendInt16(request.apiKey)
+        .appendInt16(request.apiVersion)
+        .appendInt32(request.correlationId)
         .appendString(this.#clientId, false)
 
-      if (hasRequestHeaderTaggedFields) {
+      if (request.hasRequestHeaderTaggedFields) {
         writer.appendTaggedFields()
       }
 
-      const payload = payloadFn()
-      writer.appendFrom(payload)
-      writer.prependLength()
+      const payload = request.payload()
+      writer.appendFrom(payload).prependLength()
 
-      // Write the header
-      this.#socket.cork()
+      const expectResponse = !payload.context.noResponse
+      if (expectResponse) this.#inflightRequests.set(request.correlationId, request)
 
-      if (!payload.context.noResponse) {
-        this.#inflightRequests.set(correlationId, request)
-      }
+      const canWrite = this.#socket.write(writer.buffer)
+      if (!canWrite) this.#socketMustBeDrained = true
 
-      loggers.protocol('Sending request.', { apiKey: protocolAPIsById[apiKey], correlationId, request })
+      if (!expectResponse) request.callback(null, canWrite)
 
-      for (const buf of writer.buffers) {
-        if (!this.#socket.write(buf)) {
-          canWrite = false
-        }
-      }
-
-      if (!canWrite) {
-        this.#socketMustBeDrained = true
-      }
-
-      this.#socket.uncork()
-
-      if (payload.context.noResponse) {
-        request.callback(null, canWrite)
-      }
-
-      // debugDump(Date.now() % 100000, 'send', { owner: this.#ownerId, apiKey: protocolAPIsById[apiKey], correlationId })
+      loggers.protocol('Sending request.', {
+        apiKey: protocolAPIsById[request.apiKey],
+        correlationId: request.correlationId,
+        request
+      })
 
       return canWrite
-    } catch (error) {
-      request.diagnostic.error = error
+    } catch (err) {
+      request.diagnostic.error = err as Error
       connectionsApiChannel.error.publish(request.diagnostic)
-      connectionsApiChannel.end.publish(request.diagnostic)
-      throw error
-      /* c8 ignore next 3 - C8 does not detect these as covered */
+      throw err
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }

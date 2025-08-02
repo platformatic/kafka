@@ -696,7 +696,7 @@ test('parseResponse handles aborted transactions', () => {
               })
               .appendInt32(partition.preferredReadReplica)
               // Add empty records batch
-              .appendUnsignedVarInt(partition.recordsBatch.length + 2) // Records size (including varint length)
+              .appendUnsignedVarInt(partition.recordsBatch.length + 1)
               .appendFrom(partition.recordsBatch)
           })
       }
@@ -709,7 +709,7 @@ test('parseResponse handles aborted transactions', () => {
   deepStrictEqual(
     {
       abortedTransactions: response.responses[0].partitions[0].abortedTransactions,
-      recordsLength: response.responses[0].partitions[0].records?.records.length
+      recordsLength: response.responses[0].partitions[0].records?.[0]?.records.length
     },
     {
       abortedTransactions: [
@@ -788,11 +788,11 @@ test('parseResponse parses record data', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => {})
+              .appendArray(partition.abortedTransactions, () => { })
               .appendInt32(partition.preferredReadReplica)
 
               // Add records batch
-              .appendUnsignedVarInt(partition.recordsBatch.length + 2) // Records size (including varint length)
+              .appendUnsignedVarInt(partition.recordsBatch.length + 1)
               .appendFrom(partition.recordsBatch)
           })
       }
@@ -804,13 +804,13 @@ test('parseResponse parses record data', () => {
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')
 
-  const records = response.responses[0].partitions[0].records!
-  const record = records.records[0]
+  const batch = response.responses[0].partitions[0].records[0]!
+  const record = batch.records[0]
 
   deepStrictEqual(
     {
-      firstOffset: records.firstOffset,
-      recordsLength: records.records.length,
+      firstOffset: batch.firstOffset,
+      recordsLength: batch.records.length,
       offsetDelta: record.offsetDelta,
       valueString: record.value.toString()
     },

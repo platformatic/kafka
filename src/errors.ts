@@ -31,7 +31,7 @@ export class GenericError extends Error {
   [index: string]: any
   [kGenericError]: true
 
-  static isGenericError (error: Error): boolean {
+  static isGenericError (error: Error): error is GenericError | MultipleErrors {
     return (error as GenericError)[kGenericError] === true
   }
 
@@ -71,11 +71,11 @@ export class MultipleErrors extends AggregateError {
 
   static code: ErrorCode = 'PLT_KFK_MULTIPLE'
 
-  static isGenericError (error: Error): boolean {
+  static isGenericError (error: Error): error is GenericError | MultipleErrors {
     return (error as GenericError)[kGenericError] === true
   }
 
-  static isMultipleErrors (error: Error): boolean {
+  static isMultipleErrors (error: Error): error is MultipleErrors {
     return (error as MultipleErrors)[kMultipleErrors] === true
   }
 

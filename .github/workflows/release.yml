@@ -45,10 +45,10 @@ jobs:
           GITHUB_ACTIONS: 'true'
       - name: Push changes
         run: git push origin HEAD:${{ github.ref }}
+      - name: Update npm
+        run: npm install -g npm@latest
       - name: Publish to NPM
         run: pnpm publish --access public --tag ${{ inputs.prerelease == true && 'next' || 'latest' }} --publish-branch ${{ github.ref_name }} --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: 'Create release notes'
         run: |
           pnpx @matteo.collina/release-notes -a ${{ secrets.GH_RELEASE_TOKEN }} -t v${{ inputs.version }} -r kafka -o platformatic ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}

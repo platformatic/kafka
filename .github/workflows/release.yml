@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: main
     permissions:
+      id-token: write
       contents: write
     steps:
       - name: Checkout

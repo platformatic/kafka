@@ -1,1 +1,1 @@
-NODE_OPTIONS="--experimental-strip-types --test-reporter=cleaner-spec-reporter --disable-warning=ExperimentalWarning"
+NODE_OPTIONS="--test-reporter=cleaner-spec-reporter"

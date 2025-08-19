@@ -13,6 +13,7 @@ import {
   instancesChannel,
   metadataV12,
   NetworkError,
+  PromiseWithResolvers,
   type Reader,
   saslHandshakeV1,
   type SASLMechanism,
@@ -30,7 +31,7 @@ import {
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
-  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
+  const { promise, resolve, reject } = PromiseWithResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
@@ -55,7 +56,7 @@ async function createTLSServer (t: TestContext): Promise<{ server: Server; port:
     key: await readFile(new URL('../fixtures/tls-key.pem', import.meta.url)),
     cert: await readFile(new URL('../fixtures/tls-cert.pem', import.meta.url))
   })
-  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
+  const { promise, resolve, reject } = PromiseWithResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
@@ -624,7 +625,7 @@ test('Connection should handle close with in-flight and after-drain requests', a
   t.after(() => connection.close())
 
   // Create a mock server that never responds
-  const { promise: receivePromise, resolve } = Promise.withResolvers()
+  const { promise: receivePromise, resolve } = PromiseWithResolvers()
   server.on('connection', socket => {
     socket.once('data', resolve)
   })
@@ -954,7 +955,7 @@ test('Connection.connect should connect to SASL protected broker using SASL/OAUT
   await metadataV12.api.async(connection, [])
 })
 
-test('Connection.connect should reject unsupported mechanisms', async t => {
+test('Connection.connect should reject unsupported mechanisms', async () => {
   const connection = new Connection('clientId', {
     // @ts-expect-error - Purposefully using an invalid mechanism
     sasl: { mechanism: 'WHATEVER', username: 'admin', password: 'admin' }
@@ -1006,7 +1007,7 @@ test('Connection.connect should handle authentication errors', async t => {
 test('Connection.connect should connect to a TLS host without forwarding the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = Promise.withResolvers()
+  const hostPromise = PromiseWithResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1030,7 +1031,7 @@ test('Connection.connect should connect to a TLS host without forwarding the ser
 test('Connection.connect should connect to a TLS host without forwarding the host as the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = Promise.withResolvers()
+  const hostPromise = PromiseWithResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1055,7 +1056,7 @@ test('Connection.connect should connect to a TLS host without forwarding the hos
 test('Connection.connect should connect to a TLS host without using a custom host as the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = Promise.withResolvers()
+  const hostPromise = PromiseWithResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })

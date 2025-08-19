@@ -10,5 +10,8 @@
     "playground/*.ts",
     "playground/**/*.ts",
     "scripts/*.ts"
-  ]
+  ],
+  "compilerOptions": {
+    "removeComments": false
+  }
 }

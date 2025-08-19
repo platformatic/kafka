@@ -3,3 +3,4 @@ external/
 node_modules
 coverage
 .eslintcache
+.env

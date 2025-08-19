@@ -26,7 +26,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",
-    "postbuild": "node --experimental-strip-types scripts/postbuild.ts",
+    "postbuild": "node scripts/postbuild.ts",
     "lint": "eslint --cache",
     "typecheck": "tsc -p . --noEmit",
     "format": "prettier -w benchmarks playground src test",
@@ -37,9 +37,13 @@
     "ci": "npm run build && npm run lint && npm run test:ci",
     "prepublishOnly": "npm run build && npm run lint",
     "postpublish": "git push origin && git push origin -f --tags",
-    "generate:apis": "node --experimental-strip-types scripts/generate-apis.ts",
-    "generate:errors": "node --experimental-strip-types scripts/generate-errors.ts",
-    "create:api": "node --experimental-strip-types scripts/create-api.ts"
+    "generate:apis": "node scripts/generate-apis.ts",
+    "generate:errors": "node scripts/generate-errors.ts",
+    "create:api": "node scripts/create-api.ts",
+    "build:v20": "rm -rf dist && tsc -p tsconfig.test.json",
+    "postbuild:v20": "cp package.json dist/package.json && node dist/scripts/postbuild.js",
+    "test:v20": "npm run build:v20 && cp -R test/fixtures dist/test/fixtures && c8 -c test/config/c8-local.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 dist/test/**/*.test.js",
+    "test:ci:v20": "npm run build:v20 && cp -R test/fixtures dist/test/fixtures && c8 -c test/config/c8-ci.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 dist/test/**/*.test.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",
@@ -55,7 +59,7 @@
   "devDependencies": {
     "@platformatic/rdkafka": "^4.0.0",
     "@types/debug": "^4.1.12",
-    "@types/node": "^22.13.5",
+    "@types/node": "^22.17.2",
     "@types/semver": "^7.7.0",
     "@watchable/unpromise": "^1.0.2",
     "avsc": "^5.7.7",
@@ -78,6 +82,6 @@
     "typescript": "^5.7.3"
   },
   "engines": {
-    "node": ">= 22.14.0"
+    "node": ">= 20.19.4 || >= 22.18.0 || >= 24.6.0"
   }
 }

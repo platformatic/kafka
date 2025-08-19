@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Bump Version
-        run: node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
+        run: node scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
         env:
           GITHUB_ACTIONS: 'true'
       - name: Push changes

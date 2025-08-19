@@ -1,14 +1,14 @@
 import RDKafka from '@platformatic/rdkafka'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
-import { ProduceAcks, Producer, stringSerializers } from '../src/index.ts'
+import { ProduceAcks, Producer, PromiseWithResolvers, stringSerializers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
 const iterations = 10000
 const batchSize = Math.max(iterations / 100, 1)
 
 function rdkafka (): Promise<Result> {
-  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const producer = new RDKafka.Producer(

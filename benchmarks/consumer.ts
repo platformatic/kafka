@@ -2,13 +2,13 @@ import RDKafka from '@platformatic/rdkafka'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS, logLevel } from 'kafkajs'
 import { randomUUID } from 'node:crypto'
-import { Consumer, MessagesStreamModes } from '../src/index.ts'
+import { Consumer, MessagesStreamModes, PromiseWithResolvers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
 const iterations = 10000
 
 function rdkafkaEvented (): Promise<Result> {
-  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const consumer = new RDKafka.KafkaConsumer(
@@ -68,7 +68,7 @@ function rdkafkaEvented (): Promise<Result> {
 }
 
 function rdkafkaStream (): Promise<Result> {
-  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const stream = RDKafka.KafkaConsumer.createReadStream(
@@ -107,7 +107,7 @@ function rdkafkaStream (): Promise<Result> {
 }
 
 async function kafkajs (): Promise<Result> {
-  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const client = new KafkaJS({ clientId: 'benchmarks', brokers, logLevel: logLevel.ERROR })
@@ -140,7 +140,7 @@ async function kafkajs (): Promise<Result> {
 }
 
 async function platformaticKafka (): Promise<Result> {
-  const { promise, resolve, reject } = Promise.withResolvers<Result>()
+  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const consumer = new Consumer({

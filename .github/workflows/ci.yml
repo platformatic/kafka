@@ -40,12 +40,13 @@ jobs:
         run: docker compose -f docker/compose-ci.yml up -d --wait
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
-      - name: Run Tests
-        run:
-          if [ "${{ matrix.node-version }}" = "20" ]; then
-            pnpm run test:ci:v20
-          else
-            pnpm run ci
-          fi
+      - name: Run Tests (Node.js v${{ matrix.node-version }})
+        if: ${{ matrix.node-version }} == '20'
+        run: pnpm run test:ci:v20
+        env:
+          KAFKA_VERSION: ${{ matrix.kafka-version }}
+      - name: Run Tests (Node.js v${{ matrix.node-version }})
+        if: ${{ matrix.node-version }} != '20'
+        run: pnpm run ci
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}

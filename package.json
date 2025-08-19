@@ -43,7 +43,7 @@
     "build:v20": "rm -rf dist && tsc -p tsconfig.test.json",
     "postbuild:v20": "cp package.json dist/package.json && node dist/scripts/postbuild.js",
     "test:v20": "npm run build:v20 && cp -R test/fixtures dist/test/fixtures && c8 -c test/config/c8-local.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 dist/test/**/*.test.js",
-    "test:ci:v20": "npm run build:v20 && cp -R test/fixtures dist/test/fixtures && c8 -c test/config/c8-ci.json node --env-file=test/config/env --no-warnings --test --test-timeout=300000 dist/test/**/*.test.js"
+    "test:ci:v20": "npm run build:v20 && cp -R test/fixtures dist/test/fixtures && node --env-file=test/config/env --no-warnings --test --test-timeout=300000 dist/test/**/*.test.js"
   },
   "dependencies": {
     "ajv": "^8.17.1",

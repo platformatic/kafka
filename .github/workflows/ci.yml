@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         # Using the latest LTS versions for CI
-        node-version: [22, 24]
+        node-version: [20, 22, 24]
         os: [ubuntu-latest]
         # Support for 3.6.0 is not available in CI since the Docker image has issues with option management in regard of SASL/OAUTHBEARER.
         kafka-version: ['3.5.0', '3.7.0', '3.8.0', '3.9.0', '4.0.0']
@@ -41,6 +41,11 @@ jobs:
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
       - name: Run Tests
-        run: pnpm run ci
+        run:
+          if [ "${{ matrix.node-version }}" = "20" ]; then
+            pnpm run test:ci:v20
+          else
+            pnpm run ci
+          fi
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}

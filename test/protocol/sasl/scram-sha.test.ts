@@ -185,7 +185,7 @@ test('authenticate should check for minimum required iterations', async () => {
     }
 
     // Should not get here
-    callback(null, {})
+    callback(null, {} as any)
   }
 
   const mockConnection = {}
@@ -300,7 +300,7 @@ test('authenticate should escape special characters in username', async () => {
 // Test error handling for server nonce mismatch
 test('authenticate should check server nonce starts with client nonce', async () => {
   // Replace with implementation that returns invalid nonce
-  function api (_: Connection, payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
+  function api (_: Connection, _payload: Buffer | null, callback: CallbackWithPromise<SaslAuthenticateResponse>) {
     // First call - return server response with different nonce
     callback(null, {
       errorCode: 0,
@@ -495,14 +495,14 @@ test('authenticate should return the last response on successful authentication'
       callback(null, {
         errorCode: 0,
         errorMessage: null,
-        authBytes: Buffer.from(`s=${randomBytes(10).toString('base64')},i=4096,r=${payload.toString().split('r=')[1]}`),
+        authBytes: Buffer.from(`s=${randomBytes(10).toString('base64')},i=4096,r=${payload!.toString().split('r=')[1]}`),
         sessionLifetimeMs: 3600000n
       })
     } else {
       callback(null, {
         errorCode: 0,
         errorMessage: null,
-        authBytes: `v=${serverSignature.toString('base64')}`,
+        authBytes: Buffer.from(`v=${serverSignature.toString('base64')}`),
         sessionLifetimeMs: 3600000n
       })
     }

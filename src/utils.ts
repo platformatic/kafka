@@ -21,6 +21,20 @@ export type DebugDumpLogger = (...args: any[]) => void
 
 export { setTimeout as sleep } from 'node:timers/promises'
 
+function PromiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
+  let resolve: (value: T | PromiseLike<T>) => void
+  let reject: (reason?: any) => void
+
+  const promise = new Promise<T>((_resolve, _reject) => {
+    resolve = _resolve
+    reject = _reject
+  })
+  // @ts-expect-error - resolve and reject are assigned in the promise constructor
+  return { promise, resolve, reject }
+}
+
+export const PromiseWithResolvers = Promise.withResolvers ? Promise.withResolvers.bind(Promise) : PromiseWithResolversPolyfill
+
 export const ajv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true })
 
 export const loggers: Record<string, debug.Debugger> = {

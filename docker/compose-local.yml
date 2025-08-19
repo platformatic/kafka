@@ -34,8 +34,7 @@ services:
       # Consumer group options
       KAFKA_CFG_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer'
       KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
-      # Do not use this in GitHub CI - Needed for Docker on Apple Silicon
-      _JAVA_OPTIONS: '-XX:UseSVE=0'
+      _JAVA_OPTIONS: ${JAVA_OPTIONS}
 
   broker-cluster-2:
     image: bitnami/kafka:${KAFKA_VERSION}

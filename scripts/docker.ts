@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types --disable-warning=ExperimentalWarning
+#!/usr/bin/env -S node
 
 import { execSync } from 'node:child_process'
 import { resolve } from 'node:path'

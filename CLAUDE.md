@@ -32,4 +32,4 @@ npm run lint
 
 ## Node Requirements
 
-- Node.js >= 22.14.0
+- Node.js >= 20.19.4 or >= 22.18.0 or >= 24.6.0

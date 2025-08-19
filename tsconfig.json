@@ -8,6 +8,7 @@
     "scripts/*.ts",
     "benchmarks/**/*.ts",
     "playground/*.ts",
-    "playground/**/*.ts"
+    "playground/**/*.ts",
+    "scripts/*.ts"
   ]
 }

@@ -186,7 +186,12 @@ export function parseResponse (
             const recordsBatchesReader = Reader.from(r.buffer.subarray(r.position, r.position + recordsSize))
             partition.records = []
             do {
-              partition.records.push(readRecordsBatch(recordsBatchesReader))
+              const batch = readRecordsBatch(recordsBatchesReader)
+              if (batch) {
+                partition.records.push(batch)
+              } else {
+                break
+              }
             } while (recordsBatchesReader.position < recordsSize)
 
             r.skip(recordsSize)

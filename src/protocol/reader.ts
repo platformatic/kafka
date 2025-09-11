@@ -409,4 +409,8 @@ export class Reader {
       this.skip(length)
     }
   }
+
+  canRead (length: number): boolean {
+    return this.buffer.length - this.position >= length
+  }
 }

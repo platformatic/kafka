@@ -12,6 +12,20 @@ import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
+const BATCH_HEADER_SIZE =
+  /* FirstOffset */ 8 +
+  /* Length */ 4 +
+  /* PartitionLeaderEpoch */ 4 +
+  /* Magic */ 1 +
+  /* CRC */ 4 +
+  /* Attributes */ 2 +
+  /* LastOffsetDelta */ 4 +
+  /* FirstTimestamp */ 8 +
+  /* MaxTimestamp */ 8 +
+  /* ProducerId */ 8 +
+  /* ProducerEpoch */ 2 +
+  /* FirstSequence */ 4 +
+  /* RecordsLength */ 4
 const CURRENT_RECORD_VERSION = 2
 const IS_TRANSACTIONAL = 0b10000 // Bit 4 set
 const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
@@ -247,10 +261,23 @@ export function createRecordsBatch (
   )
 }
 
-export function readRecordsBatch (reader: Reader): RecordsBatch {
+export function readRecordsBatch (reader: Reader): RecordsBatch | undefined {
+  // Check if we have enough data to read the batch header
+  if (!reader.canRead(BATCH_HEADER_SIZE)) {
+    return
+  }
+
+  const firstOffset = reader.readInt64()
+  const length = reader.readInt32()
+
+  // Check if we have enough data to read the complete batch, including the rest of the header
+  if (!reader.canRead(length)) {
+    return
+  }
+
   const batch = {
-    firstOffset: reader.readInt64(),
-    length: reader.readInt32(),
+    firstOffset,
+    length,
     partitionLeaderEpoch: reader.readInt32(),
     magic: reader.readInt8(),
     crc: reader.readUnsignedInt32(),

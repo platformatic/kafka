@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, partialDeepStrictEqual } from 'node:assert'
+import { deepStrictEqual, ok, partialDeepStrictEqual, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
@@ -33,8 +33,8 @@ import {
   offsetFetchV9,
   type Offsets,
   type OffsetsWithTimestamps,
-  type ProducerOptions,
   ProduceAcks,
+  type ProducerOptions,
   ProtocolError,
   type RecordsBatch,
   sleep,
@@ -44,9 +44,9 @@ import {
 } from '../../../src/index.ts'
 import {
   createConsumer,
-  createProducer,
   createCreationChannelVerifier,
   createGroupId,
+  createProducer,
   createTopic,
   createTracingChannelVerifier,
   mockAPI,
@@ -56,7 +56,7 @@ import {
   mockedOperationId,
   mockMetadata,
   mockMethod,
-  mockUnavailableAPI,
+  mockUnavailableAPI
 } from '../../helpers.ts'
 
 // This function produces sample messages to a topic for testing the consumer
@@ -67,10 +67,10 @@ async function produceTestMessages ({
   delay = 0,
   overrideOptions
 }: {
-  t: TestContext,
-  messages: MessageToProduce<string, string, string, string>[],
-  batchSize?: number,
-  delay?: number,
+  t: TestContext
+  messages: MessageToProduce<string, string, string, string>[]
+  batchSize?: number
+  delay?: number
   overrideOptions?: Partial<ProducerOptions<Buffer, Buffer, Buffer, Buffer>>
 }): Promise<void> {
   const producer = createProducer(t, overrideOptions)
@@ -81,7 +81,9 @@ async function produceTestMessages ({
         topic: msg.topic,
         key: Buffer.from(msg.key ?? ''),
         value: Buffer.from(msg.value ?? ''),
-        headers: new Map(Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)]))
+        headers: new Map(
+          Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)])
+        )
       })),
       acks: ProduceAcks.LEADER
     })
@@ -95,9 +97,9 @@ async function fetchFromOffset ({
   fetchOffset = 0n,
   partition = 0
 }: {
-  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>,
-  topic: string,
-  fetchOffset: bigint,
+  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>
+  topic: string
+  fetchOffset: bigint
   partition?: number
 }): Promise<FetchResponse> {
   const metadata = await consumer.metadata({ topics: [topic] })
@@ -346,9 +348,9 @@ test('close should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.close(err => {
-      if (err) {
-        reject(err)
+    consumer.close(error => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -605,9 +607,9 @@ test('consume should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.consume({ topics: [] }, (err, stream) => {
-      if (err) {
-        reject(err)
+    consumer.consume({ topics: [] }, (error, stream) => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -889,9 +891,9 @@ test('fetch should support both promise and callback API', async t => {
           }
         ]
       },
-      (err, result) => {
-        if (err) {
-          reject(err)
+      (error, result) => {
+        if (error) {
+          reject(error)
           return
         }
 
@@ -1203,14 +1205,11 @@ test('fetch should retrieve messages from multiple batches', async t => {
     }
   })
 
-  const consumer = createConsumer(
-    t,
-    {
-      minBytes: 1024 * 1024,
-      maxBytes: 1024 * 1024 * 10,
-      maxWaitTime: 500
-    }
-  )
+  const consumer = createConsumer(t, {
+    minBytes: 1024 * 1024,
+    maxBytes: 1024 * 1024 * 10,
+    maxWaitTime: 500
+  })
   const fetchResult = await fetchFromOffset({
     consumer,
     topic,
@@ -1226,13 +1225,17 @@ test('fetch should retrieve messages from multiple batches', async t => {
   strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
   for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
     const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
-    partialDeepStrictEqual(recordsBatch, {
-      attributes: 0,
-      magic: 2,
-      firstOffset: BigInt(batchNo * batchSize),
-      lastOffsetDelta: batchSize - 1,
-      length: 184
-    }, 'Should return records batch with correct metadata')
+    partialDeepStrictEqual(
+      recordsBatch,
+      {
+        attributes: 0,
+        magic: 2,
+        firstOffset: BigInt(batchNo * batchSize),
+        lastOffsetDelta: batchSize - 1,
+        length: 184
+      },
+      'Should return records batch with correct metadata'
+    )
     const records = recordsBatch.records
     strictEqual(records.length, batchSize, 'Should get all messages in batch')
 
@@ -1242,10 +1245,16 @@ test('fetch should retrieve messages from multiple batches', async t => {
         topic,
         key: record.key.toString('utf-8'),
         value: record.value.toString('utf-8'),
-        headers: Object.fromEntries(record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')]))
+        headers: Object.fromEntries(
+          record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')])
+        )
       }
     })
-    deepStrictEqual(fetchMessages, messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize), 'Should match produced messages in batch')
+    deepStrictEqual(
+      fetchMessages,
+      messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize),
+      'Should match produced messages in batch'
+    )
   }
 })
 
@@ -1296,9 +1305,9 @@ test('commit should support both promise and callback API', async t => {
         }
 
         // Test callback API
-        consumer.commit(commitOptions, err => {
-          if (err) {
-            reject(err)
+        consumer.commit(commitOptions, error => {
+          if (error) {
+            reject(error)
             return
           }
 
@@ -1487,9 +1496,9 @@ test('listOffsets should support both promise and callback API', async t => {
 
   // Test callback API
   await new Promise<void>((resolve, reject) => {
-    consumer.listOffsets({ topics: [topic] }, (err, offsets) => {
-      if (err) {
-        reject(err)
+    consumer.listOffsets({ topics: [topic] }, (error, offsets) => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -1823,9 +1832,9 @@ test('listCommittedOffsets should support both promise and callback API', async 
 
   // Test callback API
   await new Promise<void>((resolve, reject) => {
-    consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] }, (err, committed) => {
-      if (err) {
-        reject(err)
+    consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] }, (error, committed) => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -2001,9 +2010,9 @@ test('findGroupCoordinator should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.findGroupCoordinator((err, coordinatorId) => {
-      if (err) {
-        reject(err)
+    consumer.findGroupCoordinator((error, coordinatorId) => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -2259,9 +2268,9 @@ test('joinGroup should support both promise and callback API', t => {
     const consumer = createConsumer(t)
 
     // Use callback API
-    consumer.joinGroup({}, (err, memberId) => {
-      if (err) {
-        reject(err)
+    consumer.joinGroup({}, (error, memberId) => {
+      if (error) {
+        reject(error)
         return
       }
 

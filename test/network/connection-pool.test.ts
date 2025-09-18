@@ -377,9 +377,9 @@ test('getFirstAvailable with callback parameter', async t => {
 
   // Test with callback
   let callbackCalled = false
-  connectionPool.getFirstAvailable(brokers, err => {
+  connectionPool.getFirstAvailable(brokers, error => {
     callbackCalled = true
-    ok(err instanceof Error)
+    ok(error instanceof Error)
   })
 
   // Give time for the callback to be processed

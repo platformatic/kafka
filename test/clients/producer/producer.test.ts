@@ -100,9 +100,9 @@ test('close should properly clean up resources and set closed state', t => {
     strictEqual(producer.closed, false)
 
     // Close the producer
-    producer.close(err => {
-      if (err) {
-        reject(err)
+    producer.close(error => {
+      if (error) {
+        reject(error)
         return
       }
 
@@ -140,8 +140,8 @@ test('should support both promise and callback API', async t => {
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }],
         acks: ProduceAcks.LEADER
       },
-      (err, result) => {
-        strictEqual(err, null)
+      (error, result) => {
+        strictEqual(error, null)
         ok(Array.isArray(result.offsets), 'Should have offsets array')
         strictEqual(result.offsets?.length, 1)
         strictEqual(result.offsets?.[0].topic, testTopic)

@@ -202,8 +202,8 @@ test('listApis should support both callback and promise API', (t, done) => {
   const client = createBase(t)
 
   // Use callback API
-  client.listApis((err, apis) => {
-    strictEqual(err, null)
+  client.listApis((error, apis) => {
+    strictEqual(error, null)
     ok(Array.isArray(apis))
 
     client
@@ -445,8 +445,8 @@ test('metadata should support both callback and promise API', (t, done) => {
   const testTopic = `test-topic-${randomUUID()}`
 
   // Use callback API
-  client.metadata({ topics: [testTopic], autocreateTopics: true }, (err, metadata) => {
-    strictEqual(err, null)
+  client.metadata({ topics: [testTopic], autocreateTopics: true }, (error, metadata) => {
+    strictEqual(error, null)
     strictEqual(metadata.topics.has(testTopic), true)
 
     client

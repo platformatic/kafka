@@ -26,7 +26,7 @@ import {
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
-import { saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
+import { saslGssApi, saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
 import { Reader } from '../protocol/reader.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'
 import { Writer } from '../protocol/writer.ts'
@@ -42,6 +42,7 @@ export interface SASLOptions {
   username?: string
   password?: string
   token?: string
+  keytab?: string
 }
 
 export interface ConnectionOptions {
@@ -350,7 +351,7 @@ export class Connection extends EventEmitter {
   #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
     this.#status = ConnectionStatuses.AUTHENTICATING
 
-    const { mechanism, username, password, token } = this.#options.sasl!
+    const { mechanism, username, password, token, keytab } = this.#options.sasl! as Required<SASLOptions>
 
     if (!SASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
@@ -380,15 +381,24 @@ export class Connection extends EventEmitter {
         saslPlain.authenticate(
           saslAuthenticateV2.api,
           this,
-          username!,
-          password!,
+          username,
+          password,
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
       } else if (mechanism === 'OAUTHBEARER') {
         saslOAuthBearer.authenticate(
           saslAuthenticateV2.api,
           this,
-          token!,
+          token,
+          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+        )
+      } else if (mechanism === 'GSSAPI') {
+        saslGssApi.authenticate(
+          saslAuthenticateV2.api,
+          this,
+          username,
+          password,
+          keytab,
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
       } else {
@@ -396,8 +406,8 @@ export class Connection extends EventEmitter {
           saslAuthenticateV2.api,
           this,
           mechanism.substring(6) as ScramAlgorithm,
-          username!,
-          password!,
+          username,
+          password,
           defaultCrypto,
           this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
         )
@@ -455,6 +465,7 @@ export class Connection extends EventEmitter {
       request.diagnostic.error = err as Error
       connectionsApiChannel.error.publish(request.diagnostic)
       throw err
+      /* c8 ignore next 3 - Hard to test */
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }
@@ -489,9 +500,9 @@ export class Connection extends EventEmitter {
     response: SaslAuthenticateResponse
   ): void {
     if (error) {
-      const protocolError = (error as MultipleErrors).errors[0] as ProtocolError
+      const protocolError = (error as MultipleErrors).errors?.[0] as ProtocolError
 
-      if (protocolError.apiId === 'SASL_AUTHENTICATION_FAILED') {
+      if (protocolError?.apiId === 'SASL_AUTHENTICATION_FAILED') {
         error = new AuthenticationError('SASL authentication failed.', { cause: error })
       }
 

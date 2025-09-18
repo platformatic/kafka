@@ -116,8 +116,8 @@ test('subarray', () => {
     () => {
       emptyBuffer.subarray(0, 1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -188,8 +188,8 @@ test('subarray', () => {
     () => {
       multiBuffer.subarray(-1, 5)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -197,8 +197,8 @@ test('subarray', () => {
     () => {
       multiBuffer.subarray(0, 7)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -212,8 +212,8 @@ test('slice', () => {
     () => {
       emptyBuffer.slice(0, 1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -282,8 +282,8 @@ test('slice', () => {
     () => {
       singleBuffer.slice(-1, 5)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -291,8 +291,8 @@ test('slice', () => {
     () => {
       singleBuffer.slice(0, 7)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -431,8 +431,8 @@ test('consume', () => {
       () => {
         buffer.consume(-1)
       },
-      err => {
-        return err instanceof UserError && err.message === 'Out of bounds.'
+      error => {
+        return error instanceof UserError && error.message === 'Out of bounds.'
       }
     )
 
@@ -441,8 +441,8 @@ test('consume', () => {
       () => {
         buffer.consume(buffer.length + 1)
       },
-      err => {
-        return err instanceof UserError && err.message === 'Out of bounds.'
+      error => {
+        return error instanceof UserError && error.message === 'Out of bounds.'
       }
     )
   }
@@ -535,8 +535,8 @@ test('get', () => {
     () => {
       emptyBuffer.get(0)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -560,8 +560,8 @@ test('get', () => {
     () => {
       multiBuffer.get(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -569,8 +569,8 @@ test('get', () => {
     () => {
       multiBuffer.get(5)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -585,8 +585,8 @@ test('readUInt8', () => {
     () => {
       buffer.readUInt8(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -594,8 +594,8 @@ test('readUInt8', () => {
     () => {
       buffer.readUInt8(3)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -612,8 +612,8 @@ test('readInt8', () => {
     () => {
       buffer.readInt8(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -621,8 +621,8 @@ test('readInt8', () => {
     () => {
       buffer.readInt8(3)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -688,8 +688,8 @@ for (const [name, bytes] of fixedLengths) {
         () => {
           reader.call(buffer, -1)
         },
-        err => {
-          return err instanceof UserError && err.message === 'Out of bounds.'
+        error => {
+          return error instanceof UserError && error.message === 'Out of bounds.'
         }
       )
 
@@ -697,8 +697,8 @@ for (const [name, bytes] of fixedLengths) {
         () => {
           reader.call(buffer, bytes * 4)
         },
-        err => {
-          return err instanceof UserError && err.message === 'Out of bounds.'
+        error => {
+          return error instanceof UserError && error.message === 'Out of bounds.'
         }
       )
     })
@@ -741,8 +741,8 @@ test('readFloatBE', () => {
     () => {
       singleBuffer.readFloatBE(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -750,8 +750,8 @@ test('readFloatBE', () => {
     () => {
       singleBuffer.readFloatBE(1) // Not enough bytes for a float
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -792,8 +792,8 @@ test('readFloatLE', () => {
     () => {
       singleBuffer.readFloatLE(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -801,8 +801,8 @@ test('readFloatLE', () => {
     () => {
       singleBuffer.readFloatLE(1) // Not enough bytes for a float
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -844,8 +844,8 @@ test('readDoubleBE', () => {
     () => {
       singleBuffer.readDoubleBE(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -853,8 +853,8 @@ test('readDoubleBE', () => {
     () => {
       singleBuffer.readDoubleBE(1) // Not enough bytes for a double
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -896,8 +896,8 @@ test('readDoubleLE', () => {
     () => {
       singleBuffer.readDoubleLE(-1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 
@@ -905,8 +905,8 @@ test('readDoubleLE', () => {
     () => {
       singleBuffer.readDoubleLE(1) // Not enough bytes for a double
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -954,8 +954,8 @@ test('readUnsignedVarInt', () => {
     () => {
       smallBuffer.readUnsignedVarInt(1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })
@@ -1013,8 +1013,8 @@ test('readUnsignedVarInt64', () => {
     () => {
       smallBuffer.readUnsignedVarInt64(1)
     },
-    err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+    error => {
+      return error instanceof UserError && error.message === 'Out of bounds.'
     }
   )
 })

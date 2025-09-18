@@ -56,20 +56,20 @@ test('should support both promise and callback API', (t, done) => {
       partitions: 1,
       replicas: 1
     },
-    (err, created) => {
-      strictEqual(err, null)
+    (error, created) => {
+      strictEqual(error, null)
       strictEqual(created?.length, 1)
       strictEqual(created?.[0].name, topicName)
 
       // Clean up and close
-      admin.deleteTopics({ topics: [topicName] }, err => {
-        if (err) {
-          done(err)
+      admin.deleteTopics({ topics: [topicName] }, error => {
+        if (error) {
+          done(error)
           return
         }
 
         try {
-          strictEqual(err, null)
+          strictEqual(error, null)
           done()
         } catch (err) {
           done(err)

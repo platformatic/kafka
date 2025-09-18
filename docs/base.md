@@ -6,16 +6,17 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 
 ## Events
 
-| Name                                | Description                                                 |
-| ----------------------------------- | ----------------------------------------------------------- |
-| `client:broker:connect`             | Emitted when connecting to a broker.                        |
-| `client:broker:disconnect`          | Emitted when disconnecting from a broker.                   |
-| `client:broker:failed`              | Emitted when a broker connection fails.                     |
-| `client:broker:drain`               | Emitted when a broker is ready to be triggered by requests. |
-| `client:broker:sasl:handshake`      | Emitted when a broker completes SASL handshake.             |
-| `client:broker:sasl:authentication` | Emitted when a broker completes SASL authentication.        |
-| `client:metadata`                   | Emitted when metadata is retrieved.                         |
-| `client:close`                      | Emitted when client is closed.                              |
+| Name                                         | Description                                                                                  |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `client:broker:connect`                      | Emitted when connecting to a broker.                                                         |
+| `client:broker:disconnect`                   | Emitted when disconnecting from a broker.                                                    |
+| `client:broker:failed`                       | Emitted when a broker connection fails.                                                      |
+| `client:broker:drain`                        | Emitted when a broker is ready to be triggered by requests.                                  |
+| `client:broker:sasl:handshake`               | Emitted when SASL handshake with a broker is completed.                                      |
+| `client:broker:sasl:authentication`          | Emitted when SASL authentication to a broker is completed.                                   |
+| `client:broker:sasl:authentication:extended` | Emitted when SASL authentication to a broker is extended by performing a new authentication. |
+| `client:metadata`                            | Emitted when metadata is retrieved.                                                          |
+| `client:close`                               | Emitted when client is closed.                                                               |
 
 ## Constructor
 
@@ -113,6 +114,7 @@ const producer = new Producer({
   serializers: stringSerializers,
   sasl: {
     mechanism: 'PLAIN', // Also SCRAM-SHA-256, SCRAM-SHA-512 and OAUTHBEARER are supported
+    // username, password or token can also be (async) functions returning a string
     username: 'username', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
     password: 'password', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
     token: 'token' // This is used from OAUTHBEARER

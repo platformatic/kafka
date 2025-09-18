@@ -423,7 +423,7 @@ test('authenticate should handle server failures', async () => {
     },
     (err: Error) => {
       strictEqual(err instanceof AuthenticationError, true)
-      strictEqual(err.message, 'Authentication failed.')
+      strictEqual(err.message, 'SASL authentication failed.')
       return true
     }
   )
@@ -495,7 +495,9 @@ test('authenticate should return the last response on successful authentication'
       callback(null, {
         errorCode: 0,
         errorMessage: null,
-        authBytes: Buffer.from(`s=${randomBytes(10).toString('base64')},i=4096,r=${payload!.toString().split('r=')[1]}`),
+        authBytes: Buffer.from(
+          `s=${randomBytes(10).toString('base64')},i=4096,r=${payload!.toString().split('r=')[1]}`
+        ),
         sessionLifetimeMs: 3600000n
       })
     } else {

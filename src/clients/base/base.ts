@@ -281,7 +281,15 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       ...(this[kOptions] as ConnectionOptions)
     })
 
-    this.#forwardEvents(pool, ['connect', 'disconnect', 'failed', 'drain', 'sasl:handshake', 'sasl:authentication'])
+    this.#forwardEvents(pool, [
+      'connect',
+      'disconnect',
+      'failed',
+      'drain',
+      'sasl:handshake',
+      'sasl:authentication',
+      'sasl:authentication:extended'
+    ])
 
     return pool
   }
@@ -336,7 +344,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
 
     // All topics are already up-to-date, simply return them
-    if (this.#metadata && !topicsToFetch.length) {
+    if (this.#metadata && !topicsToFetch.length && !options.forceUpdate) {
       callback(null, {
         ...this.#metadata!,
         topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))

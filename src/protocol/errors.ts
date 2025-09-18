@@ -508,7 +508,7 @@ export const protocolErrors: Record<string, ProtocolErrorDefinition> = {
     id: 'SASL_AUTHENTICATION_FAILED',
     code: 58,
     canRetry: false,
-    message: 'SASL Authentication failed.'
+    message: 'SASL authentication failed.'
   },
   UNKNOWN_PRODUCER_ID: {
     id: 'UNKNOWN_PRODUCER_ID',

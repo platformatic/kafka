@@ -183,7 +183,12 @@ export function createRecordsBatch (
   let buffer = new DynamicBuffer()
   for (let i = 0; i < messages.length; i++) {
     let ts = messages[i].timestamp ?? now
-    if (typeof ts === 'number') ts = BigInt(ts)
+
+    /* c8 ignore next 3 - Hard to test */
+    if (typeof ts === 'number') {
+      ts = BigInt(ts)
+    }
+
     messages[i].timestamp = ts
 
     if (ts > maxTimestamp) maxTimestamp = ts

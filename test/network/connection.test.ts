@@ -951,7 +951,7 @@ test('Connection.connect should connect to SASL protected broker using SASL/OAUT
   })
   t.after(() => connection.close())
 
-  await connection.connect('localhost', 9096)
+  await connection.connect('localhost', 9095)
   await metadataV12.api.async(connection, [])
 })
 

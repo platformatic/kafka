@@ -28,7 +28,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
 
       const metadata = await base.metadata({ topics: [] })
 
-      deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9092 })
+      deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
     }
   )
 }

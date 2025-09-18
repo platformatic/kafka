@@ -377,9 +377,9 @@ test('Connection.send should enqueue request and process response', async t => {
       parser,
       true, // hasRequestHeaderTaggedFields
       true, // hasResponseHeaderTaggedFields
-      (err, data) => {
-        if (err) {
-          reject(err)
+      (error, data) => {
+        if (error) {
+          reject(error)
           return
         }
 
@@ -430,9 +430,9 @@ test('Connection.send should handle requests with no response', async t => {
       }, // Dummy parser
       false, // hasRequestHeaderTaggedFields
       false, // hasResponseHeaderTaggedFields
-      (err, canWrite) => {
-        if (err) {
-          reject(err)
+      (error, canWrite) => {
+        if (error) {
+          reject(error)
           return
         }
 
@@ -563,8 +563,8 @@ test('Connection should handle unexpected correlation IDs', async t => {
 
   // Listen for error
   const errorPromise = new Promise<Error>(resolve => {
-    connection.once('error', err => {
-      resolve(err)
+    connection.once('error', error => {
+      resolve(error)
     })
   })
 
@@ -603,8 +603,8 @@ test('Connection should handle socket errors', async t => {
 
   // Listen for error
   const errorPromise = new Promise<Error>(resolve => {
-    connection.once('error', err => {
-      resolve(err)
+    connection.once('error', error => {
+      resolve(error)
     })
   })
 
@@ -664,9 +664,9 @@ test('Connection should handle close with in-flight and after-drain requests', a
       },
       false,
       false,
-      err => {
-        if (err) {
-          reject(err)
+      error => {
+        if (error) {
+          reject(error)
         }
 
         resolve(null)
@@ -684,9 +684,9 @@ test('Connection should handle close with in-flight and after-drain requests', a
       },
       false,
       false,
-      err => {
-        if (err) {
-          reject(err)
+      error => {
+        if (error) {
+          reject(error)
         }
 
         resolve(null)
@@ -809,10 +809,10 @@ test('Connection should handle response parsing errors', async t => {
       parser,
       false,
       false,
-      err => {
+      error => {
         try {
-          ok(err instanceof Error)
-          strictEqual(err.message, 'Parser error')
+          ok(error instanceof Error)
+          strictEqual(error.message, 'Parser error')
           resolve()
         } catch (e) {
           reject(e)
@@ -868,9 +868,9 @@ test('Connection should handle response with tagged fields', async t => {
       parser,
       false, // hasRequestHeaderTaggedFields
       true, // hasResponseHeaderTaggedFields - Important!
-      (err, data) => {
-        if (err) {
-          reject(err)
+      (error, data) => {
+        if (error) {
+          reject(error)
           return
         }
 
@@ -907,10 +907,10 @@ test('Connection should handle send when not connected', async t => {
       },
       false,
       false,
-      err => {
+      error => {
         try {
-          ok(err instanceof NetworkError)
-          strictEqual(err.message, 'Connection closed')
+          ok(error instanceof NetworkError)
+          strictEqual(error.message, 'Connection closed')
           resolve()
         } catch (e) {
           reject(e)
@@ -954,6 +954,8 @@ test('Connection.connect should connect to SASL protected broker using SASL/OAUT
   await connection.connect('localhost', 9096)
   await metadataV12.api.async(connection, [])
 })
+
+// TODO(ShogunPanda): Add GSSAPI
 
 test('Connection.connect should reject unsupported mechanisms', async () => {
   const connection = new Connection('clientId', {

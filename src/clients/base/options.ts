@@ -44,7 +44,8 @@ export const baseOptionsSchema = {
         mechanism: { type: 'string', enum: SASLMechanisms },
         username: { type: 'string' },
         password: { type: 'string' },
-        token: { type: 'string' }
+        token: { type: 'string' },
+        keytab: { type: 'string' }
       },
       required: ['mechanism'],
       additionalProperties: false

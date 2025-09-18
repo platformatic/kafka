@@ -32,5 +32,5 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9092 })
+  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9096 })
 })

@@ -65,10 +65,9 @@ services:
       - '9091:9092'
     healthcheck:
       <<: *health_check
-      test: ['CMD', '/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh', '--bootstrap-server', 'localhost:9092']
     environment:
       <<: *common_config
-      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9094,DOCKER://broker-single:19092'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9091,DOCKER://broker-single:19092'
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-single:29092'
       # Replication options
       KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
@@ -90,7 +89,7 @@ services:
       # Ports configuration
       KAFKA_CFG_LISTENERS: 'SASL_PLAINTEXT://:9092,PLAINTEXT://:19092,CONTROLLER://:29092'
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL_PLAINTEXT:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9092,PLAINTEXT://localhost:19092'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9095,PLAINTEXT://localhost:19092'
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl:29092'
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       # Replication options
@@ -110,6 +109,7 @@ services:
 
   broker-sasl-oauthbearer:
     image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-sasl-oauthbearer
     ports:
       - '9096:9092' # SASL
     healthcheck: *health_check
@@ -120,7 +120,7 @@ services:
       # Ports configuration
       KAFKA_CFG_LISTENERS: 'SASL_PLAINTEXT://:9092,PLAINTEXT://:19092,CONTROLLER://:29092'
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL_PLAINTEXT:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9092,PLAINTEXT://localhost:19092'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9096,PLAINTEXT://localhost:19092'
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl-oauthbearer:29092'
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       # Replication options
@@ -139,3 +139,58 @@ services:
       KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: 'PLAIN'
       KAFKA_CFG_SASL_OAUTHBEARER_EXPECTED_ISSUER: kafka
       KAFKA_CFG_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: users
+
+  kdc:
+    image: alpine:latest
+    container_name: kdc
+    ports:
+      - '8000:88/tcp'
+      - '8000:88/udp'
+      - '8001:749'
+    volumes:
+      - './data/kerberos/kdc/krb5.conf:/etc/krb5.conf:ro'
+      - './data/kerberos/kdc/kdc.conf:/var/lib/krb5kdc/kdc.conf:ro'
+      - './data/kerberos/kdc/init.sh:/init.sh:ro'
+      - './data/kerberos/data:/data'
+    entrypoint: ['/bin/sh', '/init.sh']
+    healthcheck:
+      test: ['CMD', 'kadmin.local', '-q', 'list_principals']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  broker-sasl-kerberos:
+    image: bitnami/kafka:${KAFKA_VERSION}
+    container_name: broker-sasl-kerberos
+    ports:
+      - '9097:9092'
+    healthcheck: *health_check
+    volumes:
+      - './data/jaas/jaas-kerberos.conf:/opt/bitnami/kafka/config/kafka_jaas.conf'
+      - './data/kerberos/krb5.conf:/etc/krb5.conf'
+      - './data/kerberos/data/broker.keytab:/opt/bitnami/kafka/config/kafka.keytab'
+    depends_on:
+      kdc:
+        condition: service_healthy
+    environment:
+      <<: *common_config
+      # Ports configuration
+      KAFKA_CFG_LISTENERS: 'SASL_PLAINTEXT://:9092,PLAINTEXT://:19092,CONTROLLER://:29092'
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL_PLAINTEXT:SASL_PLAINTEXT,PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_CFG_ADVERTISED_LISTENERS: 'SASL_PLAINTEXT://localhost:9097,PLAINTEXT://localhost:19092'
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl-kerberos:29092'
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Replication options
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      # SASL
+      KAFKA_CLIENT_USERS: 'admin'
+      KAFKA_CLIENT_PASSWORDS: 'admin'
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: 'GSSAPI'
+      KAFKA_CFG_SUPER_USERS: 'User:admin;User:broker/broker-sasl-kerberos@EXAMPLE.COM;User:admin-keytab/localhost@EXAMPLE.COM;User:admin-password/localhost@EXAMPLE.COM'
+      KAFKA_CFG_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'false'
+      KAFKA_CFG_SASL_KERBEROS_SERVICE_NAME: 'kafka'
+      KAFKA_OPTS: '-Djava.security.auth.login.config=/opt/bitnami/kafka/config/kafka_jaas.conf -Djava.security.krb5.conf=/etc/krb5.conf'

@@ -467,7 +467,7 @@ export class Admin extends Base<AdminOptions> {
                     return
                   }
 
-                  /* c8 ignore next 5 */
+                  /* c8 ignore next 5 - Hard to test */
                   if (api.version === 4) {
                     api(connection, (options.states as ConsumerGroupState[]) ?? [], retryCallback)
                   } else {

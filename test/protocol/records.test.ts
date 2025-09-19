@@ -389,7 +389,7 @@ test('readRecordsBatch should throw on unsupported compression bitmask', () => {
   // Create a mock batch with an invalid compression bitmask
   const writer = Writer.create()
     .appendInt64(0n) // firstOffset
-    .appendInt32(100) // length
+    .appendInt32(49) // length
     .appendInt32(0) // partitionLeaderEpoch
     .appendInt8(2) // magic
     .appendUnsignedInt32(0) // crc

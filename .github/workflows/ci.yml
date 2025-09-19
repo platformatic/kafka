@@ -20,7 +20,7 @@ jobs:
             test-command: ci
           - node-version: 24.x
             test-command: ci
-    name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.kafka-version }}'
+    name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -41,7 +41,7 @@ jobs:
           version: latest
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
+      - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
         run: docker compose -f docker/compose.yml up -d --wait
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}

@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
-import test, { type TestContext } from 'node:test'
+import test, { before, type TestContext } from 'node:test'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
   AuthenticationError,
@@ -21,6 +21,7 @@ import {
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
+import { createScramUsers } from '../fixtures/create-users.ts'
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
@@ -30,7 +31,9 @@ import {
   mockedOperationId
 } from '../helpers.ts'
 
+// Create passwords as Confluent Kafka images don't support it via environment
 const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+before(() => createScramUsers(saslBroker))
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()

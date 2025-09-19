@@ -12,78 +12,78 @@ jobs:
     strategy:
       matrix:
         include:
-          - label: Node.js 20.19.5 - Kafka 3.5.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 3.5.0
+            node-version: 20
             confluent-kafka-version: 7.5.0
             test-command: ci:v20
-          - label: Node.js 20.19.5 - Kafka 3.6.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 3.6.0
+            node-version: 20
             confluent-kafka-version: 7.6.0
             test-command: ci:v20
-          - label: Node.js 20.19.5 - Kafka 3.7.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 3.7.0
+            node-version: 20
             confluent-kafka-version: 7.7.0
             test-command: ci:v20
-          - label: Node.js 20.19.5 - Kafka 3.8.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 3.8.0
+            node-version: 20
             confluent-kafka-version: 7.8.0
             test-command: ci:v20
-          - label: Node.js 20.19.5 - Kafka 3.9.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 3.9.0
+            node-version: 20
             confluent-kafka-version: 7.9.0
             test-command: ci:v20
-          - label: Node.js 20.19.5 - Kafka 4.0.0
-            node-version: 20.19.5
+          - label: Node.js 20.x - Kafka 4.0.0
+            node-version: 20
             confluent-kafka-version: 8.0.0
             test-command: ci:v20
 
-          - label: Node.js 22.19.0 - Kafka 3.5.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 3.5.0
+            node-version: 22
             confluent-kafka-version: 7.5.0
             test-command: ci
-          - label: Node.js 22.19.0 - Kafka 3.6.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 3.6.0
+            node-version: 22
             confluent-kafka-version: 7.6.0
             test-command: ci
-          - label: Node.js 22.19.0 - Kafka 3.7.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 3.7.0
+            node-version: 22
             confluent-kafka-version: 7.7.0
             test-command: ci
-          - label: Node.js 22.19.0 - Kafka 3.8.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 3.8.0
+            node-version: 22
             confluent-kafka-version: 7.8.0
             test-command: ci
-          - label: Node.js 22.19.0 - Kafka 3.9.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 3.9.0
+            node-version: 22
             confluent-kafka-version: 7.9.0
             test-command: ci
-          - label: Node.js 22.19.0 - Kafka 4.0.0
-            node-version: 22.19.0
+          - label: Node.js 22.x - Kafka 4.0.0
+            node-version: 22
             confluent-kafka-version: 8.0.0
             test-command: ci
 
-          - label: Node.js 24.8.0 - Kafka 3.5.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 3.5.0
+            node-version: 24
             confluent-kafka-version: 7.5.0
             test-command: ci
-          - label: Node.js 24.8.0 - Kafka 3.6.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 3.6.0
+            node-version: 24
             confluent-kafka-version: 7.6.0
             test-command: ci
-          - label: Node.js 24.8.0 - Kafka 3.7.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 3.7.0
+            node-version: 24
             confluent-kafka-version: 7.7.0
             test-command: ci
-          - label: Node.js 24.8.0 - Kafka 3.8.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 3.8.0
+            node-version: 24
             confluent-kafka-version: 7.8.0
             test-command: ci
-          - label: Node.js 24.8.0 - Kafka 3.9.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 3.9.0
+            node-version: 24
             confluent-kafka-version: 7.9.0
             test-command: ci
-          - label: Node.js 24.8.0 - Kafka 4.0.0
-            node-version: 24.8.0
+          - label: Node.js 24.x - Kafka 4.0.0
+            node-version: 24
             confluent-kafka-version: 8.0.0
             test-command: ci
     name: '${{ matrix.label }}'

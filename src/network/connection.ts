@@ -278,6 +278,8 @@ export class Connection extends EventEmitter {
       callback = createPromisifiedCallback()
     }
 
+    clearInterval(this.#reauthenticationTimeout)
+
     if (
       this.#status === ConnectionStatuses.CLOSED ||
       this.#status === ConnectionStatuses.ERROR ||
@@ -292,8 +294,6 @@ export class Connection extends EventEmitter {
 
       return callback[kCallbackPromise]
     }
-
-    clearInterval(this.#reauthenticationTimeout)
 
     // Ignore all disconnection errors
     this.#socket.removeAllListeners('error')

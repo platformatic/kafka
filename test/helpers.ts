@@ -34,7 +34,8 @@ import {
   type Writer
 } from '../src/index.ts'
 
-export const kafkaBootstrapServers = ['localhost:9092']
+export const kafkaBootstrapServers = ['localhost:9011']
+export const kafkaSaslBootstrapServers = ['localhost:9002']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION

@@ -21,6 +21,7 @@ export type DebugDumpLogger = (...args: any[]) => void
 
 export { setTimeout as sleep } from 'node:timers/promises'
 
+/* c8 ignore start - Hard to test */
 function PromiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
   let resolve: (value: T | PromiseLike<T>) => void
   let reject: (reason?: any) => void
@@ -33,7 +34,10 @@ function PromiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
   return { promise, resolve, reject }
 }
 
-export const PromiseWithResolvers = Promise.withResolvers ? Promise.withResolvers.bind(Promise) : PromiseWithResolversPolyfill
+export const PromiseWithResolvers = Promise.withResolvers
+  ? Promise.withResolvers.bind(Promise)
+  : PromiseWithResolversPolyfill
+/* c8 ignore end */
 
 export const ajv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true })
 

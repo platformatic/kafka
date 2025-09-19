@@ -181,6 +181,10 @@ export class ConnectionPool extends EventEmitter {
       this.emit('sasl:authentication', { ...eventPayload, authentication })
     })
 
+    connection.on('sasl:authentication:extended', authentication => {
+      this.emit('sasl:authentication:extended', { ...eventPayload, authentication })
+    })
+
     // Remove stale connections from the pool
     connection.once('close', () => {
       this.emit('disconnect', eventPayload)

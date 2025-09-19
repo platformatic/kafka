@@ -2,7 +2,8 @@ import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
-import { type Connection } from '../../network/connection.ts'
+import { type Connection, type SASLCredentialProvider } from '../../network/connection.ts'
+import { getCredential } from './credential-provider.ts'
 
 const GS2_HEADER = 'n,,'
 const GS2_HEADER_BASE64 = Buffer.from(GS2_HEADER).toString('base64')
@@ -88,43 +89,17 @@ export const defaultCrypto: ScramCryptoModule = {
   xor
 }
 
-// Implements https://datatracker.ietf.org/doc/html/rfc5802#section-9
-export function authenticate (
-  authenticateAPI: SASLAuthenticationAPI,
+function performAuthentication (
   connection: Connection,
   algorithm: ScramAlgorithm,
-  username: string,
-  password: string,
+  definition: ScramAlgorithmDefinition,
+  authenticateAPI: SASLAuthenticationAPI,
   crypto: ScramCryptoModule,
+  username: string,
+  password: string,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
-): void
-export function authenticate (
-  authenticateAPI: SASLAuthenticationAPI,
-  connection: Connection,
-  algorithm: ScramAlgorithm,
-  username: string,
-  password: string,
-  crypto?: ScramCryptoModule
-): Promise<SaslAuthenticateResponse>
-export function authenticate (
-  authenticateAPI: SASLAuthenticationAPI,
-  connection: Connection,
-  algorithm: ScramAlgorithm,
-  username: string,
-  password: string,
-  crypto: ScramCryptoModule = defaultCrypto,
-  callback?: CallbackWithPromise<SaslAuthenticateResponse>
-): void | Promise<SaslAuthenticateResponse> {
-  if (!callback) {
-    callback = createPromisifiedCallback<SaslAuthenticateResponse>()
-  }
-
+) {
   const { h, hi, hmac, xor } = crypto
-  const definition = ScramAlgorithms[algorithm]
-
-  if (!definition) {
-    throw new AuthenticationError(`Unsupported SCRAM algorithm ${algorithm}`)
-  }
 
   const clientNonce = createNonce()
   const clientFirstMessageBare = `n=${sanitizeString(username)},r=${clientNonce}`
@@ -133,7 +108,7 @@ export function authenticate (
   authenticateAPI(connection, Buffer.from(`${GS2_HEADER}${clientFirstMessageBare}`), (error, firstResponse) => {
     if (error) {
       callback(
-        new AuthenticationError('Authentication failed.', { cause: error }),
+        new AuthenticationError('SASL authentication failed.', { cause: error }),
         undefined as unknown as SaslAuthenticateResponse
       )
       return
@@ -189,7 +164,7 @@ export function authenticate (
     ) => {
       if (error) {
         callback(
-          new AuthenticationError('Authentication failed.', { cause: error }),
+          new AuthenticationError('SASL authentication failed.', { cause: error }),
           undefined as unknown as SaslAuthenticateResponse
         )
         return
@@ -207,6 +182,58 @@ export function authenticate (
       }
 
       callback(null, lastResponse)
+    })
+  })
+}
+
+// Implements https://datatracker.ietf.org/doc/html/rfc5802#section-9
+export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
+  connection: Connection,
+  algorithm: ScramAlgorithm,
+  usernameProvider: string | SASLCredentialProvider,
+  passwordProvider: string | SASLCredentialProvider,
+  crypto: ScramCryptoModule,
+  callback: CallbackWithPromise<SaslAuthenticateResponse>
+): void
+export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
+  connection: Connection,
+  algorithm: ScramAlgorithm,
+  usernameProvider: string | SASLCredentialProvider,
+  passwordProvider: string | SASLCredentialProvider,
+  crypto?: ScramCryptoModule
+): Promise<SaslAuthenticateResponse>
+export function authenticate (
+  authenticateAPI: SASLAuthenticationAPI,
+  connection: Connection,
+  algorithm: ScramAlgorithm,
+  usernameProvider: string | SASLCredentialProvider,
+  passwordProvider: string | SASLCredentialProvider,
+  crypto: ScramCryptoModule = defaultCrypto,
+  callback?: CallbackWithPromise<SaslAuthenticateResponse>
+): void | Promise<SaslAuthenticateResponse> {
+  if (!callback) {
+    callback = createPromisifiedCallback<SaslAuthenticateResponse>()
+  }
+
+  const definition = ScramAlgorithms[algorithm]
+
+  if (!definition) {
+    throw new AuthenticationError(`Unsupported SCRAM algorithm ${algorithm}`)
+  }
+
+  getCredential(`SASL/SCRAM-${algorithm} username`, usernameProvider, (error, username) => {
+    if (error) {
+      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+    }
+
+    getCredential(`SASL/SCRAM-${algorithm} password`, passwordProvider, (error, password) => {
+      if (error) {
+        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      }
+
+      performAuthentication(connection, algorithm, definition, authenticateAPI, crypto, username, password, callback)
     })
   })
 

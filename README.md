@@ -281,7 +281,7 @@ Many of the methods accept the same options as the client's constructors. The co
 
 ## Requirements
 
-Node.js LTS versions: 
+Node.js LTS versions:
 
 - `20.19.4` or above
 - `22.18.0` or above
@@ -301,7 +301,7 @@ Edit .env file as needed, enabling or not `JAVA_OPTIONS`
 Start Kafka cluster locally
 
 ```bash
-docker compose -f compose-local.yml up -d
+docker compose -f compose.yml up -d
 ```
 
 ## License

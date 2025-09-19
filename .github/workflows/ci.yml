@@ -11,12 +11,17 @@ jobs:
   ci:
     strategy:
       matrix:
-        # Using the latest LTS versions for CI
-        node-version: [20, 22, 24]
-        os: [ubuntu-latest]
-        # Support for 3.6.0 is not available in CI since the Docker image has issues with option management in regard of SASL/OAUTHBEARER.
-        kafka-version: ['3.5.0', '3.7.0', '3.8.0', '3.9.0', '4.0.0']
-    runs-on: ${{matrix.os}}
+        node-version: [20.x, 22.x, 24.x]
+        confluent-kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0]
+        include:
+          - node-version: 20.x
+            test-command: ci:v20
+          - node-version: 22.x
+            test-command: ci
+          - node-version: 24.x
+            test-command: ci
+    name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -36,16 +41,9 @@ jobs:
           version: latest
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
-        run: docker compose -f docker/compose-ci.yml up -d --wait
+      - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
+        run: docker compose -f docker/compose.yml up -d --wait
         env:
-          KAFKA_VERSION: ${{ matrix.kafka-version }}
+          KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
-        run: |
-          if [ "${{ matrix.node-version }}" = "20" ]; then
-            pnpm run test:ci:v20
-          else
-            pnpm run ci
-          fi
-        env:
-          KAFKA_VERSION: ${{ matrix.kafka-version }}
+        run: 'pnpm run ${{ matrix.test-command }}'

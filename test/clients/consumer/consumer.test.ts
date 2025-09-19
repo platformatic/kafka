@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, partialDeepStrictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
@@ -33,8 +33,9 @@ import {
   offsetFetchV9,
   type Offsets,
   type OffsetsWithTimestamps,
-  type ProducerOptions,
+  parseBroker,
   ProduceAcks,
+  type ProducerOptions,
   ProtocolError,
   type RecordsBatch,
   sleep,
@@ -44,11 +45,12 @@ import {
 } from '../../../src/index.ts'
 import {
   createConsumer,
-  createProducer,
   createCreationChannelVerifier,
   createGroupId,
+  createProducer,
   createTopic,
   createTracingChannelVerifier,
+  kafkaBootstrapServers,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
@@ -56,7 +58,7 @@ import {
   mockedOperationId,
   mockMetadata,
   mockMethod,
-  mockUnavailableAPI,
+  mockUnavailableAPI
 } from '../../helpers.ts'
 
 // This function produces sample messages to a topic for testing the consumer
@@ -67,10 +69,10 @@ async function produceTestMessages ({
   delay = 0,
   overrideOptions
 }: {
-  t: TestContext,
-  messages: MessageToProduce<string, string, string, string>[],
-  batchSize?: number,
-  delay?: number,
+  t: TestContext
+  messages: MessageToProduce<string, string, string, string>[]
+  batchSize?: number
+  delay?: number
   overrideOptions?: Partial<ProducerOptions<Buffer, Buffer, Buffer, Buffer>>
 }): Promise<void> {
   const producer = createProducer(t, overrideOptions)
@@ -81,7 +83,9 @@ async function produceTestMessages ({
         topic: msg.topic,
         key: Buffer.from(msg.key ?? ''),
         value: Buffer.from(msg.value ?? ''),
-        headers: new Map(Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)]))
+        headers: new Map(
+          Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)])
+        )
       })),
       acks: ProduceAcks.LEADER
     })
@@ -95,9 +99,9 @@ async function fetchFromOffset ({
   fetchOffset = 0n,
   partition = 0
 }: {
-  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>,
-  topic: string,
-  fetchOffset: bigint,
+  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>
+  topic: string
+  fetchOffset: bigint
   partition?: number
 }): Promise<FetchResponse> {
   const metadata = await consumer.metadata({ topics: [topic] })
@@ -121,6 +125,8 @@ async function fetchFromOffset ({
     ]
   })
 }
+
+const broker = parseBroker(kafkaBootstrapServers[0])
 
 test('constructor should initialize properly with default options', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -1014,7 +1020,7 @@ test('fetch should handle errors from Connection.get', async t => {
   const topic = await createTopic(t, true)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
   mockConnectionPoolGet(consumer[kFetchConnections], 1)
@@ -1081,7 +1087,7 @@ test('fetch should handle missing nodes from Base.metadata', async t => {
 
   // Mock metadata to fail
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
   // Attempt to fetch with mocked metadata
@@ -1114,7 +1120,7 @@ test('fetch should handle errors from the API', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
   mockAPI(consumer[kFetchConnections], fetchV17.api.key)
@@ -1149,7 +1155,7 @@ test('fetch should handle unavailable API errors', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, host: 'localhost', port: 9092 }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
   mockUnavailableAPI(consumer, 'Fetch')
@@ -1203,14 +1209,11 @@ test('fetch should retrieve messages from multiple batches', async t => {
     }
   })
 
-  const consumer = createConsumer(
-    t,
-    {
-      minBytes: 1024 * 1024,
-      maxBytes: 1024 * 1024 * 10,
-      maxWaitTime: 500
-    }
-  )
+  const consumer = createConsumer(t, {
+    minBytes: 1024 * 1024,
+    maxBytes: 1024 * 1024 * 10,
+    maxWaitTime: 500
+  })
   const fetchResult = await fetchFromOffset({
     consumer,
     topic,
@@ -1226,13 +1229,13 @@ test('fetch should retrieve messages from multiple batches', async t => {
   strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
   for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
     const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
-    partialDeepStrictEqual(recordsBatch, {
-      attributes: 0,
-      magic: 2,
-      firstOffset: BigInt(batchNo * batchSize),
-      lastOffsetDelta: batchSize - 1,
-      length: 184
-    }, 'Should return records batch with correct metadata')
+
+    strictEqual(recordsBatch.attributes, 0)
+    strictEqual(recordsBatch.magic, 2)
+    strictEqual(recordsBatch.firstOffset, BigInt(batchNo * batchSize))
+    strictEqual(recordsBatch.lastOffsetDelta, batchSize - 1)
+    strictEqual(recordsBatch.length, 184)
+
     const records = recordsBatch.records
     strictEqual(records.length, batchSize, 'Should get all messages in batch')
 
@@ -1242,10 +1245,16 @@ test('fetch should retrieve messages from multiple batches', async t => {
         topic,
         key: record.key.toString('utf-8'),
         value: record.value.toString('utf-8'),
-        headers: Object.fromEntries(record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')]))
+        headers: Object.fromEntries(
+          record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')])
+        )
       }
     })
-    deepStrictEqual(fetchMessages, messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize), 'Should match produced messages in batch')
+    deepStrictEqual(
+      fetchMessages,
+      messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize),
+      'Should match produced messages in batch'
+    )
   }
 })
 

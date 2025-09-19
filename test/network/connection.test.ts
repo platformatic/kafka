@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
-import test, { type TestContext } from 'node:test'
+import test, { before, type TestContext } from 'node:test'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
   AuthenticationError,
@@ -13,6 +13,7 @@ import {
   instancesChannel,
   metadataV12,
   NetworkError,
+  parseBroker,
   PromiseWithResolvers,
   type Reader,
   saslHandshakeV1,
@@ -20,14 +21,19 @@ import {
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
+import { createScramUsers } from '../fixtures/create-users.ts'
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
-  isKafka,
+  kafkaSaslBootstrapServers,
   mockConnectionAPI,
   mockedErrorMessage,
   mockedOperationId
 } from '../helpers.ts'
+
+// Create passwords as Confluent Kafka images don't support it via environment
+const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+before(() => createScramUsers(saslBroker))
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -52,9 +58,15 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 }
 
 async function createTLSServer (t: TestContext): Promise<{ server: Server; port: number }> {
+  let tlsFolder = '../../test/fixtures/'
+
+  if (import.meta.url.includes('dist')) {
+    tlsFolder = '../' + tlsFolder
+  }
+
   const server = createSecureServer({
-    key: await readFile(new URL('../fixtures/tls-key.pem', import.meta.url)),
-    cert: await readFile(new URL('../fixtures/tls-cert.pem', import.meta.url))
+    key: await readFile(new URL(tlsFolder + 'tls-key.pem', import.meta.url)),
+    cert: await readFile(new URL(tlsFolder + 'tls-cert.pem', import.meta.url))
   })
   const { promise, resolve, reject } = PromiseWithResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
@@ -924,25 +936,20 @@ test('Connection.connect should not connect to SASL protected broker by default'
   const connection = new Connection('clientId')
   t.after(() => connection.close())
 
-  await connection.connect('localhost', 9095)
+  await connection.connect(saslBroker.host, saslBroker.port)
   await rejects(() => metadataV12.api.async(connection, []))
 })
 
 for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
-  test(
-    `Connection.connect should connect to SASL protected broker using SASL/${mechanism}`,
-    // Disable SCRAM-SHA for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
-    { skip: isKafka('3.5.0') },
-    async t => {
-      const connection = new Connection('clientId', {
-        sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
-      })
-      t.after(() => connection.close())
+  test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
+    const connection = new Connection('clientId', {
+      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
+    })
+    t.after(() => connection.close())
 
-      await connection.connect('localhost', 9095)
-      await metadataV12.api.async(connection, [])
-    }
-  )
+    await connection.connect(saslBroker.host, saslBroker.port)
+    await metadataV12.api.async(connection, [])
+  })
 }
 
 test('Connection.connect should connect to SASL protected broker using SASL/OAUTHBEARER', async t => {
@@ -951,7 +958,7 @@ test('Connection.connect should connect to SASL protected broker using SASL/OAUT
   })
   t.after(() => connection.close())
 
-  await connection.connect('localhost', 9096)
+  await connection.connect(saslBroker.host, saslBroker.port)
   await metadataV12.api.async(connection, [])
 })
 
@@ -962,7 +969,7 @@ test('Connection.connect should reject unsupported mechanisms', async () => {
   })
 
   try {
-    await connection.connect('localhost', 9095)
+    await connection.connect(saslBroker.host, saslBroker.port)
     throw new Error('Expected error not thrown')
   } catch (error) {
     deepStrictEqual(error.cause!.message, 'SASL mechanism WHATEVER not supported.')
@@ -978,7 +985,7 @@ test('Connection.connect should handle handshake errors', async t => {
   mockConnectionAPI(connection, saslHandshakeV1.api.key)
 
   try {
-    await connection.connect('localhost', 9095)
+    await connection.connect(saslBroker.host, saslBroker.port)
     throw new Error('Expected error not thrown')
   } catch (error) {
     ok(error instanceof NetworkError)
@@ -995,7 +1002,7 @@ test('Connection.connect should handle authentication errors', async t => {
   t.after(() => connection.close())
 
   try {
-    await connection.connect('localhost', 9095)
+    await connection.connect(saslBroker.host, saslBroker.port)
     throw new Error('Expected error not thrown')
   } catch (error) {
     ok(error instanceof NetworkError)

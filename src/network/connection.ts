@@ -32,6 +32,7 @@ import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.t
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
 
+export type SASLCredentialProvider = () => string | Promise<string>
 export interface Broker {
   host: string
   port: number
@@ -39,9 +40,9 @@ export interface Broker {
 
 export interface SASLOptions {
   mechanism: SASLMechanism
-  username?: string
-  password?: string
-  token?: string
+  username?: string | SASLCredentialProvider
+  password?: string | SASLCredentialProvider
+  token?: string | SASLCredentialProvider
 }
 
 export interface ConnectionOptions {
@@ -103,6 +104,7 @@ export class Connection extends EventEmitter {
   #responseReader: Reader
   #socket!: Socket
   #socketMustBeDrained: boolean
+  #reauthenticationTimeout!: NodeJS.Timeout
 
   constructor (clientId?: string, options: ConnectionOptions = {}) {
     super()
@@ -276,6 +278,8 @@ export class Connection extends EventEmitter {
       callback = createPromisifiedCallback()
     }
 
+    clearInterval(this.#reauthenticationTimeout)
+
     if (
       this.#status === ConnectionStatuses.CLOSED ||
       this.#status === ConnectionStatuses.ERROR ||
@@ -348,7 +352,9 @@ export class Connection extends EventEmitter {
   }
 
   #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
-    this.#status = ConnectionStatuses.AUTHENTICATING
+    if (this.#status === ConnectionStatuses.CONNECTING) {
+      this.#status = ConnectionStatuses.AUTHENTICATING
+    }
 
     const { mechanism, username, password, token } = this.#options.sasl!
 
@@ -375,22 +381,12 @@ export class Connection extends EventEmitter {
       }
 
       this.emit('sasl:handshake', response.mechanisms)
+      const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
 
       if (mechanism === 'PLAIN') {
-        saslPlain.authenticate(
-          saslAuthenticateV2.api,
-          this,
-          username!,
-          password!,
-          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
-        )
+        saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
       } else if (mechanism === 'OAUTHBEARER') {
-        saslOAuthBearer.authenticate(
-          saslAuthenticateV2.api,
-          this,
-          token!,
-          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
-        )
+        saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,
@@ -399,7 +395,7 @@ export class Connection extends EventEmitter {
           username!,
           password!,
           defaultCrypto,
-          this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+          callback
         )
       }
     })
@@ -455,6 +451,7 @@ export class Connection extends EventEmitter {
       request.diagnostic.error = err as Error
       connectionsApiChannel.error.publish(request.diagnostic)
       throw err
+      /* c8 ignore next 3 - Hard to test */
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }
@@ -471,6 +468,7 @@ export class Connection extends EventEmitter {
   #onConnectionError (host: string, port: number, diagnosticContext: DiagnosticContext, cause: Error): void {
     const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause })
     this.#status = ConnectionStatuses.ERROR
+    clearTimeout(this.#reauthenticationTimeout)
 
     diagnosticContext.error = error
     connectionsConnectsChannel.error.publish(diagnosticContext)
@@ -489,9 +487,9 @@ export class Connection extends EventEmitter {
     response: SaslAuthenticateResponse
   ): void {
     if (error) {
-      const protocolError = (error as MultipleErrors).errors[0] as ProtocolError
+      const protocolError = (error as MultipleErrors).errors?.[0] as ProtocolError
 
-      if (protocolError.apiId === 'SASL_AUTHENTICATION_FAILED') {
+      if (protocolError?.apiId === 'SASL_AUTHENTICATION_FAILED') {
         error = new AuthenticationError('SASL authentication failed.', { cause: error })
       }
 
@@ -499,8 +497,28 @@ export class Connection extends EventEmitter {
       return
     }
 
-    this.emit('sasl:authentication', response.authBytes)
-    this.#onConnectionSucceed(diagnosticContext)
+    if (response.sessionLifetimeMs > 0) {
+      this.#reauthenticationTimeout = setTimeout(
+        () => {
+          const diagnosticContext = createDiagnosticContext({
+            connection: this,
+            operation: 'reauthenticate',
+            host,
+            port
+          })
+
+          this.#authenticate(host, port, diagnosticContext)
+        },
+        Number(response.sessionLifetimeMs) * 0.8
+      )
+    }
+
+    if (this.#status === ConnectionStatuses.CONNECTED) {
+      this.emit('sasl:authentication:extended', response.authBytes)
+    } else {
+      this.emit('sasl:authentication', response.authBytes)
+      this.#onConnectionSucceed(diagnosticContext)
+    }
   }
 
   /*
@@ -630,6 +648,7 @@ export class Connection extends EventEmitter {
   }
 
   #onError (error: Error): void {
+    clearTimeout(this.#reauthenticationTimeout)
     this.emit('error', new NetworkError('Connection error', { cause: error }))
   }
 }

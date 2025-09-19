@@ -75,7 +75,7 @@ test('parseResponse correctly processes a successful response', () => {
 test('parseResponse handles response with detailed error message', () => {
   // Create a response with error details
   const writer = Writer.create()
-    .appendInt16(58) // errorCode (SASL Authentication failed)
+    .appendInt16(58) // errorCode (SASL authentication failed)
     .appendString('Authentication failed: Invalid credentials', true) // error message
     .appendBytes(Buffer.alloc(0)) // empty auth bytes on failure
     .appendInt64(0n) // no session on failure

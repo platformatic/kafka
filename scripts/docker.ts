@@ -19,16 +19,16 @@ if (lastArg !== -1) {
 }
 
 const {
-  values: { version, configuration }
+  values: { version }
 } = parseArgs({
   args: scriptArgs,
   options: {
-    version: { type: 'string', short: 'v', default: '3.9.0' },
-    configuration: { type: 'string', short: 'c', default: 'local' }
+    // Rule of thumb: Confluent Kafka Version = Apache Kafka Version + 4.0.0
+    version: { type: 'string', short: 'v', default: '7.9.0' }
   }
 })
 
-dockerComposeArgs.unshift('-f', `compose-${configuration}.yml`)
+dockerComposeArgs.unshift('-f', 'compose.yml')
 const bin = execSync('which docker-compose', { encoding: 'utf8' }).trim()
 console.log(`Executing \x1b[1mKAFKA_VERSION=${version} ${[bin, ...dockerComposeArgs].join(' ')}\x1b[22m ...\x1b[0m`)
 

@@ -25,6 +25,7 @@ import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker, type Connection, type ConnectionOptions } from '../../network/connection.ts'
+import { parseBroker } from '../../network/utils.ts'
 import { kInstance } from '../../symbols.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
 import { type Metrics } from '../metrics.ts'
@@ -53,7 +54,6 @@ export const kListApis = Symbol('plt.kafka.base.listApis')
 export const kMetadata = Symbol('plt.kafka.base.metadata')
 export const kCheckNotClosed = Symbol('plt.kafka.base.checkNotClosed')
 export const kClearMetadata = Symbol('plt.kafka.base.clearMetadata')
-export const kParseBroker = Symbol('plt.kafka.base.parseBroker')
 export const kPerformWithRetry = Symbol('plt.kafka.base.performWithRetry')
 export const kPerformDeduplicated = Symbol('plt.kafka.base.performDeduplicated')
 export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
@@ -103,7 +103,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     // Initialize bootstrap brokers
     this[kBootstrapBrokers] = []
     for (const broker of options.bootstrapBrokers) {
-      this[kBootstrapBrokers].push(this[kParseBroker](broker))
+      this[kBootstrapBrokers].push(parseBroker(broker, defaultPort))
     }
 
     // Initialize main connection pool
@@ -281,7 +281,15 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       ...(this[kOptions] as ConnectionOptions)
     })
 
-    this.#forwardEvents(pool, ['connect', 'disconnect', 'failed', 'drain', 'sasl:handshake', 'sasl:authentication'])
+    this.#forwardEvents(pool, [
+      'connect',
+      'disconnect',
+      'failed',
+      'drain',
+      'sasl:handshake',
+      'sasl:authentication',
+      'sasl:authentication:extended'
+    ])
 
     return pool
   }
@@ -336,7 +344,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
 
     // All topics are already up-to-date, simply return them
-    if (this.#metadata && !topicsToFetch.length) {
+    if (this.#metadata && !topicsToFetch.length && !options.forceUpdate) {
       callback(null, {
         ...this.#metadata!,
         topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
@@ -454,19 +462,6 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
   [kClearMetadata] (): void {
     this.#metadata = undefined
-  }
-
-  [kParseBroker] (broker: Broker | string): Broker {
-    if (typeof broker === 'string') {
-      if (broker.includes(':')) {
-        const [host, port] = broker.split(':')
-        return { host, port: Number(port) }
-      } else {
-        return { host: broker, port: defaultPort }
-      }
-    }
-
-    return broker
   }
 
   [kPerformWithRetry]<ReturnType> (

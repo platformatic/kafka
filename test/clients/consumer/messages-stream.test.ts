@@ -38,6 +38,7 @@ import {
   createTopic,
   createTracingChannelVerifier,
   executeWithTimeout,
+  kafkaBootstrapServers,
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata
@@ -49,8 +50,6 @@ interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   consumer: Consumer<K, V, HK, HV>
   timeout: boolean
 }
-
-const kafkaBootstrapServers = ['localhost:9092']
 
 // Helper functions
 function createTestGroupId () {

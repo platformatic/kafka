@@ -1,49 +1,55 @@
 import { deepStrictEqual, ok, rejects } from 'node:assert'
 import { once } from 'node:events'
-import { test } from 'node:test'
+import { before, test } from 'node:test'
 import {
   AuthenticationError,
   Base,
   MultipleErrors,
   NetworkError,
+  parseBroker,
   sleep,
   type SASLMechanism
 } from '../../../src/index.ts'
-import { isKafka } from '../../helpers.ts'
+import { createScramUsers } from '../../fixtures/create-users.ts'
+import { kafkaSaslBootstrapServers } from '../../helpers.ts'
 
-test('should not connect to SASL protected broker by default', async t => {
-  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9095'], strict: true, retries: false })
+// Create passwords as Confluent Kafka images don't support it via environment
+const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+before(() => createScramUsers(saslBroker))
+
+test('UNAUTHENTICATED - should not connect to SASL protected broker by default', async t => {
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: kafkaSaslBootstrapServers,
+    strict: true,
+    retries: false
+  })
   t.after(() => base.close())
 
   await rejects(() => base.metadata({ topics: [] }))
 })
 
 for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
-  test(
-    `${mechanism} - should connect to SASL protected broker`,
-    // Disable SCRAM-SHA for Kafka 3.5.0 due to known issues in the image bitnami/kafka:3.5.0
-    { skip: isKafka('3.5.0') },
-    async t => {
-      const base = new Base({
-        clientId: 'clientId',
-        bootstrapBrokers: ['localhost:9095'],
-        strict: true,
-        retries: 0,
-        sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
-      })
+  test(`${mechanism} - should connect to SASL protected broker`, async t => {
+    const base = new Base({
+      clientId: 'clientId',
+      bootstrapBrokers: kafkaSaslBootstrapServers,
+      strict: true,
+      retries: 0,
+      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
+    })
 
-      t.after(() => base.close())
+    t.after(() => base.close())
 
-      const metadata = await base.metadata({ topics: [] })
+    const metadata = await base.metadata({ topics: [] })
 
-      deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
-    }
-  )
+    deepStrictEqual(metadata.brokers.get(1), saslBroker)
+  })
 
   test(`${mechanism} - should handle authentication errors`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       retries: 0,
       sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'invalid' }
     })
@@ -62,7 +68,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
   test(`${mechanism} - should accept a function as credential provider`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
       sasl: {
@@ -78,13 +84,13 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
 
     const metadata = await base.metadata({ topics: [] })
 
-    deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
+    deepStrictEqual(metadata.brokers.get(1), saslBroker)
   })
 
   test(`${mechanism} - should accept an async function as credential provider`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
       sasl: {
@@ -101,13 +107,13 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
 
     const metadata = await base.metadata({ topics: [] })
 
-    deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
+    deepStrictEqual(metadata.brokers.get(1), saslBroker)
   })
 
   test(`${mechanism} - should handle sync credential provider errors`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
       sasl: {
@@ -128,7 +134,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
 
       const networkError = error.errors[0]
       deepStrictEqual(networkError instanceof NetworkError, true)
-      deepStrictEqual(networkError.message, 'Connection to localhost:9095 failed.')
+      deepStrictEqual(networkError.message, `Connection to ${kafkaSaslBootstrapServers[0]} failed.`)
 
       const authenticationError = networkError.cause
       deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -140,7 +146,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
   test(`${mechanism} - should handle async credential provider errors`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
       sasl: {
@@ -162,7 +168,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
 
       const networkError = error.errors[0]
       deepStrictEqual(networkError instanceof NetworkError, true)
-      deepStrictEqual(networkError.message, 'Connection to localhost:9095 failed.')
+      deepStrictEqual(networkError.message, `Connection to ${kafkaSaslBootstrapServers[0]} failed.`)
 
       const authenticationError = networkError.cause
       deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -174,7 +180,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
   test(`${mechanism} - should automatically refresh expired tokens when the server provides a session_lifetime`, async t => {
     const base = new Base({
       clientId: 'clientId',
-      bootstrapBrokers: ['localhost:9095'],
+      bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
       sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }

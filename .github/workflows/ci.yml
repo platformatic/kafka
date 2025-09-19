@@ -11,12 +11,83 @@ jobs:
   ci:
     strategy:
       matrix:
-        # Using the latest LTS versions for CI
-        node-version: [20, 22, 24]
-        os: [ubuntu-latest]
-        # Support for 3.6.0 is not available in CI since the Docker image has issues with option management in regard of SASL/OAUTHBEARER.
-        kafka-version: ['3.5.0', '3.7.0', '3.8.0', '3.9.0', '4.0.0']
-    runs-on: ${{matrix.os}}
+        include:
+          - label: Node.js 20.19.5 - Kafka 3.5.0
+            node: 20.19.5
+            confluent-kafka-version: 7.5.0
+            os: ubuntu-24.04
+          - label: Node.js 20.19.5 - Kafka 3.6.0
+            node: 20.19.5
+            confluent-kafka-version: 7.6.0
+            os: ubuntu-24.04
+          - label: Node.js 20.19.5 - Kafka 3.7.0
+            node: 20.19.5
+            confluent-kafka-version: 7.7.0
+            os: ubuntu-24.04
+          - label: Node.js 20.19.5 - Kafka 3.8.0
+            node: 20.19.5
+            confluent-kafka-version: 7.8.0
+            os: ubuntu-24.04
+          - label: Node.js 20.19.5 - Kafka 3.9.0
+            node: 20.19.5
+            confluent-kafka-version: 7.9.0
+            os: ubuntu-24.04
+          - label: Node.js 20.19.5 - Kafka 4.0.0
+            node: 20.19.5
+            confluent-kafka-version: 8.0.0
+            os: ubuntu-24.04
+
+          - label: Node.js 22.19.0 - Kafka 3.5.0
+            node: 22.19.0
+            confluent-kafka-version: 7.5.0
+            os: ubuntu-24.04
+          - label: Node.js 22.19.0 - Kafka 3.6.0
+            node: 22.19.0
+            confluent-kafka-version: 7.6.0
+            os: ubuntu-24.04
+          - label: Node.js 22.19.0 - Kafka 3.7.0
+            node: 22.19.0
+            confluent-kafka-version: 7.7.0
+            os: ubuntu-24.04
+          - label: Node.js 22.19.0 - Kafka 3.8.0
+            node: 22.19.0
+            confluent-kafka-version: 7.8.0
+            os: ubuntu-24.04
+          - label: Node.js 22.19.0 - Kafka 3.9.0
+            node: 22.19.0
+            confluent-kafka-version: 7.9.0
+            os: ubuntu-24.04
+          - label: Node.js 22.19.0 - Kafka 4.0.0
+            node: 22.19.0
+            confluent-kafka-version: 8.0.0
+            os: ubuntu-24.04
+
+          - label: Node.js 24.8.0 - Kafka 3.5.0
+            node: 24.8.0
+            confluent-kafka-version: 7.5.0
+            os: ubuntu-24.04
+          - label: Node.js 24.8.0 - Kafka 3.6.0
+            node: 24.8.0
+            confluent-kafka-version: 7.6.0
+            os: ubuntu-24.04
+          - label: Node.js 24.8.0 - Kafka 3.7.0
+            node: 24.8.0
+            confluent-kafka-version: 7.7.0
+            os: ubuntu-24.04
+          - label: Node.js 24.8.0 - Kafka 3.8.0
+            node: 24.8.0
+            confluent-kafka-version: 7.8.0
+            os: ubuntu-24.04
+          - label: Node.js 24.8.0 - Kafka 3.9.0
+            node: 24.8.0
+            confluent-kafka-version: 7.9.0
+            os: ubuntu-24.04
+          - label: Node.js 24.8.0 - Kafka 4.0.0
+            node: 24.8.0
+            confluent-kafka-version: 8.0.0
+            os: ubuntu-24.04
+    name: '${{ matrix.label }}'
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -37,15 +108,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.kafka-version }}) Cluster
-        run: docker compose -f docker/compose-ci.yml up -d --wait
+        run: docker compose -f docker/compose.yml up -d --wait
         env:
-          KAFKA_VERSION: ${{ matrix.kafka-version }}
+          KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
         run: |
-          if [ "${{ matrix.node-version }}" = "20" ]; then
+          if [ "${{ matrix.node }}" = "20" ]; then
             pnpm run test:ci:v20
           else
             pnpm run ci
           fi
-        env:
-          KAFKA_VERSION: ${{ matrix.kafka-version }}

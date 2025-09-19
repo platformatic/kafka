@@ -2,10 +2,18 @@ import { createSigner } from 'fast-jwt'
 import { deepStrictEqual, rejects } from 'node:assert'
 import { once } from 'node:events'
 import { test } from 'node:test'
-import { AuthenticationError, Base, NetworkError, sleep } from '../../../src/index.ts'
+import { AuthenticationError, Base, NetworkError, parseBroker, sleep } from '../../../src/index.ts'
+import { kafkaSaslBootstrapServers } from '../../helpers.ts'
+
+const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
 
 test('should not connect to SASL protected broker by default', async t => {
-  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9095'], strict: true, retries: false })
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: kafkaSaslBootstrapServers,
+    strict: true,
+    retries: false
+  })
   t.after(() => base.close())
 
   await rejects(() => base.metadata({ topics: [] }))
@@ -23,7 +31,7 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
 
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: { mechanism: 'OAUTHBEARER', token }
@@ -33,7 +41,7 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
+  deepStrictEqual(metadata.brokers.get(1), saslBroker)
 })
 
 // The 'should handle authentication errors' is not possible here as the Kafka unsecured validator accepts any token
@@ -50,7 +58,7 @@ test('should accept a function as credential provider', async t => {
 
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: {
@@ -65,7 +73,7 @@ test('should accept a function as credential provider', async t => {
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
+  deepStrictEqual(metadata.brokers.get(1), saslBroker)
 })
 
 test('should accept an async function as credential provider', async t => {
@@ -80,7 +88,7 @@ test('should accept an async function as credential provider', async t => {
 
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: {
@@ -96,13 +104,13 @@ test('should accept an async function as credential provider', async t => {
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9095 })
+  deepStrictEqual(metadata.brokers.get(1), saslBroker)
 })
 
 test('should handle sync credential provider errors', async t => {
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: {
@@ -123,7 +131,7 @@ test('should handle sync credential provider errors', async t => {
 
     const networkError = error.errors[0]
     deepStrictEqual(networkError instanceof NetworkError, true)
-    deepStrictEqual(networkError.message, 'Connection to localhost:9095 failed.')
+    deepStrictEqual(networkError.message, `Connection to ${kafkaSaslBootstrapServers[0]} failed.`)
 
     const authenticationError = networkError.cause
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -135,7 +143,7 @@ test('should handle sync credential provider errors', async t => {
 test('should handle async credential provider errors', async t => {
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: {
@@ -156,7 +164,7 @@ test('should handle async credential provider errors', async t => {
 
     const networkError = error.errors[0]
     deepStrictEqual(networkError instanceof NetworkError, true)
-    deepStrictEqual(networkError.message, 'Connection to localhost:9095 failed.')
+    deepStrictEqual(networkError.message, `Connection to ${kafkaSaslBootstrapServers[0]} failed.`)
 
     const authenticationError = networkError.cause
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -168,7 +176,7 @@ test('should handle async credential provider errors', async t => {
 test('should automatically refresh expired tokens when the server provides a session_lifetime', async t => {
   const base = new Base({
     clientId: 'clientId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
     sasl: {

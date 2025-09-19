@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
-import { resolve as resolvePath } from 'node:path'
 import test, { before, type TestContext } from 'node:test'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
@@ -59,9 +58,15 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
 }
 
 async function createTLSServer (t: TestContext): Promise<{ server: Server; port: number }> {
+  let tlsFolder = '../../test/fixtures/'
+
+  if (import.meta.url.includes('dist')) {
+    tlsFolder = '../' + tlsFolder
+  }
+
   const server = createSecureServer({
-    key: await readFile(resolvePath(process.cwd(), 'test/fixtures/tls-key.pem')),
-    cert: await readFile(resolvePath(process.cwd(), 'test/fixtures/tls-cert.pem'))
+    key: await readFile(new URL(tlsFolder + 'tls-key.pem', import.meta.url)),
+    cert: await readFile(new URL(tlsFolder + 'tls-cert.pem', import.meta.url))
   })
   const { promise, resolve, reject } = PromiseWithResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []

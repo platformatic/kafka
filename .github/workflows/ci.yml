@@ -15,77 +15,77 @@ jobs:
           - label: Node.js 20.19.5 - Kafka 3.5.0
             node-version: 20.19.5
             confluent-kafka-version: 7.5.0
-            os: ubuntu-24.04
+            test-command: ci:v20
           - label: Node.js 20.19.5 - Kafka 3.6.0
             node-version: 20.19.5
             confluent-kafka-version: 7.6.0
-            os: ubuntu-24.04
+            test-command: ci:v20
           - label: Node.js 20.19.5 - Kafka 3.7.0
             node-version: 20.19.5
             confluent-kafka-version: 7.7.0
-            os: ubuntu-24.04
+            test-command: ci:v20
           - label: Node.js 20.19.5 - Kafka 3.8.0
             node-version: 20.19.5
             confluent-kafka-version: 7.8.0
-            os: ubuntu-24.04
+            test-command: ci:v20
           - label: Node.js 20.19.5 - Kafka 3.9.0
             node-version: 20.19.5
             confluent-kafka-version: 7.9.0
-            os: ubuntu-24.04
+            test-command: ci:v20
           - label: Node.js 20.19.5 - Kafka 4.0.0
             node-version: 20.19.5
             confluent-kafka-version: 8.0.0
-            os: ubuntu-24.04
+            test-command: ci:v20
 
           - label: Node.js 22.19.0 - Kafka 3.5.0
             node-version: 22.19.0
             confluent-kafka-version: 7.5.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 22.19.0 - Kafka 3.6.0
             node-version: 22.19.0
             confluent-kafka-version: 7.6.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 22.19.0 - Kafka 3.7.0
             node-version: 22.19.0
             confluent-kafka-version: 7.7.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 22.19.0 - Kafka 3.8.0
             node-version: 22.19.0
             confluent-kafka-version: 7.8.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 22.19.0 - Kafka 3.9.0
             node-version: 22.19.0
             confluent-kafka-version: 7.9.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 22.19.0 - Kafka 4.0.0
             node-version: 22.19.0
             confluent-kafka-version: 8.0.0
-            os: ubuntu-24.04
+            test-command: ci
 
           - label: Node.js 24.8.0 - Kafka 3.5.0
             node-version: 24.8.0
             confluent-kafka-version: 7.5.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 24.8.0 - Kafka 3.6.0
             node-version: 24.8.0
             confluent-kafka-version: 7.6.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 24.8.0 - Kafka 3.7.0
             node-version: 24.8.0
             confluent-kafka-version: 7.7.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 24.8.0 - Kafka 3.8.0
             node-version: 24.8.0
             confluent-kafka-version: 7.8.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 24.8.0 - Kafka 3.9.0
             node-version: 24.8.0
             confluent-kafka-version: 7.9.0
-            os: ubuntu-24.04
+            test-command: ci
           - label: Node.js 24.8.0 - Kafka 4.0.0
             node-version: 24.8.0
             confluent-kafka-version: 8.0.0
-            os: ubuntu-24.04
+            test-command: ci
     name: '${{ matrix.label }}'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -112,9 +112,4 @@ jobs:
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
-        run: |
-          if [ "${{ matrix.node-version }}" = "20" ]; then
-            pnpm run test:ci:v20
-          else
-            pnpm run ci
-          fi
+        run: 'pnpm run ${{ matrix.test-command }}'

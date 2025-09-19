@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, partialDeepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
@@ -1229,17 +1229,13 @@ test('fetch should retrieve messages from multiple batches', async t => {
   strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
   for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
     const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
-    partialDeepStrictEqual(
-      recordsBatch,
-      {
-        attributes: 0,
-        magic: 2,
-        firstOffset: BigInt(batchNo * batchSize),
-        lastOffsetDelta: batchSize - 1,
-        length: 184
-      },
-      'Should return records batch with correct metadata'
-    )
+
+    strictEqual(recordsBatch.attributes, 0)
+    strictEqual(recordsBatch.magic, 2)
+    strictEqual(recordsBatch.firstOffset, BigInt(batchNo * batchSize))
+    strictEqual(recordsBatch.lastOffsetDelta, batchSize - 1)
+    strictEqual(recordsBatch.length, 184)
+
     const records = recordsBatch.records
     strictEqual(records.length, batchSize, 'Should get all messages in batch')
 

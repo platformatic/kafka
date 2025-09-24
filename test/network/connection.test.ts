@@ -4,6 +4,7 @@ import { type AddressInfo, createServer as createNetworkServer, type Server, Soc
 import test, { before, type TestContext } from 'node:test'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
+  allowedSASLMechanisms,
   AuthenticationError,
   Connection,
   type ConnectionDiagnosticEvent,
@@ -17,7 +18,8 @@ import {
   PromiseWithResolvers,
   type Reader,
   saslHandshakeV1,
-  type SASLMechanism,
+  SASLMechanisms,
+  type SASLOptions,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
@@ -940,27 +942,20 @@ test('Connection.connect should not connect to SASL protected broker by default'
   await rejects(() => metadataV12.api.async(connection, []))
 })
 
-for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
+for (const mechanism of allowedSASLMechanisms) {
+  const sasl: SASLOptions =
+    mechanism === 'OAUTHBEARER'
+      ? { mechanism, token: 'token' }
+      : { mechanism, username: 'admin', password: 'admin', serviceName: 'kafka' }
+
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
-    const connection = new Connection('clientId', {
-      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
-    })
+    const connection = new Connection('clientId', { sasl })
     t.after(() => connection.close())
 
     await connection.connect(saslBroker.host, saslBroker.port)
     await metadataV12.api.async(connection, [])
   })
 }
-
-test('Connection.connect should connect to SASL protected broker using SASL/OAUTHBEARER', async t => {
-  const connection = new Connection('clientId', {
-    sasl: { mechanism: 'OAUTHBEARER', token: 'token' }
-  })
-  t.after(() => connection.close())
-
-  await connection.connect(saslBroker.host, saslBroker.port)
-  await metadataV12.api.async(connection, [])
-})
 
 test('Connection.connect should reject unsupported mechanisms', async () => {
   const connection = new Connection('clientId', {
@@ -978,7 +973,7 @@ test('Connection.connect should reject unsupported mechanisms', async () => {
 
 test('Connection.connect should handle handshake errors', async t => {
   const connection = new Connection('clientId', {
-    sasl: { mechanism: 'PLAIN', username: 'admin', password: 'admin' }
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' }
   })
   t.after(() => connection.close())
 
@@ -997,7 +992,7 @@ test('Connection.connect should handle handshake errors', async t => {
 
 test('Connection.connect should handle authentication errors', async t => {
   const connection = new Connection('clientId', {
-    sasl: { mechanism: 'PLAIN', username: 'admin', password: 'invalid' }
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'invalid' }
   })
   t.after(() => connection.close())
 

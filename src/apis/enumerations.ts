@@ -1,6 +1,15 @@
 // SASL Authentication
-export const SASLMechanisms = ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512', 'OAUTHBEARER'] as const
-export type SASLMechanism = (typeof SASLMechanisms)[number]
+export const SASLMechanisms = {
+  PLAIN: 'PLAIN',
+  SCRAM_SHA_256: 'SCRAM-SHA-256',
+  SCRAM_SHA_512: 'SCRAM-SHA-512',
+  OAUTHBEARER: 'OAUTHBEARER'
+} as const
+
+export const allowedSASLMechanisms = Object.values(SASLMechanisms) as SASLMechanismValue[]
+
+export type SASLMechanism = keyof typeof SASLMechanisms
+export type SASLMechanismValue = (typeof SASLMechanisms)[keyof typeof SASLMechanisms]
 
 // Metadata API
 // ./metadata/find-coordinator.ts
@@ -13,11 +22,13 @@ export const ProduceAcks = {
   NO_RESPONSE: 0,
   LEADER: 1
 } as const
+export const allowedProduceAcks = Object.values(ProduceAcks) as number[]
 export type ProduceAck = keyof typeof ProduceAcks
 
 // Consumer API
 // ./consumer/fetch.ts
 export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }
+export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels) as number[]
 export type FetchIsolationLevel = keyof typeof FetchIsolationLevels
 
 export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n }

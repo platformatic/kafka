@@ -4,7 +4,7 @@ import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
-import { type SASLMechanism, SASLMechanisms } from '../apis/enumerations.ts'
+import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
 import { saslAuthenticateV2, saslHandshakeV1 } from '../apis/index.ts'
 import { type SaslAuthenticateResponse } from '../apis/security/sasl-authenticate-v2.ts'
 import {
@@ -39,7 +39,7 @@ export interface Broker {
 }
 
 export interface SASLOptions {
-  mechanism: SASLMechanism
+  mechanism: SASLMechanismValue
   username?: string | SASLCredentialProvider
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
@@ -359,7 +359,7 @@ export class Connection extends EventEmitter {
 
     const { mechanism, username, password, token } = this.#options.sasl!
 
-    if (!SASLMechanisms.includes(mechanism)) {
+    if (!allowedSASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
         host,
         port,
@@ -384,9 +384,9 @@ export class Connection extends EventEmitter {
       this.emit('sasl:handshake', response.mechanisms)
       const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
 
-      if (mechanism === 'PLAIN') {
+      if (mechanism === SASLMechanisms.PLAIN) {
         saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
-      } else if (mechanism === 'OAUTHBEARER') {
+      } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
       } else {
         saslScramSha.authenticate(
@@ -524,7 +524,12 @@ export class Connection extends EventEmitter {
     authBytes?: Buffer
   ): void {
     if (error) {
-      this.#onConnectionError(host, port, diagnosticContext, error)
+      this.#onConnectionError(
+        host,
+        port,
+        diagnosticContext,
+        new AuthenticationError('SASL authentication failed.', { cause: error })
+      )
       return
     }
 

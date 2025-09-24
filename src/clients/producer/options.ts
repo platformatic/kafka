@@ -1,5 +1,5 @@
-import { ProduceAcks } from '../../apis/enumerations.ts'
-import { compressionsAlgorithms } from '../../protocol/compression.ts'
+import { allowedProduceAcks, ProduceAcks } from '../../apis/enumerations.ts'
+import { allowedCompressionsAlgorithms, compressionsAlgorithms } from '../../protocol/compression.ts'
 import { messageSchema } from '../../protocol/records.ts'
 import { ajv, enumErrorMessage } from '../../utils.ts'
 import { serdeProperties } from '../serde.ts'
@@ -11,15 +11,15 @@ export const produceOptionsProperties = {
   acks: {
     type: 'number',
     enumeration: {
-      allowed: Object.values(ProduceAcks),
+      allowed: allowedProduceAcks,
       errorMessage: enumErrorMessage(ProduceAcks)
     }
   },
   compression: {
     type: 'string',
     enumeration: {
-      allowed: Object.keys(compressionsAlgorithms),
-      errorMessage: enumErrorMessage(compressionsAlgorithms, true)
+      allowed: allowedCompressionsAlgorithms,
+      errorMessage: enumErrorMessage(compressionsAlgorithms)
     }
   },
   partitioner: { function: true },

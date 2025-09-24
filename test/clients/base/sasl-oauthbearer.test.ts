@@ -1,8 +1,17 @@
 import { createSigner } from 'fast-jwt'
-import { deepStrictEqual, rejects } from 'node:assert'
+import { deepStrictEqual, ok, rejects } from 'node:assert'
 import { once } from 'node:events'
 import { test } from 'node:test'
-import { AuthenticationError, Base, NetworkError, parseBroker, sleep } from '../../../src/index.ts'
+import {
+  AuthenticationError,
+  Base,
+  MultipleErrors,
+  NetworkError,
+  parseBroker,
+  SASLMechanisms,
+  saslOAuthBearer,
+  sleep
+} from '../../../src/index.ts'
 import { kafkaSaslBootstrapServers } from '../../helpers.ts'
 
 const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
@@ -34,7 +43,7 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
     bootstrapBrokers: kafkaSaslBootstrapServers,
     strict: true,
     retries: 0,
-    sasl: { mechanism: 'OAUTHBEARER', token }
+    sasl: { mechanism: SASLMechanisms.OAUTHBEARER, token }
   })
 
   t.after(() => base.close())
@@ -44,7 +53,28 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
   deepStrictEqual(metadata.brokers.get(1), saslBroker)
 })
 
-// The 'should handle authentication errors' is not possible here as the Kafka unsecured validator accepts any token
+test('should handle authentication errors', async t => {
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: kafkaSaslBootstrapServers,
+    retries: 0,
+    sasl: {
+      mechanism: 'OAUTHBEARER',
+      token: 'invalid',
+      authBytesValidator: saslOAuthBearer.jwtValidateAuthenticationBytes
+    }
+  })
+
+  t.after(() => base.close())
+
+  try {
+    await base.metadata({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    ok(error instanceof MultipleErrors)
+    deepStrictEqual(error.errors[0].cause.message, 'SASL authentication failed.')
+  }
+})
 
 test('should accept a function as credential provider', async t => {
   const signSync = createSigner({

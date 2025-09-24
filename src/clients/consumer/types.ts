@@ -51,6 +51,8 @@ export const MessagesStreamModes = {
   COMMITTED: 'committed',
   MANUAL: 'manual'
 } as const
+export const allowedMessagesStreamModes = Object.values(MessagesStreamModes) as MessagesStreamModeValue[]
+
 export type MessagesStreamMode = keyof typeof MessagesStreamModes
 export type MessagesStreamModeValue = (typeof MessagesStreamModes)[keyof typeof MessagesStreamModes]
 
@@ -59,9 +61,14 @@ export const MessagesStreamFallbackModes = {
   EARLIEST: 'earliest',
   FAIL: 'fail'
 } as const
+export const allowedMessagesStreamFallbackModes = Object.values(
+  MessagesStreamFallbackModes
+) as MessagesStreamFallbackModeValue[]
+
 export type MessagesStreamFallbackMode = keyof typeof MessagesStreamFallbackModes
 export type MessagesStreamFallbackModeValue =
   (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
+
 export interface GroupOptions {
   sessionTimeout?: number
   rebalanceTimeout?: number

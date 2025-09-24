@@ -5,9 +5,14 @@ import { type Connection, type SASLCredentialProvider } from '../../network/conn
 import { getCredential } from './credential-provider.ts'
 
 export function jwtValidateAuthenticationBytes (authBytes: Buffer, callback: CallbackWithPromise<Buffer>): void {
-  let authData: Record<string, string>
+  let authData: Record<string, string> = {}
+
   try {
-    authData = authBytes.length > 0 ? JSON.parse(authBytes.toString('utf-8')) : {}
+    if (authBytes.length > 0) {
+      authData = JSON.parse(authBytes.toString('utf-8'))
+    }
+
+    /* c8 ignore next 8  - Hard to test */
   } catch (e) {
     callback(
       new AuthenticationError('Invalid authBytes in SASL/OAUTHBEARER response', { authBytes }),

@@ -27,6 +27,8 @@ export const CompressionAlgorithms = {
   LZ4: 'lz4',
   ZSTD: 'zstd'
 } as const
+
+export const allowedCompressionsAlgorithms = Object.values(CompressionAlgorithms) as CompressionAlgorithmValue[]
 export type CompressionAlgorithm = keyof typeof CompressionAlgorithms
 export type CompressionAlgorithmValue = (typeof CompressionAlgorithms)[keyof typeof CompressionAlgorithms]
 

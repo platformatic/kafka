@@ -1,4 +1,4 @@
-import { SASLMechanisms } from '../../apis/enumerations.ts'
+import { allowedSASLMechanisms } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { version } from '../../version.ts'
 import { type BaseOptions } from './types.ts'
@@ -41,7 +41,7 @@ export const baseOptionsSchema = {
     sasl: {
       type: 'object',
       properties: {
-        mechanism: { type: 'string', enum: SASLMechanisms },
+        mechanism: { type: 'string', enum: allowedSASLMechanisms },
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },

@@ -1,8 +1,8 @@
-import { FetchIsolationLevels } from '../../apis/enumerations.ts'
+import { allowedFetchIsolationLevels } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
-import { MessagesStreamFallbackModes, MessagesStreamModes, type ConsumerOptions } from './types.ts'
+import { allowedMessagesStreamFallbackModes, allowedMessagesStreamModes, type ConsumerOptions } from './types.ts'
 
 export const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
@@ -59,7 +59,7 @@ export const consumeOptionsProperties = {
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
   maxWaitTime: { type: 'number', minimum: 0 },
-  isolationLevel: { type: 'string', enum: Object.keys(FetchIsolationLevels) },
+  isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
   deserializers: serdeProperties,
   highWaterMark: { type: 'number', minimum: 1 }
 }
@@ -74,8 +74,8 @@ export const consumeOptionsSchema = {
   type: 'object',
   properties: {
     topics: { type: 'array', items: idProperty },
-    mode: { type: 'string', enum: Object.values(MessagesStreamModes) },
-    fallbackMode: { type: 'string', enum: Object.values(MessagesStreamFallbackModes) },
+    mode: { type: 'string', enum: allowedMessagesStreamModes },
+    fallbackMode: { type: 'string', enum: allowedMessagesStreamFallbackModes },
     maxFetches: { type: 'number', minimum: 0, default: 0 },
     offsets: {
       type: 'array',
@@ -197,7 +197,7 @@ export const listOffsetsOptionsSchema = {
         items: { type: 'number', minimum: 0 }
       }
     },
-    isolationLevel: { type: 'string', enum: Object.keys(FetchIsolationLevels) },
+    isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
     timestamp: { bigint: true }
   },
   required: ['topics'],

@@ -2,13 +2,13 @@ import { deepStrictEqual, ok, rejects } from 'node:assert'
 import { once } from 'node:events'
 import { before, test } from 'node:test'
 import {
+  allowedSASLMechanisms,
   AuthenticationError,
   Base,
   MultipleErrors,
   NetworkError,
   parseBroker,
-  sleep,
-  type SASLMechanism
+  sleep
 } from '../../../src/index.ts'
 import { createScramUsers } from '../../fixtures/create-users.ts'
 import { kafkaSaslBootstrapServers } from '../../helpers.ts'
@@ -29,14 +29,20 @@ test('UNAUTHENTICATED - should not connect to SASL protected broker by default',
   await rejects(() => base.metadata({ topics: [] }))
 })
 
-for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
+for (const mechanism of allowedSASLMechanisms) {
+  if (mechanism === 'OAUTHBEARER') {
+    // GSSAPI requires a properly configured Kerberos environment
+    // which is out of scope for these tests
+    continue
+  }
+
   test(`${mechanism} - should connect to SASL protected broker`, async t => {
     const base = new Base({
       clientId: 'clientId',
       bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
-      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
+      sasl: { mechanism, username: 'admin', password: 'admin' }
     })
 
     t.after(() => base.close())
@@ -51,7 +57,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       clientId: 'clientId',
       bootstrapBrokers: kafkaSaslBootstrapServers,
       retries: 0,
-      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'invalid' }
+      sasl: { mechanism, username: 'admin', password: 'invalid' }
     })
 
     t.after(() => base.close())
@@ -72,7 +78,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       strict: true,
       retries: 0,
       sasl: {
-        mechanism: mechanism as SASLMechanism,
+        mechanism,
         username () {
           return 'admin'
         },
@@ -94,7 +100,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       strict: true,
       retries: 0,
       sasl: {
-        mechanism: mechanism as SASLMechanism,
+        mechanism,
         username: 'admin',
         async password () {
           await sleep(1000)
@@ -117,7 +123,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       strict: true,
       retries: 0,
       sasl: {
-        mechanism: mechanism as SASLMechanism,
+        mechanism,
         username () {
           throw new Error('Kaboom!')
         }
@@ -150,7 +156,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       strict: true,
       retries: 0,
       sasl: {
-        mechanism: mechanism as SASLMechanism,
+        mechanism,
         username: 'admin',
         async password () {
           throw new Error('Kaboom!')
@@ -183,7 +189,7 @@ for (const mechanism of ['PLAIN', 'SCRAM-SHA-256', 'SCRAM-SHA-512']) {
       bootstrapBrokers: kafkaSaslBootstrapServers,
       strict: true,
       retries: 0,
-      sasl: { mechanism: mechanism as SASLMechanism, username: 'admin', password: 'admin' }
+      sasl: { mechanism, username: 'admin', password: 'admin' }
     })
 
     t.after(() => base.close())

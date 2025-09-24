@@ -43,6 +43,7 @@ export interface SASLOptions {
   username?: string | SASLCredentialProvider
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
+  authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
 }
 
 export interface ConnectionOptions {
@@ -497,7 +498,37 @@ export class Connection extends EventEmitter {
       return
     }
 
-    if (response.sessionLifetimeMs > 0) {
+    if (this.#options.sasl!.authBytesValidator) {
+      this.#options.sasl!.authBytesValidator(
+        response.authBytes,
+        this.#onSaslAuthenticationValidation.bind(this, host, port, diagnosticContext, response.sessionLifetimeMs)
+      )
+    } else {
+      this.#onSaslAuthenticationValidation(
+        host,
+        port,
+        diagnosticContext,
+        response.sessionLifetimeMs,
+        null,
+        response.authBytes
+      )
+    }
+  }
+
+  #onSaslAuthenticationValidation (
+    host: string,
+    port: number,
+    diagnosticContext: DiagnosticContext,
+    sessionLifetimeMs: bigint,
+    error: Error | null,
+    authBytes?: Buffer
+  ): void {
+    if (error) {
+      this.#onConnectionError(host, port, diagnosticContext, error)
+      return
+    }
+
+    if (sessionLifetimeMs > 0) {
       this.#reauthenticationTimeout = setTimeout(
         () => {
           const diagnosticContext = createDiagnosticContext({
@@ -509,14 +540,14 @@ export class Connection extends EventEmitter {
 
           this.#authenticate(host, port, diagnosticContext)
         },
-        Number(response.sessionLifetimeMs) * 0.8
+        Number(sessionLifetimeMs) * 0.8
       )
     }
 
     if (this.#status === ConnectionStatuses.CONNECTED) {
-      this.emit('sasl:authentication:extended', response.authBytes)
+      this.emit('sasl:authentication:extended', authBytes)
     } else {
-      this.emit('sasl:authentication', response.authBytes)
+      this.emit('sasl:authentication', authBytes)
       this.#onConnectionSucceed(diagnosticContext)
     }
   }

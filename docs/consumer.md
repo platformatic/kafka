@@ -219,3 +219,11 @@ By default, `@platformatic/kafka` retries an operation three times with a waitin
 If you instead want it to handle reconnections automatically, you just have to change the values of `retries` to a higher value or `true` to set it to "infinite retries". Also, increase `retryDelay` to at least a second to avoid opening too many TCP connections in short period of time if the broker is down.
 
 You can change those values in the `Consumer` constructor (and, similarly, to any other `@platformatic/kafka` client).
+
+### Why does my server rejects my request even if SASL authentication succeeded?
+
+Some Kafka servers (such as those using JWT tokens) may return a successful exit code (0) even when invalid credentials are provided, storing authentication information only in auth bytes rather than the exit code.
+
+In such cases, you can provide the `sasl.authBytesValidator` option to validate authentication information from the auth bytes response rather than relying on the exit code alone.
+
+For JWT tokens we already provide `saslOAuthBearer.jwtValidateAuthenticationBytes`.

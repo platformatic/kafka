@@ -1,4 +1,4 @@
-import { type CompressionAlgorithms } from '../../protocol/compression.ts'
+import { type CompressionAlgorithmValue } from '../../protocol/compression.ts'
 import { type MessageToProduce } from '../../protocol/records.ts'
 import { type BaseOptions, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Serializers } from '../serde.ts'
@@ -24,7 +24,7 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
   producerEpoch?: number
   idempotent?: boolean
   acks?: number
-  compression?: CompressionAlgorithms
+  compression?: CompressionAlgorithmValue
   partitioner?: Partitioner<Key, Value, HeaderKey, HeaderValue>
   autocreateTopics?: boolean
   repeatOnStaleMetadata?: boolean

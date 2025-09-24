@@ -1,8 +1,8 @@
 import { UnsupportedCompressionError } from '../errors.ts'
 import { type NumericMap } from '../utils.ts'
 import {
-  type CompressionAlgorithm,
-  type CompressionAlgorithms,
+  type CompressionAlgorithmSpecification,
+  type CompressionAlgorithmValue,
   compressionsAlgorithms,
   compressionsAlgorithmsByBitmask
 } from './compression.ts'
@@ -49,7 +49,7 @@ export interface MessageRecord {
 
 export interface CreateRecordsBatchOptions {
   transactionalId?: NullableString
-  compression: CompressionAlgorithms
+  compression: CompressionAlgorithmValue
 
   // Idempotency support
   firstSequence?: number
@@ -215,7 +215,7 @@ export function createRecordsBatch (
   if ((options.compression ?? 'none') !== 'none') {
     const algorithm = compressionsAlgorithms[
       options.compression as keyof typeof compressionsAlgorithms
-    ] as CompressionAlgorithm
+    ] as CompressionAlgorithmSpecification
 
     if (!algorithm) {
       throw new UnsupportedCompressionError(`Unsupported compression algorithm ${options.compression}`)
@@ -281,6 +281,10 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
 
     const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.buffer.length))
 
+    // Move the original reader to the end
+    reader.skip(reader.buffer.length - reader.position)
+
+    // Replace the reader with the decompressed buffer
     reader = Reader.from(buffer)
   }
 

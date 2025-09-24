@@ -13,12 +13,22 @@ export type CompressionOperation = (data: Buffer) => Buffer
 // Right now we support sync compressing only since the average time spent on compressing small sizes of
 // data will be smaller than transferring the same data between threads to perform async (de)comporession.
 // The interface naming already accounts for future expansion to async (de)compression.
-export interface CompressionAlgorithm {
+export interface CompressionAlgorithmSpecification {
   compressSync: SyncCompressionPhase
   decompressSync: SyncCompressionPhase
   bitmask: number
   available?: boolean
 }
+
+export const CompressionAlgorithms = {
+  NONE: 'none',
+  GZIP: 'gzip',
+  SNAPPY: 'snappy',
+  LZ4: 'lz4',
+  ZSTD: 'zstd'
+} as const
+export type CompressionAlgorithm = keyof typeof CompressionAlgorithms
+export type CompressionAlgorithmValue = (typeof CompressionAlgorithms)[keyof typeof CompressionAlgorithms]
 
 function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
   return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
@@ -142,5 +152,3 @@ export const compressionsAlgorithms = {
 export const compressionsAlgorithmsByBitmask = Object.fromEntries(
   Object.values(compressionsAlgorithms).map(a => [a.bitmask, a])
 )
-
-export type CompressionAlgorithms = keyof typeof compressionsAlgorithms

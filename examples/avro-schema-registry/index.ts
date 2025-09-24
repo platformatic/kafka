@@ -62,13 +62,13 @@ function debug (label: string, ...args: any[]) {
 }
 
 async function registerSchema (schema: object) {
-  const response = await fetch(`${registryUrl}/subjects/${subjectName}/versions`, {
+  const response = await fetch(`${registryUrl}/subjects/${encodeURIComponent(subjectName)}/versions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/vnd.schemaregistry.v1+json' },
     body: JSON.stringify({ schema: JSON.stringify(schema) })
   })
 
-  if (response.status !== 200) {
+  if (!response.ok) {
     throw new UserError(`Failed to register schema: [HTTP ${response.status}]`, { cause: await response.json() })
   }
 
@@ -81,7 +81,7 @@ async function fetchSchema (schemaId: number): Promise<void> {
 
   const response = await fetch(`${registryUrl}/schemas/ids/${schemaId}`)
 
-  if (response.status !== 200) {
+  if (!response.ok) {
     throw new UserError(`Failed to fetch schema: [HTTP ${response.status}]`, { cause: await response.json() })
   }
 
@@ -121,9 +121,9 @@ async function produceMessages (data: Datum[]) {
   })
 
   try {
-    const schemaResponse = await fetch(`${registryUrl}/subjects/${subjectName}/versions/latest`)
+    const schemaResponse = await fetch(`${registryUrl}/subjects/${encodeURIComponent(subjectName)}/versions/latest`)
 
-    if (schemaResponse.status !== 200) {
+    if (!schemaResponse.ok) {
       throw new UserError(`Failed to fetch schema: [HTTP ${schemaResponse.status}]`, {
         cause: await schemaResponse.json()
       })

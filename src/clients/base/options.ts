@@ -44,7 +44,8 @@ export const baseOptionsSchema = {
         mechanism: { type: 'string', enum: SASLMechanisms },
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
-        token: { oneOf: [{ type: 'string' }, { function: true }] }
+        token: { oneOf: [{ type: 'string' }, { function: true }] },
+        authBytesValidator: { function: true }
       },
       required: ['mechanism'],
       additionalProperties: false

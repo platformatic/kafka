@@ -117,7 +117,12 @@ const producer = new Producer({
     // username, password or token can also be (async) functions returning a string
     username: 'username', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
     password: 'password', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
-    token: 'token' // This is used from OAUTHBEARER
+    token: 'token', // This is used from OAUTHBEARER
+    // This is needed if your Kafka server returns a exitCode 0 when invalid credentials are sent and only stores
+    // authentication information in auth bytes.
+    //
+    // A good example for this is OAuthBearerValidatorCallbackHandler, for which we provide saslOAuthBearer.jwtValidateAuthenticationBytes.
+    authBytesValidator: (_authBytes, cb) => cb(null)
   }
 })
 ```

@@ -9,7 +9,7 @@ import {
   readRecord,
   readRecordsBatch,
   Writer,
-  type CompressionAlgorithm,
+  type CompressionAlgorithmSpecification,
   type MessageRecord
 } from '../../src/index.ts'
 
@@ -488,7 +488,7 @@ test('createRecordsBatch and readRecordsBatch should be symmetrical', () => {
 
 // Tests with various compression algorithms
 // Note: Skip these if optional compression libraries aren't available
-for (const [compression, algorithm] of Object.entries<CompressionAlgorithm>(compressionsAlgorithms)) {
+for (const [compression, algorithm] of Object.entries<CompressionAlgorithmSpecification>(compressionsAlgorithms)) {
   test(
     `createRecordsBatch and readRecordsBatch with ${compression} compression`,
     { skip: !algorithm.available },

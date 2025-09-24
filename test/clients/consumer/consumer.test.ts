@@ -9,6 +9,7 @@ import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
   type ClientDiagnosticEvent,
   type ClusterMetadata,
+  CompressionAlgorithms,
   Consumer,
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -26,6 +27,8 @@ import {
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
+  MessagesStreamFallbackModes,
+  MessagesStreamModes,
   type MessageToProduce,
   MultipleErrors,
   NetworkError,
@@ -1255,6 +1258,36 @@ test('fetch should retrieve messages from multiple batches', async t => {
       messages.slice(batchNo * batchSize, batchNo * batchSize + batchSize),
       'Should match produced messages in batch'
     )
+  }
+})
+
+test('fetch should retrieve messages from multiple batches', async t => {
+  const topic = await createTopic(t, true)
+  const producer = await createProducer(t)
+
+  const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
+  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
+  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
+  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
+
+  const consumer = createConsumer(t, {})
+
+  const stream = await consumer.consume({
+    autocommit: true,
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST
+  })
+
+  let i = 0
+  for await (const message of stream) {
+    strictEqual(message.topic, topic)
+    strictEqual(message.key.toString(), 'test')
+    strictEqual(message.value.toString(), 'test')
+
+    if (++i === 3) {
+      break
+    }
   }
 })
 

@@ -70,8 +70,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   ) {
-    const { autocommit, mode, fallbackMode, maxFetches, offsets, deserializers, onCorruptedMessage, ...otherOptions } =
-      options
+    const {
+      autocommit,
+      mode,
+      fallbackMode,
+      maxFetches,
+      offsets,
+      deserializers,
+      onCorruptedMessage,
+      // The options below are only destructured to avoid being part of structuredClone below
+      partitionAssigner: _partitionAssigner,
+      ...otherOptions
+    } = options
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')

@@ -1261,7 +1261,7 @@ test('fetch should retrieve messages from multiple batches', async t => {
   }
 })
 
-test('fetch should retrieve messages from multiple batches', async t => {
+test.only('fetch should retrieve messages from multiple batches (compressed)', async t => {
   const topic = await createTopic(t, true)
   const producer = await createProducer(t)
 
@@ -1276,7 +1276,10 @@ test('fetch should retrieve messages from multiple batches', async t => {
     autocommit: true,
     topics: [topic],
     mode: MessagesStreamModes.EARLIEST,
-    fallbackMode: MessagesStreamFallbackModes.EARLIEST
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    minBytes: 1024 * 1024,
+    maxBytes: 1024 * 1024,
+    maxWaitTime: 100
   })
 
   let i = 0

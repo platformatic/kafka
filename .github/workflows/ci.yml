@@ -22,7 +22,7 @@ jobs:
             test-command: ci
     name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4

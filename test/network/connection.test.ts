@@ -944,9 +944,7 @@ test('Connection.connect should not connect to SASL protected broker by default'
 
 for (const mechanism of allowedSASLMechanisms) {
   const sasl: SASLOptions =
-    mechanism === 'OAUTHBEARER'
-      ? { mechanism, token: 'token' }
-      : { mechanism, username: 'admin', password: 'admin', serviceName: 'kafka' }
+    mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
     const connection = new Connection('clientId', { sasl })

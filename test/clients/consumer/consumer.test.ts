@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
+import zlib from 'node:zlib'
 import * as Prometheus from 'prom-client'
 import { type FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
@@ -1262,38 +1263,39 @@ test('fetch should retrieve messages from multiple batches', async t => {
 })
 
 for (const compression of Object.values(CompressionAlgorithms)) {
-  test(`fetch should retrieve messages from multiple batches (compressed ${compression})`, { skip: compression === 'snappy' }, async t => {
-    const topic = await createTopic(t, true)
-    const producer = await createProducer(t)
+  test(`fetch should retrieve messages from multiple batches (compressed ${compression})`,
+    { skip: compression === 'snappy' || (compression === 'zstd' && !('zstdCompressSync' in zlib)) }, async t => {
+      const topic = await createTopic(t, true)
+      const producer = await createProducer(t)
 
-    const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
-    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
-    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
-    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+      const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
+      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
 
-    const consumer = createConsumer(t, {})
+      const consumer = createConsumer(t, {})
 
-    const stream = await consumer.consume({
-      autocommit: true,
-      topics: [topic],
-      mode: MessagesStreamModes.EARLIEST,
-      fallbackMode: MessagesStreamFallbackModes.EARLIEST,
-      minBytes: 1024 * 1024,
-      maxBytes: 1024 * 1024,
-      maxWaitTime: 100
-    })
+      const stream = await consumer.consume({
+        autocommit: true,
+        topics: [topic],
+        mode: MessagesStreamModes.EARLIEST,
+        fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+        minBytes: 1024 * 1024,
+        maxBytes: 1024 * 1024,
+        maxWaitTime: 100
+      })
 
-    let i = 0
-    for await (const message of stream) {
-      strictEqual(message.topic, topic)
-      strictEqual(message.key.toString(), 'test')
-      strictEqual(message.value.toString(), 'test')
+      let i = 0
+      for await (const message of stream) {
+        strictEqual(message.topic, topic)
+        strictEqual(message.key.toString(), 'test')
+        strictEqual(message.value.toString(), 'test')
 
-      if (++i === 3) {
-        break
+        if (++i === 3) {
+          break
+        }
       }
-    }
-  })
+    })
 }
 
 test('commit should commit offsets to Kafka and support diagnostic channels', async t => {

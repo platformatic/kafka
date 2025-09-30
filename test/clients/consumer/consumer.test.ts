@@ -1261,38 +1261,40 @@ test('fetch should retrieve messages from multiple batches', async t => {
   }
 })
 
-test.only('fetch should retrieve messages from multiple batches (compressed)', async t => {
-  const topic = await createTopic(t, true)
-  const producer = await createProducer(t)
+for (const compression of Object.values(CompressionAlgorithms)) {
+  test(`fetch should retrieve messages from multiple batches (compressed ${compression})`, { skip: compression === 'snappy' }, async t => {
+    const topic = await createTopic(t, true)
+    const producer = await createProducer(t)
 
-  const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
-  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
-  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
-  await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression: CompressionAlgorithms.GZIP, messages: [msg] })
+    const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
+    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+    await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
 
-  const consumer = createConsumer(t, {})
+    const consumer = createConsumer(t, {})
 
-  const stream = await consumer.consume({
-    autocommit: true,
-    topics: [topic],
-    mode: MessagesStreamModes.EARLIEST,
-    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
-    minBytes: 1024 * 1024,
-    maxBytes: 1024 * 1024,
-    maxWaitTime: 100
-  })
+    const stream = await consumer.consume({
+      autocommit: true,
+      topics: [topic],
+      mode: MessagesStreamModes.EARLIEST,
+      fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+      minBytes: 1024 * 1024,
+      maxBytes: 1024 * 1024,
+      maxWaitTime: 100
+    })
 
-  let i = 0
-  for await (const message of stream) {
-    strictEqual(message.topic, topic)
-    strictEqual(message.key.toString(), 'test')
-    strictEqual(message.value.toString(), 'test')
+    let i = 0
+    for await (const message of stream) {
+      strictEqual(message.topic, topic)
+      strictEqual(message.key.toString(), 'test')
+      strictEqual(message.value.toString(), 'test')
 
-    if (++i === 3) {
-      break
+      if (++i === 3) {
+        break
+      }
     }
-  }
-})
+  })
+}
 
 test('commit should commit offsets to Kafka and support diagnostic channels', async t => {
   const consumer = createConsumer(t)

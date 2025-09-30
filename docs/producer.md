@@ -20,12 +20,14 @@ Options:
 | `producerEpoch`         | `number`                                                           | Producer epoch.                                                                                                                                                      |
 | `idempotent`            | `boolean`                                                          | Idempotency of the producer.                                                                                                                                         |
 | `acks`                  | `number`                                                           | Acknowledgement to wait before returning.<br/><br/>Valid values are defined in the `ProduceAcks` enumeration.                                                        |
-| `compression`           | `string`                                                           | Compression algorithm to use before sending messages to the broker.<br/><br/>Valid values are exported in the `CompressionAlgorithms` enumeration.                   |
+| `compression`           | `string`                                                           | Compression algorithm to use before sending messages to the broker.<br/><br/>Valid values are: `snappy`, `lz4`, `gzip`, `zstd` |
 | `partitioner`           | `(message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and should return the partition number.         |
 | `repeatOnStaleMetadata` | `boolean`                                                          | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                       |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                  | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties. |
 
 It also supports all the constructor options of `Base`.
+
+Notes: `zstd` is not available in node `v20`
 
 ## Basic Methods
 

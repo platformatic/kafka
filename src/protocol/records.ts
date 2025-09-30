@@ -7,7 +7,7 @@ import {
   compressionsAlgorithmsByBitmask
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
-import { type NullableString } from './definitions.ts'
+import { INT32_SIZE, INT64_SIZE, type NullableString } from './definitions.ts'
 import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
@@ -253,6 +253,7 @@ export function createRecordsBatch (
 }
 
 export function readRecordsBatch (reader: Reader): RecordsBatch {
+  const initialPosition = reader.position
   const batch = {
     firstOffset: reader.readInt64(),
     length: reader.readInt32(),
@@ -279,10 +280,13 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
       throw new UnsupportedCompressionError(`Unsupported compression algorithm with bitmask ${compression}`)
     }
 
-    const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.buffer.length))
+    // The length of all headers immediately following Length up to the length of the Records array
+    const headersLength = reader.position - initialPosition - INT32_SIZE - INT64_SIZE
+    const compressedDataLen = batch.length - headersLength
+    const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.position + compressedDataLen))
 
-    // Move the original reader to the end
-    reader.skip(reader.buffer.length - reader.position)
+    // Move the original reader to the end of the compressed data
+    reader.skip(compressedDataLen)
 
     // Replace the reader with the decompressed buffer
     reader = Reader.from(buffer)

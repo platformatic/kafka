@@ -1262,16 +1262,29 @@ test('fetch should retrieve messages from multiple batches', async t => {
   }
 })
 
-for (const compression of Object.values(CompressionAlgorithms)) {
-  test(`fetch should retrieve messages from multiple batches (compressed ${compression})`,
-    { skip: compression === 'snappy' || (compression === 'zstd' && !('zstdCompressSync' in zlib)) }, async t => {
+for (const [name, compression] of Object.entries(CompressionAlgorithms)) {
+  test(
+    `fetch should retrieve messages from multiple batches (compressed with CompressionAlgorithms.${name})`,
+    { skip: compression === 'zstd' && !('zstdCompressSync' in zlib) },
+    async t => {
       const topic = await createTopic(t, true)
       const producer = await createProducer(t)
 
-      const msg: MessageToProduce = { key: Buffer.from('test'), value: Buffer.from('test'), topic }
-      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
-      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
-      await producer.send({ acks: ProduceAcks.NO_RESPONSE, compression, messages: [msg] })
+      await producer.send({
+        acks: ProduceAcks.NO_RESPONSE,
+        compression,
+        messages: [{ key: Buffer.from('test1'), value: Buffer.from('test1'), topic }]
+      })
+      await producer.send({
+        acks: ProduceAcks.NO_RESPONSE,
+        compression,
+        messages: [{ key: Buffer.from('test2'), value: Buffer.from('test2'), topic }]
+      })
+      await producer.send({
+        acks: ProduceAcks.NO_RESPONSE,
+        compression,
+        messages: [{ key: Buffer.from('test3'), value: Buffer.from('test3'), topic }]
+      })
 
       const consumer = createConsumer(t, {})
 
@@ -1287,15 +1300,18 @@ for (const compression of Object.values(CompressionAlgorithms)) {
 
       let i = 0
       for await (const message of stream) {
-        strictEqual(message.topic, topic)
-        strictEqual(message.key.toString(), 'test')
-        strictEqual(message.value.toString(), 'test')
+        i++
 
-        if (++i === 3) {
+        strictEqual(message.topic, topic)
+        strictEqual(message.key.toString(), 'test' + i)
+        strictEqual(message.value.toString(), 'test' + i)
+
+        if (i === 3) {
           break
         }
       }
-    })
+    }
+  )
 }
 
 test('commit should commit offsets to Kafka and support diagnostic channels', async t => {

@@ -174,15 +174,14 @@ export function parseResponse (
             preferredReadReplica: r.readInt32()
           }
 
-          let recordsSize = r.readUnsignedVarInt()
-
           if (partition.errorCode !== 0) {
             errors.push([`/responses/${i}/partitions/${j}`, partition.errorCode])
           }
 
-          if (recordsSize > 1) {
-            recordsSize--
+          // We need to reduce the size by one to follow the COMPACT_RECORDS specification
+          const recordsSize = r.readUnsignedVarInt() - 1
 
+          if (recordsSize > 0) {
             const recordsBatchesReader = Reader.from(r.buffer.subarray(r.position, r.position + recordsSize))
             partition.records = []
             do {

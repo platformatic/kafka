@@ -179,7 +179,7 @@ export function parseResponse (
           if (partition.errorCode !== 0) {
             errors.push([`/responses/${i}/partitions/${j}`, partition.errorCode])
           }
-
+          
           if (recordsSize > 1) {
             recordsSize--
 
@@ -187,7 +187,7 @@ export function parseResponse (
             partition.records = []
             do {
               partition.records.push(readRecordsBatch(recordsBatchesReader))
-            } while (recordsBatchesReader.position < recordsSize)
+            } while (recordsBatchesReader.position + recordsSize < r.buffer.length)
 
             r.skip(recordsSize)
           }

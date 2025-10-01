@@ -187,7 +187,7 @@ export function parseResponse (
             partition.records = []
             do {
               partition.records.push(readRecordsBatch(recordsBatchesReader))
-            } while (recordsBatchesReader.position < recordsSize)
+            } while (recordsBatchesReader.position + recordsSize < r.buffer.length)
 
             r.skip(recordsSize)
           }

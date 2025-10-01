@@ -128,13 +128,17 @@ export class DynamicBuffer {
     }
 
     if (start < 0 || start > this.length || end > this.length) {
+      console.log('**********')
+      console.log('start', start)
+      console.log('end', end)
+      console.log('length', this.length)
       throw new UserError('Out of bounds.')
     }
 
     if (this.buffers.length === 0) {
       return EMPTY_BUFFER
     } else if (this.buffers.length === 1) {
-      return this.buffers[0].slice(start, end)
+      return this.buffers[0].subarray(start, end)
     }
 
     let position = 0

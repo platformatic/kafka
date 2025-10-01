@@ -293,7 +293,9 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
   }
 
   for (let i = 0; i < recordsLength; i++) {
-    batch.records.push(readRecord(reader))
+    const r = readRecord(reader)
+    console.log('r', r.value.toString())
+    batch.records.push(r)
   }
 
   return batch

@@ -118,7 +118,7 @@ export function createRequest (
 }
 
 /*
-  Fetch Response (Version: 17) => throttle_time_ms error_code session_id [responses] TAG_BUFFER
+  Fetch Response (Version: 17 & 18) => throttle_time_ms error_code session_id [responses] TAG_BUFFER
     throttle_time_ms => INT32
     error_code => INT16
     session_id => INT32
@@ -174,19 +174,20 @@ export function parseResponse (
             preferredReadReplica: r.readInt32()
           }
 
+          let recordsSize = r.readUnsignedVarInt()
+
           if (partition.errorCode !== 0) {
             errors.push([`/responses/${i}/partitions/${j}`, partition.errorCode])
           }
 
-          // We need to reduce the size by one to follow the COMPACT_RECORDS specification
-          const recordsSize = r.readUnsignedVarInt() - 1
+          if (recordsSize > 1) {
+            recordsSize--
 
-          if (recordsSize > 0) {
             const recordsBatchesReader = Reader.from(r.buffer.subarray(r.position, r.position + recordsSize))
             partition.records = []
             do {
               partition.records.push(readRecordsBatch(recordsBatchesReader))
-            } while (recordsBatchesReader.position < recordsSize)
+            } while (recordsBatchesReader.position < recordsSize && recordsBatchesReader.position + recordsSize < r.buffer.length)
 
             r.skip(recordsSize)
           }

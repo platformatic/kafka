@@ -1230,7 +1230,7 @@ test('fetch should retrieve messages from multiple batches', async t => {
   strictEqual(fetchResult.responses[0].partitions.length, 1, 'Should return one partition')
   const fetchPartition = fetchResult.responses[0].partitions[0]!
   strictEqual(fetchPartition.errorCode, 0, 'Should succeed fetching partition')
-  strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
+  strictEqual(fetchPartition.records?.length, 1, 'Should return all messages in a single batch since they fit in min/max bytes')
   for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
     const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
 

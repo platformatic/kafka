@@ -134,7 +134,7 @@ export class DynamicBuffer {
     if (this.buffers.length === 0) {
       return EMPTY_BUFFER
     } else if (this.buffers.length === 1) {
-      return this.buffers[0].slice(start, end)
+      return this.buffers[0].subarray(start, end)
     }
 
     let position = 0

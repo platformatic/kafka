@@ -4,3 +4,4 @@ node_modules
 coverage
 .eslintcache
 .env
+.vscode

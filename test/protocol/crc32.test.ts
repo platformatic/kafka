@@ -1,6 +1,6 @@
 import { deepStrictEqual } from 'node:assert'
 import test from 'node:test'
-import { crc32c, DynamicBuffer } from '../../src/index.ts'
+import { DynamicBuffer, jsCRC32C, loadNativeCRC32C } from '../../src/index.ts'
 
 // Samples copied from https://github.com/tulios/kafkajs/blob/55b0b416308b9e597a5a6b97b0a6fd6b846255dc/src/protocol/recordBatch/crc32c/fixtures/samples.js
 const samples = [
@@ -68,29 +68,36 @@ const java = Buffer.from([
   57, 100, 102, 102, 99, 52, 97, 97, 99, 57, 2, 2, 97, 2, 98
 ])
 
-test('perform crc32c computations', () => {
-  const longString =
-    'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Morbi mollis cursus metus vel tristique. Proin congue massa massa, a malesuada dolor ullamcorper a. Nulla eget leo vel orci venenatis placerat. Donec semper condimentum justo, vel sollicitudin dolor consequat id. Nunc sed aliquet felis, eget congue nisi. Mauris eu justo suscipit, elementum turpis ut, molestie tellus. Mauris ornare rutrum fringilla. Nulla dignissim luctus pretium. Nullam nec eros hendrerit sapien pellentesque sollicitudin. Integer eget ligula dui. Mauris nec cursus nibh. Nunc interdum elementum leo, eu sagittis eros sodales nec. Duis dictum nulla sed tincidunt malesuada. Quisque in vulputate sapien. Sed sit amet tellus a est porta rhoncus sed eu metus. Mauris non pulvinar nisl, volutpat luctus enim. Suspendisse est nisi, sagittis at risus quis, ultricies rhoncus sem. Donec ullamcorper purus eget sapien facilisis, eu eleifend felis viverra. Suspendisse elit neque, semper aliquet neque sed, egestas tempus leo. Duis condimentum turpis duis.'
-  const buffer = Buffer.from(longString)
-  deepStrictEqual(crc32c(new DynamicBuffer(buffer)), 1796588439)
-})
+const implementations = {
+  Javascript: jsCRC32C,
+  Native: loadNativeCRC32C()!
+}
 
-test('match the java crc32c code', () => {
-  deepStrictEqual(crc32c(new DynamicBuffer(java)), 818496390)
-  deepStrictEqual(crc32c(java), 818496390)
-})
+for (const [name, implementation] of Object.entries(implementations)) {
+  test(`perform crc32c computations (${name})`, () => {
+    const longString =
+      'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Morbi mollis cursus metus vel tristique. Proin congue massa massa, a malesuada dolor ullamcorper a. Nulla eget leo vel orci venenatis placerat. Donec semper condimentum justo, vel sollicitudin dolor consequat id. Nunc sed aliquet felis, eget congue nisi. Mauris eu justo suscipit, elementum turpis ut, molestie tellus. Mauris ornare rutrum fringilla. Nulla dignissim luctus pretium. Nullam nec eros hendrerit sapien pellentesque sollicitudin. Integer eget ligula dui. Mauris nec cursus nibh. Nunc interdum elementum leo, eu sagittis eros sodales nec. Duis dictum nulla sed tincidunt malesuada. Quisque in vulputate sapien. Sed sit amet tellus a est porta rhoncus sed eu metus. Mauris non pulvinar nisl, volutpat luctus enim. Suspendisse est nisi, sagittis at risus quis, ultricies rhoncus sem. Donec ullamcorper purus eget sapien facilisis, eu eleifend felis viverra. Suspendisse elit neque, semper aliquet neque sed, egestas tempus leo. Duis condimentum turpis duis.'
+    const buffer = Buffer.from(longString)
+    deepStrictEqual(implementation(new DynamicBuffer(buffer)), 1796588439)
+  })
 
-test('samples', () => {
-  for (const sample of samples) {
-    const buffer = Buffer.from(sample.input)
-    deepStrictEqual(crc32c(new DynamicBuffer(buffer)), sample.output)
-  }
-})
+  test(`match the java crc32c code (${name})`, () => {
+    deepStrictEqual(implementation(new DynamicBuffer(java)), 818496390)
+    deepStrictEqual(implementation(java), 818496390)
+  })
 
-test('empty', () => {
-  deepStrictEqual(crc32c(new DynamicBuffer(Buffer.alloc(0))), 0)
-})
+  test(`samples (${name})`, () => {
+    for (const sample of samples) {
+      const buffer = Buffer.from(sample.input)
+      deepStrictEqual(implementation(new DynamicBuffer(buffer)), sample.output)
+    }
+  })
 
-test('unicode null', () => {
-  deepStrictEqual(crc32c(new DynamicBuffer(Buffer.from('\u0000'))), 1383945041)
-})
+  test(`empty (${name})`, () => {
+    deepStrictEqual(implementation(new DynamicBuffer(Buffer.alloc(0))), 0)
+  })
+
+  test(`unicode null (${name})`, () => {
+    deepStrictEqual(implementation(new DynamicBuffer(Buffer.from('\u0000'))), 1383945041)
+  })
+}

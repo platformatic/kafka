@@ -1,11 +1,33 @@
-import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from 'node:assert'
+import { deepStrictEqual, notStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { DynamicBuffer, UserError } from '../../src/index.ts'
+import { DynamicBuffer, OutOfBoundsError } from '../../src/index.ts'
 import { EMPTY_BUFFER } from '../../src/protocol/definitions.ts'
 
 test('static isDynamicBuffer', () => {
-  ok(DynamicBuffer.isDynamicBuffer(new DynamicBuffer()))
-  ok(!DynamicBuffer.isDynamicBuffer('STRING'))
+  // Test with a DynamicBuffer instance
+  const dynamicBuffer = new DynamicBuffer()
+  strictEqual(DynamicBuffer.isDynamicBuffer(dynamicBuffer), true)
+
+  // Test with a regular Buffer
+  const regularBuffer = Buffer.from([1, 2, 3])
+  strictEqual(DynamicBuffer.isDynamicBuffer(regularBuffer), false)
+
+  // Test with null
+  strictEqual(DynamicBuffer.isDynamicBuffer(null), false)
+
+  // Test with undefined
+  strictEqual(DynamicBuffer.isDynamicBuffer(undefined), false)
+
+  // Test with other types
+  strictEqual(DynamicBuffer.isDynamicBuffer({}), false)
+  strictEqual(DynamicBuffer.isDynamicBuffer([]), false)
+  strictEqual(DynamicBuffer.isDynamicBuffer('string'), false)
+  strictEqual(DynamicBuffer.isDynamicBuffer(123), false)
+
+  // The dynamicBuffer symbol is a private implementation detail and can't be faked from outside
+  // as it's not exported or accessible (it's not Symbol.for() but a local Symbol)
+  const fakeBuffer = {}
+  strictEqual(DynamicBuffer.isDynamicBuffer(fakeBuffer), false)
 })
 
 test('constructor', () => {
@@ -117,7 +139,7 @@ test('subarray', () => {
       emptyBuffer.subarray(0, 1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -189,7 +211,7 @@ test('subarray', () => {
       multiBuffer.subarray(-1, 5)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -198,7 +220,7 @@ test('subarray', () => {
       multiBuffer.subarray(0, 7)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -213,7 +235,7 @@ test('slice', () => {
       emptyBuffer.slice(0, 1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -283,7 +305,7 @@ test('slice', () => {
       singleBuffer.slice(-1, 5)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -292,7 +314,7 @@ test('slice', () => {
       singleBuffer.slice(0, 7)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -432,7 +454,7 @@ test('consume', () => {
         buffer.consume(-1)
       },
       err => {
-        return err instanceof UserError && err.message === 'Out of bounds.'
+        return err instanceof OutOfBoundsError
       }
     )
 
@@ -442,7 +464,7 @@ test('consume', () => {
         buffer.consume(buffer.length + 1)
       },
       err => {
-        return err instanceof UserError && err.message === 'Out of bounds.'
+        return err instanceof OutOfBoundsError
       }
     )
   }
@@ -536,7 +558,7 @@ test('get', () => {
       emptyBuffer.get(0)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -561,7 +583,7 @@ test('get', () => {
       multiBuffer.get(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -570,7 +592,7 @@ test('get', () => {
       multiBuffer.get(5)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -586,7 +608,7 @@ test('readUInt8', () => {
       buffer.readUInt8(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -595,7 +617,7 @@ test('readUInt8', () => {
       buffer.readUInt8(3)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -613,7 +635,7 @@ test('readInt8', () => {
       buffer.readInt8(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -622,7 +644,7 @@ test('readInt8', () => {
       buffer.readInt8(3)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -689,7 +711,7 @@ for (const [name, bytes] of fixedLengths) {
           reader.call(buffer, -1)
         },
         err => {
-          return err instanceof UserError && err.message === 'Out of bounds.'
+          return err instanceof OutOfBoundsError
         }
       )
 
@@ -698,7 +720,7 @@ for (const [name, bytes] of fixedLengths) {
           reader.call(buffer, bytes * 4)
         },
         err => {
-          return err instanceof UserError && err.message === 'Out of bounds.'
+          return err instanceof OutOfBoundsError
         }
       )
     })
@@ -742,7 +764,7 @@ test('readFloatBE', () => {
       singleBuffer.readFloatBE(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -751,7 +773,7 @@ test('readFloatBE', () => {
       singleBuffer.readFloatBE(1) // Not enough bytes for a float
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -793,7 +815,7 @@ test('readFloatLE', () => {
       singleBuffer.readFloatLE(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -802,7 +824,7 @@ test('readFloatLE', () => {
       singleBuffer.readFloatLE(1) // Not enough bytes for a float
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -845,7 +867,7 @@ test('readDoubleBE', () => {
       singleBuffer.readDoubleBE(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -854,7 +876,7 @@ test('readDoubleBE', () => {
       singleBuffer.readDoubleBE(1) // Not enough bytes for a double
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -897,7 +919,7 @@ test('readDoubleLE', () => {
       singleBuffer.readDoubleLE(-1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 
@@ -906,7 +928,7 @@ test('readDoubleLE', () => {
       singleBuffer.readDoubleLE(1) // Not enough bytes for a double
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -955,7 +977,7 @@ test('readUnsignedVarInt', () => {
       smallBuffer.readUnsignedVarInt(1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -1014,7 +1036,7 @@ test('readUnsignedVarInt64', () => {
       smallBuffer.readUnsignedVarInt64(1)
     },
     err => {
-      return err instanceof UserError && err.message === 'Out of bounds.'
+      return err instanceof OutOfBoundsError
     }
   )
 })
@@ -1384,31 +1406,4 @@ test('writeVarInt64', () => {
   const buffer5Length = dynamicBuffer5.length
   dynamicBuffer5.writeVarInt64(-42n, false) // Prepend -42
   strictEqual(dynamicBuffer5.length > buffer5Length, true) // Length should have increased
-})
-
-test('isDynamicBuffer - static method', () => {
-  // Test with a DynamicBuffer instance
-  const dynamicBuffer = new DynamicBuffer()
-  strictEqual(DynamicBuffer.isDynamicBuffer(dynamicBuffer), true)
-
-  // Test with a regular Buffer
-  const regularBuffer = Buffer.from([1, 2, 3])
-  strictEqual(DynamicBuffer.isDynamicBuffer(regularBuffer), false)
-
-  // Test with null
-  strictEqual(DynamicBuffer.isDynamicBuffer(null), false)
-
-  // Test with undefined
-  strictEqual(DynamicBuffer.isDynamicBuffer(undefined), false)
-
-  // Test with other types
-  strictEqual(DynamicBuffer.isDynamicBuffer({}), false)
-  strictEqual(DynamicBuffer.isDynamicBuffer([]), false)
-  strictEqual(DynamicBuffer.isDynamicBuffer('string'), false)
-  strictEqual(DynamicBuffer.isDynamicBuffer(123), false)
-
-  // The dynamicBuffer symbol is a private implementation detail and can't be faked from outside
-  // as it's not exported or accessible (it's not Symbol.for() but a local Symbol)
-  const fakeBuffer = {}
-  strictEqual(DynamicBuffer.isDynamicBuffer(fakeBuffer), false)
 })

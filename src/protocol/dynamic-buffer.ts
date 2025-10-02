@@ -1,4 +1,4 @@
-import { UserError } from '../errors.ts'
+import { OutOfBoundsError } from '../errors.ts'
 import { EMPTY_BUFFER, INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE } from './definitions.ts'
 import {
   BITS_8PLUS_MASK,
@@ -91,7 +91,7 @@ export class DynamicBuffer {
     }
 
     if (start < 0 || start > this.length || end > this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     if (this.buffers.length === 0) {
@@ -128,13 +128,13 @@ export class DynamicBuffer {
     }
 
     if (start < 0 || start > this.length || end > this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     if (this.buffers.length === 0) {
       return EMPTY_BUFFER
     } else if (this.buffers.length === 1) {
-      return this.buffers[0].slice(start, end)
+      return this.buffers[0].subarray(start, end)
     }
 
     let position = 0
@@ -176,7 +176,7 @@ export class DynamicBuffer {
 
   consume (offset: number): this {
     if (offset < 0 || offset > this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     if (offset === 0) {
@@ -210,7 +210,7 @@ export class DynamicBuffer {
 
   get (offset: number): number {
     if (offset < 0 || offset >= this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     const [finalIndex, current] = this.#findInitialBuffer(offset)
@@ -219,7 +219,7 @@ export class DynamicBuffer {
 
   readUInt8 (offset: number = 0): number {
     if (offset < 0 || offset >= this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     const [finalIndex, current] = this.#findInitialBuffer(offset)
@@ -265,7 +265,7 @@ export class DynamicBuffer {
     let read = 0
 
     if (offset < 0 || offset >= this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     // Find the initial buffer
@@ -294,7 +294,7 @@ export class DynamicBuffer {
     let read = 0
 
     if (offset < 0 || offset >= this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     // Find the initial buffer
@@ -318,7 +318,7 @@ export class DynamicBuffer {
 
   readInt8 (offset: number = 0): number {
     if (offset < 0 || offset >= this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     const [finalIndex, current] = this.#findInitialBuffer(offset)
@@ -681,7 +681,7 @@ export class DynamicBuffer {
 
   #readMultiple (index: number, length: number) {
     if (index < 0 || index + length > this.length) {
-      throw new UserError('Out of bounds.')
+      throw new OutOfBoundsError('Out of bounds.')
     }
 
     let [startOffset, current] = this.#findInitialBuffer(index)

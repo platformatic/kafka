@@ -788,7 +788,110 @@ test('parseResponse parses record data', () => {
               .appendInt64(partition.lastStableOffset)
               .appendInt64(partition.logStartOffset)
               // Aborted transactions array (empty)
-              .appendArray(partition.abortedTransactions, () => { })
+              .appendArray(partition.abortedTransactions, () => {})
+              .appendInt32(partition.preferredReadReplica)
+
+              // Add records batch
+              .appendUnsignedVarInt(partition.recordsBatch.length + 1)
+              .appendFrom(partition.recordsBatch)
+          })
+      }
+    )
+    .appendInt8(0) // Root tagged fields
+
+  const response = parseResponse(1, 1, 17, Reader.from(writer))
+
+  // Verify the records were parsed correctly
+  ok(response.responses[0].partitions[0].records, 'Records should be defined')
+
+  const batch = response.responses[0].partitions[0].records[0]!
+  const record = batch.records[0]
+
+  deepStrictEqual(
+    {
+      firstOffset: batch.firstOffset,
+      recordsLength: batch.records.length,
+      offsetDelta: record.offsetDelta,
+      valueString: record.value.toString()
+    },
+    {
+      firstOffset: 0n,
+      recordsLength: 1,
+      offsetDelta: 0,
+      valueString: 'test-value'
+    }
+  )
+
+  // Verify value is a Buffer
+  ok(Buffer.isBuffer(record.value))
+})
+
+test('parseResponse handles truncated records', () => {
+  // Create a response with records data
+  // First create a record batch
+  const timestamp = BigInt(Date.now())
+  const recordsBatch = Writer.create()
+    // Record batch structure
+    .appendInt64(0n) // firstOffset
+    .appendInt32(60) // length - this would be dynamically computed in real usage
+    .appendInt32(0) // partitionLeaderEpoch
+    .appendInt8(2) // magic (record format version)
+    .appendUnsignedInt32(0) // crc - would be computed properly in real code
+    .appendInt16(0) // attributes
+    .appendInt32(0) // lastOffsetDelta
+    .appendInt64(timestamp) // firstTimestamp
+    .appendInt64(timestamp) // maxTimestamp
+    .appendInt64(-1n) // producerId - not specified
+    .appendInt16(0) // producerEpoch
+    .appendInt32(0) // firstSequence
+    .appendInt32(1) // number of records
+    // Single record
+    .appendVarInt(8) // length of the record
+    .appendInt8(0) // attributes
+    .appendVarInt64(0n) // timestampDelta
+    .appendVarInt(0) // offsetDelta
+    .appendVarIntBytes(null) // key
+    .appendVarIntBytes(Buffer.from('test-value')) // value
+    .appendVarIntArray([], () => {}) // No headers
+    // Truncated batch
+    .appendInt64(0n) // firstOffset
+    .appendInt32(60) // length
+
+  // Now create the full response
+  const writer = Writer.create()
+    .appendInt32(0) // throttleTimeMs
+    .appendInt16(0) // errorCode (success)
+    .appendInt32(123) // sessionId
+    // Responses array - using tagged fields format
+    .appendArray(
+      [
+        {
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          partitions: [
+            {
+              partitionIndex: 0,
+              errorCode: 0,
+              highWatermark: 100n,
+              lastStableOffset: 100n,
+              logStartOffset: 0n,
+              abortedTransactions: [],
+              preferredReadReplica: -1,
+              recordsBatch
+            }
+          ]
+        }
+      ],
+      (w, topic) => {
+        w.appendUUID(topic.topicId)
+          // Partitions array
+          .appendArray(topic.partitions, (w, partition) => {
+            w.appendInt32(partition.partitionIndex)
+              .appendInt16(partition.errorCode)
+              .appendInt64(partition.highWatermark)
+              .appendInt64(partition.lastStableOffset)
+              .appendInt64(partition.logStartOffset)
+              // Aborted transactions array (empty)
+              .appendArray(partition.abortedTransactions, () => {})
               .appendInt32(partition.preferredReadReplica)
 
               // Add records batch

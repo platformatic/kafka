@@ -1,4 +1,4 @@
-import { ResponseError } from '../../errors.ts'
+import { type GenericError, OutOfBoundsError, ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { readRecordsBatch, type RecordsBatch } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -174,19 +174,28 @@ export function parseResponse (
             preferredReadReplica: r.readInt32()
           }
 
-          let recordsSize = r.readUnsignedVarInt()
-
           if (partition.errorCode !== 0) {
             errors.push([`/responses/${i}/partitions/${j}`, partition.errorCode])
           }
 
-          if (recordsSize > 1) {
-            recordsSize--
+          // We need to reduce the size by one to follow the COMPACT_RECORDS specification.
+          const recordsSize = r.readUnsignedVarInt() - 1
 
+          if (recordsSize > 0) {
             const recordsBatchesReader = Reader.from(r.buffer.subarray(r.position, r.position + recordsSize))
             partition.records = []
             do {
-              partition.records.push(readRecordsBatch(recordsBatchesReader))
+              try {
+                partition.records.push(readRecordsBatch(recordsBatchesReader))
+              } catch (err) {
+                // Contrary to other places in the protocol, records batches CAN BE truncated due to maxBytes argument.
+                // In that case we just ignore the error.
+                if ((err as GenericError).code === OutOfBoundsError.code) {
+                  break
+                }
+                /* c8 ignore next 3 - Hard to test */
+                throw err
+              }
             } while (recordsBatchesReader.position < recordsSize)
 
             r.skip(recordsSize)

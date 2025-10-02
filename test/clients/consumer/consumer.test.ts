@@ -798,6 +798,54 @@ test('consume should integrate with custom deserializers', async t => {
   await stream.close()
 })
 
+test('consumer should properly consume messages with maxBytes limit', async t => {
+  const topic = await createTopic(t, true)
+  const producer = await createProducer(t)
+
+  const publishMessages = 100
+  const batchSize = 10
+
+  const batch: MessageToProduce[] = []
+  for (let i = 0; i < publishMessages; i++) {
+    const message = JSON.stringify({ id: i })
+
+    batch.push({
+      key: Buffer.from('customer_id'),
+      value: Buffer.from(message),
+      topic
+    })
+
+    if (batch.length >= batchSize) {
+      await producer.send({ messages: batch })
+      batch.length = 0
+    }
+  }
+  if (batch.length > 0) {
+    await producer.send({ messages: batch })
+  }
+
+  const consumer = createConsumer(t, {})
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytes: 1024 // magic number that will make the stream receive messages in more "onData" calls
+  })
+
+  let receivedMessages = 0
+
+  for await (const message of stream) {
+    strictEqual(JSON.parse(message.value.toString()).id, receivedMessages)
+    if (++receivedMessages === publishMessages) {
+      break
+    }
+  }
+
+  strictEqual(receivedMessages, publishMessages)
+})
+
 test('fetch should return data and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)
@@ -1230,7 +1278,11 @@ test('fetch should retrieve messages from multiple batches', async t => {
   strictEqual(fetchResult.responses[0].partitions.length, 1, 'Should return one partition')
   const fetchPartition = fetchResult.responses[0].partitions[0]!
   strictEqual(fetchPartition.errorCode, 0, 'Should succeed fetching partition')
-  strictEqual(fetchPartition.records?.length, 3, 'Should return all batches')
+  strictEqual(
+    fetchPartition.records?.length,
+    3,
+    'Should return all messages in a single batch since they fit in min/max bytes'
+  )
   for (let batchNo = 0; batchNo < fetchPartition.records.length; ++batchNo) {
     const recordsBatch: RecordsBatch = fetchPartition.records[batchNo]
 

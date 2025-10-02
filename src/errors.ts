@@ -11,6 +11,7 @@ export const errorCodes = [
   'PLT_KFK_AUTHENTICATION',
   'PLT_KFK_MULTIPLE',
   'PLT_KFK_NETWORK',
+  'PLT_KFK_OUT_OF_BOUNDS',
   'PLT_KFK_PROTOCOL',
   'PLT_KFK_RESPONSE',
   'PLT_KFK_TIMEOUT',
@@ -160,6 +161,14 @@ export class ProtocolError extends GenericError {
       memberId: (response as JoinGroupResponse)?.memberId as string | undefined,
       ...properties
     })
+  }
+}
+
+export class OutOfBoundsError extends GenericError {
+  static code: ErrorCode = 'PLT_KFK_OUT_OF_BOUNDS'
+
+  constructor (message: string, properties: ErrorProperties = {}) {
+    super(OutOfBoundsError.code, message, { isOut: true, ...properties })
   }
 }
 

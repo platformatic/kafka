@@ -1,3 +1,4 @@
 onlyBuiltDependencies:
-  - node-rdkafka
+  - '@confluentinc/kafka-javascript'
+  - '@platformatic/rdkafka'
   - unrs-resolver

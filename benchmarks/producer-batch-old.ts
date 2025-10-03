@@ -15,16 +15,16 @@ async function kafkajs (): Promise<Result> {
 
   let last = process.hrtime.bigint()
 
-  for (let b = 0; b < batches; b++) {
-    const start = b * batchSize
-    const end = Math.min(start + batchSize, iterations)
+  for (let i = 0; i < batches; i++) {
+    const batch = []
 
-    const messages = new Array(end - start).fill(null).map((_, idx) => {
-      const i = start + idx
-      return { key: '111-' + i, value: '222', partition: 0, headers: { a: '123', b: '456' } }
-    })
+    for (let j = 0; j < batchSize; j++) {
+      const index = i * batchSize + j
 
-    await producer.send({ topic, messages, acks: 0 })
+      batch.push({ topic, partition: 0, key: '111-' + index, value: '222', headers: { a: '123', b: '456' } })
+    }
+
+    await producer.send({ topic, messages: batch, acks: 0 })
     tracker.track(last)
     last = process.hrtime.bigint()
   }
@@ -43,20 +43,14 @@ async function platformaticKafka (): Promise<Result> {
 
   let last = process.hrtime.bigint()
 
-  for (let b = 0; b < batches; b++) {
-    const start = b * batchSize
-    const end = Math.min(start + batchSize, iterations)
+  for (let i = 0; i < batches; i++) {
+    const batch = []
 
-    const batch = new Array(end - start).fill(null).map((_, idx) => {
-      const i = start + idx
-      return {
-        topic,
-        partition: 0,
-        key: '111-' + i,
-        value: '222',
-        headers: { a: '123', b: '456' }
-      }
-    })
+    for (let j = 0; j < batchSize; j++) {
+      const index = i * batchSize + j
+
+      batch.push({ topic, partition: 0, key: '111-' + index, value: '222', headers: { a: '123', b: '456' } })
+    }
 
     await producer.send({ messages: batch, acks: ProduceAcks.NO_RESPONSE })
     tracker.track(last)
@@ -68,8 +62,8 @@ async function platformaticKafka (): Promise<Result> {
 }
 
 const results = {
-  'kafkajs (batched)': await kafkajs(),
-  '@platformatic/kafka (batched)': await platformaticKafka()
+  kafkajs: await kafkajs(),
+  '@platformatic/kafka': await platformaticKafka()
 }
 
 printResults(results, true, true, 'previous')

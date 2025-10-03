@@ -1,5 +1,5 @@
 import { humanize } from '../utils.ts'
-import { EMPTY_UUID, type NullableString } from './definitions.ts'
+import { EMPTY_TAGGED_FIELDS_BUFFER, EMPTY_UUID, type NullableString } from './definitions.ts'
 import { DynamicBuffer } from './dynamic-buffer.ts'
 
 // Note that in this class "== null" is purposely used instead of "===" to check for both null and undefined
@@ -294,7 +294,7 @@ export class Writer {
 
   // TODO(ShogunPanda): Tagged fields are not supported yet
   appendTaggedFields (_: any[] = []): this {
-    return this.appendInt8(0)
+    return this.append(EMPTY_TAGGED_FIELDS_BUFFER)
   }
 
   prependLength (): this {

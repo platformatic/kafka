@@ -1323,17 +1323,14 @@ for (const [name, compression] of Object.entries(CompressionAlgorithms)) {
       const producer = await createProducer(t)
 
       await producer.send({
-        acks: ProduceAcks.NO_RESPONSE,
         compression,
         messages: [{ key: Buffer.from('test1'), value: Buffer.from('test1'), topic }]
       })
       await producer.send({
-        acks: ProduceAcks.NO_RESPONSE,
         compression,
         messages: [{ key: Buffer.from('test2'), value: Buffer.from('test2'), topic }]
       })
       await producer.send({
-        acks: ProduceAcks.NO_RESPONSE,
         compression,
         messages: [{ key: Buffer.from('test3'), value: Buffer.from('test3'), topic }]
       })

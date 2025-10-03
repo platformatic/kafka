@@ -82,6 +82,7 @@ export function loadNativeCRC32C (): typeof jsCRC32C | null {
 
       return nativeImplementation(bytes)
     }
+    /* c8 ignore next 3 - Hard to test */
   } catch (error) {
     return null
   }
@@ -101,4 +102,5 @@ export function jsCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
   return (crc ^ 0xffffffff) >>> 0
 }
 
+/* c8 ignore next - Hard to test */
 export const crc32c = loadNativeCRC32C() ?? jsCRC32C

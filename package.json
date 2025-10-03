@@ -55,7 +55,6 @@
     "snappy": "^7.3.3"
   },
   "devDependencies": {
-    "@platformatic/rdkafka": "^4.0.0",
     "@types/debug": "^4.1.12",
     "@types/node": "^22.18.5",
     "@types/semver": "^7.7.1",
@@ -68,9 +67,7 @@
     "fast-jwt": "^6.0.2",
     "hwp": "^0.4.1",
     "json5": "^2.2.3",
-    "kafkajs": "^2.2.4",
     "neostandard": "^0.12.2",
-    "node-rdkafka": "^3.5.0",
     "parse5": "^7.3.0",
     "prettier": "^3.6.2",
     "prettier-plugin-space-before-function-paren": "^0.0.8",

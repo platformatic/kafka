@@ -53,15 +53,16 @@ export interface ConnectionOptions {
   tlsServerName?: string | boolean
   sasl?: SASLOptions
   ownerId?: number
+  handleBackPressure?: boolean
 }
 
 export interface Request {
   correlationId: number
   apiKey: number
   apiVersion: number
-  hasRequestHeaderTaggedFields: boolean
   hasResponseHeaderTaggedFields: boolean
-  payload: () => Writer
+  noResponse: boolean
+  payload: Buffer
   parser: ResponseParser<unknown>
   callback: Callback<any>
   diagnostic: Record<string, unknown>
@@ -96,6 +97,7 @@ export class Connection extends EventEmitter {
   #clientId: string | undefined
   // @ts-ignore This is used just for debugging
   #ownerId: number | undefined
+  #handleBackPressure: boolean
   #correlationId: number
   #nextMessage: number
   #afterDrainRequests: Request[]
@@ -116,6 +118,7 @@ export class Connection extends EventEmitter {
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId
     this.#ownerId = options.ownerId
+    this.#handleBackPressure = options.handleBackPressure ?? false
     this.#correlationId = 0
     this.#nextMessage = 0
     this.#afterDrainRequests = []
@@ -218,7 +221,9 @@ export class Connection extends EventEmitter {
 
         this.#socket.on('error', this.#onError.bind(this))
         this.#socket.on('data', this.#onData.bind(this))
-        this.#socket.on('drain', this.#onDrain.bind(this))
+        if (this.#handleBackPressure) {
+          this.#socket.on('drain', this.#onDrain.bind(this))
+        }
         this.#socket.on('close', this.#onClose.bind(this))
 
         this.#socket.setTimeout(0)
@@ -316,32 +321,54 @@ export class Connection extends EventEmitter {
   send<ReturnType> (
     apiKey: number,
     apiVersion: number,
-    payload: () => Writer,
+    createPayload: () => Writer,
     responseParser: ResponseParser<ReturnType>,
     hasRequestHeaderTaggedFields: boolean,
     hasResponseHeaderTaggedFields: boolean,
     callback: Callback<ReturnType>
   ) {
-    this.#requestsQueue.push(fastQueueCallback => {
-      const correlationId = ++this.#correlationId
+    const correlationId = ++this.#correlationId
 
-      const request: Request = {
-        correlationId,
-        apiKey,
-        apiVersion,
-        hasRequestHeaderTaggedFields,
-        hasResponseHeaderTaggedFields,
-        parser: responseParser,
-        payload,
-        callback: fastQueueCallback,
-        diagnostic: createDiagnosticContext({
-          connection: this,
-          operation: 'send',
-          apiKey,
-          apiVersion,
-          correlationId
-        })
-      }
+    const diagnostic = createDiagnosticContext({
+      connection: this,
+      operation: 'send',
+      apiKey,
+      apiVersion,
+      correlationId
+    })
+
+    const writer = Writer.create()
+    writer.appendInt16(apiKey).appendInt16(apiVersion).appendInt32(correlationId).appendString(this.#clientId, false)
+
+    if (hasRequestHeaderTaggedFields) {
+      writer.appendTaggedFields()
+    }
+
+    let payload: Writer
+    try {
+      payload = createPayload()
+    } catch (err) {
+      diagnostic.error = err as Error
+      connectionsApiChannel.error.publish(diagnostic)
+      throw err
+    }
+
+    writer.appendFrom(payload).prependLength()
+
+    const request: Request = {
+      correlationId,
+      apiKey,
+      apiVersion,
+      parser: responseParser,
+      payload: writer.buffer,
+      callback: null as unknown as Callback<any>, // Will be set later
+      hasResponseHeaderTaggedFields,
+      noResponse: payload.context.noResponse ?? false,
+      diagnostic
+    }
+
+    this.#requestsQueue.push(fastQueueCallback => {
+      request.callback = fastQueueCallback
 
       if (this.#socketMustBeDrained) {
         this.#afterDrainRequests.push(request)
@@ -419,27 +446,23 @@ export class Connection extends EventEmitter {
         return false
       }
 
-      const writer = Writer.create()
-      writer
-        .appendInt16(request.apiKey)
-        .appendInt16(request.apiVersion)
-        .appendInt32(request.correlationId)
-        .appendString(this.#clientId, false)
-
-      if (request.hasRequestHeaderTaggedFields) {
-        writer.appendTaggedFields()
+      if (!request.noResponse) {
+        this.#inflightRequests.set(request.correlationId, request)
       }
 
-      const payload = request.payload()
-      writer.appendFrom(payload).prependLength()
+      let canWrite = this.#socket.write(request.payload)
 
-      const expectResponse = !payload.context.noResponse
-      if (expectResponse) this.#inflightRequests.set(request.correlationId, request)
+      if (!this.#handleBackPressure) {
+        canWrite = true
+      }
 
-      const canWrite = this.#socket.write(writer.buffer)
-      if (!canWrite) this.#socketMustBeDrained = true
+      if (!canWrite) {
+        this.#socketMustBeDrained = true
+      }
 
-      if (!expectResponse) request.callback(null, canWrite)
+      if (request.noResponse) {
+        request.callback(null, canWrite)
+      }
 
       loggers.protocol('Sending request.', {
         apiKey: protocolAPIsById[request.apiKey],
@@ -448,11 +471,11 @@ export class Connection extends EventEmitter {
       })
 
       return canWrite
+      /* c8 ignore next 8 - Hard to test */
     } catch (err) {
       request.diagnostic.error = err as Error
       connectionsApiChannel.error.publish(request.diagnostic)
       throw err
-      /* c8 ignore next 3 - Hard to test */
     } finally {
       connectionsApiChannel.end.publish(request.diagnostic)
     }
@@ -671,9 +694,7 @@ export class Connection extends EventEmitter {
     const error = new NetworkError('Connection closed')
 
     for (const request of this.#afterDrainRequests) {
-      const payload = request.payload()
-
-      if (!payload.context.noResponse) {
+      if (!request.noResponse) {
         request.callback(error, undefined)
       }
     }

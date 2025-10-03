@@ -8,7 +8,8 @@ const instanceIdentifier = Symbol('plt.kafka.reader.instanceIdentifier')
 
 export class Reader {
   buffer: DynamicBuffer
-  position: number;
+  position: number
+  length: number;
   [instanceIdentifier]: boolean
 
   static isReader (target: any): boolean {
@@ -28,7 +29,12 @@ export class Reader {
   constructor (buffer: DynamicBuffer) {
     this.buffer = buffer
     this.position = 0
+    this.length = this.buffer.length
     this[instanceIdentifier] = true
+  }
+
+  get remaining (): number {
+    return this.length - this.position
   }
 
   reset (buffer?: Buffer | DynamicBuffer) {
@@ -56,64 +62,65 @@ export class Reader {
     return this
   }
 
-  peekUnsignedInt8 (): number {
-    return this.buffer.readUInt8(this.position)
+  peekUnsignedInt8 (position?: number): number {
+    return this.buffer.readUInt8(position ?? this.position)
   }
 
-  peekUnsignedInt16 (): number {
-    return this.buffer.readUInt16BE(this.position)
+  peekUnsignedInt16 (position?: number): number {
+    return this.buffer.readUInt16BE(position ?? this.position)
   }
 
-  peekUnsignedInt32 (): number {
-    return this.buffer.readUInt32BE(this.position)
+  peekUnsignedInt32 (position?: number): number {
+    return this.buffer.readUInt32BE(position ?? this.position)
   }
 
-  peekUnsignedInt64 (): bigint {
-    return this.buffer.readBigUInt64BE(this.position)
+  peekUnsignedInt64 (position?: number): bigint {
+    return this.buffer.readBigUInt64BE(position ?? this.position)
   }
 
-  peekUnsignedVarInt (): number {
-    return this.buffer.readUnsignedVarInt(this.position)[0]
+  peekUnsignedVarInt (position?: number): number {
+    return this.buffer.readUnsignedVarInt(position ?? this.position)[0]
   }
 
-  peekUnsignedVarInt64 (): bigint {
-    return this.buffer.readUnsignedVarInt64(this.position)[0]
+  peekUnsignedVarInt64 (position?: number): bigint {
+    return this.buffer.readUnsignedVarInt64(position ?? this.position)[0]
   }
 
-  peekInt8 (): number {
-    return this.buffer.readInt8(this.position)
+  peekInt8 (position?: number): number {
+    return this.buffer.readInt8(position ?? this.position)
   }
 
-  peekInt16 (): number {
-    return this.buffer.readInt16BE(this.position)
+  peekInt16 (position?: number): number {
+    return this.buffer.readInt16BE(position ?? this.position)
   }
 
-  peekInt32 (): number {
-    return this.buffer.readInt32BE(this.position)
+  peekInt32 (position?: number): number {
+    return this.buffer.readInt32BE(position ?? this.position)
   }
 
-  peekInt64 (): bigint {
-    return this.buffer.readBigInt64BE(this.position)
+  peekInt64 (position?: number): bigint {
+    return this.buffer.readBigInt64BE(position ?? this.position)
   }
 
-  peekFloat64 (): number {
-    return this.buffer.readDoubleBE(this.position)
+  peekFloat64 (position?: number): number {
+    return this.buffer.readDoubleBE(position ?? this.position)
   }
 
-  peekVarInt (): number {
-    return this.buffer.readVarInt(this.position)[0]
+  peekVarInt (position?: number): number {
+    return this.buffer.readVarInt(position ?? this.position)[0]
   }
 
-  peekVarInt64 (): bigint {
-    return this.buffer.readVarInt64(this.position)[0]
+  peekVarInt64 (position?: number): bigint {
+    return this.buffer.readVarInt64(position ?? this.position)[0]
   }
 
-  peekBoolean (): boolean {
-    return this.buffer.readInt8(this.position) === 1
+  peekBoolean (position?: number): boolean {
+    return this.buffer.readInt8(position ?? this.position) === 1
   }
 
-  peekUUID (): string {
-    return this.buffer.toString('hex', this.position, this.position + UUID_SIZE)
+  peekUUID (position?: number): string {
+    position ??= this.position
+    return this.buffer.toString('hex', position, position + UUID_SIZE)
   }
 
   readUnsignedInt8 (): number {

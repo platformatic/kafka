@@ -22,22 +22,23 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 
 Creates a new base client.
 
-| Property           | Type                   | Default   | Description                                                                                                                                      |
-| ------------------ | ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clientId`         | `string`               |           | Client ID.                                                                                                                                       |
-| `bootstrapBrokers` | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.       |
-| `timeout`          | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                           |
-| `retries`          | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                             |
-| `retryDelay`       | `number`               | `250`     | Amount of time in milliseconds to wait between retries.                                                                                          |
-| `metadataMaxAge`   | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                            |
-| `autocreateTopics` | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                  |
-| `strict`           | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production. |
-| `metrics`          | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                        |
-| `connectTimeout`   | `number`               | `5000`    | Client connection timeout.                                                                                                                       |
-| `maxInflights`     | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                   |
-| `tls`              | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                        |
-| `tlsServerName`    | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                 |
-| `sasl`             | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                               |
+| Property             | Type                   | Default   | Description                                                                                                                                                        |
+| -------------------- | ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `clientId`           | `string`               |           | Client ID.                                                                                                                                                         |
+| `bootstrapBrokers`   | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.                         |
+| `timeout`            | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
+| `retries`            | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
+| `retryDelay`         | `number`               | `250`     | Amount of time in milliseconds to wait between retries.                                                                                                            |
+| `metadataMaxAge`     | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                                              |
+| `autocreateTopics`   | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                                    |
+| `strict`             | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production.                   |
+| `metrics`            | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                                          |
+| `connectTimeout`     | `number`               | `5000`    | Client connection timeout.                                                                                                                                         |
+| `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
+| `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
+| `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
+| `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
+| `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
 
 ## Methods
 
@@ -126,3 +127,5 @@ const producer = new Producer({
   }
 })
 ```
+
+[node-socket-write]: https://nodejs.org/dist/latest/docs/api/stream.html#writablewritechunk-encoding-callback

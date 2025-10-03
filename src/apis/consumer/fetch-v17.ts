@@ -1,6 +1,6 @@
-import { type GenericError, OutOfBoundsError, ResponseError } from '../../errors.ts'
+import { ResponseError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
-import { readRecordsBatch, type RecordsBatch } from '../../protocol/records.ts'
+import { readRecordsBatches, type RecordsBatch } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
@@ -182,22 +182,7 @@ export function parseResponse (
           const recordsSize = r.readUnsignedVarInt() - 1
 
           if (recordsSize > 0) {
-            const recordsBatchesReader = Reader.from(r.buffer.subarray(r.position, r.position + recordsSize))
-            partition.records = []
-            do {
-              try {
-                partition.records.push(readRecordsBatch(recordsBatchesReader))
-              } catch (err) {
-                // Contrary to other places in the protocol, records batches CAN BE truncated due to maxBytes argument.
-                // In that case we just ignore the error.
-                if ((err as GenericError).code === OutOfBoundsError.code) {
-                  break
-                }
-                /* c8 ignore next 3 - Hard to test */
-                throw err
-              }
-            } while (recordsBatchesReader.position < recordsSize)
-
+            partition.records = readRecordsBatches(Reader.from(r.buffer.subarray(r.position, r.position + recordsSize)))
             r.skip(recordsSize)
           }
 

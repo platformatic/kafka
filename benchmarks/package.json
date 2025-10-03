@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "name": "benchmarks",
+  "version": "0.0.0",
+  "dependencies": {
+    "@confluentinc/kafka-javascript": "^1.5.0",
+    "@platformatic/rdkafka": "^4.0.0",
+    "kafkajs": "^2.2.4"
+  }
+}

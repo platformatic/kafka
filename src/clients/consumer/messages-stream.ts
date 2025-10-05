@@ -372,6 +372,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const partitions = assignment.partitions
 
         for (const partition of partitions) {
+          if (this.#consumer.isPaused({ topic, partition })) {
+            continue
+          }
+
           const leader = metadata.topics.get(topic)!.partitions[partition].leader
 
           if (this.#inflightNodes.has(leader)) {

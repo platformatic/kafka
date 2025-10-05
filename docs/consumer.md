@@ -183,6 +183,43 @@ If `force` is not `true`, then the method will throw an error if any `MessagesSt
 
 The return value is `void`.
 
+### `pause(partitions)`
+
+Pauses message consumption for specific topic-partitions.
+
+The parameter is an array of `TopicPartition` objects, where each object has:
+
+| Property  | Type     | Description                   |
+| --------- | -------- | ----------------------------- |
+| topic     | `string` | The topic name.               |
+| partition | `number` | The partition number to pause |
+
+**Important:** Pausing only prevents new fetch requests for the specified partitions. Messages that are already buffered in the stream's internal buffer may still be emitted after calling `pause()`.
+
+The return value is `void`.
+
+### `resume(partitions)`
+
+Resumes message consumption for specific topic-partitions that were previously paused.
+
+The parameter is an array of `TopicPartition` objects with the same structure as `pause()`.
+
+The return value is `void`.
+
+### `paused()`
+
+Returns an array of all currently paused topic-partitions.
+
+The return value is an array of `TopicPartition` objects.
+
+### `isPaused(partition)`
+
+Checks if a specific topic-partition is currently paused.
+
+The parameter is a `TopicPartition` object.
+
+The return value is `boolean`.
+
 ## FAQs
 
 ### My consumer is not receiving any message when the application restarts

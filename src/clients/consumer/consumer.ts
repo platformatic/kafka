@@ -98,7 +98,8 @@ import {
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets,
-  type OffsetsWithTimestamps
+  type OffsetsWithTimestamps,
+  type TopicPartition
 } from './types.ts'
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
@@ -118,7 +119,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeat: Date | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
-  #partitionsAssigner: GroupPartitionsAssigner;
+  #partitionsAssigner: GroupPartitionsAssigner
+  #pausedPartitions: Map<string, Set<number>>;
   /*
     The following requests are blocking in Kafka:
 
@@ -158,6 +160,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
     this.#lastHeartbeat = null
     this.#streams = new Set()
+    this.#pausedPartitions = new Map()
     this.#partitionsAssigner = this[kOptions].partitionAssigner ?? roundRobinAssigner
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
@@ -295,6 +298,58 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#consume(options, callback)
 
     return callback![kCallbackPromise]
+  }
+
+  pause (partitions: TopicPartition[]): void {
+    if (!this.assignments) {
+      throw new UserError('Cannot pause partitions before joining a consumer group.')
+    }
+
+    for (const { topic, partition } of partitions) {
+      const assignment = this.assignments.find(a => a.topic === topic)
+      if (!assignment) {
+        throw new UserError(`Topic '${topic}' is not assigned to this consumer.`, { topic })
+      }
+
+      const existing = this.#pausedPartitions.get(topic)
+      if (existing) {
+        existing.add(partition)
+      } else {
+        this.#pausedPartitions.set(topic, new Set([partition]))
+      }
+    }
+  }
+
+  resume (partitions: TopicPartition[]): void {
+    if (!this.assignments) {
+      throw new UserError('Cannot resume partitions before joining a consumer group.')
+    }
+
+    for (const { topic, partition } of partitions) {
+      const assignment = this.assignments.find(a => a.topic === topic)
+      if (!assignment) {
+        throw new UserError(`Topic '${topic}' is not assigned to this consumer.`, { topic })
+      }
+
+      const existing = this.#pausedPartitions.get(topic)
+      if (existing) {
+        existing.delete(partition)
+        if (existing.size === 0) {
+          this.#pausedPartitions.delete(topic)
+        }
+      }
+    }
+  }
+
+  paused (): TopicPartition[] {
+    return this.#pausedPartitions
+      .entries()
+      .flatMap(([topic, partitions]) => Array.from(partitions).map(partition => ({ topic, partition })))
+      .toArray()
+  }
+
+  isPaused (partition: TopicPartition): boolean {
+    return !!this.#pausedPartitions.get(partition.topic)?.has(partition.partition)
   }
 
   fetch (options: FetchOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<FetchResponse>): void

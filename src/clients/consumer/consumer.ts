@@ -342,10 +342,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   paused (): TopicPartition[] {
-    return this.#pausedPartitions
-      .entries()
-      .flatMap(([topic, partitions]) => Array.from(partitions).map(partition => ({ topic, partition })))
-      .toArray()
+    const result: TopicPartition[] = []
+    for (const [topic, partitions] of this.#pausedPartitions.entries()) {
+      for (const partition of partitions) {
+        result.push({ topic, partition })
+      }
+    }
+
+    return result
   }
 
   isPaused (partition: TopicPartition): boolean {

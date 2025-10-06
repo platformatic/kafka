@@ -23,6 +23,7 @@ import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
+  type ConsumeByPartitionOptions,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
   type CommitOptionsPartition,
@@ -51,6 +52,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #maxFetches: number
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
+  #topicPartition?: { topic: string, partition: number }
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #inflightNodes: Set<number>
@@ -68,7 +70,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
-    options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+    topicPartition?: { topic: string, partition: number }
   ) {
     const {
       autocommit,
@@ -80,6 +83,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       onCorruptedMessage,
       // The options below are only destructured to avoid being part of structuredClone below
       partitionAssigner: _partitionAssigner,
+      onAssignmentChange: _onAssignmentChange,
       ...otherOptions
     } = options
 
@@ -100,6 +104,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
+    this.#topicPartition = topicPartition
     this.#inflightNodes = new Set()
     this.#keyDeserializer = deserializers?.key ?? (noopDeserializer as Deserializer<Key>)
     this.#valueDeserializer = deserializers?.value ?? (noopDeserializer as Deserializer<Value>)
@@ -115,7 +120,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#offsetsToFetch = new Map()
     if (offsets) {
       for (const { topic, partition, offset } of offsets) {
-        this.#offsetsToFetch.set(`${topic}:${partition}`, offset)
+        if (topicPartition && topicPartition.topic === topic && topicPartition.partition === partition) {
+          this.#offsetsToFetch.set(`${topic}:${partition}`, offset)
+        }
       }
     }
 
@@ -361,7 +368,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       // Group topic-partitions by the destination broker
       const requestedOffsets = new Map<string, bigint>()
-      for (const topic of this.#topics) {
+      for (const topic of this.#topicPartition ? [this.#topicPartition.topic] : this.#topics) {
         const assignment = this.#assignmentsForTopic(topic)
 
         // This consumer has no assignment for the topic, continue
@@ -614,7 +621,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // List topic offsets
     this.#consumer.listOffsets(
       {
-        topics: this.#topics,
+        topics: this.#topicPartition ? [this.#topicPartition.topic] : this.#topics,
+        partitions: this.#topicPartition ? { [this.#topicPartition.topic]: [this.#topicPartition.partition] } : undefined,
         timestamp:
           this.#mode === MessagesStreamModes.EARLIEST ||
           (this.#mode !== MessagesStreamModes.LATEST && this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST)
@@ -640,7 +648,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
         // Now restore group offsets
         const topics: GroupAssignment[] = []
-        for (const topic of this.#topics) {
+        for (const topic of this.#topicPartition ? [this.#topicPartition.topic] : this.#topics) {
           const assignment = this.#assignmentsForTopic(topic)
 
           if (!assignment) {
@@ -704,7 +712,28 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #assignmentsForTopic (topic: string): GroupAssignment | undefined {
-    return this.#consumer.assignments!.find(assignment => assignment.topic === topic)
+    if (this.#topicPartition) {
+      const topicPartition = this.#topicPartition
+      const assignment = this.#consumer.assignments!.find(assignment => assignment.topic === topic && assignment.partitions.includes(topicPartition.partition))
+
+      if (assignment) {
+        // The consumer still has this topic partition assigned,
+        // so return the assignment and continue working
+        return {
+          topic: topicPartition.topic,
+          partitions: [topicPartition.partition]
+        }
+      } else {
+        // The consumer no longer has this topic partition assigned to it,
+        // since this stream is specific to this topic partition,
+        // close the stream so we stop fetching and downstream consumers
+        // can clean themselves up.
+        this.close()
+        return undefined
+      }
+    } else {
+      return this.#consumer.assignments!.find(assignment => assignment.topic === topic)
+    }
   }
 
   #invokeCloseCallbacks (error: Error | null) {

@@ -325,6 +325,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       throw new UserError('Cannot resume partitions before joining a consumer group.')
     }
 
+    let emitResumeEvent = false
     for (const { topic, partition } of partitions) {
       const assignment = this.assignments.find(a => a.topic === topic)
       if (!assignment) {
@@ -332,12 +333,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       const existing = this.#pausedPartitions.get(topic)
-      if (existing) {
+      if (existing?.has(partition)) {
+        emitResumeEvent = true
         existing.delete(partition)
-        if (existing.size === 0) {
-          this.#pausedPartitions.delete(topic)
-        }
       }
+
+      if (existing?.size === 0) {
+        this.#pausedPartitions.delete(topic)
+      }
+    }
+
+    if (emitResumeEvent) {
+      this.emitWithDebug('consumer', 'user:resume', { partitions })
     }
   }
 

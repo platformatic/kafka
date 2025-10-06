@@ -3270,11 +3270,11 @@ test('pause should prevent fetches from paused partitions during consumption', a
   const messages = Array.from({ length: 10 }, (_, i) => ({
     topic,
     key: `key-${i}`,
-    value: `value-${i}`,
-    partition: i % 2
+    value: `value-${i}`
   }))
 
-  await produceTestMessages({ t, messages })
+  await produceTestMessages({ t, messages: messages.slice(0, 5), overrideOptions: { partitioner: () => 0 } })
+  await produceTestMessages({ t, messages: messages.slice(5, 10), overrideOptions: { partitioner: () => 1 } })
 
   const consumer = createConsumer(t)
   const stream = await consumer.consume({

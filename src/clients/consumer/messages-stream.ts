@@ -144,6 +144,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       })
     })
 
+    this.#consumer.on('consumer:user:resume', () => {
+      if (this.#inflightNodes.size > 0 || this.#shouldClose || this.closed || this.destroyed) {
+        return
+      }
+
+      this.#fetch()
+    })
+
     if (consumer[kPrometheus]) {
       this.#metricsConsumedMessages = ensureMetric<Counter>(
         consumer[kPrometheus],
@@ -563,9 +571,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (canPush && !(this.#shouldClose || this.closed || this.destroyed)) {
-      process.nextTick(() => {
-        this.#fetch()
-      })
+      this.#fetch()
     }
   }
 

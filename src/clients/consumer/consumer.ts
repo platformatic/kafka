@@ -99,7 +99,7 @@ import {
   type ListOffsetsOptions,
   type Offsets,
   type OffsetsWithTimestamps,
-  type TopicPartition
+  type TopicPartitions
 } from './types.ts'
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
@@ -300,67 +300,72 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback![kCallbackPromise]
   }
 
-  pause (partitions: TopicPartition[]): void {
+  pause (topicPartitions: TopicPartitions[]): void {
     if (!this.assignments) {
       throw new UserError('Cannot pause partitions before joining a consumer group.')
     }
 
-    for (const { topic, partition } of partitions) {
+    for (const { topic, partitions } of topicPartitions) {
       const assignment = this.assignments.find(a => a.topic === topic)
       if (!assignment) {
         throw new UserError(`Topic '${topic}' is not assigned to this consumer.`, { topic })
       }
 
-      const existing = this.#pausedPartitions.get(topic)
-      if (existing) {
-        existing.add(partition)
-      } else {
-        this.#pausedPartitions.set(topic, new Set([partition]))
+      for (const partition of partitions) {
+        const existing = this.#pausedPartitions.get(topic)
+        if (existing) {
+          existing.add(partition)
+        } else {
+          this.#pausedPartitions.set(topic, new Set([partition]))
+        }
       }
     }
   }
 
-  resume (partitions: TopicPartition[]): void {
+  resume (topicPartitions: TopicPartitions[]): void {
     if (!this.assignments) {
       throw new UserError('Cannot resume partitions before joining a consumer group.')
     }
 
     let emitResumeEvent = false
-    for (const { topic, partition } of partitions) {
+    for (const { topic, partitions } of topicPartitions) {
       const assignment = this.assignments.find(a => a.topic === topic)
       if (!assignment) {
         throw new UserError(`Topic '${topic}' is not assigned to this consumer.`, { topic })
       }
 
-      const existing = this.#pausedPartitions.get(topic)
-      if (existing?.has(partition)) {
-        emitResumeEvent = true
-        existing.delete(partition)
-      }
+      for (const partition of partitions) {
+        const existing = this.#pausedPartitions.get(topic)
+        if (existing?.has(partition)) {
+          emitResumeEvent = true
+          existing.delete(partition)
+        }
 
-      if (existing?.size === 0) {
-        this.#pausedPartitions.delete(topic)
+        if (existing?.size === 0) {
+          this.#pausedPartitions.delete(topic)
+        }
       }
     }
 
     if (emitResumeEvent) {
-      this.emitWithDebug('consumer', 'user:resume', { partitions })
+      this.emitWithDebug('consumer', 'user:resume', { partitions: topicPartitions })
     }
   }
 
-  paused (): TopicPartition[] {
-    const result: TopicPartition[] = []
+  paused (): TopicPartitions[] {
+    const result: TopicPartitions[] = []
     for (const [topic, partitions] of this.#pausedPartitions.entries()) {
-      for (const partition of partitions) {
-        result.push({ topic, partition })
-      }
+      result.push({
+        topic,
+        partitions: Array.from(partitions)
+      })
     }
 
     return result
   }
 
-  isPaused (partition: TopicPartition): boolean {
-    return !!this.#pausedPartitions.get(partition.topic)?.has(partition.partition)
+  isPaused (topic: string, partition: number): boolean {
+    return !!this.#pausedPartitions.get(topic)?.has(partition)
   }
 
   fetch (options: FetchOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<FetchResponse>): void

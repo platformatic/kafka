@@ -10,14 +10,13 @@ export interface GroupProtocolSubscription {
   metadata?: Buffer | string
 }
 
-export interface TopicPartition {
-  topic: string
-  partition: number
-}
-
-export interface GroupAssignment {
+export interface TopicPartitions {
   topic: string
   partitions: number[]
+}
+
+export interface GroupAssignment extends TopicPartitions {
+  // Pulic export, left to not break existing usage
 }
 
 export interface GroupPartitionsAssignments {

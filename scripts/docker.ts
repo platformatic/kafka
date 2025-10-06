@@ -24,7 +24,7 @@ const {
   args: scriptArgs,
   options: {
     // Rule of thumb: Confluent Kafka Version = Apache Kafka Version + 4.0.0
-    version: { type: 'string', short: 'v', default: '7.9.0' }
+    version: { type: 'string', short: 'v', default: '8.0.1' }
   }
 })
 

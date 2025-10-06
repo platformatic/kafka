@@ -2278,6 +2278,13 @@ test('joinGroup should setup assignment for a topic', async t => {
   deepStrictEqual(consumer.assignments, [{ topic, partitions: [0, 1, 2] }])
 })
 
+test('joinGroup should be no-op in new consumer protocol', async t => {
+  await createTopic(t, true, 3)
+  const consumer = createConsumer(t, { groupProtocol: 'consumer' })
+  await consumer.joinGroup({})
+  deepStrictEqual(consumer.assignments, null)
+})
+
 test('joinGroup should setup assignment with a round robin policy', async t => {
   const topic = await createTopic(t, true, 3)
   const groupId = createGroupId()
@@ -2756,6 +2763,12 @@ test('leaveGroup should support both promise and callback API', t => {
       })
     })
   })
+})
+
+test('leaveGroup should be no-op in new consumer protocol', async t => {
+  const consumer = createConsumer(t, { groupProtocol: 'consumer' })
+  await consumer.joinGroup({})
+  await consumer.leaveGroup()
 })
 
 test('leaveGroup should fail when consumer is closed', async t => {

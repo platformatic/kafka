@@ -183,26 +183,24 @@ If `force` is not `true`, then the method will throw an error if any `MessagesSt
 
 The return value is `void`.
 
-### `pause(partitions)`
+### `pause(topicPartitions)`
 
-Pauses message consumption for specific topic-partitions.
+Pauses message consumption for specific topic-partitions. Pausing only prevents new fetch requests for the specified partitions. Messages that are already buffered in the stream's internal buffer may still be emitted after calling `pause()`. This method will throw an error if called before joining a consumer group or if the specified topic is not assigned to this consumer.
 
-The parameter is an array of `TopicPartition` objects, where each object has:
+The parameter is an array of `TopicPartitions` objects, where each object has:
 
-| Property  | Type     | Description                   |
-| --------- | -------- | ----------------------------- |
-| topic     | `string` | The topic name.               |
-| partition | `number` | The partition number to pause |
-
-**Important:** Pausing only prevents new fetch requests for the specified partitions. Messages that are already buffered in the stream's internal buffer may still be emitted after calling `pause()`.
+| Property   | Type       | Description         |
+| ---------- | ---------- | ------------------- |
+| topic      | `string`   | The topic name.     |
+| partitions | `number[]` | Array of partitions |
 
 The return value is `void`.
 
-### `resume(partitions)`
+### `resume(topicPartitions)`
 
-Resumes message consumption for specific topic-partitions that were previously paused.
+Resumes message consumption for specific topic-partitions that were previously paused. This method will throw an error if called before joining a consumer group or if the specified topic is not assigned to this consumer.
 
-The parameter is an array of `TopicPartition` objects with the same structure as `pause()`.
+The parameter is an array of `TopicPartitions` objects (same structure as `pause()`).
 
 The return value is `void`.
 
@@ -210,13 +208,11 @@ The return value is `void`.
 
 Returns an array of all currently paused topic-partitions.
 
-The return value is an array of `TopicPartition` objects.
+The return value is an array of `TopicPartitions` objects (same structure as `pause()`).
 
-### `isPaused(partition)`
+### `isPaused(topic, partition)`
 
 Checks if a specific topic-partition is currently paused.
-
-The parameter is a `TopicPartition` object.
 
 The return value is `boolean`.
 

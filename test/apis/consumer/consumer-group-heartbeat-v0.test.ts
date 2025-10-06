@@ -200,7 +200,8 @@ test('parseResponse correctly processes a successful response', () => {
     .appendString('test-member-1') // memberId
     .appendInt32(5) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
-    .appendArray([], () => {}) // Empty assignment
+    .appendInt8(-1) // Assignment non-present (nullable struct indicator)
+    .appendInt8(0) // Assignment tagged fields
     .appendInt8(0) // Root tagged fields
 
   const response = parseResponse(1, 68, 0, Reader.from(writer))
@@ -213,7 +214,7 @@ test('parseResponse correctly processes a successful response', () => {
     memberId: 'test-member-1',
     memberEpoch: 5,
     heartbeatIntervalMs: 3000,
-    assignment: []
+    assignment: null
   })
 })
 
@@ -226,37 +227,9 @@ test('parseResponse with assignment', () => {
     .appendString('test-member-1') // memberId
     .appendInt32(5) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
+    .appendInt8(1) // Assignment present (nullable struct indicator)
     .appendArray(
       [
-        // Assignment with topic partitions
-        {
-          topicPartitions: [
-            {
-              topicId: '12345678-1234-1234-1234-123456789012',
-              partitions: [0, 1, 2]
-            },
-            {
-              topicId: '87654321-4321-4321-4321-210987654321',
-              partitions: [3, 4]
-            }
-          ]
-        }
-      ],
-      (w, a) => {
-        // Write topicPartitions array
-        w.appendArray(a.topicPartitions, (w, tp) => {
-          w.appendUUID(tp.topicId).appendArray(tp.partitions, (w, p) => w.appendInt32(p), true, false)
-        })
-      }
-    )
-    .appendInt8(0) // Root tagged fields
-
-  const response = parseResponse(1, 68, 0, Reader.from(writer))
-
-  // Verify assignment structure
-  deepStrictEqual(response.assignment, [
-    {
-      topicPartitions: [
         {
           topicId: '12345678-1234-1234-1234-123456789012',
           partitions: [0, 1, 2]
@@ -265,9 +238,29 @@ test('parseResponse with assignment', () => {
           topicId: '87654321-4321-4321-4321-210987654321',
           partitions: [3, 4]
         }
-      ]
-    }
-  ])
+      ],
+      (w, tp) => {
+        w.appendUUID(tp.topicId).appendArray(tp.partitions, (w, p) => w.appendInt32(p), true, false)
+      }
+    )
+    .appendInt8(0) // Assignment tagged fields
+    .appendInt8(0) // Root tagged fields
+
+  const response = parseResponse(1, 68, 0, Reader.from(writer))
+
+  // Verify assignment structure
+  deepStrictEqual(response.assignment, {
+    topicPartitions: [
+      {
+        topicId: '12345678-1234-1234-1234-123456789012',
+        partitions: [0, 1, 2]
+      },
+      {
+        topicId: '87654321-4321-4321-4321-210987654321',
+        partitions: [3, 4]
+      }
+    ]
+  })
 })
 
 test('parseResponse handles throttling', () => {
@@ -279,7 +272,9 @@ test('parseResponse handles throttling', () => {
     .appendString('test-member-1') // memberId
     .appendInt32(5) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
-    .appendArray([], () => {}) // Empty assignment
+    .appendInt8(1) // Assignment present (nullable struct indicator)
+    .appendArray([], () => {}) // Empty topic partitions array
+    .appendInt8(0) // Assignment tagged fields
     .appendInt8(0) // Root tagged fields
 
   const response = parseResponse(1, 68, 0, Reader.from(writer))
@@ -292,7 +287,7 @@ test('parseResponse handles throttling', () => {
     memberId: 'test-member-1',
     memberEpoch: 5,
     heartbeatIntervalMs: 3000,
-    assignment: []
+    assignment: { topicPartitions: [] }
   })
 })
 
@@ -305,7 +300,8 @@ test('parseResponse throws error on non-zero error code', () => {
     .appendString(null) // memberId
     .appendInt32(-1) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
-    .appendArray([], () => {}) // Empty assignment
+    .appendInt8(-1) // Assignment non-present (nullable struct indicator)
+    .appendInt8(0) // Assignment tagged fields
     .appendInt8(0) // Root tagged fields
 
   // Verify that parsing throws ResponseError
@@ -328,7 +324,7 @@ test('parseResponse throws error on non-zero error code', () => {
         memberId: null,
         memberEpoch: -1,
         heartbeatIntervalMs: 3000,
-        assignment: []
+        assignment: null
       })
 
       return true

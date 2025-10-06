@@ -409,6 +409,13 @@ export class Reader {
     return map
   }
 
+  readNullableStruct<V> (reader: () => V): V | null {
+    if (this.readInt8() === -1) {
+      return null
+    }
+    return reader()
+  }
+
   // TODO(ShogunPanda): Tagged fields are not supported yet
   readTaggedFields (): void {
     const length = this.readVarInt()

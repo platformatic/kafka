@@ -571,7 +571,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (canPush && !(this.#shouldClose || this.closed || this.destroyed)) {
-      this.#fetch()
+      process.nextTick(() => {
+        this.#fetch()
+      })
     }
   }
 

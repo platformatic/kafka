@@ -16,7 +16,7 @@ export interface TopicPartitions {
 }
 
 export interface GroupAssignment extends TopicPartitions {
-  // Pulic export, left to not break existing usage
+  // Public export, left to not break existing usage
 }
 
 export interface GroupPartitionsAssignments {

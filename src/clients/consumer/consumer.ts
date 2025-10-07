@@ -74,6 +74,7 @@ import { ensureMetric, type Gauge } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
   commitOptionsValidator,
+  consumeByPartitionOptionsValidator,
   consumeOptionsValidator,
   consumerOptionsValidator,
   defaultConsumerOptions,
@@ -86,6 +87,7 @@ import {
 import { roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
+  type ConsumeByPartitionOptions,
   type CommitOptions,
   type ConsumeOptions,
   type ConsumerOptions,
@@ -293,6 +295,41 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.highWaterMark ??= this[kOptions].highWaterMark!
 
     this.#consume(options, callback)
+
+    return callback![kCallbackPromise]
+  }
+
+  consumeByPartition (
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>
+  ): void
+  consumeByPartition (
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>
+  ): Promise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>
+  consumeByPartition (
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback?: CallbackWithPromise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>
+  ): void | Promise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, consumeByPartitionOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>)
+      return callback[kCallbackPromise]
+    }
+
+    options.autocommit ??= this[kOptions].autocommit! ?? true
+    options.maxBytes ??= this[kOptions].maxBytes!
+    options.deserializers = Object.assign({}, options.deserializers, this[kOptions].deserializers)
+    options.highWaterMark ??= this[kOptions].highWaterMark!
+
+    this.#consumeByPartition(options, callback)
 
     return callback![kCallbackPromise]
   }
@@ -538,6 +575,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ): void {
     consumerConsumesChannel.traceCallback(
       this.#performConsume,
+      2,
+      createDiagnosticContext({ client: this, operation: 'consume', options }),
+      this,
+      options,
+      true,
+      callback
+    )
+  }
+
+  #consumeByPartition (
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>
+  ): void {
+    consumerConsumesChannel.traceCallback(
+      this.#performConsumeByPartition,
       2,
       createDiagnosticContext({ client: this, operation: 'consume', options }),
       this,
@@ -986,7 +1038,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // Create the stream and start consuming
     const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
       this,
-      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
+      options as ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>
     )
     this.#streams.add(stream)
 
@@ -998,6 +1050,123 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
 
     callback(null, stream)
+  }
+
+  #performConsumeByPartition (
+    options: ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+    trackTopics: boolean,
+    callback: CallbackWithPromise<Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>>
+  ): void {
+    // Subscribe all topics
+    let joinNeeded = this.memberId === null
+
+    if (trackTopics) {
+      for (const topic of options.topics) {
+        if (this.topics.track(topic)) {
+          joinNeeded = true
+        }
+      }
+    }
+
+    // If we need to (re)join the group, do that first and then try again
+    if (joinNeeded) {
+      this.joinGroup(options, error => {
+        if (error) {
+          callback(error, undefined as unknown as Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>)
+          return
+        }
+
+        this.#performConsumeByPartition(options, false, callback)
+      })
+
+      return
+    }
+
+    let streamMap = new Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>()
+
+    for (const topic of options.topics) {
+      const assignment = this.assignments!.find(assignment => assignment.topic === topic)
+      if (!assignment) {
+        continue
+      }
+
+      for (const partition of assignment.partitions) {
+        const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
+          this,
+          options as ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+          { topic, partition }
+        )
+
+        this.#streams.add(stream)
+
+        this.#metricActiveStreams?.inc()
+        stream.once('close', () => {
+          this.#metricActiveStreams?.dec()
+          this.topics.untrack(topic)
+          this.#streams.delete(stream)
+        })
+
+        streamMap.set(`${topic}:${partition}`, stream)
+      }
+    }
+
+    this.on('consumer:group:join', () => {
+      // calculate new list of topic-partitions vs. the keys of current streamMap
+      // if new list is identical to old list, do nothing
+      // if lists are different, create new streamMap and fill it with streams from
+      // old map that are still in new list of topic-partitions, plus new streams for
+      // the new topic-partitions (if any)
+      // replace streamMap let var with new map, and pass it to the onAssignmentChange callback
+      const oldTopicPartitions = Array.from(streamMap.keys())
+      const newTopicPartitions: string[] = []
+
+      for (const topic of options.topics) {
+        const assignment = this.assignments!.find(assignment => assignment.topic === topic)
+        if (!assignment) {
+          continue
+        }
+
+        for (const partition of assignment.partitions) {
+          newTopicPartitions.push(`${topic}:${partition}`)
+        }
+      }
+
+      if (oldTopicPartitions.length === newTopicPartitions.length && oldTopicPartitions.sort().join(',') === newTopicPartitions.sort().join(',')) {
+        return
+      }
+
+      const newStreamMap = new Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>()
+
+      for (const topicPartition of newTopicPartitions) {
+        const [topic, partition] = topicPartition.split(':')
+        const stream = streamMap.get(topicPartition)
+        if (stream) {
+          newStreamMap.set(topicPartition, stream)
+        } else {
+          const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
+            this,
+            options as ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue>,
+            { topic, partition: parseInt(partition, 10) }
+          )
+
+          this.#streams.add(stream)
+
+          this.#metricActiveStreams?.inc()
+          stream.once('close', () => {
+            this.#metricActiveStreams?.dec()
+            this.topics.untrack(topic)
+            this.#streams.delete(stream)
+          })
+
+          newStreamMap.set(topicPartition, stream)
+        }
+      }
+
+      streamMap = newStreamMap
+      options.onAssignmentChange(streamMap)
+    })
+
+    callback(null, streamMap)
   }
 
   #performFindGroupCoordinator (callback: CallbackWithPromise<number>): void {

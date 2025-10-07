@@ -15,6 +15,7 @@ const stream = await consumer.consume({
   autocommit: false,
   topics: [topic],
   sessionTimeout: 10000,
+  rebalanceTimeout: 10000,
   heartbeatInterval: 500,
   maxWaitTime: 500
 })

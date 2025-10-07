@@ -15,6 +15,7 @@ import { Writer } from './writer.ts'
 const CURRENT_RECORD_VERSION = 2
 const IS_TRANSACTIONAL = 0b10000 // Bit 4 set
 const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
+const BATCH_HEAD = INT64_SIZE + INT32_SIZE // FirstOffset + Length
 
 export interface MessageBase<Key = Buffer, Value = Buffer> {
   key?: Key
@@ -252,6 +253,7 @@ export function createRecordsBatch (
   )
 }
 
+// TODO: Early bail out if there are not enough bytes to read all the records as it might be truncated
 export function readRecordsBatch (reader: Reader): RecordsBatch {
   const initialPosition = reader.position
   const batch = {
@@ -297,4 +299,17 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
   }
 
   return batch
+}
+
+export function readRecordsBatches (reader: Reader): RecordsBatch[] {
+  const batches: RecordsBatch[] = []
+
+  while (
+    reader.remaining >= BATCH_HEAD &&
+    reader.remaining - BATCH_HEAD >= reader.peekInt32(reader.position + INT64_SIZE)
+  ) {
+    batches.push(readRecordsBatch(reader))
+  }
+
+  return batches
 }

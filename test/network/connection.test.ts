@@ -463,7 +463,7 @@ test('Connection.send should handle requests with no response', async t => {
 
 test('Connection should handle socket drain events', async t => {
   const { server, port } = await createServer(t)
-  const connection = new Connection('test-client')
+  const connection = new Connection('test-client', { handleBackPressure: true })
   t.after(() => connection.close())
 
   const writesPerRequest = 1
@@ -635,7 +635,7 @@ test('Connection should handle socket errors', async t => {
 
 test('Connection should handle close with in-flight and after-drain requests', async t => {
   const { server, port } = await createServer(t)
-  const connection = new Connection('test-client')
+  const connection = new Connection('test-client', { handleBackPressure: true })
   t.after(() => connection.close())
 
   // Create a mock server that never responds

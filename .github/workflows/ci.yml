@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
-        run: docker compose -f docker/compose.yml up -d --wait
+        run: docker compose up -d --wait
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests

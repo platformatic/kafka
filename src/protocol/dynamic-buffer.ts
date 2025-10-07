@@ -72,14 +72,24 @@ export class DynamicBuffer {
   }
 
   appendFrom (DynamicBuffer: DynamicBuffer): this {
-    this.buffers.push(...DynamicBuffer.buffers)
+    const buffers = DynamicBuffer.buffers
+
+    for (let i = 0; i < buffers.length; i++) {
+      this.buffers.push(buffers[i])
+    }
+
     this.length += DynamicBuffer.length
 
     return this
   }
 
   prependFrom (DynamicBuffer: DynamicBuffer): this {
-    this.buffers.unshift(...DynamicBuffer.buffers)
+    const buffers = DynamicBuffer.buffers
+
+    for (let i = buffers.length - 1; i >= 0; i--) {
+      this.buffers.unshift(buffers[i])
+    }
+
     this.length += DynamicBuffer.length
 
     return this
@@ -479,7 +489,7 @@ export class DynamicBuffer {
   }
 
   writeUnsignedVarInt (value: number, append: boolean = true): void {
-    const buffer = Buffer.alloc(sizeOfUnsignedVarInt(value))
+    const buffer = Buffer.allocUnsafe(sizeOfUnsignedVarInt(value))
     let position = 0
 
     while ((value & BITS_8PLUS_MASK) !== 0) {
@@ -498,7 +508,7 @@ export class DynamicBuffer {
   }
 
   writeUnsignedVarInt64 (value: bigint, append: boolean = true) {
-    const buffer = Buffer.alloc(sizeOfUnsignedVarInt64(value))
+    const buffer = Buffer.allocUnsafe(sizeOfUnsignedVarInt64(value))
     let position = 0
 
     while ((value & BITS_8PLUS_MASK_64) !== 0n) {

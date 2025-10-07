@@ -1,3 +1,0 @@
-onlyBuiltDependencies:
-  - '@confluentinc/kafka-javascript'
-  - '@platformatic/rdkafka'

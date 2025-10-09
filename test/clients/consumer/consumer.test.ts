@@ -2350,6 +2350,56 @@ test('joinGroup should setup assignment with a custom policy', async t => {
   deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 1, 2] }])
 })
 
+test('joinGroup should not fail when the partition assigner misses a member', async t => {
+  const topic = await createTopic(t, true, 3)
+  const groupId = createGroupId()
+
+  function partitionAssigner (
+    _current: string,
+    _members: Map<string, ExtendedGroupProtocolSubscription>,
+    topics: Set<string>,
+    metadata: ClusterMetadata
+  ): GroupPartitionsAssignments[] {
+    const assignments: GroupPartitionsAssignments[] = []
+
+    // Assign all partitions to only consumer1
+
+    const member = { memberId: consumer1.memberId!, assignments: new Map() }
+    assignments.push(member)
+
+    for (const topic of topics) {
+      const partitionsCount = metadata.topics.get(topic)!.partitionsCount
+
+      for (let i = 0; i < partitionsCount; i++) {
+        let topicAssignments = member.assignments.get(topic)
+
+        if (!topicAssignments) {
+          topicAssignments = { topic, partitions: [] }
+          member.assignments.set(topic, topicAssignments)
+        }
+
+        topicAssignments?.partitions.push(i)
+      }
+    }
+
+    return assignments
+  }
+
+  const consumer1 = createConsumer(t, { groupId, partitionAssigner })
+  const consumer2 = createConsumer(t, { groupId, partitionAssigner })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+
+  await consumer1.joinGroup({ protocols: [{ name: 'roundrobin', version: 1, metadata: '123' }] })
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup({ protocols: [{ name: 'roundrobin', version: 1, metadata: Buffer.from('123') }] })
+  await rejoinPromise
+
+  deepStrictEqual(consumer1.assignments, [{ topic, partitions: [0, 1, 2] }])
+  deepStrictEqual(consumer2.assignments, [])
+})
+
 test('joinGroup might receive no assignment', async t => {
   const topic = await createTopic(t, true)
   const groupId = createGroupId()

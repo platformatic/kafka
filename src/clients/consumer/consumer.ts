@@ -47,6 +47,7 @@ import {
 import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
+import { INT32_SIZE } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import {
@@ -117,8 +118,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #coordinatorId: number | null
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeat: Date | null
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
-  #partitionsAssigner: GroupPartitionsAssigner;
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>;
+
   /*
     The following requests are blocking in Kafka:
 
@@ -158,7 +159,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
     this.#lastHeartbeat = null
     this.#streams = new Set()
-    this.#partitionsAssigner = this[kOptions].partitionAssigner ?? roundRobinAssigner
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
@@ -868,12 +868,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #syncGroup (callback: CallbackWithPromise<GroupAssignment[]>): void {
+  #syncGroup (
+    partitionsAssigner: GroupPartitionsAssigner | null,
+    callback: CallbackWithPromise<GroupAssignment[]>
+  ): void {
     consumerGroupChannel.traceCallback(
       this.#performSyncGroup,
-      1,
+      2,
       createDiagnosticContext({ client: this, operation: 'syncGroup' }),
       this,
+      partitionsAssigner,
       null,
       callback
     )
@@ -1108,7 +1112,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         // Send a syncGroup request
-        this.#syncGroup((error, response) => {
+        this.#syncGroup(options.partitionAssigner, (error, response) => {
           if (!this.#membershipActive) {
             callback(null, undefined as unknown as string)
             return
@@ -1225,6 +1229,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #performSyncGroup (
+    partitionsAssigner: GroupPartitionsAssigner | null,
     assignments: SyncGroupRequestAssignment[] | null,
     callback: CallbackWithPromise<GroupAssignment[]>
   ): void {
@@ -1257,7 +1262,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#performSyncGroup(this.#createAssignments(metadata), callback)
+          this.#performSyncGroup(partitionsAssigner, this.#createAssignments(partitionsAssigner, metadata), callback)
         })
 
         return
@@ -1409,6 +1414,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     reader.skip(2) // Ignore Version information
 
+    if (reader.remaining < INT32_SIZE) {
+      return []
+    }
+
     return reader.readArray(
       r => {
         return {
@@ -1421,7 +1430,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #createAssignments (metadata: ClusterMetadata): SyncGroupRequestAssignment[] {
+  #createAssignments (
+    partitionsAssigner: GroupPartitionsAssigner | null,
+    metadata: ClusterMetadata
+  ): SyncGroupRequestAssignment[] {
     const partitionTracker: Map<string, { next: number; max: number }> = new Map()
 
     // First of all, layout topics-partitions in a list
@@ -1448,12 +1460,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const encodedAssignments: SyncGroupRequestAssignment[] = []
-    for (const member of this.#partitionsAssigner(
-      this.memberId!,
-      this.#members,
-      new Set(this.topics.current),
-      metadata
-    )) {
+
+    partitionsAssigner ??= this[kOptions].partitionAssigner ?? roundRobinAssigner
+    for (const member of partitionsAssigner(this.memberId!, this.#members, new Set(this.topics.current), metadata)) {
       encodedAssignments.push({
         memberId: member.memberId,
         assignment: this.#encodeProtocolAssignment(Array.from(member.assignments.values()))

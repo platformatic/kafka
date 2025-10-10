@@ -7,8 +7,8 @@ const { createRequest, parseResponse } = describeClientQuotasV0
 test('createRequest serializes basic parameters correctly', () => {
   const components = [
     {
-      entityType: 'client',
-      matchType: 0, // MATCH_EXACT
+      entityType: 'client-id' as const,
+      matchType: 0 as const, // MATCH_EXACT
       match: 'test-client'
     }
   ]
@@ -42,7 +42,7 @@ test('createRequest serializes basic parameters correctly', () => {
     {
       components: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           matchType: 0,
           match: 'test-client'
         }
@@ -56,13 +56,13 @@ test('createRequest serializes basic parameters correctly', () => {
 test('createRequest serializes multiple components correctly', () => {
   const components = [
     {
-      entityType: 'client',
-      matchType: 0, // MATCH_EXACT
+      entityType: 'client-id' as const,
+      matchType: 0 as const, // MATCH_EXACT
       match: 'test-client'
     },
     {
-      entityType: 'user',
-      matchType: 0, // MATCH_EXACT
+      entityType: 'user' as const,
+      matchType: 0 as const, // MATCH_EXACT
       match: 'test-user'
     }
   ]
@@ -84,7 +84,7 @@ test('createRequest serializes multiple components correctly', () => {
     componentsArray,
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         matchType: 0,
         match: 'test-client'
       },
@@ -101,23 +101,24 @@ test('createRequest serializes multiple components correctly', () => {
 test('createRequest serializes different match types correctly', () => {
   const components = [
     {
-      entityType: 'client',
-      matchType: 0, // MATCH_EXACT
+      entityType: 'client-id' as const,
+      matchType: 0 as const, // MATCH_EXACT
       match: 'test-client'
     },
     {
-      entityType: 'user',
-      matchType: 1, // MATCH_DEFAULT
+      entityType: 'user' as const,
+      matchType: 1 as const, // MATCH_DEFAULT
       match: null
     },
     {
-      entityType: 'ip',
-      matchType: 2, // MATCH_ANY
+      entityType: 'ip' as const,
+      matchType: 2 as const, // MATCH_ANY
       match: null
     }
   ]
   const strict = false
 
+  // @ts-ignore - ip actually not valid
   const writer = createRequest(components, strict)
   const reader = Reader.from(writer)
 
@@ -134,7 +135,7 @@ test('createRequest serializes different match types correctly', () => {
     componentsArray.map(c => ({ entityType: c.entityType, matchType: c.matchType, match: c.match })),
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         matchType: 0,
         match: 'test-client'
       },
@@ -156,8 +157,8 @@ test('createRequest serializes different match types correctly', () => {
 test('createRequest serializes strict flag correctly', () => {
   const components = [
     {
-      entityType: 'client',
-      matchType: 0,
+      entityType: 'client-id' as const,
+      matchType: 0 as const,
       match: 'test-client'
     }
   ]
@@ -192,7 +193,7 @@ test('parseResponse correctly processes a successful response', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -227,7 +228,7 @@ test('parseResponse correctly processes a successful response', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -255,7 +256,7 @@ test('parseResponse correctly handles multiple entries and values', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'client-1'
             }
           ],
@@ -273,7 +274,7 @@ test('parseResponse correctly handles multiple entries and values', () => {
               entityName: 'user-1'
             },
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'client-2'
             }
           ],

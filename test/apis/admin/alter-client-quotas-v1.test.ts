@@ -9,13 +9,13 @@ test('createRequest serializes basic parameters correctly', () => {
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id' as const,
           entityName: 'test-client'
         }
       ],
       ops: [
         {
-          key: 'consumer_byte_rate',
+          key: 'consumer_byte_rate' as const,
           value: 1024000,
           remove: false
         }
@@ -66,7 +66,7 @@ test('createRequest serializes basic parameters correctly', () => {
         {
           entities: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -90,17 +90,17 @@ test('createRequest serializes multiple entities correctly', () => {
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id' as const,
           entityName: 'test-client'
         },
         {
-          entityType: 'user',
+          entityType: 'user' as const,
           entityName: 'test-user'
         }
       ],
       ops: [
         {
-          key: 'consumer_byte_rate',
+          key: 'consumer_byte_rate' as const,
           value: 1024000,
           remove: false
         }
@@ -138,7 +138,7 @@ test('createRequest serializes multiple entities correctly', () => {
     entriesArray[0].entities,
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         entityName: 'test-client'
       },
       {
@@ -158,7 +158,7 @@ test('createRequest serializes multiple operations correctly', () => {
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id' as const,
           entityName: 'test-client'
         }
       ],
@@ -167,17 +167,16 @@ test('createRequest serializes multiple operations correctly', () => {
           key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
-        },
+        } as const,
         {
           key: 'producer_byte_rate',
           value: 2048000,
           remove: false
-        },
+        } as const,
         {
           key: 'request_percentage',
-          value: 0,
           remove: true
-        }
+        } as const
       ]
     }
   ]
@@ -235,7 +234,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id' as const,
           entityName: 'test-client'
         }
       ],
@@ -244,7 +243,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
           key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
-        }
+        } as const
       ]
     }
   ]
@@ -287,7 +286,7 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -316,7 +315,7 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -338,7 +337,7 @@ test('parseResponse correctly handles error responses', () => {
           errorMessage: 'Invalid request',
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -373,7 +372,7 @@ test('parseResponse correctly handles error responses', () => {
               errorMessage: 'Invalid request',
               entity: [
                 {
-                  entityType: 'client',
+                  entityType: 'client-id',
                   entityName: 'test-client'
                 }
               ]
@@ -399,7 +398,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'success-client'
             }
           ]
@@ -409,7 +408,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: 'Invalid request',
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'error-client'
             }
           ]
@@ -444,7 +443,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'success-client'
             }
           ]

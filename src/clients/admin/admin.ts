@@ -1,3 +1,5 @@
+import { type AlterClientQuotasRequest, type AlterClientQuotasResponse, type AlterClientQuotasResponseEntries } from '../../apis/admin/alter-client-quotas-v1.ts'
+import { type DescribeClientQuotasRequest, type DescribeClientQuotasResponse, type DescribeClientQuotasResponseEntry } from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
@@ -26,7 +28,8 @@ import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
-import { adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
+import { MultipleErrors } from '../../errors.ts'
+import { adminClientQuotasChannel, adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
@@ -49,7 +52,9 @@ import {
   deleteTopicsOptionsValidator,
   describeGroupsOptionsValidator,
   listGroupsOptionsValidator,
-  listTopicsOptionsValidator
+  listTopicsOptionsValidator,
+  describeClientQuotasOptionsValidator,
+  alterClientQuotasOptionsValidator,
 } from './options.ts'
 import {
   type AdminOptions,
@@ -57,6 +62,8 @@ import {
   type CreateTopicsOptions,
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
+  type DescribeClientQuotasOptions,
+  type AlterClientQuotasOptions,
   type DescribeGroupsOptions,
   type Group,
   type GroupBase,
@@ -255,6 +262,64 @@ export class Admin extends Base<AdminOptions> {
       this.#deleteGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteGroups', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  describeClientQuotas (options: DescribeClientQuotasOptions, callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void
+  describeClientQuotas (options: DescribeClientQuotasOptions): Promise<DescribeClientQuotasResponseEntry[]>
+  describeClientQuotas (options: DescribeClientQuotasOptions, callback?: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void | Promise<DescribeClientQuotasResponseEntry[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, describeClientQuotasOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as DescribeClientQuotasResponseEntry[])
+      return callback[kCallbackPromise]
+    }
+
+    adminClientQuotasChannel.traceCallback(
+      this.#describeClientQuotas,
+      1,
+      createDiagnosticContext({ client: this, operation: 'describeClientQuotas', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  alterClientQuotas (options: AlterClientQuotasOptions, callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void
+  alterClientQuotas (options: AlterClientQuotasOptions): Promise<AlterClientQuotasResponseEntries[]>
+  alterClientQuotas (options: AlterClientQuotasOptions, callback?: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void | Promise<AlterClientQuotasResponseEntries[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, alterClientQuotasOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as AlterClientQuotasResponseEntries[])
+      return callback[kCallbackPromise]
+    }
+
+    adminClientQuotasChannel.traceCallback(
+      this.#alterClientQuotas,
+      1,
+      createDiagnosticContext({ client: this, operation: 'alterClientQuotas', options }),
       this,
       options,
       callback
@@ -704,6 +769,80 @@ export class Admin extends Base<AdminOptions> {
         }
 
         callback(null, response)
+      },
+      0
+    )
+  }
+
+  #describeClientQuotas (options: DescribeClientQuotasOptions, callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void {
+    this[kPerformWithRetry](
+      'describeClientQuotas',
+      retryCallback => {
+        this[kGetBootstrapConnection]((error, connection) => {
+          if (error) {
+            retryCallback(error, undefined as unknown as DescribeClientQuotasResponse)
+            return
+          }
+
+          this[kGetApi]<DescribeClientQuotasRequest, DescribeClientQuotasResponse>('DescribeClientQuotas', (error, api) => {
+            if (error) {
+              retryCallback(error, undefined as unknown as DescribeClientQuotasResponse)
+              return
+            }
+
+            api(
+              connection,
+              options.components,
+              options.strict ?? false,
+              retryCallback as unknown as Callback<DescribeClientQuotasResponse>
+            )
+          })
+        })
+      },
+      (error: Error | null, response: DescribeClientQuotasResponse) => {
+        if (error) {
+          callback(new MultipleErrors('Describing client quotas failed.', [error]), undefined as unknown as DescribeClientQuotasResponseEntry[])
+          return
+        }
+
+        callback(null, response.entries)
+      },
+      0
+    )
+  }
+
+  #alterClientQuotas (options: AlterClientQuotasOptions, callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void {
+    this[kPerformWithRetry](
+      'alterClientQuotas',
+      retryCallback => {
+        this[kGetBootstrapConnection]((error, connection) => {
+          if (error) {
+            retryCallback(error, undefined as unknown as AlterClientQuotasResponse)
+            return
+          }
+
+          this[kGetApi]<AlterClientQuotasRequest, AlterClientQuotasResponse>('AlterClientQuotas', (error, api) => {
+            if (error) {
+              retryCallback(error, undefined as unknown as AlterClientQuotasResponse)
+              return
+            }
+
+            api(
+              connection,
+              options.entries,
+              options.validateOnly ?? false,
+              retryCallback as unknown as Callback<AlterClientQuotasResponse>
+            )
+          })
+        })
+      },
+      (error: Error | null, response: AlterClientQuotasResponse) => {
+        if (error) {
+          callback(new MultipleErrors('Altering client quotas failed.', [error]), undefined as unknown as AlterClientQuotasResponseEntries[])
+          return
+        }
+
+        callback(null, response.entries)
       },
       0
     )

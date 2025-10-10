@@ -468,3 +468,21 @@ export async function executeWithTimeout<T = unknown> (
     return value
   })
 }
+
+export async function retry<T> (retries: number, waitms: number, fn: () => Promise<T>): Promise<T> {
+  let lastError: Error | undefined
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+
+      if (attempt < retries) {
+        await sleep(waitms)
+      }
+    }
+  }
+
+  throw lastError
+}

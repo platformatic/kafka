@@ -3,22 +3,30 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import { type ClientQuotaEntityType, type ClientQuotaKey, type ClientQuotaMatchTypes } from '../enumerations.ts'
 
-export interface DescribeClientQuotasRequestComponent {
-  entityType: string
-  matchType: number
-  match: string | null
+export interface DescribeClientQuotasRequestMatchComponent {
+  entityType: ClientQuotaEntityType
+  matchType: typeof ClientQuotaMatchTypes.EXACT
+  match: string
 }
+
+export interface DescribeClientQuotasRequestSpecialComponent {
+  entityType: ClientQuotaEntityType
+  matchType: typeof ClientQuotaMatchTypes.DEFAULT | typeof ClientQuotaMatchTypes.ANY
+}
+
+export type DescribeClientQuotasRequestComponent = DescribeClientQuotasRequestMatchComponent | DescribeClientQuotasRequestSpecialComponent
 
 export type DescribeClientQuotasRequest = Parameters<typeof createRequest>
 
 export interface DescribeClientQuotasResponseValue {
-  key: string
+  key: ClientQuotaKey
   value: number
 }
 
 export interface DescribeClientQuotasResponseEntity {
-  entityType: string
+  entityType: ClientQuotaEntityType
   entityName: NullableString
 }
 
@@ -45,6 +53,7 @@ export interface DescribeClientQuotasResponse {
 export function createRequest (components: DescribeClientQuotasRequestComponent[], strict: boolean): Writer {
   return Writer.create()
     .appendArray(components, (w, c) => {
+      // @ts-ignore - TS complains that 'match' is not available in all variants of DescribeClientQuotasRequestComponent
       w.appendString(c.entityType).appendInt8(c.matchType).appendString(c.match)
     })
     .appendBoolean(strict)
@@ -77,11 +86,11 @@ export function parseResponse (
     entries: reader.readArray(r => {
       return {
         entity: r.readArray(r => {
-          return { entityType: r.readString(), entityName: r.readNullableString() }
+          return { entityType: r.readString() as ClientQuotaEntityType, entityName: r.readNullableString() }
         }),
         values: r.readArray(r => {
           return {
-            key: r.readString(),
+            key: r.readString() as ClientQuotaKey,
             value: r.readFloat64()
           }
         })

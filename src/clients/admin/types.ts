@@ -1,3 +1,5 @@
+import { type AlterClientQuotasRequestEntry } from '../../apis/admin/alter-client-quotas-v1.ts'
+import { type DescribeClientQuotasRequestComponent } from '../../apis/admin/describe-client-quotas-v0.ts'
 import { type CreateTopicsRequestTopicConfig } from '../../apis/admin/create-topics-v7.ts'
 import { type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
@@ -70,4 +72,14 @@ export interface DescribeGroupsOptions {
 
 export interface DeleteGroupsOptions {
   groups: string[]
+}
+
+export interface DescribeClientQuotasOptions {
+  components: DescribeClientQuotasRequestComponent[]
+  strict?: boolean
+}
+
+export interface AlterClientQuotasOptions {
+  entries: AlterClientQuotasRequestEntry[]
+  validateOnly?: boolean
 }

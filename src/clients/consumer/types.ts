@@ -103,14 +103,13 @@ export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
 export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & { groupId: string } & GroupOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>
 
-export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = Omit<
+export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = Pick<
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>,
-  'deserializers'
-> &
-  GroupOptions & {
-    node: number
-    topics: FetchRequestTopic[]
-  }
+  'minBytes' | 'maxBytes' | 'maxWaitTime' | 'isolationLevel'
+> & {
+  node: number
+  topics: FetchRequestTopic[]
+}
 
 export interface CommitOptionsPartition extends TopicWithPartitionAndOffset {
   leaderEpoch: number

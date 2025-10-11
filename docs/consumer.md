@@ -108,10 +108,14 @@ The return value is the raw response from Kafka.
 
 Options:
 
-| Property | Type                  | Description                      |
-| -------- | --------------------- | -------------------------------- |
-| node     | number                | Node to consume data from.       |
-| topics   | `FetchRequestTopic[]` | Topic and partitions to consume. |
+| Property       | Type                  | Default          | Description                                                                                                                                                                      |
+| -------------- | --------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node           | number                |                  | Node to consume data from.                                                                                                                                                       |
+| topics         | `FetchRequestTopic[]` |                  | Topic and partitions to consume.                                                                                                                                                 |
+| minBytes       | `number`              | `1`              | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                     |
+| maxBytes       | `number`              | 10MB             | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                     |
+| maxWaitTime    | `number`              | 5 seconds        | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                        |
+| isolationLevel | `string`              | `READ_COMMITTED` | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration. |
 
 Note that all the partitions must be hosted on the node otherwise the operation will fail.
 

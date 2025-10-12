@@ -486,3 +486,25 @@ export async function retry<T> (retries: number, waitms: number, fn: () => Promi
 
   throw lastError
 }
+
+export async function waitFor<T = unknown> (
+  condition: (() => T) | (() => Promise<T>),
+  options: { interval?: number; timeout?: number } = {}
+): Promise<T> {
+  const interval = options.interval ?? 50
+  const timeout = options.timeout ?? 1000
+  const startTime = Date.now()
+
+  while (true) {
+    try {
+      const result = await condition()
+      return result
+    } catch (error) {
+      const elapsed = Date.now() - startTime
+      if (elapsed >= timeout) {
+        throw new Error(`waitFor timed out after ${timeout}ms: ${error}`)
+      }
+      await sleep(interval)
+    }
+  }
+}

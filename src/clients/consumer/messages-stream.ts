@@ -17,6 +17,8 @@ import {
 import { UserError } from '../../errors.ts'
 import { type Message } from '../../protocol/records.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
+import { kAutocommit } from '../../symbols.ts'
+import { kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
 import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
@@ -124,7 +126,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Start the autocommit interval
     if (typeof autocommit === 'number' && autocommit > 0) {
-      this.#autocommitInterval = setInterval(this.#autocommit.bind(this), autocommit as number)
+      this.#autocommitInterval = setInterval(this[kAutocommit].bind(this), autocommit as number)
     } else {
       this.#autocommitInterval = null
     }
@@ -196,7 +198,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.once('close', () => {
       // We have offsets that were enqueued to be committed. Perform the operation
       if (this.#offsetsToCommit.size > 0) {
-        this.#autocommit()
+        this[kAutocommit]()
       }
 
       // We have offsets that are being committed. These are awaited despite of the force parameters
@@ -555,7 +557,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (this.#autocommitEnabled && !this.#autocommitInterval) {
-      this.#autocommit()
+      this[kAutocommit]()
     }
 
     if (canPush && !(this.#shouldClose || this.closed || this.destroyed)) {
@@ -582,7 +584,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  #autocommit (): void {
+  [kAutocommit] (): void {
     if (this.#offsetsToCommit.size === 0) {
       return
     }
@@ -673,6 +675,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     )
   }
 
+  [kRefreshOffsetsAndFetch] () {
+    this.#refreshOffsets(() => {
+      this.#fetch()
+    })
+  }
+
   #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {
     for (const [topic, partitions] of offsets) {
       for (let i = 0; i < partitions.length; i++) {
@@ -704,7 +712,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #assignmentsForTopic (topic: string): GroupAssignment | undefined {
-    return this.#consumer.assignments!.find(assignment => assignment.topic === topic)
+    return this.#consumer.assignments?.find(assignment => assignment.topic === topic)
   }
 
   #invokeCloseCallbacks (error: Error | null) {

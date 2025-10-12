@@ -34,7 +34,7 @@ export interface ConsumerGroupHeartbeatResponse {
   memberId: NullableString
   memberEpoch: number
   heartbeatIntervalMs: number
-  assignment: ConsumerGroupHeartbeatResponseAssignment[]
+  assignment: ConsumerGroupHeartbeatResponseAssignment | null
 }
 
 /*
@@ -103,16 +103,14 @@ export function parseResponse (
     memberId: reader.readNullableString(),
     memberEpoch: reader.readInt32(),
     heartbeatIntervalMs: reader.readInt32(),
-    assignment: reader.readArray(r => {
-      return {
-        topicPartitions: r.readArray(r => {
-          return {
-            topicId: r.readUUID(),
-            partitions: r.readArray(r => r.readInt32(), true, false)
-          }
-        })
-      } as ConsumerGroupHeartbeatResponseAssignment
-    })
+    assignment: reader.readNullableStruct(() => ({
+      topicPartitions: reader.readArray(r => {
+        return {
+          topicId: r.readUUID(),
+          partitions: r.readArray(r => r.readInt32(), true, false)
+        }
+      })
+    }))
   }
 
   if (response.errorCode !== 0) {

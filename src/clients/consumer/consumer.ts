@@ -3,10 +3,15 @@ import {
   type CallbackWithPromise,
   createPromisifiedCallback,
   kCallbackPromise,
+  createTimeoutCallback,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
 import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
+import {
+  type ConsumerGroupHeartbeatRequest,
+  type ConsumerGroupHeartbeatResponse
+} from '../../apis/consumer/consumer-group-heartbeat-v0.ts'
 import {
   type JoinGroupRequest,
   type JoinGroupRequestProtocol,
@@ -69,6 +74,7 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
+import { kAutocommit } from '../../symbols.ts'
 import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Gauge } from '../metrics.ts'
@@ -99,8 +105,10 @@ import {
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets,
-  type OffsetsWithTimestamps
+  type OffsetsWithTimestamps,
+  type ConsumerGroupOptions
 } from './types.ts'
+import { kRefreshOffsetsAndFetch } from '../../symbols.ts'
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
   ConsumerOptions<Key, Value, HeaderKey, HeaderValue>
@@ -110,6 +118,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   memberId: string | null
   topics: TopicsMap
   assignments: GroupAssignment[] | null
+  #assignments: TopicPartition[]
 
   #members: Map<string, ExtendedGroupProtocolSubscription>
   #membershipActive: boolean
@@ -117,7 +126,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #protocol: string | null
   #coordinatorId: number | null
   #heartbeatInterval: NodeJS.Timeout | null
+  #lastHeartbeatIntervalMs: number
   #lastHeartbeat: Date | null
+  #useNewProtocol: boolean
+  #memberEpoch: number
+  #groupRemoteAssignor: string | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>;
 
   /*
@@ -151,14 +164,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.topics = new TopicsMap()
     this.assignments = null
 
+    this.#assignments = []
     this.#members = new Map()
     this.#membershipActive = false
     this.#isLeader = false
     this.#protocol = null
     this.#coordinatorId = null
     this.#heartbeatInterval = null
+    this.#lastHeartbeatIntervalMs = 0
     this.#lastHeartbeat = null
     this.#streams = new Set()
+    this.#memberEpoch = 0
+    this.#useNewProtocol = this[kOptions].groupProtocol === 'consumer'
+    this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
@@ -210,11 +228,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kClosed] = true
 
-    const closer = this.#membershipActive
-      ? this.#leaveGroup.bind(this)
-      : function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
-        callback(null)
-      }
+    const closer = this.#useNewProtocol
+      ? this.#leaveGroupNewProtocol.bind(this)
+      : this.#membershipActive
+        ? this.#leaveGroup.bind(this)
+        : function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
+            callback(null)
+          }
 
     closer(force as boolean, error => {
       if (error) {
@@ -257,7 +277,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (!baseReady) {
       return false
     }
-
+    if (this.#useNewProtocol) {
+      return !!this.memberId && this.#memberEpoch >= 0
+    }
     // We consider the group ready if we have a groupId, a memberId and heartbeat interval
     return this.#membershipActive && Boolean(this.groupId) && Boolean(this.memberId) && this.#heartbeatInterval !== null
   }
@@ -482,16 +504,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
+    if (this.#useNewProtocol) {
+      callback(null, '')
+      return callback[kCallbackPromise]
+    }
+
     const validationError = this[kValidateOptions](options, groupOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as string)
       return callback[kCallbackPromise]
     }
 
-    options.sessionTimeout ??= this[kOptions].sessionTimeout!
+    options.sessionTimeout ??= (this[kOptions] as GroupOptions).sessionTimeout!
     options.rebalanceTimeout ??= this[kOptions].rebalanceTimeout!
-    options.heartbeatInterval ??= this[kOptions].heartbeatInterval!
-    options.protocols ??= this[kOptions].protocols!
+    options.heartbeatInterval ??= (this[kOptions] as GroupOptions).heartbeatInterval!
+    options.protocols ??= (this[kOptions] as GroupOptions).protocols!
 
     this.#validateGroupOptions(options)
 
@@ -514,6 +541,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (this.#useNewProtocol) {
+      callback(null)
       return callback[kCallbackPromise]
     }
 
@@ -634,7 +666,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           api(
             connection,
             this.groupId,
-            this.generationId,
+            this.#useNewProtocol ? this.#memberEpoch : this.generationId,
             this.memberId!,
             null,
             Array.from(topics.values()),
@@ -799,8 +831,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           api(
             connection,
-            // Note: once we start implementing KIP-848, the memberEpoch must be obtained
-            [{ groupId: this.groupId, memberId: this.memberId!, memberEpoch: -1, topics }],
+            [
+              {
+                groupId: this.groupId,
+                memberId: this.memberId!,
+                memberEpoch: this.#useNewProtocol ? this.#memberEpoch : -1,
+                topics
+              }
+            ],
             false,
             groupCallback
           )
@@ -957,6 +995,246 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
   }
 
+  #consumerGroupHeartbeat (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
+    options.rebalanceTimeout ??= this[kOptions].rebalanceTimeout!
+
+    consumerHeartbeatChannel.traceCallback(
+      this.#performConsumerGroupHeartbeat,
+      1,
+      createDiagnosticContext({ client: this, operation: 'consumerGroupHeartbeat' }),
+      this,
+      options,
+      callback
+    )
+  }
+
+  #performConsumerGroupHeartbeat (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
+    this.#performGroupOperation<ConsumerGroupHeartbeatResponse>(
+      'consumerGroupHeartbeat',
+      (connection, groupCallback) => {
+        this.emitWithDebug('consumer:heartbeat', 'start')
+        this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
+          error,
+          api
+        ) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as ConsumerGroupHeartbeatResponse)
+            return
+          }
+
+          const timeoutCallback = createTimeoutCallback(groupCallback, this[kOptions].timeout!, 'Heartbeat timeout.')
+
+          api(
+            connection,
+            this.groupId,
+            this.memberId || '',
+            this.#memberEpoch,
+            null, // instanceId
+            null, // rackId
+            options.rebalanceTimeout,
+            this.topics.current,
+            this.#groupRemoteAssignor,
+            this.#assignments,
+            timeoutCallback
+          )
+        })
+      },
+      (error, response) => {
+        if (this[kClosed]) {
+          this.emitWithDebug('consumer:heartbeat', 'end')
+          callback(null)
+          return
+        }
+
+        if (error) {
+          this.#cancelHeartbeat()
+          this.emitWithDebug('consumer:heartbeat', 'error', { error })
+
+          const fenced = (error as any).response?.errorCode === 110 // FENCED_MEMBER_EPOCH
+          if (fenced) {
+            this.#assignments = []
+            this.assignments = []
+            this.#memberEpoch = 0
+            this.#consumerGroupHeartbeat(options, () => {})
+            callback(error)
+            return
+          }
+
+          this.#heartbeatInterval = setTimeout(() => {
+            this.#consumerGroupHeartbeat(options, () => {})
+          }, this.#lastHeartbeatIntervalMs || 1000)
+
+          callback(error)
+          return
+        }
+
+        this.#lastHeartbeat = new Date()
+
+        this.#memberEpoch = response.memberEpoch
+
+        if (response.memberId) {
+          const changed = this.memberId !== response.memberId
+          this.memberId = response.memberId
+          if (changed) {
+            this.memberId = response.memberId
+            this.#consumerGroupHeartbeat(options, () => {})
+            this.emitWithDebug('consumer:heartbeat', 'end')
+            callback(null)
+            return
+          }
+        }
+
+        if (response.heartbeatIntervalMs > 0) {
+          this.#cancelHeartbeat()
+          this.#lastHeartbeatIntervalMs = response.heartbeatIntervalMs
+          this.#heartbeatInterval = setTimeout(() => {
+            this.#consumerGroupHeartbeat(options, () => {})
+          }, response.heartbeatIntervalMs)
+        }
+
+        const newAssignments = response.assignment?.topicPartitions
+        if (newAssignments) {
+          this.#revokePartitions(newAssignments)
+          this.#assignPartitions(newAssignments)
+        }
+        this.emitWithDebug('consumer:heartbeat', 'end')
+        callback(null)
+      }
+    )
+  }
+
+  #diffAssignments (A: TopicPartition[], B: TopicPartition[]): TopicPartition[] {
+    const result: TopicPartition[] = []
+    for (const a of A) {
+      const b = B.find(tp => tp.topicId === a.topicId)
+      if (!b) {
+        result.push(a)
+      } else {
+        const diff = a.partitions.filter(partition => !b.partitions.includes(partition))
+        if (diff.length > 0) {
+          result.push({ topicId: a.topicId, partitions: diff })
+        }
+      }
+    }
+    return result
+  }
+
+  #revokePartitions (newAssignment: TopicPartition[]): void {
+    const toRevoke = this.#diffAssignments(this.#assignments, newAssignment)
+    if (toRevoke.length === 0) {
+      return
+    }
+
+    for (const stream of this.#streams) {
+      stream.pause()
+      stream[kAutocommit]()
+    }
+
+    this.#updateAssignments(newAssignment, error => {
+      for (const stream of this.#streams) {
+        stream.resume()
+      }
+      /* c8 ignore next 3 - Hard to test */
+      if (error) {
+        return
+      }
+      this.#cancelHeartbeat()
+      this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, () => {})
+    })
+  }
+
+  #assignPartitions (newAssignment: TopicPartition[]): void {
+    const toAssign = this.#diffAssignments(newAssignment, this.#assignments)
+    if (toAssign.length === 0) {
+      return
+    }
+    this.#updateAssignments(newAssignment, error => {
+      if (error) {
+        return
+      }
+      this.#cancelHeartbeat()
+      this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, () => {})
+      for (const stream of this.#streams) {
+        // 3. Refresh partition offsets
+        stream[kRefreshOffsetsAndFetch]()
+      }
+    })
+  }
+
+  #updateAssignments (newAssignments: TopicPartition[], callback: CallbackWithPromise<void>): void {
+    this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+      if (error) {
+        callback(error)
+        return
+      }
+      const topicIdToTopic = new Map<string, string>()
+      for (const [topic, topicMetadata] of metadata.topics) {
+        topicIdToTopic.set(topicMetadata.id, topic)
+      }
+      const assignments: GroupAssignment[] = newAssignments.map(tp => ({
+        topic: topicIdToTopic.get(tp.topicId)!,
+        partitions: tp.partitions
+      }))
+      this.#assignments = newAssignments
+      this.assignments = assignments
+      callback(null)
+    })
+  }
+
+  #joinGroupNewProtocol (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
+    this.#memberEpoch = 0
+    this.#assignments = []
+    this.#membershipActive = true
+    this.#consumerGroupHeartbeat(options, err => {
+      if (this.memberId) {
+        this.emitWithDebug('consumer', 'group:join', { groupId: this.groupId, memberId: this.memberId })
+      }
+      callback(err)
+    })
+  }
+
+  #leaveGroupNewProtocol (_: boolean, callback: CallbackWithPromise<void>): void {
+    // Leave by sending a heartbeat with memberEpoch = -1
+    this.#cancelHeartbeat()
+    this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(
+      'leaveGroupNewProtocol',
+      (connection, groupCallback) => {
+        this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
+          error,
+          api
+        ) => {
+          if (error) {
+            groupCallback(error, undefined as unknown as ConsumerGroupHeartbeatResponse)
+            return
+          }
+
+          api(
+            connection,
+            this.groupId,
+            this.memberId!,
+            -1, // memberEpoch = -1 signals leave
+            null, // instanceId
+            null, // rackId
+            0, // rebalanceTimeout
+            [], // subscribedTopicNames
+            this.#groupRemoteAssignor,
+            [], // topicPartitions
+            groupCallback
+          )
+        })
+      },
+      _error => {
+        this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
+        this.memberId = null
+        this.#memberEpoch = -1
+        this.#assignments = []
+        this.assignments = []
+
+        callback(null)
+      }
+    )
+  }
+
   #performConsume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     trackTopics: boolean,
@@ -975,6 +1253,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // If we need to (re)join the group, do that first and then try again
     if (joinNeeded) {
+      if (this.#useNewProtocol) {
+        this.#joinGroupNewProtocol(options as Required<GroupOptions>, error => {
+          if (error) {
+            callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
+            return
+          }
+          this.#performConsume(options, false, callback)
+          return
+        })
+        return
+      }
+
+      // Classic consumer protocol join
       this.joinGroup(options, error => {
         if (error) {
           callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
@@ -1359,7 +1650,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #validateGroupOptions (options: GroupOptions, validator?: ValidateFunction<unknown>): void {
+  #validateGroupOptions (options: any, validator?: ValidateFunction<unknown>): void {
     validator ??= groupOptionsValidator
     const valid = validator(options)
 
@@ -1461,7 +1752,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const encodedAssignments: SyncGroupRequestAssignment[] = []
 
-    partitionsAssigner ??= this[kOptions].partitionAssigner ?? roundRobinAssigner
+    partitionsAssigner ??= (this[kOptions] as GroupOptions).partitionAssigner ?? roundRobinAssigner
     for (const member of partitionsAssigner(this.memberId!, this.#members, new Set(this.topics.current), metadata)) {
       encodedAssignments.push({
         memberId: member.memberId,
@@ -1504,4 +1795,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     return error
   }
+}
+
+interface TopicPartition {
+  topicId: string
+  partitions: number[]
 }

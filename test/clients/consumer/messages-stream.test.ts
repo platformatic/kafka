@@ -143,13 +143,14 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   await consumer.topics.trackAll(topic)
   await consumer.joinGroup({})
   options.metrics = undefined
+  const { groupProtocol, ...consumeOptions } = options
 
   const stream: MessagesStream<K, V, HK, HV> = await consumer.consume({
     topics: [topic],
     mode: MessagesStreamModes.EARLIEST,
     maxWaitTime: 4000,
     autocommit: false,
-    ...options
+    ...consumeOptions
   })
 
   const messages: Message<K, V, HK, HV>[] = []

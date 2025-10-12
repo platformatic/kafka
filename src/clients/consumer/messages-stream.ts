@@ -144,6 +144,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       })
     })
 
+    this.#consumer.on('consumer:user:resume', () => {
+      if (this.#shouldClose || this.closed || this.destroyed) {
+        return
+      }
+
+      this.#fetch()
+    })
+
     if (consumer[kPrometheus]) {
       this.#metricsConsumedMessages = ensureMetric<Counter>(
         consumer[kPrometheus],
@@ -372,6 +380,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const partitions = assignment.partitions
 
         for (const partition of partitions) {
+          if (this.#consumer.isPaused(topic, partition)) {
+            continue
+          }
+
           const leader = metadata.topics.get(topic)!.partitions[partition].leader
 
           if (this.#inflightNodes.has(leader)) {

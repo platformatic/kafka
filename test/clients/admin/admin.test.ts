@@ -6,7 +6,9 @@ import {
   Admin,
   adminClientQuotasChannel,
   adminGroupsChannel,
+  adminLogDirsChannel,
   adminTopicsChannel,
+  type BrokerLogDirDescription,
   type ClientDiagnosticEvent,
   ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
@@ -15,6 +17,7 @@ import {
   type DescribeClientQuotasOptions,
   describeClientQuotasV0,
   describeGroupsV5,
+  describeLogDirsV4,
   EMPTY_BUFFER,
   type GroupBase,
   instancesChannel,
@@ -2117,6 +2120,288 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
     } catch (error) {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.errors[0].message.includes('Unsupported API AlterClientQuotas.'), true)
+    }
+  })
+})
+
+describe('Log Dirs (describeLogDirs)', () => {
+  test('describeLogDirs should describe log directories for topics and support diagnostic channels', async t => {
+    const admin = createAdmin(t)
+
+    const topicName1 = `test-topic-${randomUUID()}`
+    await admin.createTopics({
+      topics: [topicName1],
+      partitions: 2,
+      replicas: 1
+    })
+    const topicName2 = `test-topic-${randomUUID()}`
+    await admin.createTopics({
+      topics: [topicName2],
+      partitions: 4,
+      replicas: 2
+    })
+
+    const options = {
+      topics: [
+        {
+          name: topicName1,
+          partitions: [0, 1]
+        },
+        {
+          name: topicName2,
+          partitions: [0, 2, 3]
+        }
+      ]
+    }
+
+    const verifyTracingChannel = createTracingChannelVerifier(
+      adminLogDirsChannel,
+      'client',
+      {
+        start (context: ClientDiagnosticEvent) {
+          deepStrictEqual(context, {
+            client: admin,
+            operation: 'describeLogDirs',
+            options,
+            operationId: mockedOperationId
+          })
+        },
+        asyncStart (context: ClientDiagnosticEvent) {
+          const result = context.result as BrokerLogDirDescription[]
+          ok(result)
+          strictEqual(Array.isArray(result), true)
+          strictEqual(result.length, 3)
+          deepStrictEqual(result.map(r => r.broker).sort(), [1, 2, 3])
+        },
+        error (context: ClientDiagnosticEvent) {
+          ok(typeof context === 'undefined')
+        }
+      },
+      (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeLogDirs'
+    )
+
+    await scheduler.wait(500)
+
+    const responses = await admin.describeLogDirs(options)
+
+    strictEqual(responses.length, 3)
+    for (const response of responses) {
+      strictEqual(typeof response.throttleTimeMs, 'number')
+      for (const result of response.results) {
+        strictEqual(result.logDir, '/var/lib/kafka/data')
+        for (const topic of result.topics) {
+          strictEqual([topicName1, topicName2].includes(topic.name), true)
+          for (const partition of topic.partitions) {
+            if (topic.name === topicName1) {
+              strictEqual([0, 1].includes(partition.partitionIndex), true)
+            } else {
+              strictEqual([0, 2, 3].includes(partition.partitionIndex), true)
+            }
+            strictEqual(typeof partition.partitionSize, 'bigint')
+            strictEqual(typeof partition.offsetLag, 'bigint')
+            strictEqual(typeof partition.isFutureKey, 'boolean')
+          }
+        }
+      }
+    }
+
+    // Each partition of a topic must be listed only once among all broker responses
+    deepStrictEqual(
+      responses
+        .flatMap(response =>
+          response.results.flatMap(result =>
+            result.topics
+              .filter(topic => topic.name === topicName1)
+              .flatMap(topic => topic.partitions.map(partition => partition.partitionIndex))))
+        .sort(),
+      [0, 1]
+    )
+    // With 2 replicas each partition of a topic must be listed twice among all broker responses
+    deepStrictEqual(
+      responses
+        .flatMap(response =>
+          response.results.flatMap(result =>
+            result.topics
+              .filter(topic => topic.name === topicName2)
+              .flatMap(topic => topic.partitions.map(partition => partition.partitionIndex))))
+        .sort(),
+      [0, 0, 2, 2, 3, 3]
+    )
+
+    verifyTracingChannel()
+
+    // Clean up
+    await admin.deleteTopics({ topics: [topicName1, topicName2] })
+  })
+
+  test('describeLogDirs should validate options in strict mode', async t => {
+    const admin = createAdmin(t, { strict: true })
+
+    // Test with missing required field (topics)
+    try {
+      // @ts-expect-error - Intentionally passing invalid options
+      await admin.describeLogDirs({})
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('topics'), true)
+    }
+
+    // Test with invalid type for topics
+    try {
+      // @ts-expect-error - Intentionally passing invalid options
+      await admin.describeLogDirs({ topics: 'not-an-array' })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('topics'), true)
+    }
+
+    // Test with empty topics array
+    try {
+      await admin.describeLogDirs({ topics: [] })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('topics'), true)
+    }
+
+    // Test with invalid topic object (missing name)
+    try {
+      await admin.describeLogDirs({
+        topics: [{ partitions: [0] }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('name'), true)
+    }
+
+    // Test with invalid topic object (missing partitions)
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic' }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('partitions'), true)
+    }
+
+    // Test with invalid name type
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 123, partitions: [0] }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('name'), true)
+    }
+
+    // Test with empty name
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: '', partitions: [0] }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('name'), true)
+    }
+
+    // Test with invalid partitions type
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: 'not-an-array' }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('partitions'), true)
+    }
+
+    // Test with empty partitions array
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [] }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('partitions'), true)
+    }
+
+    // Test with invalid partition number
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [-1] }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('partitions'), true)
+    }
+
+    // Test with invalid additional property in topic
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [0], invalidProperty: true }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('must NOT have additional properties'), true)
+    }
+
+    // Test with invalid additional property in options
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [0] }],
+        invalidProperty: true
+      } as any)
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('must NOT have additional properties'), true)
+    }
+  })
+
+  test('describeLogDirs should handle errors from Connection.get', async t => {
+    const admin = createAdmin(t)
+
+    mockConnectionPoolGet(admin[kConnections], 4)
+
+    try {
+      // Attempt to delete groups - should fail with connection error
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [0] }]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      // Error should contain our mock error message
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Describing log dirs failed.'), true)
+    }
+  })
+
+  test('describeLogDirs should handle errors from the API', async t => {
+    const admin = createAdmin(t)
+
+    mockAPI(admin[kConnections], describeLogDirsV4.api.key)
+
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [0] }]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Describing log dirs failed.'), true)
+    }
+  })
+
+  test('describeLogDirs should handle unavailable API errors', async t => {
+    const admin = createAdmin(t)
+
+    mockUnavailableAPI(admin, 'DescribeLogDirs')
+
+    try {
+      await admin.describeLogDirs({
+        topics: [{ name: 'test-topic', partitions: [0] }]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.errors[0].message.includes('Unsupported API DescribeLogDirs.'), true)
     }
   })
 })

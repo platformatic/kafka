@@ -5,7 +5,9 @@ import { Reader, ResponseError, Writer, alterClientQuotasV1 } from '../../../src
 const { createRequest, parseResponse } = alterClientQuotasV1
 
 test('createRequest serializes basic parameters correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
@@ -21,10 +23,7 @@ test('createRequest serializes basic parameters correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -86,7 +85,9 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes multiple entities correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
@@ -106,10 +107,7 @@ test('createRequest serializes multiple entities correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Read and verify entries
@@ -154,7 +152,9 @@ test('createRequest serializes multiple entities correctly', () => {
 })
 
 test('createRequest serializes multiple operations correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
@@ -179,10 +179,7 @@ test('createRequest serializes multiple operations correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Read entries
@@ -230,7 +227,9 @@ test('createRequest serializes multiple operations correctly', () => {
 })
 
 test('createRequest serializes validateOnly flag correctly', () => {
-  const entries = [
+  const validateOnly = true
+
+  const writer = createRequest([
     {
       entities: [
         {
@@ -246,10 +245,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = true
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Skip entries - already tested

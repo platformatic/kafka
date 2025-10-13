@@ -16,7 +16,9 @@ export interface DescribeClientQuotasRequestSpecialComponent {
   matchType: typeof ClientQuotaMatchTypes.DEFAULT | typeof ClientQuotaMatchTypes.ANY
 }
 
-export type DescribeClientQuotasRequestComponent = DescribeClientQuotasRequestMatchComponent | DescribeClientQuotasRequestSpecialComponent
+export type DescribeClientQuotasRequestComponent =
+  | DescribeClientQuotasRequestMatchComponent
+  | DescribeClientQuotasRequestSpecialComponent
 
 export type DescribeClientQuotasRequest = Parameters<typeof createRequest>
 

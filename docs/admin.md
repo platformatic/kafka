@@ -90,6 +90,32 @@ Options:
 | -------- | ---------- | ----------------- |
 | groups   | `string[]` | Groups to delete. |
 
+### `describeClientQuotas(options[, callback])`
+
+Gets detailed information about client quotas.
+
+The return value is an object specifying quotas for the requested user/client combination.
+
+Options:
+
+| Property   | Type                                          | Description                                                                                              |
+| ---------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| components | `DescribeClientQuotasRequestComponent[]`      | Array of components specifying the entity types and match criteria for which to describe client quotas.  |
+| strict     | `boolean`                                     | Whether to use strict matching for components. Defaults to `false`.                                      |
+
+### `alterClientQuotas(options[, callback])`
+
+Alters client quotas for specified entities.
+
+The return value is a list of entities for which quotas have been changed.
+
+Options:
+
+| Property     | Type                              | Description                                                                               |
+| ------------ | --------------------------------- | ----------------------------------------------------------------------------------------- |
+| entries      | `AlterClientQuotasRequestEntry[]` | Array of entries specifying the entities and quotas to change.                            |
+| validateOnly | `boolean`                         | Whether to only validate the request without applying changes. Defaults to `false`.       |
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

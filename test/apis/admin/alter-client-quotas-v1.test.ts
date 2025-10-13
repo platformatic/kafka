@@ -9,13 +9,13 @@ test('createRequest serializes basic parameters correctly', () => {
     {
       entities: [
         {
-          entityType: 'client-id' as const,
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
       ops: [
         {
-          key: 'consumer_byte_rate' as const,
+          key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
         }
@@ -90,17 +90,17 @@ test('createRequest serializes multiple entities correctly', () => {
     {
       entities: [
         {
-          entityType: 'client-id' as const,
+          entityType: 'client-id',
           entityName: 'test-client'
         },
         {
-          entityType: 'user' as const,
+          entityType: 'user',
           entityName: 'test-user'
         }
       ],
       ops: [
         {
-          key: 'consumer_byte_rate' as const,
+          key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
         }
@@ -158,7 +158,7 @@ test('createRequest serializes multiple operations correctly', () => {
     {
       entities: [
         {
-          entityType: 'client-id' as const,
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
@@ -167,16 +167,16 @@ test('createRequest serializes multiple operations correctly', () => {
           key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
-        } as const,
+        },
         {
           key: 'producer_byte_rate',
           value: 2048000,
           remove: false
-        } as const,
+        },
         {
           key: 'request_percentage',
           remove: true
-        } as const
+        }
       ]
     }
   ]
@@ -234,7 +234,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
     {
       entities: [
         {
-          entityType: 'client-id' as const,
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
@@ -243,7 +243,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
           key: 'consumer_byte_rate',
           value: 1024000,
           remove: false
-        } as const
+        }
       ]
     }
   ]

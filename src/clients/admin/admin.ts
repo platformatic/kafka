@@ -1,5 +1,13 @@
-import { type AlterClientQuotasRequest, type AlterClientQuotasResponse, type AlterClientQuotasResponseEntries } from '../../apis/admin/alter-client-quotas-v1.ts'
-import { type DescribeClientQuotasRequest, type DescribeClientQuotasResponse, type DescribeClientQuotasResponseEntry } from '../../apis/admin/describe-client-quotas-v0.ts'
+import {
+  type AlterClientQuotasRequest,
+  type AlterClientQuotasResponse,
+  type AlterClientQuotasResponseEntries
+} from '../../apis/admin/alter-client-quotas-v1.ts'
+import {
+  type DescribeClientQuotasRequest,
+  type DescribeClientQuotasResponse,
+  type DescribeClientQuotasResponseEntry
+} from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
@@ -29,7 +37,12 @@ import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enu
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import { MultipleErrors } from '../../errors.ts'
-import { adminClientQuotasChannel, adminGroupsChannel, adminTopicsChannel, createDiagnosticContext } from '../../diagnostic.ts'
+import {
+  adminClientQuotasChannel,
+  adminGroupsChannel,
+  adminTopicsChannel,
+  createDiagnosticContext
+} from '../../diagnostic.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
@@ -54,7 +67,7 @@ import {
   listGroupsOptionsValidator,
   listTopicsOptionsValidator,
   describeClientQuotasOptionsValidator,
-  alterClientQuotasOptionsValidator,
+  alterClientQuotasOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -270,9 +283,15 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
-  describeClientQuotas (options: DescribeClientQuotasOptions, callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void
+  describeClientQuotas (
+    options: DescribeClientQuotasOptions,
+    callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>
+  ): void
   describeClientQuotas (options: DescribeClientQuotasOptions): Promise<DescribeClientQuotasResponseEntry[]>
-  describeClientQuotas (options: DescribeClientQuotasOptions, callback?: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void | Promise<DescribeClientQuotasResponseEntry[]> {
+  describeClientQuotas (
+    options: DescribeClientQuotasOptions,
+    callback?: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>
+  ): void | Promise<DescribeClientQuotasResponseEntry[]> {
     if (!callback) {
       callback = createPromisifiedCallback()
     }
@@ -299,9 +318,15 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
-  alterClientQuotas (options: AlterClientQuotasOptions, callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void
+  alterClientQuotas (
+    options: AlterClientQuotasOptions,
+    callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>
+  ): void
   alterClientQuotas (options: AlterClientQuotasOptions): Promise<AlterClientQuotasResponseEntries[]>
-  alterClientQuotas (options: AlterClientQuotasOptions, callback?: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void | Promise<AlterClientQuotasResponseEntries[]> {
+  alterClientQuotas (
+    options: AlterClientQuotasOptions,
+    callback?: CallbackWithPromise<AlterClientQuotasResponseEntries[]>
+  ): void | Promise<AlterClientQuotasResponseEntries[]> {
     if (!callback) {
       callback = createPromisifiedCallback()
     }
@@ -774,7 +799,10 @@ export class Admin extends Base<AdminOptions> {
     )
   }
 
-  #describeClientQuotas (options: DescribeClientQuotasOptions, callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>): void {
+  #describeClientQuotas (
+    options: DescribeClientQuotasOptions,
+    callback: CallbackWithPromise<DescribeClientQuotasResponseEntry[]>
+  ): void {
     this[kPerformWithRetry](
       'describeClientQuotas',
       retryCallback => {
@@ -784,7 +812,10 @@ export class Admin extends Base<AdminOptions> {
             return
           }
 
-          this[kGetApi]<DescribeClientQuotasRequest, DescribeClientQuotasResponse>('DescribeClientQuotas', (error, api) => {
+          this[kGetApi]<DescribeClientQuotasRequest, DescribeClientQuotasResponse>('DescribeClientQuotas', (
+            error,
+            api
+          ) => {
             if (error) {
               retryCallback(error, undefined as unknown as DescribeClientQuotasResponse)
               return
@@ -801,7 +832,10 @@ export class Admin extends Base<AdminOptions> {
       },
       (error: Error | null, response: DescribeClientQuotasResponse) => {
         if (error) {
-          callback(new MultipleErrors('Describing client quotas failed.', [error]), undefined as unknown as DescribeClientQuotasResponseEntry[])
+          callback(
+            new MultipleErrors('Describing client quotas failed.', [error]),
+            undefined as unknown as DescribeClientQuotasResponseEntry[]
+          )
           return
         }
 
@@ -811,7 +845,10 @@ export class Admin extends Base<AdminOptions> {
     )
   }
 
-  #alterClientQuotas (options: AlterClientQuotasOptions, callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>): void {
+  #alterClientQuotas (
+    options: AlterClientQuotasOptions,
+    callback: CallbackWithPromise<AlterClientQuotasResponseEntries[]>
+  ): void {
     this[kPerformWithRetry](
       'alterClientQuotas',
       retryCallback => {
@@ -838,7 +875,10 @@ export class Admin extends Base<AdminOptions> {
       },
       (error: Error | null, response: AlterClientQuotasResponse) => {
         if (error) {
-          callback(new MultipleErrors('Altering client quotas failed.', [error]), undefined as unknown as AlterClientQuotasResponseEntries[])
+          callback(
+            new MultipleErrors('Altering client quotas failed.', [error]),
+            undefined as unknown as AlterClientQuotasResponseEntries[]
+          )
           return
         }
 

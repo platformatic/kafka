@@ -22,7 +22,7 @@ import {
   MultipleErrors,
   sleep,
   UnsupportedApiError,
-  alterClientQuotasV1,
+  alterClientQuotasV1
 } from '../../../src/index.ts'
 import {
   createAdmin,
@@ -156,7 +156,9 @@ test('all operations should fail when admin is closed', async t => {
   // Attempt to call describeClientQuotas on closed admin
   try {
     await admin.describeClientQuotas({
-      components: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }]
+      components: [
+        { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+      ]
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -1373,7 +1375,7 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
     { clientId: 'Client1', user: 'User1' },
     { clientId: 'Client1', user: null },
     { clientId: null, user: 'User1' },
-    { clientId: null, user: null },
+    { clientId: null, user: null }
   ]
 
   for (const testCase of testCases) {
@@ -1420,7 +1422,7 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
       } else {
         describeComponents.push({
           entityType: ClientQuotaEntityTypes.CLIENT_ID,
-          matchType: ClientQuotaMatchTypes.DEFAULT,
+          matchType: ClientQuotaMatchTypes.DEFAULT
         })
       }
       if (testCase.user) {
@@ -1432,7 +1434,7 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
       } else {
         describeComponents.push({
           entityType: ClientQuotaEntityTypes.USER,
-          matchType: ClientQuotaMatchTypes.DEFAULT,
+          matchType: ClientQuotaMatchTypes.DEFAULT
         })
       }
 
@@ -1502,9 +1504,7 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
     await admin.alterClientQuotas({
       entries: [
         {
-          entities: [
-            { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' },
-          ],
+          entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
           ops: [
             { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false },
             { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000, remove: false },
@@ -1620,9 +1620,7 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
       await admin.alterClientQuotas({
         entries: [
           {
-            entities: [
-              { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' },
-            ],
+            entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
             ops: [
               { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, remove: true },
               { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, remove: true },
@@ -1693,12 +1691,8 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
 
     const clientQuotaEntries: alterClientQuotasV1.AlterClientQuotasRequestEntry[] = [
       {
-        entities: [
-          { entityType: ClientQuotaEntityTypes.CLIENT_ID }
-        ],
-        ops: [
-          { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }
-        ]
+        entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID }],
+        ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
       }
     ]
 
@@ -1977,7 +1971,9 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
 
     try {
       await admin.describeClientQuotas({
-        components: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }]
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
       })
       throw new Error('Expected error not thrown')
     } catch (error) {
@@ -2014,7 +2010,9 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
 
     try {
       await admin.describeClientQuotas({
-        components: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }]
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
       })
       throw new Error('Expected error not thrown')
     } catch (error) {
@@ -2051,7 +2049,9 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
 
     try {
       await admin.describeClientQuotas({
-        components: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }]
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
       })
       throw new Error('Expected error not thrown')
     } catch (error) {
@@ -2088,7 +2088,9 @@ describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
 
     try {
       await admin.describeClientQuotas({
-        components: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }]
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
       })
       throw new Error('Expected error not thrown')
     } catch (error) {

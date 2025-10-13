@@ -64,8 +64,9 @@ export function createRequest (entries: AlterClientQuotasRequestEntry[], validat
       w.appendArray(e.entities, (w, e) => {
         w.appendString(e.entityType).appendString(e.entityName)
       }).appendArray(e.ops, (w, o) => {
-        // @ts-ignore - TS complains that 'value' is not available in all variants of AlterClientQuotasRequestOp
-        w.appendString(o.key).appendFloat64(o.value ?? 0).appendBoolean(o.remove)
+        w.appendString(o.key)
+          .appendFloat64((o as AlterClientQuotaRequestOpAddition).value)
+          .appendBoolean(o.remove)
       })
     })
     .appendBoolean(validateOnly)

@@ -1,4 +1,4 @@
-import { ConsumerGroupStates } from '../../apis/enumerations.ts'
+import { ClientQuotaMatchTypes, ConsumerGroupStates } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
@@ -97,27 +97,14 @@ export const describeClientQuotasOptionsSchema = {
     components: {
       type: 'array',
       items: {
-        oneOf: [
-          {
-            type: 'object',
-            properties: {
-              entityType: { type: 'string', minLength: 1 },
-              matchType: { type: 'number', const: 0 }, // EXACT
-              match: { type: 'string' }
-            },
-            required: ['entityType', 'matchType', 'match'],
-            additionalProperties: false
-          },
-          {
-            type: 'object',
-            properties: {
-              entityType: { type: 'string', minLength: 1 },
-              matchType: { type: 'number', enum: [1, 2] } // DEFAULT or ANY
-            },
-            required: ['entityType', 'matchType'],
-            additionalProperties: false
-          }
-        ]
+        type: 'object',
+        properties: {
+          entityType: { type: 'string', minLength: 1 },
+          matchType: { type: 'number', enum: Object.values(ClientQuotaMatchTypes) },
+          match: { type: 'string' }
+        },
+        required: ['entityType', 'matchType'],
+        additionalProperties: false
       },
       minItems: 1
     },

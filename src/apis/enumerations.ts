@@ -100,7 +100,11 @@ export type ClientQuotaMatchType = (typeof ClientQuotaMatchTypes)[keyof typeof C
 export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
 export type ClientQuotaEntityType = (typeof ClientQuotaEntityTypes)[keyof typeof ClientQuotaEntityTypes]
 
-export const ClientQuotaKeys = { PRODUCER_BYTE_RATE: 'producer_byte_rate', CONSUMER_BYTE_RATE: 'consumer_byte_rate', REQUEST_PERCENTAGE: 'request_percentage' } as const
+export const ClientQuotaKeys = {
+  PRODUCER_BYTE_RATE: 'producer_byte_rate',
+  CONSUMER_BYTE_RATE: 'consumer_byte_rate',
+  REQUEST_PERCENTAGE: 'request_percentage'
+} as const
 export type ClientQuotaKey = (typeof ClientQuotaKeys)[keyof typeof ClientQuotaKeys]
 
 // ./admin/*-scram-credentials.ts

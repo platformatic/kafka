@@ -7,8 +7,8 @@ const { createRequest, parseResponse } = describeClientQuotasV0
 test('createRequest serializes basic parameters correctly', () => {
   const components = [
     {
-      entityType: 'client-id' as const,
-      matchType: 0 as const, // MATCH_EXACT
+      entityType: 'client-id',
+      matchType: 0, // MATCH_EXACT
       match: 'test-client'
     }
   ]
@@ -56,13 +56,13 @@ test('createRequest serializes basic parameters correctly', () => {
 test('createRequest serializes multiple components correctly', () => {
   const components = [
     {
-      entityType: 'client-id' as const,
-      matchType: 0 as const, // MATCH_EXACT
+      entityType: 'client-id',
+      matchType: 0, // MATCH_EXACT
       match: 'test-client'
     },
     {
-      entityType: 'user' as const,
-      matchType: 0 as const, // MATCH_EXACT
+      entityType: 'user',
+      matchType: 0, // MATCH_EXACT
       match: 'test-user'
     }
   ]
@@ -101,18 +101,18 @@ test('createRequest serializes multiple components correctly', () => {
 test('createRequest serializes different match types correctly', () => {
   const components = [
     {
-      entityType: 'client-id' as const,
-      matchType: 0 as const, // MATCH_EXACT
+      entityType: 'client-id',
+      matchType: 0, // MATCH_EXACT
       match: 'test-client'
     },
     {
-      entityType: 'user' as const,
-      matchType: 1 as const, // MATCH_DEFAULT
+      entityType: 'user',
+      matchType: 1, // MATCH_DEFAULT
       match: null
     },
     {
-      entityType: 'ip' as const,
-      matchType: 2 as const, // MATCH_ANY
+      entityType: 'ip',
+      matchType: 2, // MATCH_ANY
       match: null
     }
   ]
@@ -157,8 +157,8 @@ test('createRequest serializes different match types correctly', () => {
 test('createRequest serializes strict flag correctly', () => {
   const components = [
     {
-      entityType: 'client-id' as const,
-      matchType: 0 as const,
+      entityType: 'client-id',
+      matchType: 0,
       match: 'test-client'
     }
   ]

@@ -65,7 +65,7 @@ export function createRequest (entries: AlterClientQuotasRequestEntry[], validat
         w.appendString(e.entityType).appendString(e.entityName)
       }).appendArray(e.ops, (w, o) => {
         w.appendString(o.key)
-          .appendFloat64((o as AlterClientQuotaRequestOpAddition).value)
+          .appendFloat64((o as AlterClientQuotaRequestOpAddition).value ?? 0)
           .appendBoolean(o.remove)
       })
     })

@@ -2135,8 +2135,9 @@ describe('Log Dirs (describeLogDirs)', () => {
       replicas: 1
     })
     const topicName2 = `test-topic-${randomUUID()}`
+    const topicName3 = `test-topic-${randomUUID()}`
     await admin.createTopics({
-      topics: [topicName2],
+      topics: [topicName2, topicName3],
       partitions: 4,
       replicas: 2
     })
@@ -2190,7 +2191,11 @@ describe('Log Dirs (describeLogDirs)', () => {
       for (const result of response.results) {
         strictEqual(result.logDir, '/var/lib/kafka/data')
         for (const topic of result.topics) {
-          strictEqual([topicName1, topicName2].includes(topic.name), true)
+          if (![topicName1, topicName2].includes(topic.name)) {
+            // At least for Kafka 7.5.0 we get information for more topics than we requested.
+            // So skip them here.
+            continue
+          }
           for (const partition of topic.partitions) {
             if (topic.name === topicName1) {
               strictEqual([0, 1].includes(partition.partitionIndex), true)

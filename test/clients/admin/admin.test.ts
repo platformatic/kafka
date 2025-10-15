@@ -950,7 +950,15 @@ test('describeGroups should describe consumer groups and support diagnostic chan
   const describedGroup = describedGroups.get(consumer.groupId)!
   const { id, clientId, clientHost } = Array.from(describedGroup.members.values()!)[0]
   const authorizedOperations = describedGroup.authorizedOperations
-  deepStrictEqual(Array.from(describedGroups.values()), [
+  deepStrictEqual(Array.from(describedGroups.values()).sort((a, b) => a.state.localeCompare(b.state)), [
+    {
+      id: 'non-existent-group',
+      state: 'DEAD',
+      protocolType: '',
+      protocol: '',
+      members: new Map(),
+      authorizedOperations
+    },
     {
       id: consumer.groupId,
       protocol: 'roundrobin',
@@ -973,14 +981,6 @@ test('describeGroups should describe consumer groups and support diagnostic chan
           }
         ]
       ]),
-      authorizedOperations
-    },
-    {
-      id: 'non-existent-group',
-      state: 'DEAD',
-      protocolType: '',
-      protocol: '',
-      members: new Map(),
       authorizedOperations
     }
   ])

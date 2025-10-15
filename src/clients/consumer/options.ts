@@ -54,7 +54,7 @@ export const groupOptionsAdditionalValidations = {
   }
 }
 
-export const consumeOptionsProperties = {
+export const baseConsumeOptionsProperties = {
   autocommit: { oneOf: [{ type: 'boolean' }, { type: 'number', minimum: 100 }] },
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
@@ -70,27 +70,43 @@ export const groupOptionsSchema = {
   additionalProperties: true // This is needed as we might forward options from consume
 }
 
+export const consumeOptionsProperties = {
+  topics: { type: 'array', items: idProperty },
+  mode: { type: 'string', enum: allowedMessagesStreamModes },
+  fallbackMode: { type: 'string', enum: allowedMessagesStreamFallbackModes },
+  maxFetches: { type: 'number', minimum: 0, default: 0 },
+  offsets: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: topicWithPartitionAndOffsetProperties,
+      required: ['topic', 'partition', 'offset'],
+      additionalProperties: false
+    }
+  },
+  onCorruptedMessage: { function: true },
+}
+
 export const consumeOptionsSchema = {
   type: 'object',
   properties: {
-    topics: { type: 'array', items: idProperty },
-    mode: { type: 'string', enum: allowedMessagesStreamModes },
-    fallbackMode: { type: 'string', enum: allowedMessagesStreamFallbackModes },
-    maxFetches: { type: 'number', minimum: 0, default: 0 },
-    offsets: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: topicWithPartitionAndOffsetProperties,
-        required: ['topic', 'partition', 'offset'],
-        additionalProperties: false
-      }
-    },
-    onCorruptedMessage: { function: true },
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...baseConsumeOptionsProperties,
+    ...consumeOptionsProperties,
   },
   required: ['topics'],
+  additionalProperties: false
+}
+
+export const consumeByPartitionOptionsSchema = {
+  type: 'object',
+  properties: {
+    ...groupOptionsProperties,
+    ...baseConsumeOptionsProperties,
+    ...consumeOptionsProperties,
+    onAssignmentChange: { function: true }
+  },
+  required: ['topics', 'onAssignmentChange'],
   additionalProperties: false
 }
 
@@ -99,7 +115,7 @@ export const consumerOptionsSchema = {
   properties: {
     groupId: idProperty,
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...baseConsumeOptionsProperties
   },
   required: ['groupId'],
   additionalProperties: true
@@ -134,7 +150,7 @@ export const fetchOptionsSchema = {
       }
     },
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...baseConsumeOptionsProperties
   },
   required: ['node', 'topics'],
   additionalProperties: false
@@ -221,6 +237,7 @@ export const groupIdAndOptionsValidator = ajv.compile({
 })
 
 export const consumeOptionsValidator = ajv.compile(consumeOptionsSchema)
+export const consumeByPartitionOptionsValidator = ajv.compile(consumeByPartitionOptionsSchema)
 export const consumerOptionsValidator = ajv.compile(consumerOptionsSchema)
 export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)
 export const commitOptionsValidator = ajv.compile(commitOptionsSchema)

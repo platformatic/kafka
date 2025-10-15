@@ -3,6 +3,7 @@ import { type FetchIsolationLevel } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
+import type { MessagesStream } from './messages-stream.ts'
 
 export interface GroupProtocolSubscription {
   name: string
@@ -99,6 +100,10 @@ export interface StreamOptions {
 export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> &
   GroupOptions
+
+export type ConsumeByPartitionOptions<Key, Value, HeaderKey, HeaderValue> = ConsumeOptions<Key, Value, HeaderKey, HeaderValue> & {
+  onAssignmentChange: (streams: Map<string, MessagesStream<Key, Value, HeaderKey, HeaderValue>>) => void
+}
 
 export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & { groupId: string } & GroupOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>

@@ -2181,7 +2181,7 @@ describe('Log Dirs (describeLogDirs)', () => {
       (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeLogDirs'
     )
 
-    await scheduler.wait(500)
+    await scheduler.wait(1000)
 
     const responses = await admin.describeLogDirs(options)
 

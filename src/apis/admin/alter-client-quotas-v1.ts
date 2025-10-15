@@ -3,17 +3,25 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type ClientQuotaEntityType, type ClientQuotaKey } from '../enumerations.ts'
 
 export interface AlterClientQuotasRequestEntity {
-  entityType: string
-  entityName: NullableString
+  entityType: ClientQuotaEntityType
+  entityName?: NullableString
 }
 
-export interface AlterClientQuotasRequestOp {
-  key: string
+export interface AlterClientQuotaRequestOpAddition {
+  key: ClientQuotaKey
   value: number
-  remove: boolean
+  remove: false
 }
+
+export interface AlterClientQuotaRequestOpRemoval {
+  key: ClientQuotaKey
+  remove: true
+}
+
+export type AlterClientQuotasRequestOp = AlterClientQuotaRequestOpAddition | AlterClientQuotaRequestOpRemoval
 
 export interface AlterClientQuotasRequestEntry {
   entities: AlterClientQuotasRequestEntity[]
@@ -56,7 +64,9 @@ export function createRequest (entries: AlterClientQuotasRequestEntry[], validat
       w.appendArray(e.entities, (w, e) => {
         w.appendString(e.entityType).appendString(e.entityName)
       }).appendArray(e.ops, (w, o) => {
-        w.appendString(o.key).appendFloat64(o.value).appendBoolean(o.remove)
+        w.appendString(o.key)
+          .appendFloat64((o as AlterClientQuotaRequestOpAddition).value ?? 0)
+          .appendBoolean(o.remove)
       })
     })
     .appendBoolean(validateOnly)

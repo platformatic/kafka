@@ -5,11 +5,13 @@ import { Reader, ResponseError, Writer, alterClientQuotasV1 } from '../../../src
 const { createRequest, parseResponse } = alterClientQuotasV1
 
 test('createRequest serializes basic parameters correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
@@ -21,10 +23,7 @@ test('createRequest serializes basic parameters correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -66,7 +65,7 @@ test('createRequest serializes basic parameters correctly', () => {
         {
           entities: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -86,11 +85,13 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes multiple entities correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           entityName: 'test-client'
         },
         {
@@ -106,10 +107,7 @@ test('createRequest serializes multiple entities correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Read and verify entries
@@ -138,7 +136,7 @@ test('createRequest serializes multiple entities correctly', () => {
     entriesArray[0].entities,
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         entityName: 'test-client'
       },
       {
@@ -154,11 +152,13 @@ test('createRequest serializes multiple entities correctly', () => {
 })
 
 test('createRequest serializes multiple operations correctly', () => {
-  const entries = [
+  const validateOnly = false
+
+  const writer = createRequest([
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
@@ -175,15 +175,11 @@ test('createRequest serializes multiple operations correctly', () => {
         },
         {
           key: 'request_percentage',
-          value: 0,
           remove: true
         }
       ]
     }
-  ]
-  const validateOnly = false
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Read entries
@@ -231,11 +227,13 @@ test('createRequest serializes multiple operations correctly', () => {
 })
 
 test('createRequest serializes validateOnly flag correctly', () => {
-  const entries = [
+  const validateOnly = true
+
+  const writer = createRequest([
     {
       entities: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           entityName: 'test-client'
         }
       ],
@@ -247,10 +245,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
         }
       ]
     }
-  ]
-  const validateOnly = true
-
-  const writer = createRequest(entries, validateOnly)
+  ], validateOnly)
   const reader = Reader.from(writer)
 
   // Skip entries - already tested
@@ -287,7 +282,7 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -316,7 +311,7 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -338,7 +333,7 @@ test('parseResponse correctly handles error responses', () => {
           errorMessage: 'Invalid request',
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ]
@@ -373,7 +368,7 @@ test('parseResponse correctly handles error responses', () => {
               errorMessage: 'Invalid request',
               entity: [
                 {
-                  entityType: 'client',
+                  entityType: 'client-id',
                   entityName: 'test-client'
                 }
               ]
@@ -399,7 +394,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'success-client'
             }
           ]
@@ -409,7 +404,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: 'Invalid request',
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'error-client'
             }
           ]
@@ -444,7 +439,7 @@ test('parseResponse handles multiple entries with mixed errors', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'success-client'
             }
           ]

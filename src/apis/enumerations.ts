@@ -95,7 +95,17 @@ export type IncrementalAlterConfigType = keyof typeof IncrementalAlterConfigType
 
 // ./admin/*-client-quotas.ts
 export const ClientQuotaMatchTypes = { EXACT: 0, DEFAULT: 1, ANY: 2 } as const
-export type ClientQuotaMatchType = keyof typeof ClientQuotaMatchTypes
+export type ClientQuotaMatchType = (typeof ClientQuotaMatchTypes)[keyof typeof ClientQuotaMatchTypes]
+
+export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
+export type ClientQuotaEntityType = (typeof ClientQuotaEntityTypes)[keyof typeof ClientQuotaEntityTypes]
+
+export const ClientQuotaKeys = {
+  PRODUCER_BYTE_RATE: 'producer_byte_rate',
+  CONSUMER_BYTE_RATE: 'consumer_byte_rate',
+  REQUEST_PERCENTAGE: 'request_percentage'
+} as const
+export type ClientQuotaKey = (typeof ClientQuotaKeys)[keyof typeof ClientQuotaKeys]
 
 // ./admin/*-scram-credentials.ts
 export const ScramMechanisms = { UNKNOWN: 0, SCRAM_SHA_256: 1, SCRAM_SHA_512: 2 } as const

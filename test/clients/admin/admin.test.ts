@@ -1,15 +1,19 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import { test } from 'node:test'
+import { describe, test } from 'node:test'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
+  adminClientQuotasChannel,
   adminGroupsChannel,
   adminTopicsChannel,
   type ClientDiagnosticEvent,
+  ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
   Consumer,
   type CreatedTopic,
+  type DescribeClientQuotasOptions,
+  describeClientQuotasV0,
   describeGroupsV5,
   EMPTY_BUFFER,
   type GroupBase,
@@ -17,7 +21,8 @@ import {
   listGroupsV5,
   MultipleErrors,
   sleep,
-  UnsupportedApiError
+  UnsupportedApiError,
+  alterClientQuotasV1
 } from '../../../src/index.ts'
 import {
   createAdmin,
@@ -31,8 +36,11 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
-  mockUnavailableAPI
+  mockUnavailableAPI,
+  retry
 } from '../../helpers.ts'
+import { scheduler } from 'node:timers/promises'
+import { ClientQuotaEntityTypes, ClientQuotaKeys } from '../../../src/apis/enumerations.ts'
 
 test('constructor should initialize properly', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -140,6 +148,26 @@ test('all operations should fail when admin is closed', async t => {
     await admin.deleteGroups({
       groups: ['test-group']
     })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call describeClientQuotas on closed admin
+  try {
+    await admin.describeClientQuotas({
+      components: [
+        { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call alterClientQuotas on closed admin
+  try {
+    await admin.alterClientQuotas({ entries: [] })
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
@@ -1340,4 +1368,755 @@ test('deleteGroups should handle unavailable API errors (FindCoordinator)', asyn
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
   }
+})
+
+describe('Client Quotas (describeClientQuotas, alterClientQuotas)', () => {
+  const testCases = [
+    { clientId: 'Client1', user: 'User1' },
+    { clientId: 'Client1', user: null },
+    { clientId: null, user: 'User1' },
+    { clientId: null, user: null }
+  ]
+
+  for (const testCase of testCases) {
+    test(`quotas should be set and removed on ${testCase.user ? 'specific' : 'default'} user and ${testCase.clientId ? 'specific' : 'default'} client-id`, async t => {
+      const admin = createAdmin(t)
+
+      const clientQuotaEntries: alterClientQuotasV1.AlterClientQuotasRequestEntry[] = [
+        {
+          entities: [
+            { entityType: ClientQuotaEntityTypes.USER, entityName: testCase.user },
+            { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: testCase.clientId }
+          ],
+          ops: [
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5, remove: false }
+          ]
+        }
+      ]
+
+      const alterOptions = { entries: clientQuotaEntries, validateOnly: false }
+
+      const alterResult = await admin.alterClientQuotas(alterOptions)
+
+      deepStrictEqual(alterResult, [
+        {
+          errorCode: 0,
+          errorMessage: null,
+          entity: [
+            { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: testCase.clientId },
+            { entityType: ClientQuotaEntityTypes.USER, entityName: testCase.user }
+          ]
+        }
+      ])
+
+      const describeComponents = []
+
+      if (testCase.clientId) {
+        describeComponents.push({
+          entityType: ClientQuotaEntityTypes.CLIENT_ID,
+          matchType: ClientQuotaMatchTypes.EXACT,
+          match: testCase.clientId
+        })
+      } else {
+        describeComponents.push({
+          entityType: ClientQuotaEntityTypes.CLIENT_ID,
+          matchType: ClientQuotaMatchTypes.DEFAULT
+        })
+      }
+      if (testCase.user) {
+        describeComponents.push({
+          entityType: ClientQuotaEntityTypes.USER,
+          matchType: ClientQuotaMatchTypes.EXACT,
+          match: testCase.user
+        })
+      } else {
+        describeComponents.push({
+          entityType: ClientQuotaEntityTypes.USER,
+          matchType: ClientQuotaMatchTypes.DEFAULT
+        })
+      }
+
+      const options: DescribeClientQuotasOptions = { components: describeComponents, strict: false }
+
+      await retry(10, 100, async () => {
+        const result = await admin.describeClientQuotas(options)
+        deepStrictEqual(result, [
+          {
+            entity: [
+              {
+                entityType: ClientQuotaEntityTypes.CLIENT_ID,
+                entityName: testCase.clientId
+              },
+              {
+                entityType: ClientQuotaEntityTypes.USER,
+                entityName: testCase.user
+              }
+            ],
+            values: [
+              { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000 },
+              { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5 },
+              { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000 }
+            ]
+          }
+        ])
+      })
+
+      const removeQuotaEntries: alterClientQuotasV1.AlterClientQuotasRequestEntry[] = [
+        {
+          entities: [
+            { entityType: ClientQuotaEntityTypes.USER, entityName: testCase.user },
+            { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: testCase.clientId }
+          ],
+          ops: [
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, remove: true },
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, remove: true },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, remove: true }
+          ]
+        }
+      ]
+
+      const removeOptions = { entries: removeQuotaEntries, validateOnly: false }
+      const removeResult = await admin.alterClientQuotas(removeOptions)
+
+      deepStrictEqual(removeResult, [
+        {
+          errorCode: 0,
+          errorMessage: null,
+          entity: [
+            { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: testCase.clientId },
+            { entityType: ClientQuotaEntityTypes.USER, entityName: testCase.user }
+          ]
+        }
+      ])
+
+      await retry(10, 100, async () => {
+        const quotasAfterRemoval = await admin.describeClientQuotas(options)
+        deepStrictEqual(quotasAfterRemoval, [])
+      })
+    })
+  }
+
+  test('describeClientQuotas should handle strict option', async t => {
+    const admin = createAdmin(t)
+
+    await admin.alterClientQuotas({
+      entries: [
+        {
+          entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
+          ops: [
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5, remove: false }
+          ]
+        }
+      ],
+      validateOnly: false
+    })
+    await admin.alterClientQuotas({
+      entries: [
+        {
+          entities: [
+            { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' },
+            { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }
+          ],
+          ops: [
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000, remove: false },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5, remove: false }
+          ]
+        }
+      ],
+      validateOnly: false
+    })
+
+    await retry(10, 100, async () => {
+      const result = await admin.describeClientQuotas({
+        components: [
+          {
+            entityType: ClientQuotaEntityTypes.USER,
+            matchType: ClientQuotaMatchTypes.EXACT,
+            match: 'User1'
+          }
+        ],
+        strict: false
+      })
+      deepStrictEqual(result, [
+        {
+          entity: [
+            {
+              entityType: ClientQuotaEntityTypes.USER,
+              entityName: 'User1'
+            }
+          ],
+          values: [
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000 },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5 },
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000 }
+          ]
+        },
+        {
+          entity: [
+            {
+              entityType: ClientQuotaEntityTypes.CLIENT_ID,
+              entityName: 'Client1'
+            },
+            {
+              entityType: ClientQuotaEntityTypes.USER,
+              entityName: 'User1'
+            }
+          ],
+          values: [
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000 },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5 },
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000 }
+          ]
+        }
+      ])
+      const strictResult = await admin.describeClientQuotas({
+        components: [
+          {
+            entityType: ClientQuotaEntityTypes.USER,
+            matchType: ClientQuotaMatchTypes.EXACT,
+            match: 'User1'
+          }
+        ],
+        strict: true
+      })
+      deepStrictEqual(strictResult, [
+        {
+          entity: [
+            {
+              entityType: ClientQuotaEntityTypes.USER,
+              entityName: 'User1'
+            }
+          ],
+          values: [
+            { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 1000 },
+            { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.5 },
+            { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000 }
+          ]
+        }
+      ])
+
+      // Cleanup
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [
+              { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' },
+              { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }
+            ],
+            ops: [
+              { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, remove: true },
+              { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, remove: true },
+              { key: ClientQuotaKeys.REQUEST_PERCENTAGE, remove: true }
+            ]
+          }
+        ],
+        validateOnly: false
+      })
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
+            ops: [
+              { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, remove: true },
+              { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, remove: true },
+              { key: ClientQuotaKeys.REQUEST_PERCENTAGE, remove: true }
+            ]
+          }
+        ],
+        validateOnly: false
+      })
+    })
+  })
+
+  test('alterClientQuotas should support validateOnly option', async t => {
+    const admin = createAdmin(t)
+
+    const clientQuotaEntries: alterClientQuotasV1.AlterClientQuotasRequestEntry[] = [
+      {
+        entities: [
+          { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' },
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }
+        ],
+        ops: [
+          { key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 2000, remove: false },
+          { key: ClientQuotaKeys.CONSUMER_BYTE_RATE, value: 2000, remove: false },
+          { key: ClientQuotaKeys.REQUEST_PERCENTAGE, value: 0.7, remove: false }
+        ]
+      }
+    ]
+
+    const validateOnlyOptions = { entries: clientQuotaEntries, validateOnly: true }
+    const validateResult = await admin.alterClientQuotas(validateOnlyOptions)
+
+    deepStrictEqual(validateResult, [
+      {
+        errorCode: 0,
+        errorMessage: null,
+        entity: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' },
+          { entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }
+        ]
+      }
+    ])
+
+    const options: DescribeClientQuotasOptions = {
+      components: [
+        {
+          entityType: ClientQuotaEntityTypes.USER,
+          matchType: ClientQuotaMatchTypes.EXACT,
+          match: 'User1'
+        },
+        {
+          entityType: ClientQuotaEntityTypes.CLIENT_ID,
+          matchType: ClientQuotaMatchTypes.EXACT,
+          match: 'Client1'
+        }
+      ],
+      strict: false
+    }
+
+    // We should wait a bit to ensure the changes have been applied
+    await scheduler.wait(1000)
+    const quotas = await admin.describeClientQuotas(options)
+    deepStrictEqual(quotas, [])
+  })
+
+  test('describeClientQuotas and alterClientQuotas should support diagnostic channels', async t => {
+    const admin = createAdmin(t)
+
+    const clientQuotaEntries: alterClientQuotasV1.AlterClientQuotasRequestEntry[] = [
+      {
+        entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID }],
+        ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+      }
+    ]
+
+    const alterOptions = { entries: clientQuotaEntries, validateOnly: false }
+
+    const verifyAlterTracingChannel = createTracingChannelVerifier(
+      adminClientQuotasChannel,
+      'client',
+      {
+        start (context: ClientDiagnosticEvent) {
+          deepStrictEqual(context, {
+            client: admin,
+            operation: 'alterClientQuotas',
+            options: alterOptions,
+            operationId: mockedOperationId
+          })
+        },
+        asyncStart (context: ClientDiagnosticEvent) {
+          // The result should be an array of alter responses
+          strictEqual(Array.isArray(context.result), true)
+        },
+        error (context: ClientDiagnosticEvent) {
+          ok(typeof context === 'undefined')
+        }
+      },
+      (_label: string, data: ClientDiagnosticEvent) => data.operation === 'alterClientQuotas'
+    )
+
+    await admin.alterClientQuotas(alterOptions)
+
+    verifyAlterTracingChannel()
+
+    const options = {
+      components: [
+        {
+          entityType: ClientQuotaEntityTypes.CLIENT_ID,
+          matchType: ClientQuotaMatchTypes.ANY,
+          match: null
+        }
+      ],
+      strict: false
+    }
+
+    const verifyDescribeTracingChannel = createTracingChannelVerifier(
+      adminClientQuotasChannel,
+      'client',
+      {
+        start (context: ClientDiagnosticEvent) {
+          deepStrictEqual(context, {
+            client: admin,
+            operation: 'describeClientQuotas',
+            options,
+            operationId: mockedOperationId
+          })
+        },
+        asyncStart (context: ClientDiagnosticEvent) {
+          strictEqual(Array.isArray(context.result), true)
+        },
+        error (context: ClientDiagnosticEvent) {
+          ok(typeof context === 'undefined')
+        }
+      },
+      (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeClientQuotas'
+    )
+
+    const quotas = await admin.describeClientQuotas(options)
+
+    strictEqual(Array.isArray(quotas), true)
+
+    for (const quota of quotas) {
+      strictEqual(Array.isArray(quota.entity), true)
+      strictEqual(Array.isArray(quota.values), true)
+
+      for (const entity of quota.entity) {
+        strictEqual(typeof entity.entityType, 'string')
+        ok(entity.entityName === null || typeof entity.entityName === 'string')
+      }
+
+      for (const value of quota.values) {
+        strictEqual(typeof value.key, 'string')
+        strictEqual(typeof value.value, 'number')
+      }
+    }
+
+    verifyDescribeTracingChannel()
+  })
+
+  test('describeClientQuotas should validate options in strict mode', async t => {
+    const admin = createAdmin(t, { strict: true })
+
+    // Test with missing required field (components)
+    try {
+      // @ts-expect-error
+      await admin.describeClientQuotas({})
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('components'), true)
+    }
+
+    // Test with invalid type for components
+    try {
+      // @ts-expect-error
+      await admin.describeClientQuotas({ components: 'not-an-array' })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('components'), true)
+    }
+
+    // Test with empty components array
+    try {
+      await admin.describeClientQuotas({ components: [] })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('components'), true)
+    }
+
+    // Test with invalid component object (missing entityType)
+    try {
+      await admin.describeClientQuotas({
+        components: [{ matchType: 0, match: null }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entityType'), true)
+    }
+
+    // Test with invalid component object (missing matchType)
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', match: null }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('matchType'), true)
+    }
+
+    // Test with invalid entityType type
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 123, matchType: 0, match: null }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entityType'), true)
+    }
+
+    // Test with empty entityType
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: '', matchType: 0, match: null }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entityType'), true)
+    }
+
+    // Test with invalid matchType type
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', matchType: 'not-a-number', match: null }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('matchType'), true)
+    }
+
+    // Test with invalid match type (should be string or null)
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', matchType: 0, match: 123 }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('match'), true)
+    }
+
+    // Test with invalid strict type
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', matchType: 0, match: null }],
+        strict: 'not-a-boolean'
+      } as any)
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('strict'), true)
+    }
+
+    // Test with invalid additional property in component
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', matchType: 0, match: null, invalidProperty: true }] as any
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('must NOT have additional properties'), true)
+    }
+
+    // Test with invalid additional property in options
+    try {
+      await admin.describeClientQuotas({
+        components: [{ entityType: 'client-id', matchType: 0, match: null }],
+        invalidProperty: true
+      } as any)
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('must NOT have additional properties'), true)
+    }
+  })
+
+  test('alterClientQuotas should validate options in strict mode', async t => {
+    const admin = createAdmin(t, { strict: true })
+
+    // Test with missing required field (entries)
+    try {
+      // @ts-expect-error
+      await admin.alterClientQuotas({})
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entries'), true)
+    }
+
+    // Test with invalid type for entries
+    try {
+      // @ts-expect-error
+      await admin.alterClientQuotas({ entries: 'not-an-array' })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entries'), true)
+    }
+
+    // Test with empty entries array
+    try {
+      await admin.alterClientQuotas({ entries: [] })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('entries'), true)
+    }
+
+    // Test with invalid validateOnly type
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ],
+        validateOnly: 'not-a-boolean'
+      } as any)
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('validateOnly'), true)
+    }
+
+    // Test with invalid additional property
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.USER, entityName: 'User1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ],
+        invalidProperty: true
+      } as any)
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error.message.includes('must NOT have additional properties'), true)
+    }
+  })
+
+  test('describeClientQuotas should handle errors from Connection.getFirstAvailable', async t => {
+    const admin = createAdmin(t)
+
+    mockConnectionPoolGetFirstAvailable(admin[kConnections], 1)
+
+    try {
+      await admin.describeClientQuotas({
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Describing client quotas failed.'), true)
+    }
+  })
+
+  test('alterClientQuotas should handle errors from Connection.getFirstAvailable', async t => {
+    const admin = createAdmin(t)
+
+    mockConnectionPoolGetFirstAvailable(admin[kConnections], 1)
+
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Altering client quotas failed.'), true)
+    }
+  })
+
+  test('describeClientQuotas should handle errors from Connection.get', async t => {
+    const admin = createAdmin(t)
+
+    mockConnectionPoolGet(admin[kConnections], 1)
+
+    try {
+      await admin.describeClientQuotas({
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Describing client quotas failed.'), true)
+    }
+  })
+
+  test('alterClientQuotas should handle errors from Connection.get', async t => {
+    const admin = createAdmin(t)
+
+    mockConnectionPoolGet(admin[kConnections], 1)
+
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Altering client quotas failed.'), true)
+    }
+  })
+
+  test('describeClientQuotas should handle errors from the API', async t => {
+    const admin = createAdmin(t)
+
+    mockAPI(admin[kConnections], describeClientQuotasV0.api.key)
+
+    try {
+      await admin.describeClientQuotas({
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Describing client quotas failed.'), true)
+    }
+  })
+
+  test('alterClientQuotas should handle errors from the API', async t => {
+    const admin = createAdmin(t)
+
+    mockAPI(admin[kConnections], alterClientQuotasV1.api.key)
+
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes('Altering client quotas failed.'), true)
+    }
+  })
+
+  test('describeClientQuotas should handle unavailable API errors (DescribeClientQuotas)', async t => {
+    const admin = createAdmin(t)
+
+    mockUnavailableAPI(admin, 'DescribeClientQuotas')
+
+    try {
+      await admin.describeClientQuotas({
+        components: [
+          { entityType: ClientQuotaEntityTypes.CLIENT_ID, matchType: ClientQuotaMatchTypes.EXACT, match: 'Client1' }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.errors[0].message.includes('Unsupported API DescribeClientQuotas.'), true)
+    }
+  })
+
+  test('alterClientQuotas should handle unavailable API errors (AlterClientQuotas)', async t => {
+    const admin = createAdmin(t)
+
+    mockUnavailableAPI(admin, 'AlterClientQuotas')
+
+    try {
+      await admin.alterClientQuotas({
+        entries: [
+          {
+            entities: [{ entityType: ClientQuotaEntityTypes.CLIENT_ID, entityName: 'Client1' }],
+            ops: [{ key: ClientQuotaKeys.PRODUCER_BYTE_RATE, value: 1000, remove: false }]
+          }
+        ]
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.errors[0].message.includes('Unsupported API AlterClientQuotas.'), true)
+    }
+  })
 })

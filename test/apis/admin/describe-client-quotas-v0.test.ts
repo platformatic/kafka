@@ -5,16 +5,15 @@ import { Reader, ResponseError, Writer, describeClientQuotasV0 } from '../../../
 const { createRequest, parseResponse } = describeClientQuotasV0
 
 test('createRequest serializes basic parameters correctly', () => {
-  const components = [
+  const strict = false
+
+  const writer = createRequest([
     {
-      entityType: 'client',
+      entityType: 'client-id',
       matchType: 0, // MATCH_EXACT
       match: 'test-client'
     }
-  ]
-  const strict = false
-
-  const writer = createRequest(components, strict)
+  ], strict)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -42,7 +41,7 @@ test('createRequest serializes basic parameters correctly', () => {
     {
       components: [
         {
-          entityType: 'client',
+          entityType: 'client-id',
           matchType: 0,
           match: 'test-client'
         }
@@ -54,9 +53,11 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes multiple components correctly', () => {
-  const components = [
+  const strict = false
+
+  const writer = createRequest([
     {
-      entityType: 'client',
+      entityType: 'client-id',
       matchType: 0, // MATCH_EXACT
       match: 'test-client'
     },
@@ -65,10 +66,7 @@ test('createRequest serializes multiple components correctly', () => {
       matchType: 0, // MATCH_EXACT
       match: 'test-user'
     }
-  ]
-  const strict = false
-
-  const writer = createRequest(components, strict)
+  ], strict)
   const reader = Reader.from(writer)
 
   // Read components array
@@ -84,7 +82,7 @@ test('createRequest serializes multiple components correctly', () => {
     componentsArray,
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         matchType: 0,
         match: 'test-client'
       },
@@ -101,7 +99,7 @@ test('createRequest serializes multiple components correctly', () => {
 test('createRequest serializes different match types correctly', () => {
   const components = [
     {
-      entityType: 'client',
+      entityType: 'client-id',
       matchType: 0, // MATCH_EXACT
       match: 'test-client'
     },
@@ -118,6 +116,7 @@ test('createRequest serializes different match types correctly', () => {
   ]
   const strict = false
 
+  // @ts-ignore - ip actually not valid
   const writer = createRequest(components, strict)
   const reader = Reader.from(writer)
 
@@ -134,7 +133,7 @@ test('createRequest serializes different match types correctly', () => {
     componentsArray.map(c => ({ entityType: c.entityType, matchType: c.matchType, match: c.match })),
     [
       {
-        entityType: 'client',
+        entityType: 'client-id',
         matchType: 0,
         match: 'test-client'
       },
@@ -154,16 +153,15 @@ test('createRequest serializes different match types correctly', () => {
 })
 
 test('createRequest serializes strict flag correctly', () => {
-  const components = [
+  const strict = true
+
+  const writer = createRequest([
     {
-      entityType: 'client',
+      entityType: 'client-id',
       matchType: 0,
       match: 'test-client'
     }
-  ]
-  const strict = true
-
-  const writer = createRequest(components, strict)
+  ], strict)
   const reader = Reader.from(writer)
 
   // Skip components array - already tested
@@ -192,7 +190,7 @@ test('parseResponse correctly processes a successful response', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -227,7 +225,7 @@ test('parseResponse correctly processes a successful response', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'test-client'
             }
           ],
@@ -255,7 +253,7 @@ test('parseResponse correctly handles multiple entries and values', () => {
         {
           entity: [
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'client-1'
             }
           ],
@@ -273,7 +271,7 @@ test('parseResponse correctly handles multiple entries and values', () => {
               entityName: 'user-1'
             },
             {
-              entityType: 'client',
+              entityType: 'client-id',
               entityName: 'client-2'
             }
           ],

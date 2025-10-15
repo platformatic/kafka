@@ -10,10 +10,12 @@ export interface GroupProtocolSubscription {
   metadata?: Buffer | string
 }
 
-export interface GroupAssignment {
+export interface TopicPartitions {
   topic: string
   partitions: number[]
 }
+
+export interface GroupAssignment extends TopicPartitions {}
 
 export interface GroupPartitionsAssignments {
   memberId: string

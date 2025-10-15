@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, doesNotThrow } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
@@ -3313,4 +3313,220 @@ test('metrics should track the number of active topics', async t => {
     const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
     deepStrictEqual(activeTopics.values[0].value, 0)
   }
+})
+
+test('pause should prevent fetches from paused partitions during consumption', async t => {
+  const topic = await createTopic(t, true, 2)
+  const messages = Array.from({ length: 10 }, (_, i) => ({
+    topic,
+    key: `key-${i}`,
+    value: `value-${i}`
+  }))
+
+  const consumer = createConsumer(t)
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true
+  })
+
+  consumer.pause([{ topic, partitions: [0] }])
+  await produceTestMessages({ t, messages: messages.slice(0, 5), overrideOptions: { partitioner: () => 0 } })
+  await produceTestMessages({ t, messages: messages.slice(5, 10), overrideOptions: { partitioner: () => 1 } })
+
+  const received: { key: string; partition: number }[] = []
+  let count = 0
+
+  for await (const message of stream) {
+    received.push({ key: message.key.toString(), partition: message.partition })
+    count++
+
+    if (count === 5) {
+      break
+    }
+  }
+
+  strictEqual(
+    received.every(m => m.partition === 1),
+    true
+  )
+})
+
+test('resume should allow fetches from previously paused partitions', async t => {
+  const topic = await createTopic(t, true, 2)
+  const messages = Array.from({ length: 10 }, (_, i) => ({
+    topic,
+    key: `key-${i}`,
+    value: `value-${i}`
+  }))
+
+  await produceTestMessages({ t, messages: messages.slice(0, 5), overrideOptions: { partitioner: () => 0 } })
+  await produceTestMessages({ t, messages: messages.slice(5, 10), overrideOptions: { partitioner: () => 1 } })
+
+  const consumer = createConsumer(t)
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 100
+  })
+
+  consumer.pause([{ topic, partitions: [0] }])
+
+  const received: { key: string; partition: number }[] = []
+  let count = 0
+
+  for await (const message of stream) {
+    received.push({ key: message.key.toString(), partition: message.partition })
+    count++
+
+    if (count === 5) {
+      consumer.resume([{ topic, partitions: [0] }])
+    }
+
+    if (count === 10) {
+      break
+    }
+  }
+
+  strictEqual(
+    received.slice(0, 5).every(m => m.partition === 1),
+    true
+  )
+  strictEqual(
+    received.slice(5, 10).every(m => m.partition === 0),
+    true
+  )
+})
+
+test('resume should handle resuming non-paused partitions gracefully', async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  doesNotThrow(() => consumer.resume([{ topic, partitions: [0] }]))
+})
+
+test('pause/resume should throw error if consumer has not joined a group', async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  try {
+    consumer.pause([{ topic, partitions: [0] }])
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, 'Cannot pause partitions before joining a consumer group.')
+  }
+
+  try {
+    consumer.resume([{ topic, partitions: [0] }])
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, 'Cannot resume partitions before joining a consumer group.')
+  }
+})
+
+test('pause/resume should throw error if topic is not assigned to consumer', async t => {
+  const topic1 = await createTopic(t, true)
+  const topic2 = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic1)
+  await consumer.joinGroup({})
+
+  try {
+    consumer.pause([{ topic: topic2, partitions: [0] }])
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, `Topic '${topic2}' is not assigned to this consumer.`)
+  }
+
+  try {
+    consumer.resume([{ topic: topic2, partitions: [0] }])
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, `Topic '${topic2}' is not assigned to this consumer.`)
+  }
+})
+
+test('pause/resume should handle multiple topic-partitions', async t => {
+  const topic1 = await createTopic(t, true)
+  const topic2 = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic1, topic2)
+  await consumer.joinGroup({})
+
+  consumer.pause([
+    { topic: topic1, partitions: [0] },
+    { topic: topic2, partitions: [0] }
+  ])
+
+  strictEqual(consumer.isPaused(topic1, 0), true)
+  strictEqual(consumer.isPaused(topic2, 0), true)
+
+  consumer.resume([
+    { topic: topic1, partitions: [0] },
+    { topic: topic2, partitions: [0] }
+  ])
+
+  strictEqual(consumer.isPaused(topic1, 0), false)
+  strictEqual(consumer.isPaused(topic2, 0), false)
+})
+
+test('paused should return all paused topic-partitions', async t => {
+  const topic1 = await createTopic(t, true, 2)
+  const topic2 = await createTopic(t, true, 2)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic1, topic2)
+  await consumer.joinGroup({})
+
+  consumer.pause([
+    { topic: topic1, partitions: [0, 1] },
+    { topic: topic2, partitions: [0] }
+  ])
+
+  deepStrictEqual(consumer.paused(), [
+    { topic: topic1, partitions: [0, 1] },
+    { topic: topic2, partitions: [0] }
+  ])
+})
+
+test('isPaused should return true for paused topic-partitions', async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  consumer.pause([{ topic, partitions: [0] }])
+  strictEqual(consumer.isPaused(topic, 0), true)
+})
+
+test('isPaused should return false for non-paused topic-partitions', async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic)
+  await consumer.joinGroup({})
+
+  strictEqual(consumer.isPaused(topic, 0), false)
+})
+
+test('isPaused should return false for topic-partitions not assigned to consumer', async t => {
+  const topic1 = await createTopic(t, true)
+  const topic2 = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  consumer.topics.trackAll(topic1)
+  await consumer.joinGroup({})
+
+  strictEqual(consumer.isPaused(topic2, 0), false)
 })

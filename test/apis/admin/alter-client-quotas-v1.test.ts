@@ -7,23 +7,26 @@ const { createRequest, parseResponse } = alterClientQuotasV1
 test('createRequest serializes basic parameters correctly', () => {
   const validateOnly = false
 
-  const writer = createRequest([
-    {
-      entities: [
-        {
-          entityType: 'client-id',
-          entityName: 'test-client'
-        }
-      ],
-      ops: [
-        {
-          key: 'consumer_byte_rate',
-          value: 1024000,
-          remove: false
-        }
-      ]
-    }
-  ], validateOnly)
+  const writer = createRequest(
+    [
+      {
+        entities: [
+          {
+            entityType: 'client-id',
+            entityName: 'test-client'
+          }
+        ],
+        ops: [
+          {
+            key: 'consumer_byte_rate',
+            value: 1024000,
+            remove: false
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -87,27 +90,30 @@ test('createRequest serializes basic parameters correctly', () => {
 test('createRequest serializes multiple entities correctly', () => {
   const validateOnly = false
 
-  const writer = createRequest([
-    {
-      entities: [
-        {
-          entityType: 'client-id',
-          entityName: 'test-client'
-        },
-        {
-          entityType: 'user',
-          entityName: 'test-user'
-        }
-      ],
-      ops: [
-        {
-          key: 'consumer_byte_rate',
-          value: 1024000,
-          remove: false
-        }
-      ]
-    }
-  ], validateOnly)
+  const writer = createRequest(
+    [
+      {
+        entities: [
+          {
+            entityType: 'client-id',
+            entityName: 'test-client'
+          },
+          {
+            entityType: 'user',
+            entityName: 'test-user'
+          }
+        ],
+        ops: [
+          {
+            key: 'consumer_byte_rate',
+            value: 1024000,
+            remove: false
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Read and verify entries
@@ -154,32 +160,35 @@ test('createRequest serializes multiple entities correctly', () => {
 test('createRequest serializes multiple operations correctly', () => {
   const validateOnly = false
 
-  const writer = createRequest([
-    {
-      entities: [
-        {
-          entityType: 'client-id',
-          entityName: 'test-client'
-        }
-      ],
-      ops: [
-        {
-          key: 'consumer_byte_rate',
-          value: 1024000,
-          remove: false
-        },
-        {
-          key: 'producer_byte_rate',
-          value: 2048000,
-          remove: false
-        },
-        {
-          key: 'request_percentage',
-          remove: true
-        }
-      ]
-    }
-  ], validateOnly)
+  const writer = createRequest(
+    [
+      {
+        entities: [
+          {
+            entityType: 'client-id',
+            entityName: 'test-client'
+          }
+        ],
+        ops: [
+          {
+            key: 'consumer_byte_rate',
+            value: 1024000,
+            remove: false
+          },
+          {
+            key: 'producer_byte_rate',
+            value: 2048000,
+            remove: false
+          },
+          {
+            key: 'request_percentage',
+            remove: true
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Read entries
@@ -229,23 +238,26 @@ test('createRequest serializes multiple operations correctly', () => {
 test('createRequest serializes validateOnly flag correctly', () => {
   const validateOnly = true
 
-  const writer = createRequest([
-    {
-      entities: [
-        {
-          entityType: 'client-id',
-          entityName: 'test-client'
-        }
-      ],
-      ops: [
-        {
-          key: 'consumer_byte_rate',
-          value: 1024000,
-          remove: false
-        }
-      ]
-    }
-  ], validateOnly)
+  const writer = createRequest(
+    [
+      {
+        entities: [
+          {
+            entityType: 'client-id',
+            entityName: 'test-client'
+          }
+        ],
+        ops: [
+          {
+            key: 'consumer_byte_rate',
+            value: 1024000,
+            remove: false
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Skip entries - already tested

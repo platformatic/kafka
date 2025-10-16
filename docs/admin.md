@@ -116,6 +116,18 @@ Options:
 | entries      | `AlterClientQuotasRequestEntry[]` | Array of entries specifying the entities and quotas to change.                            |
 | validateOnly | `boolean`                         | Whether to only validate the request without applying changes. Defaults to `false`.       |
 
+### `describeLogDirs(options[, callback])`
+
+Describes log directories for specified topics across all brokers.
+
+The return value is an array of broker log directory descriptions, each containing information one broker's log directories.
+
+Options:
+
+| Property | Type                            | Description                                                                      |
+| -------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| topics   | `DescribeLogDirsRequestTopic[]` | Array of topics specifying the topics and partitions for which to describe logs. |
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

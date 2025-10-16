@@ -174,6 +174,31 @@ export const alterClientQuotasOptionsSchema = {
   additionalProperties: false
 }
 
+export const describeLogDirsOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitions: {
+            type: 'array',
+            items: { type: 'number', minimum: 0 },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitions'],
+        additionalProperties: false
+      },
+      minItems: 1
+    }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
@@ -182,3 +207,4 @@ export const describeGroupsOptionsValidator = ajv.compile(describeGroupsOptionsS
 export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchema)
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
+export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)

@@ -940,3 +940,32 @@ test('readTaggedFields', () => {
   // Position should be at the end
   strictEqual(reader.position, buffer.length)
 })
+
+test('readNullableStruct - null', () => {
+  const buffer = Buffer.from([
+    255 // -1 indicates null
+  ])
+  const reader = new Reader(new DynamicBuffer(buffer))
+  strictEqual(
+    reader.readNullableStruct(() => {
+      return { a: reader.readInt8(), b: reader.readInt8() }
+    }),
+    null
+  )
+})
+
+test('readNullableStruct - non-null', () => {
+  const buffer = Buffer.from([
+    1, // 1 indicates non-null
+    42, // first value
+    43 // second value
+  ])
+
+  const reader = new Reader(new DynamicBuffer(buffer))
+  deepStrictEqual(
+    reader.readNullableStruct(() => {
+      return { a: reader.readInt8(), b: reader.readInt8() }
+    }),
+    { a: 42, b: 43 }
+  )
+})

@@ -1,7 +1,7 @@
 services:
   broker-single:
     # Rule of thumb: Confluent Kafka Version = Apache Kafka Version + 4.0.0
-    image: &image confluentinc/cp-kafka:${KAFKA_VERSION:-8.0.0}
+    image: &image confluentinc/cp-kafka:${KAFKA_VERSION:-7.9.0}
     container_name: broker-single
     ports:
       - "9001:9092"

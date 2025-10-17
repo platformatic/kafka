@@ -49,7 +49,7 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { type GenericError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -228,13 +228,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kClosed] = true
 
-    const closer = this.#useNewProtocol
-      ? this.#leaveGroupNewProtocol.bind(this)
-      : this.#membershipActive
-        ? this.#leaveGroup.bind(this)
-        : function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
-            callback(null)
-          }
+    let closer: (_: boolean, callback: CallbackWithPromise<void>) => void
+    if (this.#useNewProtocol) {
+      closer = this.#leaveGroupNewProtocol.bind(this)
+    } else if (this.#membershipActive) {
+      closer = this.#leaveGroup.bind(this)
+    } else {
+      closer = function noopCloser () {
+        callback(null)
+      }
+    }
 
     closer(force as boolean, error => {
       if (error) {
@@ -1050,7 +1053,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.#cancelHeartbeat()
           this.emitWithDebug('consumer:heartbeat', 'error', { error })
 
-          const fenced = (error as any).response?.errorCode === 110 // FENCED_MEMBER_EPOCH
+          const fenced = (error as any).response?.errorCode === protocolErrors.FENCED_MEMBER_EPOCH.code
           if (fenced) {
             this.#assignments = []
             this.assignments = []

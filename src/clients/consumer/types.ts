@@ -1,5 +1,5 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
-import { type FetchIsolationLevel } from '../../apis/enumerations.ts'
+import { GroupProtocols, type FetchIsolationLevel } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
@@ -70,7 +70,7 @@ export type MessagesStreamFallbackModeValue =
   (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
 
 export interface GroupOptions {
-  groupProtocol?: 'classic'
+  groupProtocol?: typeof GroupProtocols.CLASSIC
   sessionTimeout?: number
   rebalanceTimeout?: number
   heartbeatInterval?: number
@@ -79,7 +79,7 @@ export interface GroupOptions {
 }
 
 export interface ConsumerGroupOptions {
-  groupProtocol: 'consumer'
+  groupProtocol: typeof GroupProtocols.CONSUMER
   groupRemoteAssignor?: string
   rebalanceTimeout?: number
 }

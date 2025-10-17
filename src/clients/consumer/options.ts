@@ -1,4 +1,4 @@
-import { allowedFetchIsolationLevels } from '../../apis/enumerations.ts'
+import { allowedFetchIsolationLevels, allowedGroupProtocols } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
@@ -8,7 +8,7 @@ export const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
   rebalanceTimeout: { type: 'number', minimum: 0 },
   heartbeatInterval: { type: 'number', minimum: 0 },
-  groupProtocol: { type: 'string', enum: ['classic', 'consumer'] },
+  groupProtocol: { type: 'string', enum: allowedGroupProtocols },
   groupRemoteAssignor: { type: 'string' },
   protocols: {
     type: 'array',

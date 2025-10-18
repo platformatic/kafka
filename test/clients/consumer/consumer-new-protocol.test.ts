@@ -182,8 +182,8 @@ test('#leaveGroupNewProtocol should handle unavailable API errors', skipNewProto
 test('#updateAssignments should handle metadata error', skipNewProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
+  consumer.on('consumer:heartbeat:start', () => mockMetadata(consumer))
   const stream = await consumer.consume({ topics: [topic] })
-  mockMetadata(consumer)
   await once(consumer, 'consumer:heartbeat:end')
   await stream.close()
 })

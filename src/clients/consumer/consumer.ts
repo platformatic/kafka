@@ -74,7 +74,7 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
-import { kAutocommit } from '../../symbols.ts'
+import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Gauge } from '../metrics.ts'
@@ -108,7 +108,6 @@ import {
   type OffsetsWithTimestamps,
   type ConsumerGroupOptions
 } from './types.ts'
-import { kRefreshOffsetsAndFetch } from '../../symbols.ts'
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
   ConsumerOptions<Key, Value, HeaderKey, HeaderValue>
@@ -228,13 +227,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kClosed] = true
 
-    let closer: (_: boolean, callback: CallbackWithPromise<void>) => void
+    let closer: (force: boolean, callback: CallbackWithPromise<void>) => void
     if (this.#useNewProtocol) {
       closer = this.#leaveGroupNewProtocol.bind(this)
     } else if (this.#membershipActive) {
       closer = this.#leaveGroup.bind(this)
     } else {
-      closer = function noopCloser () {
+      closer = function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
         callback(null)
       }
     }
@@ -1263,7 +1262,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
           this.#performConsume(options, false, callback)
-          return
         })
         return
       }

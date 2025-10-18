@@ -26,6 +26,11 @@ export const allowedProduceAcks = Object.values(ProduceAcks) as number[]
 export type ProduceAck = keyof typeof ProduceAcks
 
 // Consumer API
+
+export const GroupProtocols = { CLASSIC: 'classic', CONSUMER: 'consumer' } as const
+export const allowedGroupProtocols = Object.values(GroupProtocols)
+export type GroupProtocol = keyof typeof GroupProtocols
+
 // ./consumer/fetch.ts
 export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }
 export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels) as number[]

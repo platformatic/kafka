@@ -1,5 +1,5 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
-import { type FetchIsolationLevel } from '../../apis/enumerations.ts'
+import { type GroupProtocols, type FetchIsolationLevel } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
@@ -70,11 +70,18 @@ export type MessagesStreamFallbackModeValue =
   (typeof MessagesStreamFallbackModes)[keyof typeof MessagesStreamFallbackModes]
 
 export interface GroupOptions {
+  groupProtocol?: typeof GroupProtocols.CLASSIC
   sessionTimeout?: number
   rebalanceTimeout?: number
   heartbeatInterval?: number
   protocols?: GroupProtocolSubscription[]
   partitionAssigner?: GroupPartitionsAssigner
+}
+
+export interface ConsumerGroupOptions {
+  groupProtocol: typeof GroupProtocols.CONSUMER
+  groupRemoteAssignor?: string
+  rebalanceTimeout?: number
 }
 
 export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
@@ -100,7 +107,9 @@ export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> &
   GroupOptions
 
-export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & { groupId: string } & GroupOptions &
+export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & {
+  groupId: string
+} & (GroupOptions | ConsumerGroupOptions) &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>
 
 export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = Pick<

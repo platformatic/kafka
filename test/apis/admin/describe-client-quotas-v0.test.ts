@@ -7,13 +7,16 @@ const { createRequest, parseResponse } = describeClientQuotasV0
 test('createRequest serializes basic parameters correctly', () => {
   const strict = false
 
-  const writer = createRequest([
-    {
-      entityType: 'client-id',
-      matchType: 0, // MATCH_EXACT
-      match: 'test-client'
-    }
-  ], strict)
+  const writer = createRequest(
+    [
+      {
+        entityType: 'client-id',
+        matchType: 0, // MATCH_EXACT
+        match: 'test-client'
+      }
+    ],
+    strict
+  )
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -55,18 +58,21 @@ test('createRequest serializes basic parameters correctly', () => {
 test('createRequest serializes multiple components correctly', () => {
   const strict = false
 
-  const writer = createRequest([
-    {
-      entityType: 'client-id',
-      matchType: 0, // MATCH_EXACT
-      match: 'test-client'
-    },
-    {
-      entityType: 'user',
-      matchType: 0, // MATCH_EXACT
-      match: 'test-user'
-    }
-  ], strict)
+  const writer = createRequest(
+    [
+      {
+        entityType: 'client-id',
+        matchType: 0, // MATCH_EXACT
+        match: 'test-client'
+      },
+      {
+        entityType: 'user',
+        matchType: 0, // MATCH_EXACT
+        match: 'test-user'
+      }
+    ],
+    strict
+  )
   const reader = Reader.from(writer)
 
   // Read components array
@@ -155,13 +161,16 @@ test('createRequest serializes different match types correctly', () => {
 test('createRequest serializes strict flag correctly', () => {
   const strict = true
 
-  const writer = createRequest([
-    {
-      entityType: 'client-id',
-      matchType: 0,
-      match: 'test-client'
-    }
-  ], strict)
+  const writer = createRequest(
+    [
+      {
+        entityType: 'client-id',
+        matchType: 0,
+        match: 'test-client'
+      }
+    ],
+    strict
+  )
   const reader = Reader.from(writer)
 
   // Skip components array - already tested

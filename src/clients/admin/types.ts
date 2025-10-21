@@ -1,5 +1,10 @@
 import { type AlterClientQuotasRequestEntry } from '../../apis/admin/alter-client-quotas-v1.ts'
 import { type DescribeClientQuotasRequestComponent } from '../../apis/admin/describe-client-quotas-v0.ts'
+import {
+  type DescribeLogDirsResponse,
+  type DescribeLogDirsResponseResult,
+  type DescribeLogDirsRequestTopic
+} from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type CreateTopicsRequestTopicConfig } from '../../apis/admin/create-topics-v7.ts'
 import { type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
@@ -82,4 +87,14 @@ export interface DescribeClientQuotasOptions {
 export interface AlterClientQuotasOptions {
   entries: AlterClientQuotasRequestEntry[]
   validateOnly?: boolean
+}
+
+export interface DescribeLogDirsOptions {
+  topics: DescribeLogDirsRequestTopic[]
+}
+
+export interface BrokerLogDirDescription {
+  broker: number
+  throttleTimeMs: DescribeLogDirsResponse['throttleTimeMs']
+  results: Omit<DescribeLogDirsResponseResult, 'errorCode'>[]
 }

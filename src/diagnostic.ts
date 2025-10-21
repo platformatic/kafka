@@ -68,6 +68,7 @@ export const baseMetadataChannel = createTracingChannel<ClientDiagnosticEvent>('
 export const adminTopicsChannel = createTracingChannel<ClientDiagnosticEvent>('admin:topics')
 export const adminGroupsChannel = createTracingChannel<ClientDiagnosticEvent>('admin:groups')
 export const adminClientQuotasChannel = createTracingChannel<ClientDiagnosticEvent>('admin:clientQuotas')
+export const adminLogDirsChannel = createTracingChannel<ClientDiagnosticEvent>('admin:logDirs')
 
 // Producer channels
 export const producerInitIdempotentChannel = createTracingChannel<ClientDiagnosticEvent>('producer:initIdempotent')

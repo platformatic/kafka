@@ -1,3 +1,4 @@
+import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import {
   type AlterClientQuotasRequest,
   type AlterClientQuotasResponse,
@@ -40,6 +41,7 @@ import { MultipleErrors } from '../../errors.ts'
 import {
   adminClientQuotasChannel,
   adminGroupsChannel,
+  adminLogDirsChannel,
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
@@ -67,7 +69,8 @@ import {
   listGroupsOptionsValidator,
   listTopicsOptionsValidator,
   describeClientQuotasOptionsValidator,
-  alterClientQuotasOptionsValidator
+  alterClientQuotasOptionsValidator,
+  describeLogDirsOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -77,11 +80,13 @@ import {
   type DeleteTopicsOptions,
   type DescribeClientQuotasOptions,
   type AlterClientQuotasOptions,
+  type DescribeLogDirsOptions,
   type DescribeGroupsOptions,
   type Group,
   type GroupBase,
   type ListGroupsOptions,
-  type ListTopicsOptions
+  type ListTopicsOptions,
+  type BrokerLogDirDescription
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
@@ -345,6 +350,38 @@ export class Admin extends Base<AdminOptions> {
       this.#alterClientQuotas,
       1,
       createDiagnosticContext({ client: this, operation: 'alterClientQuotas', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  describeLogDirs (options: DescribeLogDirsOptions, callback: CallbackWithPromise<BrokerLogDirDescription[]>): void
+  describeLogDirs (options: DescribeLogDirsOptions): Promise<BrokerLogDirDescription[]>
+  describeLogDirs (
+    options: DescribeLogDirsOptions,
+    callback?: CallbackWithPromise<BrokerLogDirDescription[]>
+  ): void | Promise<BrokerLogDirDescription[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, describeLogDirsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as BrokerLogDirDescription[])
+      return callback[kCallbackPromise]
+    }
+
+    adminLogDirsChannel.traceCallback(
+      this.#describeLogDirs,
+      1,
+      createDiagnosticContext({ client: this, operation: 'describeLogDirs', options }),
       this,
       options,
       callback
@@ -886,5 +923,60 @@ export class Admin extends Base<AdminOptions> {
       },
       0
     )
+  }
+
+  #describeLogDirs (options: DescribeLogDirsOptions, callback: CallbackWithPromise<BrokerLogDirDescription[]>): void {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as BrokerLogDirDescription[])
+        return
+      }
+
+      runConcurrentCallbacks<BrokerLogDirDescription>(
+        'Describing log dirs failed.',
+        metadata.brokers,
+        ([id, broker], concurrentCallback) => {
+          this[kGetConnection](broker, (error, connection) => {
+            if (error) {
+              concurrentCallback(error, undefined as unknown as BrokerLogDirDescription)
+              return
+            }
+
+            this[kPerformWithRetry]<DescribeLogDirsResponse>(
+              'describeLogDirs',
+              retryCallback => {
+                this[kGetApi]<DescribeLogDirsRequest, DescribeLogDirsResponse>('DescribeLogDirs', (error, api) => {
+                  if (error) {
+                    retryCallback(error, undefined as unknown as DescribeLogDirsResponse)
+                    return
+                  }
+
+                  api(connection, options.topics, retryCallback as unknown as Callback<DescribeLogDirsResponse>)
+                })
+              },
+              (error, response) => {
+                if (error) {
+                  concurrentCallback(error, undefined as unknown as BrokerLogDirDescription)
+                  return
+                }
+
+                concurrentCallback(null, {
+                  broker: id,
+                  throttleTimeMs: response.throttleTimeMs,
+                  results: response.results.map(result => ({
+                    logDir: result.logDir,
+                    topics: result.topics,
+                    totalBytes: result.totalBytes,
+                    usableBytes: result.usableBytes
+                  }))
+                })
+              },
+              0
+            )
+          })
+        },
+        callback
+      )
+    })
   }
 }

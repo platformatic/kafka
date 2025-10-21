@@ -206,6 +206,22 @@ export const listOffsetsOptionsSchema = {
   additionalProperties: false
 }
 
+export const getLagOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: { type: 'array', items: idProperty },
+    partitions: {
+      type: 'object',
+      additionalProperties: {
+        type: 'array',
+        items: { type: 'number', minimum: 0 }
+      }
+    }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const groupOptionsValidator = ajv.compile({
   ...groupOptionsSchema,
   dependentSchemas: groupOptionsAdditionalValidations
@@ -228,6 +244,7 @@ export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)
 export const commitOptionsValidator = ajv.compile(commitOptionsSchema)
 export const listCommitsOptionsValidator = ajv.compile(listCommitsOptionsSchema)
 export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
+export const getLagOptionsValidator = ajv.compile(getLagOptionsSchema)
 
 export const defaultConsumerOptions = {
   autocommit: true,

@@ -1,16 +1,17 @@
 import { ok, strictEqual } from 'node:assert'
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
-import {
-  ResponseError,
-  type MessageToProduce,
-  type ProducerOptions,
-  ProduceAcks,
-  consumerGroupHeartbeatV0,
-  sleep,
-  UnsupportedApiError
-} from '../../../src/index.ts'
 import { kClosed, kConnections } from '../../../src/clients/base/base.ts'
+import {
+  consumerGroupHeartbeatV0,
+  ProduceAcks,
+  ResponseError,
+  sleep,
+  UnsupportedApiError,
+  type MessageToProduce,
+  type ProducerOptions
+} from '../../../src/index.ts'
 import {
   createConsumer,
   createProducer,
@@ -21,7 +22,6 @@ import {
   mockUnavailableAPI,
   waitFor
 } from '../../helpers.ts'
-import { randomUUID } from 'node:crypto'
 
 async function produceTestMessages ({
   t,
@@ -54,9 +54,9 @@ async function produceTestMessages ({
   }
 }
 
-const skipNewProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
+const skipConsumerGroupProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
 
-test('consumer should consume messages with new consumer protocol', skipNewProtocol, async t => {
+test('consumer should consume messages with new consumer protocol', skipConsumerGroupProtocol, async t => {
   const topic = await createTopic(t, true, 3)
   await produceTestMessages({
     t,
@@ -79,31 +79,35 @@ test('consumer should consume messages with new consumer protocol', skipNewProto
   await stream.close()
 })
 
-test('consumer.assignments should change on rebalance with new consumer protocol', skipNewProtocol, async t => {
-  const topic = await createTopic(t, true, 2)
-  const groupId = `test-consumer-group-${randomUUID()}`
+test(
+  'consumer.assignments should change on rebalance with new consumer protocol',
+  skipConsumerGroupProtocol,
+  async t => {
+    const topic = await createTopic(t, true, 2)
+    const groupId = `test-consumer-group-${randomUUID()}`
 
-  const consumer1 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
-  const stream1 = await consumer1.consume({ topics: [topic] })
-  t.after(() => stream1.close())
+    const consumer1 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
+    const stream1 = await consumer1.consume({ topics: [topic] })
+    t.after(() => stream1.close())
 
-  await waitFor(() => {
-    strictEqual(consumer1.assignments?.length, 1)
-    strictEqual(consumer1.assignments[0].partitions.length, 2)
-  })
+    await waitFor(() => {
+      strictEqual(consumer1.assignments?.length, 1)
+      strictEqual(consumer1.assignments[0].partitions.length, 2)
+    })
 
-  const consumer2 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
-  const stream2 = await consumer2.consume({ topics: [topic] })
-  t.after(() => stream2.close())
+    const consumer2 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
+    const stream2 = await consumer2.consume({ topics: [topic] })
+    t.after(() => stream2.close())
 
-  await waitFor(() => {
-    strictEqual(consumer1.assignments?.length, 1)
-    strictEqual(consumer1.assignments[0].partitions.length, 1)
-  })
-  await Promise.all([stream1.close(), stream2.close()])
-})
+    await waitFor(() => {
+      strictEqual(consumer1.assignments?.length, 1)
+      strictEqual(consumer1.assignments[0].partitions.length, 1)
+    })
+    await Promise.all([stream1.close(), stream2.close()])
+  }
+)
 
-test('consumer should handle fenced member epoch error', skipNewProtocol, async t => {
+test('consumer should handle fenced member epoch error', skipConsumerGroupProtocol, async t => {
   const topic = await createTopic(t, true)
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const stream = await consumer.consume({ topics: [topic] })
@@ -135,7 +139,7 @@ test('consumer should handle fenced member epoch error', skipNewProtocol, async 
   await stream.close()
 })
 
-test('#consumerGroupHeartbeat should handle unavailable API errors', skipNewProtocol, async t => {
+test('#consumerGroupHeartbeat should handle unavailable API errors', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
 
@@ -150,7 +154,7 @@ test('#consumerGroupHeartbeat should handle unavailable API errors', skipNewProt
   }
 })
 
-test('#consumerGroupHeartbeat should ignore response when closed ', skipNewProtocol, async t => {
+test('#consumerGroupHeartbeat should ignore response when closed ', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
   const stream = await consumer.consume({ topics: [topic] })
@@ -160,7 +164,7 @@ test('#consumerGroupHeartbeat should ignore response when closed ', skipNewProto
   await stream.close()
 })
 
-test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', skipNewProtocol, async t => {
+test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, timeout: 200 })
   const topic = await createTopic(t, true, 1)
   const stream = await consumer.consume({ topics: [topic] })
@@ -171,7 +175,7 @@ test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', sk
   await stream.close()
 })
 
-test('#leaveGroupNewProtocol should handle unavailable API errors', skipNewProtocol, async t => {
+test('#leaveGroupNewProtocol should handle unavailable API errors', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
   const stream = await consumer.consume({ topics: [topic] })
@@ -179,7 +183,7 @@ test('#leaveGroupNewProtocol should handle unavailable API errors', skipNewProto
   await stream.close()
 })
 
-test('#updateAssignments should handle metadata error', skipNewProtocol, async t => {
+test('#updateAssignments should handle metadata error', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
   consumer.on('consumer:heartbeat:start', () => mockMetadata(consumer))

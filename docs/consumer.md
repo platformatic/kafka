@@ -8,16 +8,18 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 ## Events
 
-| Name                        | Description                                         |
-| --------------------------- | --------------------------------------------------- |
-| `consumer:group:join`       | Emitted when joining a group.                       |
-| `consumer:group:leave`      | Emitted when leaving a group.                       |
-| `consumer:group:rejoin`     | Emitted when re-joining a group after a rebalance.  |
-| `consumer:group:rebalance`  | Emitted when group rebalancing occurs.              |
-| `consumer:heartbeat:start`  | Emitted when starting new heartbeats.               |
-| `consumer:heartbeat:cancel` | Emitted if a scheduled heartbeat has been canceled. |
-| `consumer:heartbeat:end`    | Emitted during successful heartbeats.               |
-| `consumer:heartbeat:error`  | Emitted during failed heartbeats.                   |
+| Name                        | Description                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
+| `consumer:group:join`       | Emitted when joining a group.                                                              |
+| `consumer:group:leave`      | Emitted when leaving a group.                                                              |
+| `consumer:group:rejoin`     | Emitted when re-joining a group after a rebalance.                                         |
+| `consumer:group:rebalance`  | Emitted when group rebalancing occurs.                                                     |
+| `consumer:heartbeat:start`  | Emitted when starting new heartbeats.                                                      |
+| `consumer:heartbeat:cancel` | Emitted if a scheduled heartbeat has been canceled.                                        |
+| `consumer:heartbeat:end`    | Emitted during successful heartbeats.                                                      |
+| `consumer:heartbeat:error`  | Emitted during failed heartbeats.                                                          |
+| `consumer:lag`              | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
+| `consumer:lag:error`        | Emitted when lag calculation fails during monitoring operations.                           |
 
 ## Constructor
 
@@ -25,23 +27,23 @@ Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.
 
 Options:
 
-| Property          | Type                                                | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------------- | --------------------------------------------------- | ------------------------- | - |
-| groupId           | `string`                                            |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
-| autocommit        | `boolean \| number`                                 | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
-| minBytes          | `number`                                            | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
-| maxBytes          | `number`                                            | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
-| maxWaitTime       | `number`                                            | 5 seconds                 | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                                                                                                                                                                                                                            |
-| isolationLevel    | string                                              | `READ_COMMITTED`          | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration.                                                                                                                                                                                                             |
-| deserializers     | `Deserializers<Key, Value, HeaderKey, HeaderValue>` |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.                                                                                                                                                                                                                               |
-| highWaterMark     | `number`                                            | `1024`                    | The maximum amount of messages to store in memory before delaying fetch requests. Note that this severely impacts both performance at the cost of memory use.                                                                                                                                                                                                                                        |
-| sessionTimeout    | `number`                                            | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with broker configuration property `group.consumer.session.timeout.ms`. |
-| rebalanceTimeout  | `number`                                            | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group. |
-| heartbeatInterval | `number`                                            | 3 seconds                 | Interval in milliseconds between heartbeats.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with the broker configuration property `group.consumer.heartbeat.interval`.  |
-| groupProtocol     | `'classic' \| 'consumer'`                           | `'classic'`               | Group protocol to use. Use `'classic'` for the original consumer group protocol and `'consumer'` for the new protocol introduced in [KIP-848](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol).<br/><br/> The `'consumer'` protocol provides server-side partition assignment and incremental rebalancing behavior. |
-| groupRemoteAssignor | `string`                                          | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`. |
-| protocols           | `GroupProtocolSubscription[]`                     | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`. |
-| partitionAssigner   | `GroupPartitionsAssigner`                           |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead. |
+| Property            | Type                                                | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------- | --------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| groupId             | `string`                                            |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
+| autocommit          | `boolean \| number`                                 | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
+| minBytes            | `number`                                            | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
+| maxBytes            | `number`                                            | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
+| maxWaitTime         | `number`                                            | 5 seconds                 | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                                                                                                                                                                                                                            |
+| isolationLevel      | string                                              | `READ_COMMITTED`          | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration.                                                                                                                                                                                                             |
+| deserializers       | `Deserializers<Key, Value, HeaderKey, HeaderValue>` |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.                                                                                                                                                                                                                               |
+| highWaterMark       | `number`                                            | `1024`                    | The maximum amount of messages to store in memory before delaying fetch requests. Note that this severely impacts both performance at the cost of memory use.                                                                                                                                                                                                                                        |
+| sessionTimeout      | `number`                                            | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with broker configuration property `group.consumer.session.timeout.ms`.                                                                              |
+| rebalanceTimeout    | `number`                                            | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.                                                                                                                                                                                                                         |
+| heartbeatInterval   | `number`                                            | 3 seconds                 | Interval in milliseconds between heartbeats.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with the broker configuration property `group.consumer.heartbeat.interval`.                                                                                                                                                                                                     |
+| groupProtocol       | `'classic' \| 'consumer'`                           | `'classic'`               | Group protocol to use. Use `'classic'` for the original consumer group protocol and `'consumer'` for the new protocol introduced in [KIP-848](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol).<br/><br/> The `'consumer'` protocol provides server-side partition assignment and incremental rebalancing behavior.              |
+| groupRemoteAssignor | `string`                                            | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`.                                                                                                                                                                                                                   |
+| protocols           | `GroupProtocolSubscription[]`                       | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`.                                                                                                                                                                                       |
+| partitionAssigner   | `GroupPartitionsAssigner`                           |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                                                                                                  |
 
 It also supports all the constructor options of `Base`.
 
@@ -111,13 +113,13 @@ The return value is the raw response from Kafka.
 
 Options:
 
-| Property       | Type                  | Default          | Description                                                                                                                                                                      |
-| -------------- | --------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| node           | number                |                  | Node to consume data from.                                                                                                                                                       |
-| topics         | `FetchRequestTopic[]` |                  | Topic and partitions to consume.                                                                                                                                                 |
-| minBytes       | `number`              | `1`              | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                     |
-| maxBytes       | `number`              | 10MB             | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                     |
-| maxWaitTime    | `number`              | 5 seconds        | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                        |
+| Property       | Type                  | Default          | Description                                                                                                                                                                              |
+| -------------- | --------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node           | number                |                  | Node to consume data from.                                                                                                                                                               |
+| topics         | `FetchRequestTopic[]` |                  | Topic and partitions to consume.                                                                                                                                                         |
+| minBytes       | `number`              | `1`              | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                             |
+| maxBytes       | `number`              | 10MB             | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                             |
+| maxWaitTime    | `number`              | 5 seconds        | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                |
 | isolationLevel | `string`              | `READ_COMMITTED` | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration. |
 
 Note that all the partitions must be hosted on the node otherwise the operation will fail.
@@ -160,6 +162,35 @@ Options:
 | Property | Type       | Description      |
 | -------- | ---------- | ---------------- |
 | topics   | `string[]` | Topics to check. |
+
+### `getLag(options[, callback])`
+
+Calculates the consumer lag for specified topics.
+
+The return value is a map where keys are topic names and values are arrays of lag values (where the position represents the partition). A value of `-1n` indicates that the consumer is not assigned to that partition.
+
+If a partition is filtered out via the `partitions` option, then a `-2n` will be returned for that partition.
+
+Options:
+
+| Property   | Type                       | Description                                                                              |
+| ---------- | -------------------------- | ---------------------------------------------------------------------------------------- |
+| topics     | `string[]`                 | Topics to check lag for.                                                                 |
+| partitions | `Record<string, number[]>` | Partitions to get for each topic. By default it fetches all the partitions of the topic. |
+
+### `startLagMonitoring(options, interval)`
+
+Initiates periodic consumer lag monitoring at the specified `interval` in milliseconds.
+
+Consumer lag data is automatically emitted through `consumer:lag` events at each monitoring cycle.
+
+Monitoring continues until explicitly stopped with `stopLagMonitoring` or automatically terminates when the consumer closes.
+
+The `options` parameter accepts the same configuration as `getLag`.
+
+### `stopLagMonitoring()`
+
+Terminates the periodic consumer lag monitoring that was previously activated with `startLagMonitoring`.
 
 ### `findGroupCoordinator([callback])`
 

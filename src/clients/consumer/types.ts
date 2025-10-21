@@ -1,5 +1,5 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
-import { type GroupProtocols, type FetchIsolationLevel } from '../../apis/enumerations.ts'
+import { type FetchIsolationLevel, type GroupProtocols } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
@@ -138,3 +138,5 @@ export interface ListOffsetsOptions {
   timestamp?: bigint
   isolationLevel?: FetchIsolationLevel
 }
+
+export type GetLagOptions = Omit<ListOffsetsOptions, 'timestamp' | 'isolationLevel'>

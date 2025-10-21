@@ -1,14 +1,8 @@
-import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import {
   type AlterClientQuotasRequest,
   type AlterClientQuotasResponse,
   type AlterClientQuotasResponseEntries
 } from '../../apis/admin/alter-client-quotas-v1.ts'
-import {
-  type DescribeClientQuotasRequest,
-  type DescribeClientQuotasResponse,
-  type DescribeClientQuotasResponseEntry
-} from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
@@ -21,7 +15,13 @@ import {
   type DeleteTopicsRequestTopic,
   type DeleteTopicsResponse
 } from '../../apis/admin/delete-topics-v6.ts'
+import {
+  type DescribeClientQuotasRequest,
+  type DescribeClientQuotasResponse,
+  type DescribeClientQuotasResponseEntry
+} from '../../apis/admin/describe-client-quotas-v0.ts'
 import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../apis/admin/describe-groups-v5.ts'
+import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
   type ListGroupsRequest as ListGroupsRequestV5,
@@ -37,7 +37,6 @@ import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
-import { MultipleErrors } from '../../errors.ts'
 import {
   adminClientQuotasChannel,
   adminGroupsChannel,
@@ -45,6 +44,7 @@ import {
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
+import { MultipleErrors } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
@@ -62,31 +62,31 @@ import {
 import { type BaseOptions } from '../base/types.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
+  alterClientQuotasOptionsValidator,
   createTopicsOptionsValidator,
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
-  describeGroupsOptionsValidator,
-  listGroupsOptionsValidator,
-  listTopicsOptionsValidator,
   describeClientQuotasOptionsValidator,
-  alterClientQuotasOptionsValidator,
-  describeLogDirsOptionsValidator
+  describeGroupsOptionsValidator,
+  describeLogDirsOptionsValidator,
+  listGroupsOptionsValidator,
+  listTopicsOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
+  type AlterClientQuotasOptions,
+  type BrokerLogDirDescription,
   type CreatedTopic,
   type CreateTopicsOptions,
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
   type DescribeClientQuotasOptions,
-  type AlterClientQuotasOptions,
-  type DescribeLogDirsOptions,
   type DescribeGroupsOptions,
+  type DescribeLogDirsOptions,
   type Group,
   type GroupBase,
   type ListGroupsOptions,
-  type ListTopicsOptions,
-  type BrokerLogDirDescription
+  type ListTopicsOptions
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
@@ -368,6 +368,7 @@ export class Admin extends Base<AdminOptions> {
       callback = createPromisifiedCallback()
     }
 
+    /* c8 ignore next 3 - Hard to test */
     if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
     }
@@ -927,6 +928,7 @@ export class Admin extends Base<AdminOptions> {
 
   #describeLogDirs (options: DescribeLogDirsOptions, callback: CallbackWithPromise<BrokerLogDirDescription[]>): void {
     this[kMetadata]({ topics: [] }, (error, metadata) => {
+      /* c8 ignore next 4 - Hard to test */
       if (error) {
         callback(error, undefined as unknown as BrokerLogDirDescription[])
         return

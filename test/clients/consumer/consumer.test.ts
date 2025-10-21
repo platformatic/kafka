@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
+import { type ChannelListener, subscribe, unsubscribe } from 'node:diagnostics_channel'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import zlib from 'node:zlib'
@@ -17,6 +18,7 @@ import {
   consumerFetchesChannel,
   consumerGroupChannel,
   consumerHeartbeatChannel,
+  consumerLagChannel,
   consumerOffsetsChannel,
   defaultConsumerOptions,
   type ExtendedGroupProtocolSubscription,
@@ -40,6 +42,7 @@ import {
   parseBroker,
   ProduceAcks,
   type ProducerOptions,
+  PromiseWithResolvers,
   ProtocolError,
   type RecordsBatch,
   sleep,
@@ -89,7 +92,8 @@ async function produceTestMessages ({
         value: Buffer.from(msg.value ?? ''),
         headers: new Map(
           Object.entries(msg.headers ?? {}).map(([key, value]) => [Buffer.from(key), Buffer.from(value)])
-        )
+        ),
+        partition: msg.partition
       })),
       acks: ProduceAcks.LEADER
     })
@@ -2075,6 +2079,310 @@ test('listCommittedOffsets should handle unavailable API errors', async t => {
   }
 })
 
+test('getLag should return the consumer lag', async t => {
+  const topic = await createTopic(t, true, 3)
+  const groupId = createGroupId()
+
+  // We have 15 messages, 5 in each partition
+  const messages = Array.from({ length: 15 }, (_, i) => ({
+    topic,
+    key: `key-${i}`,
+    value: `value-${i}`,
+    headers: { [`headerKey-${i}`]: `headerValue-${i}` },
+    partition: i % 3
+  }))
+
+  await produceTestMessages({ t, messages })
+
+  // Create three consumers and join the group
+  const consumer1 = createConsumer(t, { groupId })
+  const consumer2 = createConsumer(t, { groupId })
+  const consumer3 = createConsumer(t, { groupId })
+
+  await Promise.all([consumer1, consumer2, consumer3].map(consumer => consumer.joinGroup({})))
+
+  async function setup (consumer: Consumer, maxFetches: number) {
+    const stream = await consumer.consume({
+      topics: [topic],
+      autocommit: true,
+      mode: 'earliest',
+      maxWaitTime: 1000,
+      maxBytes: 10
+    })
+
+    let fetches = 0
+    stream.on('fetch', () => {
+      fetches++
+      if (fetches >= maxFetches) {
+        stream.pause()
+      }
+    })
+
+    return stream
+  }
+
+  const stream1 = await setup(consumer1, 1)
+  const stream2 = await setup(consumer2, 2)
+  const stream3 = await setup(consumer3, 3)
+
+  const paused1 = once(stream1, 'pause')
+  const paused2 = once(stream2, 'pause')
+  const paused3 = once(stream3, 'pause')
+
+  stream1.resume()
+  stream2.resume()
+  stream3.resume()
+
+  await Promise.all([paused1, paused2, paused3])
+
+  const lag1 = await consumer1.getLag({ topics: [topic] })
+  const lag2 = await consumer2.getLag({ topics: [topic] })
+  const lag3 = await consumer3.getLag({ topics: [topic] })
+
+  ok(lag1.get(topic)!.includes(4n))
+  ok(lag2.get(topic)!.includes(3n))
+  ok(lag3.get(topic)!.includes(2n))
+})
+
+test('getLag should allow to filter out topics and partitions', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+
+  await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytes: 10
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    consumer.getLag({ topics: [topic], partitions: { [topic]: [0, 2] } }, (err, offsets) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      deepStrictEqual(offsets, new Map([[topic, [-1n, -2n, -1n]]]))
+      resolve()
+    })
+  })
+})
+
+test('getLag should support both promise and callback API', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  // Test callback API
+  await new Promise<void>((resolve, reject) => {
+    consumer.getLag({ topics: [topic] }, (err, offsets) => {
+      if (err) {
+        reject(err)
+        return
+      }
+
+      // Verify structure
+      strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+      strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+
+      // Now test the promise API
+      consumer
+        .listOffsets({ topics: [topic] })
+        .then(promiseOffsets => {
+          strictEqual(promiseOffsets instanceof Map, true, 'Promise API should return a Map of offsets')
+          strictEqual(promiseOffsets.has(topic), true, 'Promise result should contain the requested topic')
+          resolve()
+        })
+        .catch(reject)
+    })
+  })
+})
+
+test('getLag should fail when consumer is closed', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  // Close the consumer first
+  await consumer.close()
+
+  // Attempt to list offsets with a closed consumer
+  try {
+    await consumer.getLag({ topics: [topic] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof NetworkError, true)
+    strictEqual(error.message, 'Client is closed.')
+  }
+})
+
+test('getLag should validate the supplied options', async t => {
+  const consumer = createConsumer(t, { strict: true })
+
+  // Test with missing topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await consumer.getLag({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topics type
+  try {
+    await consumer.getLag({
+      // @ts-expect-error - Intentionally passing invalid option
+      topics: 'not-an-array'
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+})
+
+test('getLag should handle errors from Base.metadata', async t => {
+  const consumer = createConsumer(t)
+
+  mockMetadata(consumer)
+
+  // Attempt to list offsets with the mocked error
+  try {
+    await consumer.getLag({ topics: ['test-topic'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('getLag should handle errors from Connection.get', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+  await consumer.metadata({ topics: [topic] })
+
+  mockConnectionPoolGet(consumer[kConnections], 1)
+
+  // Attempt to list offsets with the mocked connection
+  try {
+    await consumer.getLag({ topics: [topic] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Listing offsets failed.'), true)
+  }
+})
+
+test('getLag should handle unavailable API errors', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+  await consumer.metadata({ topics: [topic] })
+
+  mockUnavailableAPI(consumer, 'ListOffsets')
+
+  try {
+    await consumer.getLag({ topics: [topic] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API ListOffsets.'), true)
+  }
+})
+
+test('startLagMonitoring should regularly check consumer lag', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+  const { promise, resolve } = PromiseWithResolvers<Offsets[]>()
+  const lagsViaEvent: Offsets[] = []
+  const lagsViaChannel: Offsets[] = []
+
+  function onLag ({ lag }: { lag: Offsets }) {
+    lagsViaChannel.push(lag)
+  }
+
+  subscribe(consumerLagChannel.name, onLag as ChannelListener)
+
+  consumer.startLagMonitoring({ topics: [topic] }, 1000)
+
+  consumer.on('consumer:lag', lag => {
+    lagsViaEvent.push(lag)
+
+    if (lagsViaEvent.length === 3) {
+      resolve(lagsViaEvent)
+    }
+  })
+
+  await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytes: 10
+  })
+
+  await promise
+  unsubscribe(consumerLagChannel.name, onLag as ChannelListener)
+
+  deepStrictEqual(lagsViaEvent, [
+    new Map([[topic, [-1n, -1n, -1n]]]),
+    new Map([[topic, [-1n, -1n, -1n]]]),
+    new Map([[topic, [-1n, -1n, -1n]]])
+  ])
+})
+
+test('startLagMonitoring should validate the supplied options', async t => {
+  const consumer = createConsumer(t, { strict: true })
+
+  // Test with missing topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await consumer.startLagMonitoring({}, 1000)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topics type
+  try {
+    await consumer.startLagMonitoring(
+      {
+        // @ts-expect-error - Intentionally passing invalid option
+        topics: 'not-an-array'
+      },
+      1000
+    )
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('topics'), true)
+  }
+})
+
+test('startLagMonitoring should handle errors', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+
+  const { promise, resolve } = PromiseWithResolvers<MultipleErrors>()
+  consumer.startLagMonitoring({ topics: ['invalid'] }, 1000)
+
+  consumer.on('consumer:lag:error', error => {
+    resolve(error)
+  })
+
+  await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytes: 10
+  })
+
+  const error = await promise
+  ok(MultipleErrors.isMultipleErrors(error))
+  deepStrictEqual(error.errors[0].errors[0].message, 'This server does not host this topic-partition.')
+})
+
 test('findGroupCoordinator should return the coordinator nodeId and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 
@@ -3325,5 +3633,77 @@ test('metrics should track the number of active topics', async t => {
     const metrics = await registry.getMetricsAsJSON()
     const activeTopics = metrics.find(m => m.name === 'kafka_consumers_topics')!
     deepStrictEqual(activeTopics.values[0].value, 0)
+  }
+})
+
+test('metrics should track the consumer lag', async t => {
+  const registry = new Prometheus.Registry()
+  const topic = await createTopic(t, true, 3)
+  const consumer = await createConsumer(t, { metrics: { registry, client: Prometheus } })
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const consumersLags = metrics.find(m => m.name === 'kafka_consumers_lags')!
+
+    deepStrictEqual(
+      { ...consumersLags, values: null },
+      {
+        aggregator: 'sum',
+        help: 'Lag of active Kafka consumers',
+        name: 'kafka_consumers_lags',
+        type: 'histogram',
+        values: null
+      }
+    )
+  }
+  consumer.startLagMonitoring({ topics: [topic] }, 500)
+
+  // We have 15 messages, 5 in each partition
+  const messages = Array.from({ length: 15 }, (_, i) => ({
+    topic,
+    key: `key-${i}`,
+    value: `value-${i}`,
+    headers: { [`headerKey-${i}`]: `headerValue-${i}` },
+    partition: i % 3
+  }))
+
+  await produceTestMessages({ t, messages })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytes: 10
+  })
+
+  let fetches = 0
+  stream.on('fetch', () => {
+    fetches++
+    if (fetches === 3) {
+      stream.pause()
+    }
+  })
+
+  const paused = once(stream, 'pause')
+  stream.resume()
+  await paused
+  const [lag] = await once(consumer, 'consumer:lag')
+
+  const expectedSum = Number(lag.get(topic).reduce((a: bigint, c: bigint) => a + c, 0n))
+
+  {
+    const metrics = await registry.getMetricsAsJSON()
+    const consumersLags = metrics.find(m => m.name === 'kafka_consumers_lags')!
+
+    const sum = consumersLags.values.find(
+      v => (v as Prometheus.MetricValueWithName<string>).metricName === 'kafka_consumers_lags_sum'
+    )!.value
+    const count = consumersLags.values.find(
+      v => (v as Prometheus.MetricValueWithName<string>).metricName === 'kafka_consumers_lags_count'
+    )!.value
+
+    deepStrictEqual(sum, expectedSum)
+    deepStrictEqual(count, 3)
   }
 })

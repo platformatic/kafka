@@ -7,7 +7,7 @@ Support for diagnostic and instrumentation is provided via [Node.js Diagnostic C
 The presence of the `result` and `error` properties and the order of tracing channels events follows the current pseudo-code flow:
 
 ```javascript
-function operation(options, callback) {
+function operation (options, callback) {
   const channel = tracingChannel('plt:kafka:example')
   const context = { operationId: 0n, options }
 
@@ -55,9 +55,10 @@ Each tracing channel publishes events with the following common properties:
 
 ## Published channels
 
-| Name                  | Description                                                                                                                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plt:kafka:instances` | Notifies any creation of a `Connection`, `ConnectionPool`, `Base`, `Admin`, `Producer`, `Consumer` or `MessagesStream`. This channel will publish objects with the `type` and `instance` property. |
+| Name                     | Description                                                                                                                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plt:kafka:instances`    | Notifies any creation of a `Connection`, `ConnectionPool`, `Base`, `Admin`, `Producer`, `Consumer` or `MessagesStream`. This channel will publish objects with the `type` and `instance` property. |
+| `plt:kafka:consumer:lag` | Notifies any `Consumer` lag obtained via `Consumer.getLag` (including the one triggered via `Consumer.startLagMonitoring`).                                                                          |
 
 ## Published tracing channels
 

@@ -1170,7 +1170,9 @@ test('should properly handle deleting topics in between', async t => {
     autocommit: true,
     maxWaitTime: 1000
   })
+
   t.after(() => stream1.close())
+  stream1.resume()
 
   const errorPromise = once(stream1, 'error')
 
@@ -1183,10 +1185,14 @@ test('should properly handle deleting topics in between', async t => {
     autocommit: true,
     maxWaitTime: 1000
   })
+
   t.after(() => stream2.close())
+  stream2.resume()
 
   // Wait for the first stream to error out due to the topic deletion
+
   const [error] = await errorPromise
+
   const protocolError = error.findBy('hasStaleMetadata', true)
   strictEqual(protocolError.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
 
@@ -1197,7 +1203,9 @@ test('should properly handle deleting topics in between', async t => {
     autocommit: true,
     maxWaitTime: 1000
   })
+
   t.after(() => stream3.close())
+  stream3.resume()
 })
 
 test('should report correct isActive status', async t => {

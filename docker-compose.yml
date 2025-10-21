@@ -39,6 +39,8 @@ services:
       # Consumer group options
       KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: "classic,consumer"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_GROUP_CONSUMER_HEARTBEAT_INTERVAL_MS: "200"
+      KAFKA_GROUP_CONSUMER_MIN_HEARTBEAT_INTERVAL_MS: "100"
 
   broker-sasl:
     image: *image

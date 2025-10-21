@@ -1,4 +1,4 @@
-import { allowedFetchIsolationLevels } from '../../apis/enumerations.ts'
+import { allowedFetchIsolationLevels, allowedGroupProtocols } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
@@ -8,6 +8,8 @@ export const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
   rebalanceTimeout: { type: 'number', minimum: 0 },
   heartbeatInterval: { type: 'number', minimum: 0 },
+  groupProtocol: { type: 'string', enum: allowedGroupProtocols },
+  groupRemoteAssignor: { type: 'string' },
   protocols: {
     type: 'array',
     items: {
@@ -227,7 +229,7 @@ export const commitOptionsValidator = ajv.compile(commitOptionsSchema)
 export const listCommitsOptionsValidator = ajv.compile(listCommitsOptionsSchema)
 export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
 
-export const defaultConsumerOptions: Partial<ConsumerOptions<Buffer, Buffer, Buffer, Buffer>> = {
+export const defaultConsumerOptions = {
   autocommit: true,
   sessionTimeout: 60_000, // One minute
   rebalanceTimeout: 102_000, // Two minutes,
@@ -238,4 +240,4 @@ export const defaultConsumerOptions: Partial<ConsumerOptions<Buffer, Buffer, Buf
   maxWaitTime: 5_000,
   isolationLevel: 'READ_COMMITTED',
   highWaterMark: 1024
-}
+} satisfies Partial<ConsumerOptions<Buffer, Buffer, Buffer, Buffer>>

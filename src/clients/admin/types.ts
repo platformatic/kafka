@@ -10,6 +10,7 @@ import { type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
+import { type Acl, type AclFilter } from '../../apis/types.ts'
 
 export interface BrokerAssignment {
   partition: number
@@ -97,4 +98,16 @@ export interface BrokerLogDirDescription {
   broker: number
   throttleTimeMs: DescribeLogDirsResponse['throttleTimeMs']
   results: Omit<DescribeLogDirsResponseResult, 'errorCode'>[]
+}
+
+export interface CreateAclsOptions {
+  creations: Acl[]
+}
+
+export interface DescribeAclsOptions {
+  filter: AclFilter
+}
+
+export interface DeleteAclsOptions {
+  filters: AclFilter[]
 }

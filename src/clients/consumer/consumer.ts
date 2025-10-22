@@ -2,16 +2,16 @@ import { type ValidateFunction } from 'ajv'
 import {
   type CallbackWithPromise,
   createPromisifiedCallback,
-  kCallbackPromise,
   createTimeoutCallback,
+  kCallbackPromise,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
-import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
-import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
   type ConsumerGroupHeartbeatRequest,
   type ConsumerGroupHeartbeatResponse
 } from '../../apis/consumer/consumer-group-heartbeat-v0.ts'
+import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
   type JoinGroupRequest,
   type JoinGroupRequestProtocol,
@@ -46,6 +46,7 @@ import {
   consumerFetchesChannel,
   consumerGroupChannel,
   consumerHeartbeatChannel,
+  consumerLagChannel,
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
@@ -55,6 +56,7 @@ import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
+import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import {
   Base,
   kAfterCreate,
@@ -74,10 +76,9 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
-import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
-import { ensureMetric, type Gauge } from '../metrics.ts'
+import { ensureMetric, type Gauge, type Histogram } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
   commitOptionsValidator,
@@ -85,6 +86,7 @@ import {
   consumerOptionsValidator,
   defaultConsumerOptions,
   fetchOptionsValidator,
+  getLagOptionsValidator,
   groupIdAndOptionsValidator,
   groupOptionsValidator,
   listCommitsOptionsValidator,
@@ -95,9 +97,11 @@ import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
   type ConsumeOptions,
+  type ConsumerGroupOptions,
   type ConsumerOptions,
   type ExtendedGroupProtocolSubscription,
   type FetchOptions,
+  type GetLagOptions,
   type GroupAssignment,
   type GroupOptions,
   type GroupPartitionsAssigner,
@@ -105,9 +109,13 @@ import {
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets,
-  type OffsetsWithTimestamps,
-  type ConsumerGroupOptions
+  type OffsetsWithTimestamps
 } from './types.ts'
+
+interface TopicPartition {
+  topicId: string
+  partitions: number[]
+}
 
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
   ConsumerOptions<Key, Value, HeaderKey, HeaderValue>
@@ -127,10 +135,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeatIntervalMs: number
   #lastHeartbeat: Date | null
-  #useNewProtocol: boolean
+  #useConsumerGroupProtocol: boolean
   #memberEpoch: number
   #groupRemoteAssignor: string | null
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>;
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  #lagMonitoring: NodeJS.Timeout | null;
 
   /*
     The following requests are blocking in Kafka:
@@ -150,6 +159,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   // Metrics
   #metricActiveStreams: Gauge | undefined
+  #metricLags: Histogram | undefined
 
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
     super(options)
@@ -173,8 +183,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#lastHeartbeatIntervalMs = 0
     this.#lastHeartbeat = null
     this.#streams = new Set()
+    this.#lagMonitoring = null
     this.#memberEpoch = 0
-    this.#useNewProtocol = this[kOptions].groupProtocol === 'consumer'
+    this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
@@ -194,6 +205,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       this.topics.setMetric(
         ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers_topics', 'Number of topics being consumed')
+      )
+
+      this.#metricLags = ensureMetric<Histogram>(
+        this[kPrometheus],
+        'Histogram',
+        'kafka_consumers_lags',
+        'Lag of active Kafka consumers'
       )
     }
 
@@ -226,12 +244,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this[kClosed] = true
+    clearTimeout(this.#lagMonitoring!)
 
     let closer: (force: boolean, callback: CallbackWithPromise<void>) => void
-    if (this.#useNewProtocol) {
-      closer = this.#leaveGroupNewProtocol.bind(this)
+    if (this.#useConsumerGroupProtocol) {
+      closer = this.#leaveGroupConsumerProtocol.bind(this)
     } else if (this.#membershipActive) {
-      closer = this.#leaveGroup.bind(this)
+      closer = this.#leaveGroupClassicProtocol.bind(this)
     } else {
       closer = function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
         callback(null)
@@ -279,7 +298,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (!baseReady) {
       return false
     }
-    if (this.#useNewProtocol) {
+    if (this.#useConsumerGroupProtocol) {
       return !!this.memberId && this.#memberEpoch >= 0
     }
     // We consider the group ready if we have a groupId, a memberId and heartbeat interval
@@ -474,6 +493,99 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback![kCallbackPromise]
   }
 
+  getLag (options: GetLagOptions, callback: CallbackWithPromise<Offsets>): void
+  getLag (options: GetLagOptions): Promise<Offsets>
+  getLag (options: GetLagOptions, callback?: CallbackWithPromise<Offsets>): void | Promise<Offsets> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Offsets>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, getLagOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as Offsets)
+      return callback[kCallbackPromise]
+    }
+
+    this.listOffsets(options, (error, offsets) => {
+      if (error) {
+        this.emit('consumer:lag:error', error)
+        callback(error, undefined as unknown as Offsets)
+        return
+      }
+
+      // Now gather the last committed offsets from each stream
+      const committeds = new Map<string, bigint>()
+      for (const stream of this.#streams) {
+        for (const [topic, offset] of stream.committedOffsets) {
+          committeds.set(topic, offset)
+        }
+      }
+
+      // Build the lag map back. A -1n denotes that the consumer is not assigned to a certain partition
+      const lag = new Map<string, bigint[]>()
+      for (const [topic, partitions] of offsets as Offsets) {
+        const toInclude = new Set(options.partitions?.[topic] ?? [])
+        const hasPartitionsFilter = toInclude.size > 0
+
+        const partitionLags = []
+        for (let i = 0; i < partitions.length; i++) {
+          if (hasPartitionsFilter && !toInclude.has(i)) {
+            partitionLags.push(-2n)
+            continue
+          }
+
+          const latest = partitions[i]
+          const committed = committeds.get(`${topic}:${i}`)
+
+          // If the consumer is not assigned to this partition, we return -1n.
+          // Otherwise we compute the lag as latest - committed - 1. The -1 is because latest is the offset of the next message to be produced.
+          partitionLags.push(typeof committed === 'undefined' ? -1n : latest - committed - 1n)
+        }
+
+        lag.set(topic, partitionLags)
+      }
+
+      // Publish to the diagnostic channel
+      consumerLagChannel.publish({ client: this, lag })
+
+      // Publish to the metric if available
+      if (this.#metricLags) {
+        for (const partitions of lag.values()) {
+          for (const l of partitions) {
+            if (l >= 0n) {
+              this.#metricLags.observe(Number(l))
+            }
+          }
+        }
+      }
+
+      this.emit('consumer:lag', lag)
+      callback(null, lag)
+    })
+
+    return callback![kCallbackPromise]
+  }
+
+  startLagMonitoring (options: GetLagOptions, interval: number): void {
+    const validationError = this[kValidateOptions](options, getLagOptionsValidator, '/options', false)
+
+    if (validationError) {
+      throw validationError
+    }
+
+    this.#lagMonitoring = setTimeout(() => {
+      this.getLag(options, () => this.#lagMonitoring!.refresh())
+    }, interval)
+  }
+
+  stopLagMonitoring (): void {
+    clearTimeout(this.#lagMonitoring!)
+  }
+
   findGroupCoordinator (callback: CallbackWithPromise<number>): void
   findGroupCoordinator (): Promise<number>
   findGroupCoordinator (callback?: CallbackWithPromise<number>): void | Promise<number> {
@@ -506,7 +618,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    if (this.#useNewProtocol) {
+    if (this.#useConsumerGroupProtocol) {
       callback(null, '')
       return callback[kCallbackPromise]
     }
@@ -546,13 +658,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    if (this.#useNewProtocol) {
+    if (this.#useConsumerGroupProtocol) {
       callback(null)
       return callback[kCallbackPromise]
     }
 
     this.#membershipActive = false
-    this.#leaveGroup(force as boolean, error => {
+    this.#leaveGroupClassicProtocol(force as boolean, error => {
       if (error) {
         this.#membershipActive = true
         callback(error)
@@ -668,7 +780,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           api(
             connection,
             this.groupId,
-            this.#useNewProtocol ? this.#memberEpoch : this.generationId,
+            this.#useConsumerGroupProtocol ? this.#memberEpoch : this.generationId,
             this.memberId!,
             null,
             Array.from(topics.values()),
@@ -837,7 +949,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               {
                 groupId: this.groupId,
                 memberId: this.memberId!,
-                memberEpoch: this.#useNewProtocol ? this.#memberEpoch : -1,
+                memberEpoch: this.#useConsumerGroupProtocol ? this.#memberEpoch : -1,
                 topics
               }
             ],
@@ -897,7 +1009,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #leaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
+  #leaveGroupClassicProtocol (force: boolean, callback: CallbackWithPromise<void>): void {
     consumerGroupChannel.traceCallback(
       this.#performLeaveGroup,
       1,
@@ -1183,7 +1295,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #joinGroupNewProtocol (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
+  #joinGroupConsumerProtocol (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
     this.#memberEpoch = 0
     this.#assignments = []
     this.#membershipActive = true
@@ -1195,11 +1307,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #leaveGroupNewProtocol (_: boolean, callback: CallbackWithPromise<void>): void {
+  #leaveGroupConsumerProtocol (_: boolean, callback: CallbackWithPromise<void>): void {
     // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
     this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(
-      'leaveGroupNewProtocol',
+      'leaveGroupConsumerProtocol',
       (connection, groupCallback) => {
         this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
           error,
@@ -1255,8 +1367,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // If we need to (re)join the group, do that first and then try again
     if (joinNeeded) {
-      if (this.#useNewProtocol) {
-        this.#joinGroupNewProtocol(options as Required<GroupOptions>, error => {
+      if (this.#useConsumerGroupProtocol) {
+        this.#joinGroupConsumerProtocol(options as Required<GroupOptions>, error => {
           if (error) {
             callback(error, undefined as unknown as MessagesStream<Key, Value, HeaderKey, HeaderValue>)
             return
@@ -1796,9 +1908,4 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     return error
   }
-}
-
-interface TopicPartition {
-  topicId: string
-  partitions: number[]
 }

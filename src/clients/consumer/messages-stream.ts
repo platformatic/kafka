@@ -16,8 +16,8 @@ import {
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
 import { type Message } from '../../protocol/records.ts'
+import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
-import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
 import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
@@ -44,16 +44,20 @@ export function defaultCorruptedMessageHandler (): boolean {
   return true
 }
 
+let currentInstance = 0
+
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
   #fallbackMode: string
+  #paused: boolean
   #fetches: number
   #maxFetches: number
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
+  #offsetsCommitted: Map<string, bigint>
   #inflightNodes: Set<number>
   #keyDeserializer: DeserializerWithHeaders<Key>
   #valueDeserializer: DeserializerWithHeaders<Value>
@@ -65,7 +69,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
-  #corruptedMessageHandler: CorruptedMessageHandler
+  #corruptedMessageHandler: CorruptedMessageHandler;
+
+  [kInstance]: number
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
@@ -93,11 +99,17 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     /* c8 ignore next - Unless is initialized directly, highWaterMark is always defined */
-    super({ objectMode: true, highWaterMark: options.highWaterMark ?? defaultConsumerOptions.highWaterMark })
+    super({
+      objectMode: true,
+      highWaterMark: maxFetches ?? options.highWaterMark ?? defaultConsumerOptions.highWaterMark
+    })
+    this[kInstance] = currentInstance++
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
+    this.#offsetsCommitted = new Map()
+    this.#paused = false
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
@@ -155,6 +167,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     notifyCreation('messages-stream', this)
+  }
+
+  get committedOffsets (): Map<string, bigint> {
+    return this.#offsetsCommitted
   }
 
   close (callback: CallbackWithPromise<void>): void
@@ -231,6 +247,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return this.#consumer.isConnected()
   }
 
+  resume () {
+    this.#paused = false
+    return super.resume()
+  }
+
+  // We want to track if the stream is paused explicitly by the user, while isPaused from Node.js can also
+  // be true if the stream is paused because there is no consumer.
+  pause () {
+    this.#paused = true
+    return super.pause()
+  }
+
   /*
     TypeScript support - Extracted from node @types/node/stream.d.ts
 
@@ -247,8 +275,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     *   7. resume
     * Custom:
     *   8. autocommit
+    *   9. fetch
   */
   addListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
+  addListener (event: 'fetch', listener: () => void): this
   addListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   addListener (event: 'close', listener: () => void): this
   addListener (event: 'end', listener: () => void): this
@@ -262,6 +292,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   on (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
+  on (event: 'fetch', listener: () => void): this
   on (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   on (event: 'close', listener: () => void): this
   on (event: 'end', listener: () => void): this
@@ -275,6 +306,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   once (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
+  once (event: 'fetch', listener: () => void): this
   once (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   once (event: 'close', listener: () => void): this
   once (event: 'end', listener: () => void): this
@@ -287,6 +319,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super.once(event, listener)
   }
 
+  prependListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
+  prependListener (event: 'fetch', listener: () => void): this
   prependListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependListener (event: 'close', listener: () => void): this
   prependListener (event: 'end', listener: () => void): this
@@ -299,6 +333,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super.prependListener(event, listener)
   }
 
+  prependOnceListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
+  prependOnceListener (event: 'fetch', listener: () => void): this
   prependOnceListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependOnceListener (event: 'close', listener: () => void): this
   prependOnceListener (event: 'end', listener: () => void): this
@@ -338,8 +374,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return
     }
 
+    // No need to fetch if nobody is consuming the data
+    if (this.readableFlowing === null || this.#paused) {
+      return
+    }
+
     this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
       if (error) {
+        this.emit('fetch')
+
         // The stream has been closed, ignore any error
         /* c8 ignore next 4 - Hard to test */
         if (this.#shouldClose || this.closed || this.destroyed) {
@@ -351,8 +394,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
-      /* c8 ignore next 4 - Hard to test */
+      /* c8 ignore next 5 - Hard to test */
       if (this.#shouldClose || this.closed || this.destroyed) {
+        this.emit('fetch')
         this.push(null)
         return
       }
@@ -410,6 +454,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.#inflightNodes.add(leader)
         this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests }, (error, response) => {
           this.#inflightNodes.delete(leader)
+          this.emit('fetch')
 
           if (error) {
             // The stream has been closed, ignore the error
@@ -559,10 +604,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this[kAutocommit]()
     }
 
-    if (canPush && !(this.#shouldClose || this.closed || this.destroyed)) {
+    if (canPush) {
       process.nextTick(() => {
         this.#fetch()
       })
+    }
+  }
+
+  #updateCommittedOffset (topic: string, partition: number, offset: bigint): void {
+    const key = `${topic}:${partition}`
+    const previous = this.#offsetsCommitted.get(key)
+
+    if (typeof previous === 'undefined' || previous < offset) {
+      this.#offsetsCommitted.set(key, offset)
     }
   }
 
@@ -578,7 +632,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       callback = createPromisifiedCallback<void>()
     }
 
-    this.#consumer.commit({ offsets: [{ topic, partition, offset, leaderEpoch }] }, callback)
+    this.#consumer.commit({ offsets: [{ topic, partition, offset, leaderEpoch }] }, error => {
+      /* c8 ignore next 4 - Hard to test */
+      if (error) {
+        callback!(error)
+        return
+      }
+
+      this.#updateCommittedOffset(topic, partition, offset)
+      callback!(null)
+    })
 
     return callback[kCallbackPromise]!
   }
@@ -599,6 +662,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.emit('autocommit', error)
         this.destroy(error)
         return
+      }
+
+      for (const { topic, partition, offset } of offsets) {
+        this.#updateCommittedOffset(topic, partition, offset)
       }
 
       this.emit('autocommit', null, offsets)

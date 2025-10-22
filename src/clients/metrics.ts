@@ -22,12 +22,14 @@ export interface Gauge extends Metric {
   dec: (value?: number) => void
 }
 
-export interface Histogram {}
+export interface Histogram extends Metric {
+  observe: (value: number) => void
+}
 
 export interface Summary {}
 
 export interface Registry {
-  getSingleMetric: (name: string) => Counter | Gauge | any
+  getSingleMetric: (name: string) => Counter | Gauge | Histogram | any
 
   // Unused in this package
   metrics (): Promise<string>
@@ -46,6 +48,7 @@ export interface Registry {
 export interface Prometheus {
   Counter: new (options: { name: string; help: string; registers: Registry[]; labelNames?: string[] }) => Counter
   Gauge: new (options: { name: string; help: string; registers: Registry[]; labelNames?: string[] }) => Gauge
+  Histogram: new (options: { name: string; help: string; registers: Registry[]; labelNames?: string[] }) => Histogram
   Registry: new (contentType?: string) => Registry
 }
 
@@ -57,7 +60,7 @@ export interface Metrics {
 
 export function ensureMetric<MetricType extends Metric> (
   metrics: Metrics,
-  type: 'Gauge' | 'Counter',
+  type: 'Gauge' | 'Counter' | 'Histogram',
   name: string,
   help: string
 ): MetricType {

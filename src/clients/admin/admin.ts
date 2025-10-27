@@ -45,11 +45,13 @@ import {
   createDiagnosticContext
 } from '../../diagnostic.ts'
 import { MultipleErrors } from '../../errors.ts'
+import { type Broker, type Connection } from '../../index.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
   kAfterCreate,
   kCheckNotClosed,
+  kConnections,
   kGetApi,
   kGetBootstrapConnection,
   kGetConnection,
@@ -91,6 +93,8 @@ import {
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
+  #controller: Broker | null = null
+
   constructor (options: AdminOptions) {
     super(options as BaseOptions)
     this[kAfterCreate]('admin')
@@ -392,6 +396,28 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
+  #getControllerConnection (callback: Callback<Connection>): void {
+    if (this.#controller) {
+      this[kConnections].get(this.#controller, callback)
+    } else {
+      this[kGetBootstrapConnection](callback)
+    }
+  }
+
+  #handleNotControllerError<T> (error: Error | null, value: T, callback: Callback<T>): void {
+    if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
+      this.metadata({ topics: [] }, (metadataError, metadata) => {
+        if (metadataError) {
+          callback(metadataError, undefined as unknown as T)
+        }
+        this.#controller = metadata.brokers.get(metadata.controllerId) || null
+        callback(error, undefined as unknown as T)
+      })
+    } else {
+      callback(error, value)
+    }
+  }
+
   #listTopics (options: ListTopicsOptions, callback: CallbackWithPromise<string[]>): void {
     const includeInternals = options.includeInternals ?? false
 
@@ -470,7 +496,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'createTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this.#getControllerConnection((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as CreateTopicsResponse)
                 return
@@ -482,13 +508,9 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api(
-                  connection,
-                  requests,
-                  this[kOptions].timeout!,
-                  false,
-                  retryCallback as unknown as Callback<CreateTopicsResponse>
-                )
+                api(connection, requests, this[kOptions].timeout!, false, (error, response) => {
+                  this.#handleNotControllerError(error, response, retryCallback)
+                })
               })
             })
           },
@@ -532,7 +554,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'deleteTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this.#getControllerConnection((error, connection) => {
               if (error) {
                 retryCallback(error, undefined)
                 return
@@ -549,12 +571,9 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api(
-                  connection,
-                  requests,
-                  this[kOptions].timeout!,
-                  retryCallback as unknown as Callback<DeleteTopicsResponse>
-                )
+                api(connection, requests, this[kOptions].timeout!, (error, response) => {
+                  this.#handleNotControllerError(error, response, retryCallback)
+                })
               })
             })
           },

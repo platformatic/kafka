@@ -23,6 +23,7 @@ export interface ClusterTopicMetadata {
 export interface ClusterMetadata {
   id: string
   brokers: Map<number, Broker>
+  controllerId: number
   topics: Map<string, ClusterTopicMetadata>
   lastUpdate: number
 }

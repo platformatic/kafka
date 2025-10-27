@@ -1599,6 +1599,46 @@ test('listOffsets should return offset values for topics and partitions and supp
   verifyTracingChannel()
 })
 
+test('listOffsets should return offset values for all consumed topics when none are explicitly requested', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true, 2)
+
+  const verifyTracingChannel = createTracingChannelVerifier(consumerOffsetsChannel, 'client', {
+    start (context: ClientDiagnosticEvent) {
+      deepStrictEqual(context, {
+        client: consumer,
+        operation: 'listOffsets',
+        options: { topics: [] },
+        operationId: mockedOperationId
+      })
+    },
+    asyncStart (context: ClientDiagnosticEvent) {
+      deepStrictEqual((context.result as Offsets).get(topic), [0n, 0n])
+    },
+    error (context: ClientDiagnosticEvent) {
+      ok(typeof context === 'undefined')
+    }
+  })
+
+  // Get offsets for the test topic
+  consumer.topics.track(topic)
+  const offsets = await consumer.listOffsets({ topics: [] })
+
+  // Verify the offsets structure
+  strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+  strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+
+  const topicOffsets = offsets.get(topic)!
+  strictEqual(Array.isArray(topicOffsets), true, 'Topic offsets should be an array')
+  strictEqual(topicOffsets.length, 2, 'Should have offsets for all partitions')
+
+  // For new topics, offsets should typically be 0
+  strictEqual(typeof topicOffsets[0], 'bigint', 'Offset should be a bigint')
+  strictEqual(typeof topicOffsets[1], 'bigint', 'Offset should be a bigint')
+
+  verifyTracingChannel()
+})
+
 test('listOffsets should support both promise and callback API', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)

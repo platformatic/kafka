@@ -799,7 +799,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: ListOffsetsOptions,
     callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
   ): void {
-    this[kMetadata]({ topics: options.topics }, (error, metadata) => {
+    let topics = options.topics
+
+    if (!topics || topics.length === 0) {
+      topics = this.topics.current
+    }
+
+    this[kMetadata]({ topics }, (error, metadata) => {
       if (error) {
         callback(error, undefined as unknown as Offsets)
         return
@@ -807,7 +813,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       const requests = new Map<number, Map<string, ListOffsetsRequestTopic>>()
 
-      for (const name of options.topics) {
+      for (const name of topics) {
         const topic = metadata.topics.get(name)!
         const toInclude = new Set(options.partitions?.[name] ?? [])
         const hasPartitionsFilter = toInclude.size > 0

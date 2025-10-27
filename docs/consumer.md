@@ -140,6 +140,8 @@ Options:
 
 Lists available offsets for topics.
 
+If the topics list is empty, then it will fetch the offsets of all topics currently consumed by the consumer.
+
 The return value is a map where keys are in the form `$topic:$partition` and values are arrays of offsets (where the position represents the partition).
 
 Options:
@@ -166,6 +168,8 @@ Options:
 ### `getLag(options[, callback])`
 
 Calculates the consumer lag for specified topics.
+
+If the topics list is empty, then it will calculate the lag of all topics currently consumed by the consumer.
 
 The return value is a map where keys are topic names and values are arrays of lag values (where the position represents the partition). A value of `-1n` indicates that the consumer is not assigned to that partition.
 

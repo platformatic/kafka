@@ -171,6 +171,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     notifyCreation('messages-stream', this)
   }
 
+  get offsetsToFetch (): Map<string, bigint> {
+    return this.#offsetsToFetch
+  }
+
+  get offsetsToCommit (): Map<string, CommitOptionsPartition> {
+    return this.#offsetsToCommit
+  }
+
+  get offsetsCommitted (): Map<string, bigint> {
+    return this.#offsetsCommitted
+  }
+
+  // TODO: This is deprecated alias, remove in future major version
   get committedOffsets (): Map<string, bigint> {
     return this.#offsetsCommitted
   }
@@ -281,6 +294,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   */
   addListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   addListener (event: 'fetch', listener: () => void): this
+  addListener (event: 'offsets', listener: () => void): this
   addListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   addListener (event: 'close', listener: () => void): this
   addListener (event: 'end', listener: () => void): this
@@ -295,6 +309,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   on (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   on (event: 'fetch', listener: () => void): this
+  on (event: 'offsets', listener: () => void): this
   on (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   on (event: 'close', listener: () => void): this
   on (event: 'end', listener: () => void): this
@@ -309,6 +324,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   once (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   once (event: 'fetch', listener: () => void): this
+  once (event: 'offsets', listener: () => void): this
   once (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   once (event: 'close', listener: () => void): this
   once (event: 'end', listener: () => void): this
@@ -323,6 +339,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   prependListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependListener (event: 'fetch', listener: () => void): this
+  prependListener (event: 'offsets', listener: () => void): this
   prependListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependListener (event: 'close', listener: () => void): this
   prependListener (event: 'end', listener: () => void): this
@@ -337,6 +354,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   prependOnceListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependOnceListener (event: 'fetch', listener: () => void): this
+  prependOnceListener (event: 'offsets', listener: () => void): this
   prependOnceListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependOnceListener (event: 'close', listener: () => void): this
   prependOnceListener (event: 'end', listener: () => void): this
@@ -793,6 +811,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
+    this.emit('offsets')
     callback(null)
   }
 

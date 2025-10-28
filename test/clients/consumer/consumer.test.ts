@@ -2188,13 +2188,16 @@ test('getLag should allow to filter out topics and partitions', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)
 
-  await consumer.consume({
+  const stream = await consumer.consume({
     topics: [topic],
     autocommit: true,
     mode: 'earliest',
     maxWaitTime: 1000,
     maxBytes: 10
   })
+
+  // Wait for the topics to be fetched
+  await once(stream, 'offsets')
 
   await new Promise<void>((resolve, reject) => {
     consumer.getLag({ topics: [topic], partitions: { [topic]: [0, 2] } }, (err, offsets) => {
@@ -2203,7 +2206,7 @@ test('getLag should allow to filter out topics and partitions', async t => {
         return
       }
 
-      deepStrictEqual(offsets, new Map([[topic, [-1n, -2n, -1n]]]))
+      deepStrictEqual(offsets, new Map([[topic, [0n, -2n, 0n]]]))
       resolve()
     })
   })

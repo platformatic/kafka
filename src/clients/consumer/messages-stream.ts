@@ -146,6 +146,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // will have changed so we may have gone from last  with no assignments to
     // having some.
     this.#consumer.on('consumer:group:join', () => {
+      this.#offsetsCommitted.clear()
+
       this.#refreshOffsets((error: Error | null) => {
         /* c8 ignore next 4 - Hard to test */
         if (error) {
@@ -771,6 +773,23 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           )
           return
         }
+      }
+    }
+
+    // Rebuild the list of offsetsCommitted (which is used for consumer lag) out of the offsets to fetch
+    for (const topic of this.#topics) {
+      const assignment = this.#assignmentsForTopic(topic)
+
+      // This consumer has no assignment for the topic, continue
+      if (!assignment) {
+        continue
+      }
+
+      const partitions = assignment.partitions
+
+      for (const partition of partitions) {
+        const committed = this.#offsetsToFetch.get(`${topic}:${partition}`)!
+        this.#offsetsCommitted.set(`${topic}:${partition}`, committed - 1n)
       }
     }
 

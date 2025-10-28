@@ -2364,9 +2364,9 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
   unsubscribe(consumerLagChannel.name, onLag as ChannelListener)
 
   deepStrictEqual(lagsViaEvent, [
-    new Map([[topic, [-1n, -1n, -1n]]]),
-    new Map([[topic, [-1n, -1n, -1n]]]),
-    new Map([[topic, [-1n, -1n, -1n]]])
+    new Map([[topic, [-1n, -1n, -1n]]]), // Still joining and not assigned to any partition
+    new Map([[topic, [0n, 0n, 0n]]]),
+    new Map([[topic, [0n, 0n, 0n]]])
   ])
 })
 

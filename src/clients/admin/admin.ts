@@ -85,6 +85,7 @@ import {
   type DescribeLogDirsOptions,
   type Group,
   type GroupBase,
+  type GroupMember,
   type ListGroupsOptions,
   type ListTopicsOptions
 } from './types.ts'
@@ -705,26 +706,31 @@ export class Admin extends Base<AdminOptions> {
                 for (const member of raw.members) {
                   const reader = Reader.from(member.memberMetadata)
 
-                  const memberMetadata = {
-                    version: reader.readInt16(),
-                    topics: reader.readArray(r => r.readString(false), false, false),
-                    metadata: reader.readBytes(false)
+                  let memberMetadata: GroupMember['metadata'] | undefined
+                  let memberAssignments: Map<string, GroupAssignment> | undefined
+
+                  if (reader.remaining > 0) {
+                    memberMetadata = {
+                      version: reader.readInt16(),
+                      topics: reader.readArray(r => r.readString(false), false, false),
+                      metadata: reader.readBytes(false)
+                    }
+
+                    reader.reset(member.memberAssignment)
+                    reader.skip(2) // Ignore Version information
+
+                    memberAssignments = reader.readMap(
+                      r => {
+                        const topic = r.readString(false)
+
+                        return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
+                      },
+                      false,
+                      false
+                    )
+
+                    reader.readBytes() // Ignore the user data
                   }
-
-                  reader.reset(member.memberAssignment)
-                  reader.skip(2) // Ignore Version information
-
-                  const memberAssignments: Map<string, GroupAssignment> = reader.readMap(
-                    r => {
-                      const topic = r.readString(false)
-
-                      return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
-                    },
-                    false,
-                    false
-                  )
-
-                  reader.readBytes() // Ignore the user data
 
                   group.members.set(member.memberId, {
                     id: member.memberId,

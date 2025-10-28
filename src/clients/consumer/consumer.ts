@@ -520,7 +520,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       // Now gather the last committed offsets from each stream
       const committeds = new Map<string, bigint>()
       for (const stream of this.#streams) {
-        for (const [topic, offset] of stream.committedOffsets) {
+        for (const [topic, offset] of stream.offsetsCommitted) {
           committeds.set(topic, offset)
         }
       }

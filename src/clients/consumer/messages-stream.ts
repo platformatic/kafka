@@ -146,6 +146,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // will have changed so we may have gone from last  with no assignments to
     // having some.
     this.#consumer.on('consumer:group:join', () => {
+      this.#offsetsCommitted.clear()
+
       this.#refreshOffsets((error: Error | null) => {
         /* c8 ignore next 4 - Hard to test */
         if (error) {
@@ -169,6 +171,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     notifyCreation('messages-stream', this)
   }
 
+  get offsetsToFetch (): Map<string, bigint> {
+    return this.#offsetsToFetch
+  }
+
+  get offsetsToCommit (): Map<string, CommitOptionsPartition> {
+    return this.#offsetsToCommit
+  }
+
+  get offsetsCommitted (): Map<string, bigint> {
+    return this.#offsetsCommitted
+  }
+
+  // TODO: This is deprecated alias, remove in future major version
   get committedOffsets (): Map<string, bigint> {
     return this.#offsetsCommitted
   }
@@ -279,6 +294,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   */
   addListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   addListener (event: 'fetch', listener: () => void): this
+  addListener (event: 'offsets', listener: () => void): this
   addListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   addListener (event: 'close', listener: () => void): this
   addListener (event: 'end', listener: () => void): this
@@ -293,6 +309,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   on (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   on (event: 'fetch', listener: () => void): this
+  on (event: 'offsets', listener: () => void): this
   on (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   on (event: 'close', listener: () => void): this
   on (event: 'end', listener: () => void): this
@@ -307,6 +324,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   once (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   once (event: 'fetch', listener: () => void): this
+  once (event: 'offsets', listener: () => void): this
   once (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   once (event: 'close', listener: () => void): this
   once (event: 'end', listener: () => void): this
@@ -321,6 +339,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   prependListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependListener (event: 'fetch', listener: () => void): this
+  prependListener (event: 'offsets', listener: () => void): this
   prependListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependListener (event: 'close', listener: () => void): this
   prependListener (event: 'end', listener: () => void): this
@@ -335,6 +354,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   prependOnceListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependOnceListener (event: 'fetch', listener: () => void): this
+  prependOnceListener (event: 'offsets', listener: () => void): this
   prependOnceListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
   prependOnceListener (event: 'close', listener: () => void): this
   prependOnceListener (event: 'end', listener: () => void): this
@@ -774,6 +794,24 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
+    // Rebuild the list of offsetsCommitted (which is used for consumer lag) out of the offsets to fetch
+    for (const topic of this.#topics) {
+      const assignment = this.#assignmentsForTopic(topic)
+
+      // This consumer has no assignment for the topic, continue
+      if (!assignment) {
+        continue
+      }
+
+      const partitions = assignment.partitions
+
+      for (const partition of partitions) {
+        const committed = this.#offsetsToFetch.get(`${topic}:${partition}`)!
+        this.#offsetsCommitted.set(`${topic}:${partition}`, committed - 1n)
+      }
+    }
+
+    this.emit('offsets')
     callback(null)
   }
 

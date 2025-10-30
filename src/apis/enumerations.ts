@@ -116,7 +116,9 @@ export const ConfigSources = {
   DYNAMIC_DEFAULT_BROKER_CONFIG: 3,
   STATIC_BROKER_CONFIG: 4,
   DEFAULT_CONFIG: 5,
-  DYNAMIC_BROKER_LOGGER_CONFIG: 6
+  DYNAMIC_BROKER_LOGGER_CONFIG: 6,
+  CLIENT_METRICS_CONFIG: 7,
+  GROUP_CONFIG: 8
 } as const
 export const allowedConfigSources = Object.values(ConfigSources)
 export type ConfigSourceLabel = keyof typeof ConfigSources
@@ -124,24 +126,39 @@ export type ConfigSourceValue = (typeof ConfigSources)[ConfigSourceLabel]
 /** @deprecated Use ConfigSourceLabel */
 export type ConfigSource = ConfigSourceLabel
 
-export const ConfigTypes = {
+export const ConfigResourceTypes = {
   UNKNOWN: 0,
   TOPIC: 2,
   BROKER: 4,
-  BROKER_LOGGER: 8
+  BROKER_LOGGER: 8,
+  CLIENT_METRICS: 16,
+  GROUP: 32
+} as const
+export const allowedConfigResourceTypes = Object.values(ConfigResourceTypes)
+export type ConfigResourceTypeLabel = keyof typeof ConfigResourceTypes
+export type ConfigResourceTypeValue = (typeof ConfigResourceTypes)[ConfigResourceTypeLabel]
+
+export const ConfigTypes = {
+  UNKNOWN: 0,
+  BOOLEAN: 1,
+  STRING: 2,
+  INT: 3,
+  SHORT: 4,
+  LONG: 5,
+  DOUBLE: 6,
+  LIST: 7,
+  CLASS: 8,
+  PASSWORD: 9
 } as const
 export const allowedConfigTypes = Object.values(ConfigTypes)
 export type ConfigTypeLabel = keyof typeof ConfigTypes
 export type ConfigTypeValue = (typeof ConfigTypes)[ConfigTypeLabel]
-/** @deprecated Use ConfigTypeLabel */
-export type ConfigType = ConfigTypeLabel
 
-export const IncrementalAlterConfigTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 } as const
-export const allowedIncrementalAlterConfigTypes = Object.values(IncrementalAlterConfigTypes)
-export type IncrementalAlterConfigTypeLabel = keyof typeof IncrementalAlterConfigTypes
-export type IncrementalAlterConfigTypeValue = (typeof IncrementalAlterConfigTypes)[IncrementalAlterConfigTypeLabel]
-/** @deprecated Use IncrementalAlterConfigTypeLabel */
-export type IncrementalAlterConfigType = IncrementalAlterConfigTypeLabel
+export const IncrementalAlterConfigOperationTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 } as const
+export const allowedIncrementalAlterConfigOperationTypes = Object.values(IncrementalAlterConfigOperationTypes)
+export type IncrementalAlterConfigOperationTypeLabel = keyof typeof IncrementalAlterConfigOperationTypes
+export type IncrementalAlterConfigOperationTypeValue =
+  (typeof IncrementalAlterConfigOperationTypes)[IncrementalAlterConfigOperationTypeLabel]
 
 // ./admin/*-client-quotas.ts
 export const ClientQuotaMatchTypes = { EXACT: 0, DEFAULT: 1, ANY: 2 } as const

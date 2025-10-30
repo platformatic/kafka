@@ -5,21 +5,23 @@ import { alterConfigsV2, Reader, ResponseError, Writer } from '../../../src/inde
 const { createRequest, parseResponse } = alterConfigsV2
 
 test('createRequest serializes basic parameters correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic',
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: 'compact'
-        }
-      ]
-    }
-  ]
   const validateOnly = false
 
-  const writer = createRequest(resources, validateOnly)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -71,31 +73,33 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes multiple resources correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic-1',
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: 'compact'
-        }
-      ]
-    },
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic-2',
-      configs: [
-        {
-          name: 'retention.ms',
-          value: '86400000'
-        }
-      ]
-    }
-  ]
   const validateOnly = false
 
-  const writer = createRequest(resources, validateOnly)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic-1',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: 'compact'
+          }
+        ]
+      },
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic-2',
+        configs: [
+          {
+            name: 'retention.ms',
+            value: '86400000'
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Read resources array
@@ -146,29 +150,31 @@ test('createRequest serializes multiple resources correctly', () => {
 })
 
 test('createRequest serializes multiple configs correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic',
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: 'compact'
-        },
-        {
-          name: 'retention.ms',
-          value: '86400000'
-        },
-        {
-          name: 'min.insync.replicas',
-          value: '2'
-        }
-      ]
-    }
-  ]
   const validateOnly = false
 
-  const writer = createRequest(resources, validateOnly)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: 'compact'
+          },
+          {
+            name: 'retention.ms',
+            value: '86400000'
+          },
+          {
+            name: 'min.insync.replicas',
+            value: '2'
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Read resources array
@@ -208,21 +214,23 @@ test('createRequest serializes multiple configs correctly', () => {
 })
 
 test('createRequest serializes null config values correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic',
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: null
-        }
-      ]
-    }
-  ]
   const validateOnly = false
 
-  const writer = createRequest(resources, validateOnly)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: null
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Read resources array
@@ -245,21 +253,23 @@ test('createRequest serializes null config values correctly', () => {
 })
 
 test('createRequest serializes validateOnly flag correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // Topic
-      resourceName: 'test-topic',
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: 'compact'
-        }
-      ]
-    }
-  ]
   const validateOnly = true
 
-  const writer = createRequest(resources, validateOnly)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // Topic
+        resourceName: 'test-topic',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly
+  )
   const reader = Reader.from(writer)
 
   // Skip resources array

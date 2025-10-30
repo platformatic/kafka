@@ -3,15 +3,29 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import {
+  type IncrementalAlterConfigOperationTypes,
+  type ConfigResourceTypeValue,
+  type IncrementalAlterConfigOperationTypeValue
+} from '../enumerations.ts'
 
-export interface IncrementalAlterConfigsRequestConfig {
+interface IncrementalAlterConfigsDeletionRequestConfig {
   name: string
-  configOperation: number
-  value?: NullableString
+  configOperation: typeof IncrementalAlterConfigOperationTypes.DELETE
 }
 
+interface IncrementalAlterConfigsModificationRequestConfig {
+  name: string
+  configOperation: Exclude<IncrementalAlterConfigOperationTypeValue, typeof IncrementalAlterConfigOperationTypes.DELETE>
+  value: string
+}
+
+export type IncrementalAlterConfigsRequestConfig =
+  | IncrementalAlterConfigsModificationRequestConfig
+  | IncrementalAlterConfigsDeletionRequestConfig
+
 export interface IncrementalAlterConfigsRequestResource {
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
   configs: IncrementalAlterConfigsRequestConfig[]
 }
@@ -21,7 +35,7 @@ export type IncrementalAlterConfigsRequest = Parameters<typeof createRequest>
 export interface IncrementalAlterConfigsResponseResult {
   errorCode: number
   errorMessage: NullableString
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
 }
 
@@ -47,7 +61,9 @@ export function createRequest (resources: IncrementalAlterConfigsRequestResource
       w.appendInt8(r.resourceType)
         .appendString(r.resourceName)
         .appendArray(r.configs, (w, r) => {
-          w.appendString(r.name).appendInt8(r.configOperation).appendString(r.value)
+          w.appendString(r.name)
+            .appendInt8(r.configOperation)
+            .appendString((r as IncrementalAlterConfigsModificationRequestConfig).value)
         })
     })
     .appendBoolean(validateOnly)
@@ -84,7 +100,7 @@ export function parseResponse (
       return {
         errorCode,
         errorMessage,
-        resourceType: r.readInt8(),
+        resourceType: r.readInt8() as ConfigResourceTypeValue,
         resourceName: r.readString()
       }
     })

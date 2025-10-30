@@ -2,17 +2,26 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { scheduler } from 'node:timers/promises'
-import { ClientQuotaEntityTypes, ClientQuotaKeys } from '../../../src/apis/enumerations.ts'
+import {
+  ClientQuotaEntityTypes,
+  ClientQuotaKeys,
+  ConfigResourceTypes,
+  ConfigSources,
+  ConfigTypes,
+  IncrementalAlterConfigOperationTypes
+} from '../../../src/apis/enumerations.ts'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
   adminClientQuotasChannel,
   adminConsumerGroupOffsetsChannel,
+  adminConfigsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminTopicsChannel,
   alterClientQuotasV1,
   type Broker,
+  alterConfigsV2,
   type BrokerLogDirDescription,
   type Callback,
   type CallbackWithPromise,
@@ -20,15 +29,18 @@ import {
   ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
   type Connection,
+  type ConfigDescription,
   Consumer,
   type CreatedTopic,
   createPartitionsV3,
   type DescribeClientQuotasOptions,
   describeClientQuotasV0,
+  describeConfigsV4,
   describeGroupsV5,
   describeLogDirsV4,
   EMPTY_BUFFER,
   type GroupBase,
+  incrementalAlterConfigsV1,
   instancesChannel,
   type ListConsumerGroupOffsetsGroup,
   listGroupsV5,
@@ -224,6 +236,36 @@ test('all operations should fail when admin is closed', async t => {
     await admin.deleteConsumerGroupOffsets({
       groupId: 'test-group',
       topics: []
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call describeConfigs on closed admin
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic' }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call alterConfigs on closed admin
+  try {
+    await admin.alterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: [] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call incrementalAlterConfigs on closed admin
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: [] }]
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -3843,7 +3885,9 @@ test('listConsumerGroupOffsets should validate options in strict mode', async t 
   // Test with invalid topic object (invalid partitions type)
   try {
     await admin.listConsumerGroupOffsets({
-      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: 'not-an-array' }] as any }] as any
+      groups: [
+        { groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: 'not-an-array' }] as any }
+      ] as any
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -3865,7 +3909,9 @@ test('listConsumerGroupOffsets should validate options in strict mode', async t 
   // Test with invalid partition (invalid type)
   try {
     await admin.listConsumerGroupOffsets({
-      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: ['not-a-number'] }] as any }] as any
+      groups: [
+        { groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: ['not-a-number'] }] as any }
+      ] as any
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -4549,5 +4595,2038 @@ test('deleteConsumerGroupOffsets should handle unavailable API errors (OffsetDel
     strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
     strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
     strictEqual(error.errors[0].message.includes('Unsupported API OffsetDelete.'), true)
+  }
+})
+
+test('describeConfigs should list configs (TOPIC resource type)', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const initialResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: []
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  strictEqual(Array.isArray(initialResult), true)
+  strictEqual(initialResult.length, 1)
+  strictEqual(initialResult[0].resourceType, ConfigResourceTypes.TOPIC)
+  strictEqual(initialResult[0].resourceName, topicName)
+  strictEqual(Array.isArray(initialResult[0].configs), true)
+  strictEqual(initialResult[0].configs.length > 0, true)
+  for (const config of initialResult[0].configs) {
+    strictEqual(typeof config.name, 'string')
+    strictEqual(typeof config.value, 'string')
+    strictEqual(typeof config.readOnly, 'boolean')
+    strictEqual(typeof config.configSource, 'number')
+    strictEqual(typeof config.isSensitive, 'boolean')
+    strictEqual(Array.isArray(config.synonyms), true)
+    strictEqual(typeof config.configType, 'number')
+    strictEqual(config.documentation, null)
+  }
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('describeConfigs should list only desired configs (TOPIC resource type)', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const initialResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy', 'retention.ms']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(initialResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        },
+        {
+          name: 'retention.ms',
+          value: '604800000',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LONG,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('describeConfigs should include documentation and synonyms if requested (TOPIC resource type)', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const initialResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: true,
+    includeDocumentation: true
+  })
+  deepStrictEqual(initialResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [
+            {
+              name: 'log.cleanup.policy',
+              source: ConfigSources.DEFAULT_CONFIG,
+              value: 'delete'
+            }
+          ],
+          configType: ConfigTypes.LIST,
+          documentation:
+            'This config designates the retention policy to use on log segments. The "delete" policy (which is the default) will discard old segments when their retention time or size limit has been reached. The "compact" policy will enable <a href="#compaction">log compaction</a>, which retains the latest value for each key. It is also possible to specify both policies in a comma-separated list (e.g. "delete,compact"). In this case, old segments will be discarded per the retention time and size configuration, while retained segments will be compacted.'
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('describeConfigs should properly describe broker configs', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+
+  // This test is more about not crashing at all. If any request with Broker resource type
+  // is sent to the wrong broker, the broker will respond with an error and the test will fail.
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '1',
+        configurationKeys: []
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '2',
+        configurationKeys: []
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '3',
+        configurationKeys: []
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+
+  ok(result)
+  strictEqual(result.length, 3)
+  strictEqual(
+    result.every(r => r.resourceType === ConfigResourceTypes.BROKER),
+    true
+  )
+  strictEqual(result[0].resourceName, '1')
+  strictEqual(Array.isArray(result[0].configs), true)
+  strictEqual(result[1].resourceName, '2')
+  strictEqual(Array.isArray(result[1].configs), true)
+  strictEqual(result[2].resourceName, '3')
+  strictEqual(Array.isArray(result[2].configs), true)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('describeConfigs should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const options = {
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: []
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  }
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminConfigsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'describeConfigs',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as ConfigDescription[]
+        strictEqual(Array.isArray(result), true)
+        strictEqual(result.length, 1)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeConfigs'
+  )
+  await admin.describeConfigs(options)
+  verifyTracingChannel()
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('describeConfigs should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing resources
+  try {
+    await admin.describeConfigs({} as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for resources
+  try {
+    await admin.describeConfigs({ resources: 'not-an-array' } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for includeSynonyms
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ],
+      includeSynonyms: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('includeSynonyms'), true)
+  }
+
+  // Test with invalid type for includeDocumentation
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ],
+      includeDocumentation: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('includeDocumentation'), true)
+  }
+
+  // Test with empty resources array
+  try {
+    await admin.describeConfigs({ resources: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for resources elements
+  try {
+    await admin.describeConfigs({
+      resources: ['not-an-object'] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property in resource object
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: [],
+          invalidProperty: true
+        } as any
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with missing resourceType in resource object
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceName: 'test-topic', configurationKeys: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with missing resourceName in resource object
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, configurationKeys: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid type for resourceType
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: true, resourceName: 'test-topic', configurationKeys: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid enum member for resourceType
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: 9999, resourceName: 'test-topic', configurationKeys: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid type for resourceName
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 123, configurationKeys: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.describeConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: '', configurationKeys: [] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid type for configurationKeys
+  try {
+    await admin.describeConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: 'not-an-array' }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configurationKeys'), true)
+  }
+
+  // Test with invalid type for configurationKeys elements
+  try {
+    await admin.describeConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: [123] }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configurationKeys'), true)
+  }
+
+  // Test with invalid empty configurationKeys elements
+  try {
+    await admin.describeConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: [''] }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configurationKeys'), true)
+  }
+})
+
+test('describeConfigs should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+  mockConnectionPoolGet(admin[kConnections], 4)
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Describing configs failed.'), true)
+  }
+})
+
+test('describeConfigs should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+  mockAPI(admin[kConnections], describeConfigsV4.api.key)
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Describing configs failed.'), true)
+  }
+})
+
+test('describeConfigs should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+  mockUnavailableAPI(admin, 'DescribeConfigs')
+  try {
+    await admin.describeConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configurationKeys: []
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DescribeConfigs.'), true)
+  }
+})
+
+test('alterConfigs should update configs', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  await admin.alterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          { name: 'cleanup.policy', value: 'compact' },
+          { name: 'retention.ms', value: '86400000' }
+        ]
+      }
+    ],
+    validateOnly: false
+  })
+
+  await scheduler.wait(1000)
+
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy', 'retention.ms']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(result, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'compact',
+          readOnly: false,
+          configSource: ConfigSources.TOPIC_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        },
+        {
+          name: 'retention.ms',
+          value: '86400000',
+          readOnly: false,
+          configSource: ConfigSources.TOPIC_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LONG,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('alterConfigs should properly update broker configs', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+
+  // This test is more about not crashing at all. If any request with Broker resource type
+  // is sent to the wrong broker, the broker will respond with an error and the test will fail.
+  await admin.alterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '1',
+        configs: [{ name: 'message.max.bytes', value: '2000000' }]
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '2',
+        configs: [{ name: 'message.max.bytes', value: '2000000' }]
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '3',
+        configs: [{ name: 'message.max.bytes', value: '2000000' }]
+      }
+    ]
+  })
+
+  await scheduler.wait(1000)
+
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '1',
+        configurationKeys: ['message.max.bytes']
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '2',
+        configurationKeys: ['message.max.bytes']
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '3',
+        configurationKeys: ['message.max.bytes']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+
+  deepStrictEqual(result, [
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '1',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2000000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    },
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '2',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2000000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    },
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '3',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2000000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('alterConfigs should not update configs when validateOnly is true', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  await admin.alterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          { name: 'cleanup.policy', value: 'compact' },
+          { name: 'retention.ms', value: '86400000' }
+        ]
+      }
+    ],
+    validateOnly: true
+  })
+
+  await scheduler.wait(1000)
+
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy', 'retention.ms']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(result, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        },
+        {
+          name: 'retention.ms',
+          value: '604800000',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LONG,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('alterConfigs should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const options = {
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          { name: 'cleanup.policy', value: 'compact' },
+          { name: 'retention.ms', value: '86400000' }
+        ]
+      }
+    ],
+    validateOnly: false
+  }
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminConfigsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'alterConfigs',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        strictEqual(context.result, undefined)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'alterConfigs'
+  )
+  await admin.alterConfigs(options)
+  verifyTracingChannel()
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('alterConfigs should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing resources
+  try {
+    await admin.alterConfigs({} as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for resources
+  try {
+    await admin.alterConfigs({ resources: 'not-an-array' } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for validateOnly
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ],
+      validateOnly: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('validateOnly'), true)
+  }
+
+  // Test with empty resources array
+  try {
+    await admin.alterConfigs({ resources: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for resources elements
+  try {
+    await admin.alterConfigs({
+      resources: ['not-an-object'] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property in resource object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }],
+          invalidProperty: true
+        } as any
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with missing resourceType in resource object
+  try {
+    await admin.alterConfigs({
+      resources: [{ resourceName: 'test-topic', configs: [{ name: 'cleanup.policy', value: 'compact' }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with missing resourceName in resource object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, configs: [{ name: 'cleanup.policy', value: 'compact' }] }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with missing configs in resource object
+  try {
+    await admin.alterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid type for resourceType
+  try {
+    await admin.alterConfigs({
+      resources: [
+        { resourceType: true, resourceName: 'test-topic', configs: [{ name: 'cleanup.policy', value: 'compact' }] }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid enum member for resourceType
+  try {
+    await admin.alterConfigs({
+      resources: [
+        { resourceType: 9999, resourceName: 'test-topic', configs: [{ name: 'cleanup.policy', value: 'compact' }] }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid type for resourceName
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 123,
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: '',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid type for configs
+  try {
+    await admin.alterConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: 'not-an-array' }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid empty configs array
+  try {
+    await admin.alterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: [] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid type for configs elements
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: ['not-an-object'] as any
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with missing name in config object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [{ value: 'compact' }] as any
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid additional property in config object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [{ name: 'cleanup.policy', value: 'compact', invalidProperty: true } as any]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for name in config object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [{ name: 123, value: 'compact' }] as any
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid empty name in config object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [{ name: '', value: 'compact' }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid type for value in config object
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [{ name: 'cleanup.policy', value: 123 }] as any
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('value'), true)
+  }
+})
+
+test('alterConfigs should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+  mockConnectionPoolGet(admin[kConnections], 4)
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Altering configs failed.'), true)
+  }
+})
+
+test('alterConfigs should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+  mockAPI(admin[kConnections], alterConfigsV2.api.key)
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Altering configs failed.'), true)
+  }
+})
+
+test('alterConfigs should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+  mockUnavailableAPI(admin, 'AlterConfigs')
+  try {
+    await admin.alterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [{ name: 'cleanup.policy', value: 'compact' }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API AlterConfigs.'), true)
+  }
+})
+
+test('incrementalAlterConfigs should be able to set, append, subtract, and delete configs', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  })
+  await scheduler.wait(1000)
+  const setResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(setResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'compact',
+          readOnly: false,
+          configSource: ConfigSources.TOPIC_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        }
+      ]
+    }
+  ])
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.APPEND,
+            value: 'delete'
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  })
+  await scheduler.wait(1000)
+  const appendResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(appendResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'compact,delete',
+          readOnly: false,
+          configSource: ConfigSources.TOPIC_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        }
+      ]
+    }
+  ])
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.SUBTRACT,
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  })
+  await scheduler.wait(1000)
+  const subtractResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(subtractResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          configSource: ConfigSources.TOPIC_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        }
+      ]
+    }
+  ])
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.DELETE
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  })
+  await scheduler.wait(1000)
+  const deleteResult = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(deleteResult, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          // The config has been deleted from topic config, so it falls back to default
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('incrementalAlterConfigs should properly update broker configs', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '1',
+        configs: [
+          {
+            name: 'message.max.bytes',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: '2500000'
+          }
+        ]
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '2',
+        configs: [
+          {
+            name: 'message.max.bytes',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: '2500000'
+          }
+        ]
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '3',
+        configs: [
+          {
+            name: 'message.max.bytes',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: '2500000'
+          }
+        ]
+      }
+    ]
+  })
+
+  await scheduler.wait(1000)
+
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '1',
+        configurationKeys: ['message.max.bytes']
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '2',
+        configurationKeys: ['message.max.bytes']
+      },
+      {
+        resourceType: ConfigResourceTypes.BROKER,
+        resourceName: '3',
+        configurationKeys: ['message.max.bytes']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+
+  deepStrictEqual(result, [
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '1',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2500000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    },
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '2',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2500000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    },
+    {
+      resourceType: ConfigResourceTypes.BROKER,
+      resourceName: '3',
+      configs: [
+        {
+          name: 'message.max.bytes',
+          value: '2500000',
+          readOnly: false,
+          configSource: ConfigSources.DYNAMIC_BROKER_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.INT,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('incrementalAlterConfigs should not update configs when validateOnly is true', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  await admin.incrementalAlterConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly: true
+  })
+  await scheduler.wait(200)
+  const result = await admin.describeConfigs({
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configurationKeys: ['cleanup.policy']
+      }
+    ],
+    includeSynonyms: false,
+    includeDocumentation: false
+  })
+  deepStrictEqual(result, [
+    {
+      resourceType: ConfigResourceTypes.TOPIC,
+      resourceName: topicName,
+      configs: [
+        {
+          name: 'cleanup.policy',
+          value: 'delete',
+          readOnly: false,
+          configSource: ConfigSources.DEFAULT_CONFIG,
+          isSensitive: false,
+          synonyms: [],
+          configType: ConfigTypes.LIST,
+          documentation: null
+        }
+      ]
+    }
+  ])
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('incrementalAlterConfigs should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+  const topicName = await createTopic(t, true)
+  const options = {
+    resources: [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: topicName,
+        configs: [
+          {
+            name: 'cleanup.policy',
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
+            value: 'compact'
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  }
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminConfigsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'incrementalAlterConfigs',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        strictEqual(context.result, undefined)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'incrementalAlterConfigs'
+  )
+  await admin.incrementalAlterConfigs(options)
+  verifyTracingChannel()
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('incrementalAlterConfigs should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing resources
+  try {
+    await admin.incrementalAlterConfigs({} as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ]
+        }
+      ],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for resources
+  try {
+    await admin.incrementalAlterConfigs({ resources: 'not-an-array' } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for validateOnly
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ]
+        }
+      ],
+      validateOnly: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('validateOnly'), true)
+  }
+
+  // Test with empty resources array
+  try {
+    await admin.incrementalAlterConfigs({ resources: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid type for resources elements
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: ['not-an-object'] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resources'), true)
+  }
+
+  // Test with invalid additional property in resource object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ],
+          invalidProperty: true
+        } as any
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with missing resourceType in resource object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceName: 'test-topic', configs: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with missing resourceName in resource object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, configs: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with missing configs in resource object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid type for resourceType
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: true, resourceName: 'test-topic', configs: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid enum member for resourceType
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: 9999, resourceName: 'test-topic', configs: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid type for resourceName
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 123, configs: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: '', configs: [] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid type for configs
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        { resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: 'not-an-array' }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid empty configs array
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: [] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid type for configs elements
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: ['not-an-object'] as any
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+
+  // Test with invalid additional property in config object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact',
+              invalidProperty: true
+            } as any
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with missing name in config object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            } as any
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with missing configOperation in config object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              value: 'compact'
+            } as any
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configOperation'), true)
+  }
+
+  // Test with missing value in config object when operation is not DELETE
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET
+            } as any
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('value'), true)
+  }
+
+  // Test with invalid type for name in config object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 123,
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'test'
+            } as any
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid empty name in config object
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: '',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'test'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid type for configOperation
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'test.config',
+              configOperation: 'not-a-number' as any,
+              value: 'test'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configOperation'), true)
+  }
+
+  // Test with invalid enum member for configOperation
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'test.config',
+              configOperation: 9999 as any,
+              value: 'test'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configOperation'), true)
+  }
+
+  // Test with invalid type for value in config object when operation is not DELETE
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'test.config',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 123 as any
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('value'), true)
+  }
+
+  // Test with invalid value provided for DELETE operation
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test',
+          configs: [
+            {
+              name: 'test.config',
+              configOperation: IncrementalAlterConfigOperationTypes.DELETE,
+              // @ts-expect-error - Intentionally passing invalid options
+              value: 'should-not-be-provided'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('value'), true)
+  }
+})
+
+test('incrementalAlterConfigs should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+  mockConnectionPoolGet(admin[kConnections], 4)
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Incrementally altering configs failed.'), true)
+  }
+})
+
+test('incrementalAlterConfigs should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+  mockAPI(admin[kConnections], incrementalAlterConfigsV1.api.key)
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Incrementally altering configs failed.'), true)
+  }
+})
+
+test('incrementalAlterConfigs should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+  mockUnavailableAPI(admin, 'IncrementalAlterConfigs')
+  try {
+    await admin.incrementalAlterConfigs({
+      resources: [
+        {
+          resourceType: ConfigResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          configs: [
+            {
+              name: 'cleanup.policy',
+              configOperation: IncrementalAlterConfigOperationTypes.SET,
+              value: 'compact'
+            }
+          ]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API IncrementalAlterConfigs.'), true)
   }
 })

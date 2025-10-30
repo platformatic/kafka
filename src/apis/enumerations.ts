@@ -83,20 +83,39 @@ export const ConfigSources = {
   DYNAMIC_DEFAULT_BROKER_CONFIG: 3,
   STATIC_BROKER_CONFIG: 4,
   DEFAULT_CONFIG: 5,
-  DYNAMIC_BROKER_LOGGER_CONFIG: 6
+  DYNAMIC_BROKER_LOGGER_CONFIG: 6,
+  CLIENT_METRICS_CONFIG: 7,
+  GROUP_CONFIG: 8
 } as const
-export type ConfigSource = keyof typeof ConfigSources
+export type ConfigSource = (typeof ConfigSources)[keyof typeof ConfigSources]
 
-export const ConfigTypes = {
+export const ConfigResources = {
   UNKNOWN: 0,
   TOPIC: 2,
   BROKER: 4,
-  BROKER_LOGGER: 8
+  BROKER_LOGGER: 8,
+  CLIENT_METRICS: 16,
+  GROUP: 32
 } as const
-export type ConfigType = keyof typeof ConfigTypes
+export type ConfigResource = (typeof ConfigResources)[keyof typeof ConfigResources]
 
-export const IncrementalAlterConfigTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 }
-export type IncrementalAlterConfigType = keyof typeof IncrementalAlterConfigTypes
+export const ConfigTypes = {
+  UNKNOWN: 0,
+  BOOLEAN: 1,
+  STRING: 2,
+  INT: 3,
+  SHORT: 4,
+  LONG: 5,
+  DOUBLE: 6,
+  LIST: 7,
+  CLASS: 8,
+  PASSWORD: 9
+} as const
+export type ConfigType = (typeof ConfigTypes)[keyof typeof ConfigTypes]
+
+export const IncrementalAlterConfigOperationTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 } as const
+export type IncrementalAlterConfigOperationType =
+  (typeof IncrementalAlterConfigOperationTypes)[keyof typeof IncrementalAlterConfigOperationTypes]
 
 // ./admin/*-client-quotas.ts
 export const ClientQuotaMatchTypes = { EXACT: 0, DEFAULT: 1, ANY: 2 } as const

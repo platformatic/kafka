@@ -752,8 +752,7 @@ test('Connection should handle request serialization errors', async t => {
     throw new Error('Parser error')
   }
 
-  // Send a request
-  await throws(() =>
+  const requestPromise = new Promise((resolve, reject) => {
     connection.send(
       0, // apiKey
       0, // apiVersion
@@ -761,8 +760,19 @@ test('Connection should handle request serialization errors', async t => {
       parser,
       false,
       false,
-      () => {}
-    ))
+      (err: any) => {
+        if (err) {
+          reject(err)
+        }
+
+        resolve(null)
+      }
+    )
+  })
+
+  await rejects(() => requestPromise, {
+    message: 'Serialization error'
+  })
 
   verifyTracingChannel()
 })

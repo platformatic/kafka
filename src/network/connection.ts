@@ -350,7 +350,7 @@ export class Connection extends EventEmitter {
     } catch (err) {
       diagnostic.error = err as Error
       connectionsApiChannel.error.publish(diagnostic)
-      throw err
+      return callback(err, undefined as unknown as ReturnType)
     }
 
     writer.appendFrom(payload).prependLength()

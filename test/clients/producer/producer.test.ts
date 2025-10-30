@@ -4,6 +4,8 @@ import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   type ClientDiagnosticEvent,
+  compressionsAlgorithms,
+  GenericError,
   initProducerIdV5,
   instancesChannel,
   MultipleErrors,
@@ -689,6 +691,30 @@ test('send should auto-initialize idempotent producer if needed', async t => {
   // Verify result structure
   ok(Array.isArray(result.offsets), 'Should have offsets array')
   strictEqual(result.offsets?.length, 1)
+})
+
+test('send should handle synchronuous error during payload creation', async t => {
+  const producer = createProducer(t, { strict: true })
+  const testTopic = await createTopic(t)
+
+  const compression = 'lz4'
+  const expectedError = new GenericError('PLT_KFK_UNSUPPORTED_COMPRESSION', 'Avoid RUD')
+  t.mock.method(compressionsAlgorithms[compression], 'compressSync', () => { throw expectedError })
+
+  await rejects(
+
+    async () => {
+      await producer.send({
+        messages: [{ topic: testTopic, value: Buffer.from('auto-init-idempotent-message') }],
+        compression,
+      })
+    },
+    (error: any) => {
+      strictEqual(error instanceof AggregateError, true)
+      strictEqual(error.errors[0], expectedError)
+      return true
+    }
+  )
 })
 
 test('send should validate options in strict mode', async t => {

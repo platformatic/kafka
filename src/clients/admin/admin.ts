@@ -444,8 +444,8 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #createTopics (options: CreateTopicsOptions, callback: CallbackWithPromise<CreatedTopic[]>): void {
-    const numPartitions = options.partitions ?? 1
-    const replicationFactor = options.replicas ?? 1
+    const numPartitions = options.partitions ?? -1
+    const replicationFactor = options.replicas ?? -1
     const assignments: CreateTopicsRequestTopicAssignment[] = []
     const configs = options.configs ?? []
 

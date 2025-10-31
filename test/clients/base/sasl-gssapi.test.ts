@@ -49,5 +49,5 @@ test('should connect to SASL protected broker using SASL/GSSAPI using a custom a
   t.after(() => base.close())
 
   const metadata = await base.metadata({ topics: [] })
-  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9003 })
+  deepStrictEqual(metadata.brokers.get(1), { host: 'localhost', port: 9003, rack: null })
 })

@@ -50,7 +50,7 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), saslBroker)
+  deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
 })
 
 test('should connect to SASL protected broker using SASL/OAUTHBEARER and custom extensions', async t => {
@@ -75,7 +75,7 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER and custom 
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), saslBroker)
+  deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
 })
 
 test('should handle authentication errors', async t => {
@@ -128,7 +128,7 @@ test('should accept a function as credential provider', async t => {
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), saslBroker)
+  deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
 })
 
 test('should accept an async function as credential provider', async t => {
@@ -159,7 +159,7 @@ test('should accept an async function as credential provider', async t => {
 
   const metadata = await base.metadata({ topics: [] })
 
-  deepStrictEqual(metadata.brokers.get(1), saslBroker)
+  deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
 })
 
 test('should handle sync credential provider errors', async t => {

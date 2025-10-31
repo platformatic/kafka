@@ -409,8 +409,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
             // This should never change, but we act defensively here
             for (const broker of metadata.brokers) {
-              const { host, port } = broker
-              brokers.set(broker.nodeId, { host, port })
+              const { host, port, rack } = broker
+              brokers.set(broker.nodeId, { host, port, rack })
             }
 
             this.#metadata.brokers = brokers
@@ -428,7 +428,9 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 partitions[rawPartition.partitionIndex] = {
                   leader: rawPartition.leaderId,
                   leaderEpoch: rawPartition.leaderEpoch,
-                  replicas: rawPartition.replicaNodes
+                  replicas: rawPartition.replicaNodes,
+                  isr: rawPartition.isrNodes,
+                  offlineReplicas: rawPartition.offlineReplicas
                 }
               }
 

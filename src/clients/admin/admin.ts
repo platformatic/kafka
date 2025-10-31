@@ -539,7 +539,7 @@ export class Admin extends Base<AdminOptions> {
     }
 
     this[kPerformDeduplicated](
-      'createTopics',
+      `createTopics-${options.topics.join(',')}`,
       deduplicateCallback => {
         this[kPerformWithRetry](
           'createTopics',
@@ -597,7 +597,7 @@ export class Admin extends Base<AdminOptions> {
 
   #deleteTopics (options: DeleteTopicsOptions, callback: CallbackWithPromise<void>): void {
     this[kPerformDeduplicated](
-      'deleteTopics',
+      `deleteTopics-${options.topics.join(',')}`,
       deduplicateCallback => {
         this[kPerformWithRetry](
           'deleteTopics',

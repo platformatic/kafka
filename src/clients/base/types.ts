@@ -1,4 +1,5 @@
 import { type Broker, type ConnectionOptions } from '../../network/connection.ts'
+import { type NullableString } from '../../protocol/definitions.ts'
 import { type Metrics } from '../metrics.ts'
 
 export interface TopicWithPartitionAndOffset {
@@ -11,6 +12,8 @@ export interface ClusterPartitionMetadata {
   leader: number
   leaderEpoch: number
   replicas: number[]
+  isr: number[]
+  offlineReplicas: number[]
 }
 
 export interface ClusterTopicMetadata {
@@ -22,7 +25,7 @@ export interface ClusterTopicMetadata {
 
 export interface ClusterMetadata {
   id: string
-  brokers: Map<number, Broker>
+  brokers: Map<number, Broker & { rack: NullableString }>
   topics: Map<string, ClusterTopicMetadata>
   lastUpdate: number
 }

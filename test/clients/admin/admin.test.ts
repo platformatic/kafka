@@ -439,8 +439,6 @@ test('createTopics using assignments', async t => {
   // Create a topic with a single partition - leader will be automatically assigned
   const created = await admin.createTopics({
     topics: [topicName],
-    partitions: -1,
-    replicas: -1,
     assignments: brokerIds.map((brokerId, i) => ({ partition: i, brokers: [brokerId] }))
   })
 

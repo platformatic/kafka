@@ -1,4 +1,23 @@
 services:
+  kdc:
+    image: alpine:latest
+    container_name: kdc
+    ports:
+      - '8000:88/tcp'
+      - '8000:88/udp'
+      - '8001:749'
+    volumes:
+      - './docker/kerberos/krb5-kdc.conf:/etc/krb5.conf:ro'
+      - './docker/kerberos/kdc.conf:/var/lib/krb5kdc/kdc.conf:ro'
+      - './docker/kerberos/init.sh:/init.sh:ro'
+      - './tmp/kerberos:/data'
+    entrypoint: ['/bin/sh', '/init.sh']
+    healthcheck:
+      test: ['CMD', 'kadmin.local', '-q', 'list_principals']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   broker-single:
     # Rule of thumb: Confluent Kafka Version = Apache Kafka Version + 4.0.0
     image: &image confluentinc/cp-kafka:${KAFKA_VERSION:-7.9.0}
@@ -74,6 +93,38 @@ services:
       KAFKA_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: users
       KAFKA_SASL_OAUTHBEARER_EXPECTED_SCOPE: test
 
+  broker-sasl-kerberos:
+    image: *image
+    container_name: broker-sasl-kerberos
+    ports:
+      - "9003:9092" # SASL
+      - "19003:19092" # PLAIN TEXT - Used to create users
+    healthcheck: *health_check
+    volumes:
+      - "./docker/sasl/jaas-kerberos.conf:/etc/kafka/jaas.conf:ro"
+      - "./docker/kerberos/krb5-broker.conf:/etc/krb5.conf:ro"
+      - "./tmp/kerberos/broker.keytab:/etc/kafka/broker.keytab:ro"
+    depends_on:
+      kdc:
+        condition: service_healthy
+    environment:
+      <<: *common_config
+      # Broker specific general and port options
+      KAFKA_LISTENERS: "SASL://:9092,DOCKER://:19092,CONTROLLER://:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "SASL:SASL_PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_ADVERTISED_LISTENERS: "SASL://localhost:9003,DOCKER://broker-sasl-kerberos:19092"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@broker-sasl-kerberos:29092"
+      # SASL
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/jaas.conf -Djava.security.krb5.conf=/etc/krb5.conf"
+      KAFKA_LISTENER_NAME_SASL_GSSAPI_SASL_JAAS_CONFIG: 'com.sun.security.auth.module.Krb5LoginModule required useKeyTab=true storeKey=true keyTab="/etc/kafka/broker.keytab" principal="broker/broker-sasl-kerberos@EXAMPLE.COM";'
+      KAFKA_CONNECTIONS_MAX_REAUTH_MS: 5000
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      KAFKA_SUPER_USERS: 'User:admin;User:broker/broker-sasl-kerberos@EXAMPLE.COM;User:admin-keytab/localhost@EXAMPLE.COM;User:admin-password/localhost@EXAMPLE.COM'
+      KAFKA_SASL_ENABLED_MECHANISMS: "GSSAPI"
+      KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: "PLAIN"
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: "PLAIN"
+      KAFKA_SASL_KERBEROS_SERVICE_NAME: 'kafka'
+  
   broker-cluster-1:
     image: *image
     container_name: broker-cluster-1

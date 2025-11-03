@@ -26,7 +26,7 @@ import {
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
-import { saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
+import { saslGssApi, saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
 import { Reader } from '../protocol/reader.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'
 import { Writer } from '../protocol/writer.ts'
@@ -43,6 +43,7 @@ export interface SASLOptions {
   username?: string | SASLCredentialProvider
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
+  keytab?: string | SASLCredentialProvider
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
 }
 
@@ -384,7 +385,7 @@ export class Connection extends EventEmitter {
       this.#status = ConnectionStatuses.AUTHENTICATING
     }
 
-    const { mechanism, username, password, token } = this.#options.sasl!
+    const { mechanism, username, password, token, keytab } = this.#options.sasl!
 
     if (!allowedSASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
@@ -415,6 +416,8 @@ export class Connection extends EventEmitter {
         saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
+      } else if (mechanism === SASLMechanisms.GSSAPI) {
+        saslGssApi.authenticate(saslAuthenticateV2.api, this, username, password, keytab, callback)
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,

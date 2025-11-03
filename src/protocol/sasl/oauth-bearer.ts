@@ -52,7 +52,8 @@ export function authenticate (
 
   getCredential('SASL/OAUTHBEARER token', tokenOrProvider, (error, token) => {
     if (error) {
-      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      return
     }
 
     authenticateAPI(connection, Buffer.from(`n,,\x01auth=Bearer ${token}\x01\x01`), callback!)

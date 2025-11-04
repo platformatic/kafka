@@ -417,7 +417,7 @@ export class Connection extends EventEmitter {
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
       } else if (mechanism === SASLMechanisms.GSSAPI) {
-        saslGssApi.authenticate(saslAuthenticateV2.api, this, username, password, keytab, callback)
+        saslGssApi.authenticate(saslAuthenticateV2.api, this, username!, password!, keytab!, callback)
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,

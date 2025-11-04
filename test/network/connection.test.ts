@@ -28,6 +28,7 @@ import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
   kafkaSaslBootstrapServers,
+  kafkaSaslKerberosBootstrapServers,
   mockConnectionAPI,
   mockedErrorMessage,
   mockedOperationId
@@ -943,8 +944,20 @@ test('Connection.connect should not connect to SASL protected broker by default'
 })
 
 for (const mechanism of allowedSASLMechanisms) {
-  const sasl: SASLOptions =
-    mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
+  let sasl: SASLOptions
+  let saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+
+  switch (mechanism) {
+    case SASLMechanisms.OAUTHBEARER:
+      sasl = { mechanism, token: 'token' }
+      break
+    case SASLMechanisms.GSSAPI:
+      saslBroker = parseBroker(kafkaSaslKerberosBootstrapServers[0])
+      sasl = { mechanism, username: 'admin-password@EXAMPLE.COM', password: 'admin' }
+      break
+    default:
+      sasl = { mechanism, username: 'admin', password: 'admin' }
+  }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
     const connection = new Connection('clientId', { sasl })

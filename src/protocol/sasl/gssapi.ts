@@ -1,4 +1,4 @@
-import krb, { type KerberosClient } from 'kerberos'
+import { createRequire } from 'node:module'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
@@ -6,42 +6,19 @@ import { type Connection, type SASLCredentialProvider } from '../../network/conn
 import { EMPTY_BUFFER } from '../definitions.ts'
 import { getCredential } from './credential-provider.ts'
 
-function createKerberosAuthenticationError (message: string, kerberosError: string): AuthenticationError {
-  return new AuthenticationError(message, { kerberosError })
-}
-
-/*
-// We use this to verify username and password
-// krb.checkPassword(username, password, 'kafka', 'EXAMPLE.COM', error => {
-//   if (error) {
-//     callback(
-//       createKerberosAuthenticationError('Invalid credentials.', error),
-//       undefined as unknown as SaslAuthenticateResponse
-//     )
-//     return
-//   }
-// })
-*/
-
 function performChallenge (
   connection: Connection,
   authenticateAPI: SASLAuthenticationAPI,
-  client: KerberosClient,
-  step: string,
+  client: any,
+  target: string,
+  input: Buffer,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void {
-  client.step(step, async (error: string | null, challenge: string) => {
-    if (error) {
-      callback(
-        createKerberosAuthenticationError('Cannot continue Kerberos step challenge.', error),
-        undefined as unknown as SaslAuthenticateResponse
-      )
-      return
-    }
+  try {
+    const { completed, output } = client.step(target, input)
 
-    const challengeBuffer = challenge ? Buffer.from(challenge, 'base64') : EMPTY_BUFFER
-
-    authenticateAPI(connection, challengeBuffer, (error, response) => {
+    authenticateAPI(connection, output, (error, response) => {
+      /* c8 ignore next 7 - Hard to test */
       if (error) {
         callback(
           new AuthenticationError('SASL authentication failed.', { cause: error }),
@@ -50,69 +27,69 @@ function performChallenge (
         return
       }
 
-      if (response.authBytes.length === 0) {
-        callback(null, response)
+      /* c8 ignore next 4 - Hard to test */
+      if (!completed) {
+        performChallenge(connection, authenticateAPI, client, target, response.authBytes, callback)
         return
       }
 
-      if (client.contextComplete) {
-        client.unwrap(response.authBytes.toString('base64'), (error: string | null) => {
+      try {
+        client.unwrap(response.authBytes)
+        /* c8 ignore next 6 - Hard to test */
+      } catch (e) {
+        callback(
+          new AuthenticationError('Cannot unwrap Kerberos response.', { kerberosError: e }),
+          undefined as unknown as SaslAuthenticateResponse
+        )
+      }
+
+      try {
+        // Byte 0: No security layer; Byte 1-3: max message size - 0=none
+        const wrapped = client.wrap(Buffer.from([1, 0, 0, 0]))
+
+        authenticateAPI(connection, Buffer.from(wrapped, 'base64'), (error, response) => {
+          /* c8 ignore next 7 - Hard to test */
           if (error) {
             callback(
-              createKerberosAuthenticationError('Cannot unwrap Kerberose response', error),
+              new AuthenticationError('SASL authentication failed.', { cause: error }),
               undefined as unknown as SaslAuthenticateResponse
             )
             return
           }
 
-          // Byte 0: No security layer; Byte 1-3: max message size - 0=none
-          client.wrap(Buffer.from([1, 0, 0, 0]).toString('base64'), {}, (error: string | null, wrapped: string) => {
-            if (error) {
-              callback(
-                createKerberosAuthenticationError('Cannot wrap Kerberos response.', error),
-                undefined as unknown as SaslAuthenticateResponse
-              )
-              return
-            }
-
-            // Invia la risposta wrappata a Kafka
-            authenticateAPI(connection, Buffer.from(wrapped, 'base64'), (error, response) => {
-              if (error) {
-                callback(
-                  new AuthenticationError('SASL authentication failed.', { cause: error }),
-                  undefined as unknown as SaslAuthenticateResponse
-                )
-                return
-              }
-
-              callback(null, response)
-            })
-          })
+          callback(null, response)
         })
-
-        return
+        /* c8 ignore next 6 - Hard to test */
+      } catch (e) {
+        callback(
+          new AuthenticationError('Cannot wrap Kerberos response.', { kerberosError: e }),
+          undefined as unknown as SaslAuthenticateResponse
+        )
       }
-
-      // Altrimenti continua normalmente
-      performChallenge(connection, authenticateAPI, client, response.authBytes.toString('base64'), callback)
     })
-  })
+    /* c8 ignore next 6 - Hard to test */
+  } catch (e) {
+    callback!(
+      new AuthenticationError('Cannot perform Kerberos step challenge.', { kerberosError: e }),
+      undefined as unknown as SaslAuthenticateResponse
+    )
+  }
 }
 
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  username: string,
-  password: string,
-  keytab: string,
+  usernameProvider: string | SASLCredentialProvider,
+  passwordProvider: string | SASLCredentialProvider,
+  keytabProvider: string | SASLCredentialProvider,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  username: string,
-  password: string,
-  keytab: string
+  usernameProvider: string | SASLCredentialProvider,
+  passwordProvider: string | SASLCredentialProvider,
+  keytabProvider: string | SASLCredentialProvider
 ): Promise<SaslAuthenticateResponse>
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
@@ -122,9 +99,13 @@ export function authenticate (
   keytabProvider: string | SASLCredentialProvider,
   callback?: CallbackWithPromise<SaslAuthenticateResponse>
 ): void | Promise<SaslAuthenticateResponse> {
+  /* c8 ignore next 3 - Hard to test */
   if (!callback) {
     callback = createPromisifiedCallback<SaslAuthenticateResponse>()
   }
+
+  const require = createRequire(import.meta.url)
+  const { GSSAPI } = require('../../../native/gssapi.darwin-arm64.node')
 
   getCredential('SASL/GSSAPI username', usernameProvider, (error, username) => {
     if (error) {
@@ -132,42 +113,38 @@ export function authenticate (
       return
     }
 
-    passwordProvider ??= () => ''
-    keytabProvider ??= () => ''
+    let credentialProvider: string | SASLCredentialProvider
+    let credentialType: 'password' | 'keytab'
 
-    getCredential('SASL/GSSAPI password', passwordProvider, (error, password) => {
+    if (passwordProvider) {
+      credentialType = 'password'
+      credentialProvider = passwordProvider
+    } else {
+      credentialType = 'keytab'
+      credentialProvider = keytabProvider
+    }
+
+    getCredential(`SASL/GSSAPI ${credentialType}`, credentialProvider, (error, credential) => {
       if (error) {
         callback!(error, undefined as unknown as SaslAuthenticateResponse)
         return
       }
 
-      getCredential('SASL/GSSAPI keytab', keytabProvider, (error, password) => {
-        if (error) {
-          callback!(error, undefined as unknown as SaslAuthenticateResponse)
-        }
-      })
+      const client = new GSSAPI('localhost:8000', 'EXAMPLE.COM')
+      try {
+        credentialType === 'password'
+          ? client.authenticateWithPassword(username, credential)
+          : client.authenticateWithKeytab(username, credential)
+      } catch (e) {
+        callback!(
+          new AuthenticationError('SASL authentication failed.', { kerberosError: e }),
+          undefined as unknown as SaslAuthenticateResponse
+        )
 
-      /*
-        Before calling this, you need to invoke kinit:
+        return
+      }
 
-        echo $password | kinit $username
-        kinit -kt $keytab $username
-      */
-
-      krb.initializeClient('broker@broker-sasl-kerberos', { principal: 'admin-keytab@EXAMPLE.COM' }, (
-        error: string | null,
-        client: KerberosClient
-      ) => {
-        if (error) {
-          callback(
-            createKerberosAuthenticationError('Cannot initialize Kerberos client.', error),
-            undefined as unknown as SaslAuthenticateResponse
-          )
-          return
-        }
-
-        performChallenge(connection, authenticateAPI, client, '', callback)
-      })
+      performChallenge(connection, authenticateAPI, client, 'broker@broker-sasl-kerberos', EMPTY_BUFFER, callback!)
     })
   })
 

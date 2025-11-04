@@ -122,7 +122,7 @@ export class Connection extends EventEmitter {
     this.#correlationId = 0
     this.#nextMessage = 0
     this.#afterDrainRequests = []
-    this.#requestsQueue = fastq((op, cb) => op(cb), this.#options.maxInflights!)
+    this.#requestsQueue = fastq((op, cb) => op(cb), this.#options.maxInflights! ?? defaultOptions.maxInflights!)
     this.#inflightRequests = new Map()
     this.#responseBuffer = new DynamicBuffer()
     this.#responseReader = new Reader(this.#responseBuffer)

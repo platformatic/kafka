@@ -750,3 +750,23 @@ test('kPerformWithRetry should not leak timers', async t => {
   strictEqual(error.errors.length, 2)
   ok(error.errors[1].message.startsWith('Client closed while retrying'))
 })
+
+test('initialization should not fail when maxInflights is specifically set to undefined', async t => {
+  const client = createBase(t, { maxInflights: undefined })
+
+  // Create a promise that resolves when metadata event is emitted
+  const metadataPromise = new Promise<ClusterMetadata>(resolve => {
+    client.on('client:metadata', resolve)
+  })
+
+  // Trigger metadata fetch
+  client.metadata({ topics: [] })
+
+  // Wait for the event
+  const metadata = await metadataPromise
+
+  // Verify metadata structure
+  strictEqual(typeof metadata.id, 'string')
+  strictEqual(metadata.brokers instanceof Map, true)
+  strictEqual(metadata.topics instanceof Map, true)
+})

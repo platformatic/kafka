@@ -997,7 +997,7 @@ test('send should repeat the operation in case of stale metadata', async t => {
   mockAPI(
     producer[kConnections],
     produceV11.api.key,
-    new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', { topic: testTopic })
+    new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', null, { topic: testTopic })
   )
 
   await producer.send({

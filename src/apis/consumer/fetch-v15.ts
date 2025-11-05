@@ -148,7 +148,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, null]])
   }
 
   const response: FetchResponse = {
@@ -175,7 +175,7 @@ export function parseResponse (
           }
 
           if (partition.errorCode !== 0) {
-            errors.push([`/responses/${i}/partitions/${j}`, partition.errorCode])
+            errors.push([`/responses/${i}/partitions/${j}`, [partition.errorCode, null]])
           }
 
           // We need to reduce the size by one to follow the COMPACT_RECORDS specification.

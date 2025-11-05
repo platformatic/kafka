@@ -1,5 +1,6 @@
 import { type JoinGroupResponse } from './apis/consumer/join-group-v9.ts'
 import { protocolAPIsById } from './protocol/apis.ts'
+import { type NullableString } from './protocol/definitions.ts'
 import { protocolErrors, protocolErrorsCodesById } from './protocol/errors.ts'
 
 const kGenericError = Symbol('plt.kafka.genericError')
@@ -146,13 +147,19 @@ export class NetworkError extends GenericError {
 export class ProtocolError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_PROTOCOL'
 
-  constructor (codeOrId: string | number, properties: ErrorProperties = {}, response: unknown = undefined) {
+  constructor (
+    codeOrId: string | number,
+    serverErrorMessage: NullableString = null,
+    properties: ErrorProperties = {},
+    response: unknown = undefined
+  ) {
     const { id, code, message, canRetry } =
       protocolErrors[typeof codeOrId === 'number' ? protocolErrorsCodesById[codeOrId] : codeOrId]
 
     super(ProtocolError.code, message, {
       apiId: id,
       apiCode: code,
+      serverErrorMessage,
       canRetry,
       hasStaleMetadata: ['UNKNOWN_TOPIC_OR_PARTITION', 'LEADER_NOT_AVAILABLE', 'NOT_LEADER_OR_FOLLOWER'].includes(id),
       needsRejoin: ['MEMBER_ID_REQUIRED', 'UNKNOWN_MEMBER_ID', 'REBALANCE_IN_PROGRESS'].includes(id),
@@ -178,13 +185,16 @@ export class ResponseError extends MultipleErrors {
   constructor (
     apiName: number,
     apiVersion: number,
-    errors: Record<string, number>,
+    errors: Record<string, [number, NullableString]>,
     response: unknown,
     properties: ErrorProperties = {}
   ) {
     super(
       `Received response with error while executing API ${protocolAPIsById[apiName]}(v${apiVersion})`,
-      Object.entries(errors).map(([path, errorCode]) => new ProtocolError(errorCode as number, { path }, response)),
+      Object.entries(errors).map(
+        ([path, [errorCode, detailedErrorMessage]]) =>
+          new ProtocolError(errorCode as number, detailedErrorMessage, { path }, response)
+      ),
       {
         ...properties,
         response

@@ -100,14 +100,15 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     results: reader.readArray((r, i) => {
       const errorCode = r.readInt16()
+      const errorMessage = r.readNullableString()
 
       if (errorCode !== 0) {
-        errors.push([`/results/${i}`, errorCode])
+        errors.push([`/results/${i}`, [errorCode, errorMessage]])
       }
 
       return {
         errorCode,
-        errorMessage: r.readNullableString(),
+        errorMessage,
         resourceType: r.readInt8(),
         resourceName: r.readString(),
         configs: r.readArray(r => {

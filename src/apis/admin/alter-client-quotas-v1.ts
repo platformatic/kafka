@@ -106,7 +106,7 @@ export function parseResponse (
       }
 
       if (entry.errorCode !== 0) {
-        errors.push([`/entries/${i}`, entry.errorCode])
+        errors.push([`/entries/${i}`, [entry.errorCode, entry.errorMessage]])
       }
 
       return entry

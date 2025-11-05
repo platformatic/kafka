@@ -67,7 +67,7 @@ export function parseResponse (
       }
 
       if (topicResponse.errorCode !== 0) {
-        errors.push([`/responses/${i}`, topicResponse.errorCode])
+        errors.push([`/responses/${i}`, [topicResponse.errorCode, topicResponse.errorMessage]])
       }
 
       return topicResponse

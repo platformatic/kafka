@@ -115,13 +115,14 @@ export function parseResponse (
   const errors: ResponseErrorWithLocation[] = []
 
   const errorCode = reader.readInt16()
+  const errorMessage = reader.readNullableString()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, errorMessage]])
   }
   const response: DescribeQuorumResponse = {
     errorCode,
-    errorMessage: reader.readNullableString(),
+    errorMessage,
     topics: reader.readArray((r, i) => {
       return {
         topicName: r.readString(),
@@ -154,7 +155,7 @@ export function parseResponse (
           }
 
           if (partition.errorCode !== 0) {
-            errors.push([`/topics/${i}/partitions/${j}`, partition.errorCode])
+            errors.push([`/topics/${i}/partitions/${j}`, [partition.errorCode, partition.errorMessage]])
           }
 
           return partition

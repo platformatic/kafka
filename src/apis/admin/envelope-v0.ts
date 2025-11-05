@@ -45,7 +45,7 @@ export function parseResponse (
   }
 
   if (response.errorCode) {
-    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode }, response)
+    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response

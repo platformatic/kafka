@@ -101,14 +101,15 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     groups: reader.readArray((r, i) => {
       const errorCode = r.readInt16()
+      const errorMessage = r.readNullableString()
 
       if (errorCode !== 0) {
-        errors.push([`/groups/${i}`, errorCode])
+        errors.push([`/groups/${i}`, [errorCode, errorMessage]])
       }
 
       return {
         errorCode,
-        errorMessage: r.readNullableString(),
+        errorMessage,
         groupId: r.readString(),
         groupState: r.readString(),
         groupEpoch: r.readInt32(),

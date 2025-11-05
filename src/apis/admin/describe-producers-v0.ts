@@ -99,7 +99,7 @@ export function parseResponse (
           }
 
           if (partition.errorCode !== 0) {
-            errors.push([`/partitions/${i}`, partition.errorCode])
+            errors.push([`/partitions/${i}`, [partition.errorCode, partition.errorMessage]])
           }
 
           return partition

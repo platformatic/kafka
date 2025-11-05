@@ -387,14 +387,15 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
   channelName: string | TracingChannelWithName<DiagnosticEvent>,
   unclonable: string | string[],
   verifiers: Record<string, Function>,
-  filter: (label: string, data: DiagnosticEvent) => boolean = () => true
+  filter: (label: string, data: DiagnosticEvent) => boolean = () => true,
+  multiple: boolean = false
 ) {
   if (typeof channelName !== 'string') {
     channelName = (channelName as TracingChannelWithName<DiagnosticEvent>).name
   }
 
   const channel = tracingChannel<string, DiagnosticEvent>(channelName)
-  const eventsData: Record<string, object> = {}
+  const eventsData: Record<string, object[]> = {}
   const operationsId = new Set<bigint>()
 
   function tracker (label: string, data: DiagnosticEvent) {
@@ -417,7 +418,9 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
     }
 
     operationsId.add(data.operationId as bigint)
-    eventsData[label] = { ...toCopy, ...structuredClone(toClone), operationId: mockedOperationId }
+
+    eventsData[label] ??= []
+    eventsData[label].push({ ...toCopy, ...structuredClone(toClone), operationId: mockedOperationId })
   }
 
   const subscribers = {
@@ -432,10 +435,17 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
 
   return function verify () {
     channel.unsubscribe(subscribers as TracingChannelSubscribers<DiagnosticEvent>)
-    deepStrictEqual(operationsId.size, 1, 'Only one operationId should be present, got: ' + operationsId.toString())
 
-    for (const [label, verifier] of Object.entries(verifiers)) {
-      verifier(eventsData[label])
+    if (multiple) {
+      for (const [label, verifier] of Object.entries(verifiers)) {
+        verifier(eventsData[label])
+      }
+    } else {
+      deepStrictEqual(operationsId.size, 1, 'Only one operationId should be present, got: ' + operationsId.toString())
+
+      for (const [label, verifier] of Object.entries(verifiers)) {
+        verifier(eventsData[label]?.[0])
+      }
     }
   }
 }

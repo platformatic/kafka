@@ -98,7 +98,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       throw new UserError('Must specify offsets when the stream mode is MANUAL.')
     }
 
-    /* c8 ignore next - Unless is initialized directly, highWaterMark is always defined */
+    /* c8 ignore next 4 - Unless is initialized directly, highWaterMark is always defined */
     super({
       objectMode: true,
       highWaterMark: maxFetches ?? options.highWaterMark ?? defaultConsumerOptions.highWaterMark
@@ -171,19 +171,23 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     notifyCreation('messages-stream', this)
   }
 
+  /* c8 ignore next 3 - Simple getter */
   get offsetsToFetch (): Map<string, bigint> {
     return this.#offsetsToFetch
   }
 
+  /* c8 ignore next 3 - Simple getter */
   get offsetsToCommit (): Map<string, CommitOptionsPartition> {
     return this.#offsetsToCommit
   }
 
+  /* c8 ignore next 3 - Simple getter */
   get offsetsCommitted (): Map<string, bigint> {
     return this.#offsetsCommitted
   }
 
   // TODO: This is deprecated alias, remove in future major version
+  /* c8 ignore next 3 - Simple getter */
   get committedOffsets (): Map<string, bigint> {
     return this.#offsetsCommitted
   }

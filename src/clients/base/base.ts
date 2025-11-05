@@ -191,15 +191,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       return callback[kCallbackPromise]
     }
 
-    baseMetadataChannel.traceCallback(
-      this[kMetadata],
-      1,
-      createDiagnosticContext({ client: this, operation: 'metadata' }),
-      this,
-      options,
-      callback
-    )
-
+    this[kMetadata](options, callback)
     return callback[kCallbackPromise]
   }
 
@@ -327,126 +319,12 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   }
 
   [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
-    const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
-    let topicsToFetch: string[] = []
-
-    // Determine which topics we need to fetch
-    if (!this.#metadata || options.forceUpdate) {
-      topicsToFetch = options.topics
-    } else {
-      for (const topic of options.topics) {
-        const existingTopic = this.#metadata.topics.get(topic)
-
-        if (!existingTopic || existingTopic.lastUpdate < expiralDate) {
-          topicsToFetch.push(topic)
-        }
-      }
-    }
-
-    // All topics are already up-to-date, simply return them
-    if (this.#metadata && !topicsToFetch.length && !options.forceUpdate) {
-      callback(null, {
-        ...this.#metadata!,
-        topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
-      })
-
-      return
-    }
-
-    const autocreateTopics = options.autocreateTopics ?? this[kOptions].autocreateTopics
-
-    this[kPerformDeduplicated](
-      // Unique key to avoid mixing callbacks
-      `metadata-${options.topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}`,
-      deduplicateCallback => {
-        this[kPerformWithRetry]<MetadataResponse>(
-          'metadata',
-          retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
-              if (error) {
-                retryCallback(error, undefined as unknown as MetadataResponse)
-                return
-              }
-
-              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
-                if (error) {
-                  retryCallback(error, undefined as unknown as MetadataResponse)
-                  return
-                }
-
-                api(connection, topicsToFetch, autocreateTopics, true, retryCallback)
-              })
-            })
-          },
-          (error: Error | null, metadata: MetadataResponse) => {
-            if (error) {
-              const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
-
-              // Stale metadata, we need to fetch everything again
-              if (hasStaleMetadata) {
-                this[kClearMetadata]()
-                topicsToFetch = options.topics
-              }
-
-              deduplicateCallback(error, undefined as unknown as ClusterMetadata)
-              return
-            }
-
-            const lastUpdate = Date.now()
-
-            if (!this.#metadata) {
-              this.#metadata = {
-                id: metadata.clusterId!,
-                brokers: new Map(),
-                topics: new Map(),
-                lastUpdate
-              }
-            } else {
-              this.#metadata.lastUpdate = lastUpdate
-            }
-
-            const brokers: ClusterMetadata['brokers'] = new Map()
-
-            // This should never change, but we act defensively here
-            for (const broker of metadata.brokers) {
-              const { host, port } = broker
-              brokers.set(broker.nodeId, { host, port })
-            }
-
-            this.#metadata.brokers = brokers
-
-            // Update all the topics in the cache
-            for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
-              /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
-              if (isInternal) {
-                continue
-              }
-
-              const partitions: ClusterTopicMetadata['partitions'] = []
-
-              for (const rawPartition of rawPartitions.sort((a, b) => a.partitionIndex - b.partitionIndex)) {
-                partitions[rawPartition.partitionIndex] = {
-                  leader: rawPartition.leaderId,
-                  leaderEpoch: rawPartition.leaderEpoch,
-                  replicas: rawPartition.replicaNodes
-                }
-              }
-
-              this.#metadata.topics.set(name!, { id, partitions, partitionsCount: rawPartitions.length, lastUpdate })
-            }
-
-            // Now build the object to return
-            const updatedMetadata = {
-              ...this.#metadata,
-              topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
-            }
-
-            this.emitWithDebug('client', 'metadata', updatedMetadata)
-            deduplicateCallback(null, updatedMetadata)
-          },
-          0
-        )
-      },
+    baseMetadataChannel.traceCallback(
+      this.#performMetadata,
+      1,
+      createDiagnosticContext({ client: this, operation: 'metadata' }),
+      this,
+      options,
       callback
     )
   }
@@ -638,6 +516,131 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kAfterCreate] (type: ClientType): void {
     this[kClientType] = type
     notifyCreation(type, this)
+  }
+
+  #performMetadata (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
+    const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
+    let topicsToFetch: string[] = []
+
+    // Determine which topics we need to fetch
+    if (!this.#metadata || options.forceUpdate) {
+      topicsToFetch = options.topics
+    } else {
+      for (const topic of options.topics) {
+        const existingTopic = this.#metadata.topics.get(topic)
+
+        if (!existingTopic || existingTopic.lastUpdate < expiralDate) {
+          topicsToFetch.push(topic)
+        }
+      }
+    }
+
+    // All topics are already up-to-date, simply return them
+    if (this.#metadata && !topicsToFetch.length && !options.forceUpdate) {
+      callback(null, {
+        ...this.#metadata!,
+        topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
+      })
+
+      return
+    }
+
+    const autocreateTopics = options.autocreateTopics ?? this[kOptions].autocreateTopics
+
+    this[kPerformDeduplicated](
+      // Unique key to avoid mixing callbacks
+      `metadata-${options.topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}`,
+      deduplicateCallback => {
+        this[kPerformWithRetry]<MetadataResponse>(
+          'metadata',
+          retryCallback => {
+            this[kGetBootstrapConnection]((error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as MetadataResponse)
+                return
+              }
+
+              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  return
+                }
+
+                api(connection, topicsToFetch, autocreateTopics, true, retryCallback)
+              })
+            })
+          },
+          (error: Error | null, metadata: MetadataResponse) => {
+            if (error) {
+              const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
+
+              // Stale metadata, we need to fetch everything again
+              if (hasStaleMetadata) {
+                this[kClearMetadata]()
+                topicsToFetch = options.topics
+              }
+
+              deduplicateCallback(error, undefined as unknown as ClusterMetadata)
+              return
+            }
+
+            const lastUpdate = Date.now()
+
+            if (!this.#metadata) {
+              this.#metadata = {
+                id: metadata.clusterId!,
+                brokers: new Map(),
+                topics: new Map(),
+                lastUpdate
+              }
+            } else {
+              this.#metadata.lastUpdate = lastUpdate
+            }
+
+            const brokers: ClusterMetadata['brokers'] = new Map()
+
+            // This should never change, but we act defensively here
+            for (const broker of metadata.brokers) {
+              const { host, port } = broker
+              brokers.set(broker.nodeId, { host, port })
+            }
+
+            this.#metadata.brokers = brokers
+
+            // Update all the topics in the cache
+            for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
+              /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
+              if (isInternal) {
+                continue
+              }
+
+              const partitions: ClusterTopicMetadata['partitions'] = []
+
+              for (const rawPartition of rawPartitions.sort((a, b) => a.partitionIndex - b.partitionIndex)) {
+                partitions[rawPartition.partitionIndex] = {
+                  leader: rawPartition.leaderId,
+                  leaderEpoch: rawPartition.leaderEpoch,
+                  replicas: rawPartition.replicaNodes
+                }
+              }
+
+              this.#metadata.topics.set(name!, { id, partitions, partitionsCount: rawPartitions.length, lastUpdate })
+            }
+
+            // Now build the object to return
+            const updatedMetadata = {
+              ...this.#metadata,
+              topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
+            }
+
+            this.emitWithDebug('client', 'metadata', updatedMetadata)
+            deduplicateCallback(null, updatedMetadata)
+          },
+          0
+        )
+      },
+      callback
+    )
   }
 
   #forwardEvents (source: EventEmitter, events: string[]): void {

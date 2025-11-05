@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
+  baseMetadataChannel,
   type ClientDiagnosticEvent,
   compressionsAlgorithms,
   GenericError,
@@ -402,7 +403,7 @@ test('send should return ProduceResult with offsets and support diagnostic chann
 
   const originalOptions = structuredClone(options)
 
-  const verifyTracingChannel = createTracingChannelVerifier(
+  const verifyProducingTracingChannel = createTracingChannelVerifier(
     producerSendsChannel,
     'client',
     {
@@ -426,6 +427,21 @@ test('send should return ProduceResult with offsets and support diagnostic chann
     (_label: string, data: ClientDiagnosticEvent) => data.operation === 'send'
   )
 
+  const verifyMetadataTracingChannel = createTracingChannelVerifier(
+    baseMetadataChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent[]) {
+        deepStrictEqual(context[1], { client: producer, operation: 'metadata', operationId: mockedOperationId })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    undefined,
+    true
+  )
+
   // Produce a message
   const result = await producer.send(options)
 
@@ -437,7 +453,8 @@ test('send should return ProduceResult with offsets and support diagnostic chann
   strictEqual(typeof result.offsets?.[0].partition, 'number')
   ok(result.offsets?.[0].offset >= 0n, 'Offset should be a non-negative bigint')
 
-  verifyTracingChannel()
+  verifyProducingTracingChannel()
+  verifyMetadataTracingChannel()
 })
 
 test('send should support messages with keys', async t => {
@@ -699,14 +716,15 @@ test('send should handle synchronuous error during payload creation', async t =>
 
   const compression = 'lz4'
   const expectedError = new GenericError('PLT_KFK_UNSUPPORTED_COMPRESSION', 'Avoid RUD')
-  t.mock.method(compressionsAlgorithms[compression], 'compressSync', () => { throw expectedError })
+  t.mock.method(compressionsAlgorithms[compression], 'compressSync', () => {
+    throw expectedError
+  })
 
   await rejects(
-
     async () => {
       await producer.send({
         messages: [{ topic: testTopic, value: Buffer.from('auto-init-idempotent-message') }],
-        compression,
+        compression
       })
     },
     (error: any) => {

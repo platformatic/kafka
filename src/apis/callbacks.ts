@@ -78,9 +78,11 @@ export function createTimeoutCallback<ReturnType> (
   }, timeout)
 
   return (error: Error | null, result: ReturnType) => {
+    /* c8 ignore next 3 - Hard to test */
     if (timeoutFired) {
       return
     }
+
     clearTimeout(timeoutHandle)
     callback(error, result)
   }

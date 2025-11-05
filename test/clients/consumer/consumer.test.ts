@@ -2371,6 +2371,8 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
     new Map([[topic, [0n, 0n, 0n]]]),
     new Map([[topic, [0n, 0n, 0n]]])
   ])
+
+  consumer.stopLagMonitoring()
 })
 
 test('startLagMonitoring should validate the supplied options', async t => {

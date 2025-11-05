@@ -79,7 +79,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['/', [errorCode, null]])
   }
 
   const response: DescribeLogDirsResponse = {
@@ -89,7 +89,7 @@ export function parseResponse (
       const errorCode = r.readInt16()
 
       if (errorCode !== 0) {
-        errors.push([`/results/${i}`, errorCode])
+        errors.push([`/results/${i}`, [errorCode, null]])
       }
 
       return {

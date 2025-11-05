@@ -132,7 +132,7 @@ export function parseResponse (
       }
 
       if (topic.errorCode !== 0) {
-        errors.push([`/topics/${i}`, topic.errorCode])
+        errors.push([`/topics/${i}`, [topic.errorCode, topic.errorMessage]])
       }
 
       return topic

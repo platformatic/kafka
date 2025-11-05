@@ -93,7 +93,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, null]])
   }
 
   const response: AddPartitionsToTxnResponse = {
@@ -114,7 +114,7 @@ export function parseResponse (
               if (partition.partitionErrorCode !== 0) {
                 errors.push([
                   `/results_by_transaction/${i}/topic_results/${j}/results_by_partitions/${k}`,
-                  partition.partitionErrorCode
+                  [partition.partitionErrorCode, null]
                 ])
               }
 

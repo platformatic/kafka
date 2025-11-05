@@ -2,6 +2,7 @@ import { promisify } from 'node:util'
 import { type Connection } from '../network/connection.ts'
 import { type Reader } from '../protocol/reader.ts'
 import { type Writer } from '../protocol/writer.ts'
+import { type NullableString } from '../protocol/definitions.ts'
 
 export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
 
@@ -16,7 +17,7 @@ export type ResponseParser<ReturnType> = (
   reader: Reader
 ) => ReturnType | Promise<ReturnType>
 
-export type ResponseErrorWithLocation = [string, number]
+export type ResponseErrorWithLocation = [string, [number, NullableString]]
 
 export type APIWithCallback<RequestArguments extends Array<unknown>, ResponseType> = (
   connection: Connection,

@@ -79,7 +79,7 @@ export function parseResponse (
       }
 
       if (state.errorCode !== 0) {
-        errors.push([`/transaction_states/${i}`, state.errorCode])
+        errors.push([`/transaction_states/${i}`, [state.errorCode, null]])
       }
 
       return state

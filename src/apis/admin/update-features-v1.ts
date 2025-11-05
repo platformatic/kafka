@@ -68,15 +68,16 @@ export function parseResponse (
 
   const throttleTimeMs = reader.readInt32()
   const errorCode = reader.readInt16()
+  const errorMessage = reader.readNullableString()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, errorMessage]])
   }
 
   const response: UpdateFeaturesResponse = {
     throttleTimeMs,
     errorCode,
-    errorMessage: reader.readNullableString(),
+    errorMessage,
     results: reader.readArray((r, i) => {
       const result = {
         feature: r.readString(),
@@ -85,7 +86,7 @@ export function parseResponse (
       }
 
       if (result.errorCode !== 0) {
-        errors.push([`/results/${i}`, result.errorCode])
+        errors.push([`/results/${i}`, [result.errorCode, result.errorMessage]])
       }
 
       return result

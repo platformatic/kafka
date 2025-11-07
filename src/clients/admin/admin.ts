@@ -3,6 +3,7 @@ import {
   type AlterClientQuotasResponse,
   type AlterClientQuotasResponseEntries
 } from '../../apis/admin/alter-client-quotas-v1.ts'
+import { type CreatePartitionsRequest, type CreatePartitionsResponse } from '../../apis/admin/create-partitions-v3.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
@@ -70,6 +71,7 @@ import { type BaseOptions } from '../base/types.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
   alterClientQuotasOptionsValidator,
+  createPartitionsOptionsValidator,
   createTopicsOptionsValidator,
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
@@ -85,6 +87,7 @@ import {
   type AlterClientQuotasOptions,
   type BrokerLogDirDescription,
   type CreatedTopic,
+  type CreatePartitionsOptions,
   type CreateTopicsOptions,
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
@@ -193,6 +196,35 @@ export class Admin extends Base<AdminOptions> {
       this.#deleteTopics,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteTopics', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  createPartitions (options: CreatePartitionsOptions, callback: CallbackWithPromise<void>): void
+  createPartitions (options: CreatePartitionsOptions): Promise<void>
+  createPartitions (options: CreatePartitionsOptions, callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, createPartitionsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined)
+      return callback[kCallbackPromise]
+    }
+
+    adminTopicsChannel.traceCallback(
+      this.#createPartitions,
+      1,
+      createDiagnosticContext({ client: this, operation: 'createPartitions', options }),
       this,
       options,
       callback
@@ -630,6 +662,48 @@ export class Admin extends Base<AdminOptions> {
         )
       },
       error => callback(error)
+    )
+  }
+
+  #createPartitions (options: CreatePartitionsOptions, callback: CallbackWithPromise<void>): void {
+    this[kPerformDeduplicated](
+      'createPartitions',
+      deduplicateCallback => {
+        this[kPerformWithRetry](
+          'createPartitions',
+          retryCallback => {
+            this.#getControllerConnection((error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as CreatePartitionsResponse)
+                return
+              }
+
+              this[kGetApi]<CreatePartitionsRequest, CreatePartitionsResponse>('CreatePartitions', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as CreatePartitionsResponse)
+                  return
+                }
+
+                api(connection, options.topics, this[kOptions].timeout!, options.validateOnly ?? false, (
+                  error,
+                  response
+                ) => {
+                  this.#handleNotControllerError(error, response, retryCallback)
+                })
+              })
+            })
+          },
+          deduplicateCallback,
+          0
+        )
+      },
+      error => {
+        if (error) {
+          callback(new MultipleErrors('Creating partitions failed.', [error]))
+        } else {
+          callback(null)
+        }
+      }
     )
   }
 

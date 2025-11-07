@@ -52,6 +52,19 @@ Options:
 | -------- | ---------- | ----------------- |
 | `topics` | `string[]` | Topics to delete. |
 
+### `createPartitions(options[, callback])`
+
+Creates additional partitions for existing topics.
+
+The return value is `void`.
+
+Options:
+
+| Property      | Type                             | Description                                                                                            |
+| ------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `topics`      | `CreatePartitionsRequestTopic[]` | Topics to create partitions for with information about partition count and assignments for each topic. |
+| `validateOnly`| `boolean`                        | Whether to only validate the request without applying changes. Defaults to `false`.                    |
+
 ### `listGroups(options[, callback])`
 
 Lists consumer groups.

@@ -51,6 +51,39 @@ export const deleteTopicOptionsSchema = {
   additionalProperties: false
 }
 
+export const createPartitionsOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: idProperty,
+          count: { type: 'number', minimum: 1 },
+          assignments: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                brokerIds: { type: 'array', items: { type: 'number' }, minItems: 1 }
+              },
+              required: ['brokerIds'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['name', 'count'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    validateOnly: { type: 'boolean', default: false }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const listGroupsOptionsSchema = {
   type: 'object',
   properties: {
@@ -222,6 +255,7 @@ export const describeLogDirsOptionsSchema = {
 }
 
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
+export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
 export const listGroupsOptionsValidator = ajv.compile(listGroupsOptionsSchema)

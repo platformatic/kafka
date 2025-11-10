@@ -1,7 +1,6 @@
 export {
   Base,
   kCheckNotClosed,
-  kClearMetadata,
   kGetApi,
   kGetBootstrapConnection,
   kGetConnection,

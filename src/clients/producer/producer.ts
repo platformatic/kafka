@@ -16,7 +16,6 @@ import {
   Base,
   kAfterCreate,
   kCheckNotClosed,
-  kClearMetadata,
   kClosed,
   kGetApi,
   kGetBootstrapConnection,
@@ -515,7 +514,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
 
             if (hasStaleMetadata && repeatOnStaleMetadata) {
-              this[kClearMetadata]()
+              this.clearMetadata()
               this.#performSingleDestinationSend(
                 topics,
                 messages,

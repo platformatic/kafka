@@ -61,7 +61,6 @@ import {
   Base,
   kAfterCreate,
   kCheckNotClosed,
-  kClearMetadata,
   kClosed,
   kCreateConnectionPool,
   kFetchConnections,
@@ -1909,7 +1908,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #handleMetadataError (error: Error | null): Error | null {
     if (error && (error as GenericError)?.findBy('hasStaleMetadata', true)) {
-      this[kClearMetadata]()
+      this.clearMetadata()
     }
 
     return error

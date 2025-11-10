@@ -53,7 +53,6 @@ export const kClosed = Symbol('plt.kafka.base.closed')
 export const kListApis = Symbol('plt.kafka.base.listApis')
 export const kMetadata = Symbol('plt.kafka.base.metadata')
 export const kCheckNotClosed = Symbol('plt.kafka.base.checkNotClosed')
-export const kClearMetadata = Symbol('plt.kafka.base.clearMetadata')
 export const kPerformWithRetry = Symbol('plt.kafka.base.performWithRetry')
 export const kPerformDeduplicated = Symbol('plt.kafka.base.performDeduplicated')
 export const kValidateOptions = Symbol('plt.kafka.base.validateOptions')
@@ -339,7 +338,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     return false
   }
 
-  [kClearMetadata] (): void {
+  clearMetadata (): void {
     this.#metadata = undefined
   }
 
@@ -576,7 +575,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
               // Stale metadata, we need to fetch everything again
               if (hasStaleMetadata) {
-                this[kClearMetadata]()
+                this.clearMetadata()
                 topicsToFetch = options.topics
               }
 

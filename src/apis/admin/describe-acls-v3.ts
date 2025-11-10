@@ -3,21 +3,13 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import { type AclOperation, type AclPermissionType, type PatternType, type ResourceType } from '../enumerations.ts'
+import { type AclPermission, type AclTarget, type AclFilter } from '../types.ts'
 
 export type DescribeAclsRequest = Parameters<typeof createRequest>
 
-export interface DescribeAclsResponseAcl {
-  principal: string
-  host: string
-  operation: number
-  permissionType: number
-}
-
-export interface DescribeAclsResponseResource {
-  resourceType: number
-  resourceName: string
-  patternType: number
-  acls: DescribeAclsResponseAcl[]
+export interface DescribeAclsResponseResource extends AclTarget {
+  acls: AclPermission[]
 }
 export interface DescribeAclsResponse {
   throttleTimeMs: number
@@ -36,23 +28,15 @@ export interface DescribeAclsResponse {
     operation => INT8
     permission_type => INT8
 */
-export function createRequest (
-  resourceTypeFilter: number,
-  resourceNameFilter: NullableString,
-  patternTypeFilter: number,
-  principalFilter: NullableString,
-  hostFilter: NullableString,
-  operation: number,
-  permissionType: number
-): Writer {
+export function createRequest (filter: AclFilter): Writer {
   return Writer.create()
-    .appendInt8(resourceTypeFilter)
-    .appendString(resourceNameFilter)
-    .appendInt8(patternTypeFilter)
-    .appendString(principalFilter)
-    .appendString(hostFilter)
-    .appendInt8(operation)
-    .appendInt8(permissionType)
+    .appendInt8(filter.resourceType)
+    .appendString(filter.resourceName)
+    .appendInt8(filter.patternType)
+    .appendString(filter.principal)
+    .appendString(filter.host)
+    .appendInt8(filter.operation)
+    .appendInt8(filter.permissionType)
     .appendTaggedFields()
 }
 
@@ -83,15 +67,15 @@ export function parseResponse (
     errorMessage: reader.readNullableString(),
     resources: reader.readArray(r => {
       return {
-        resourceType: r.readInt8(),
+        resourceType: r.readInt8() as ResourceType,
         resourceName: r.readString(),
-        patternType: r.readInt8(),
+        patternType: r.readInt8() as PatternType,
         acls: r.readArray(r => {
           return {
             principal: r.readString(),
             host: r.readString(),
-            operation: r.readInt8(),
-            permissionType: r.readInt8()
+            operation: r.readInt8() as AclOperation,
+            permissionType: r.readInt8() as AclPermissionType
           }
         })
       }

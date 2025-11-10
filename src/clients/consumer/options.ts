@@ -1,4 +1,4 @@
-import { allowedFetchIsolationLevels, allowedGroupProtocols } from '../../apis/enumerations.ts'
+import { allowedGroupProtocols, IsolationLevels } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
@@ -61,7 +61,7 @@ export const consumeOptionsProperties = {
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
   maxWaitTime: { type: 'number', minimum: 0 },
-  isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
+  isolationLevel: { type: 'string', enum: Object.values(IsolationLevels) },
   deserializers: serdeProperties,
   highWaterMark: { type: 'number', minimum: 1 }
 }
@@ -188,7 +188,7 @@ export const listCommitsOptionsSchema = {
   additionalProperties: false
 }
 
-export const listOffsetsOptionsSchema = {
+export const consumerListOffsetsOptionsSchema = {
   type: 'object',
   properties: {
     topics: { type: 'array', items: idProperty },
@@ -199,7 +199,7 @@ export const listOffsetsOptionsSchema = {
         items: { type: 'number', minimum: 0 }
       }
     },
-    isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
+    isolationLevel: { type: 'string', enum: Object.values(IsolationLevels) },
     timestamp: { bigint: true }
   },
   required: ['topics'],
@@ -243,7 +243,7 @@ export const consumerOptionsValidator = ajv.compile(consumerOptionsSchema)
 export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)
 export const commitOptionsValidator = ajv.compile(commitOptionsSchema)
 export const listCommitsOptionsValidator = ajv.compile(listCommitsOptionsSchema)
-export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
+export const consumerListOffsetsOptionsValidator = ajv.compile(consumerListOffsetsOptionsSchema)
 export const getLagOptionsValidator = ajv.compile(getLagOptionsSchema)
 
 export const defaultConsumerOptions = {
@@ -255,6 +255,6 @@ export const defaultConsumerOptions = {
   minBytes: 1,
   maxBytes: 1_048_576 * 10, // 10 MB
   maxWaitTime: 5_000,
-  isolationLevel: 'READ_COMMITTED',
+  isolationLevel: IsolationLevels.READ_COMMITTED,
   highWaterMark: 1024
 } satisfies Partial<ConsumerOptions<Buffer, Buffer, Buffer, Buffer>>

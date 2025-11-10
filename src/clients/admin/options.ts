@@ -1,4 +1,4 @@
-import { ClientQuotaMatchTypes, ConsumerGroupStates } from '../../apis/enumerations.ts'
+import { ClientQuotaMatchTypes, ConsumerGroupStates, IsolationLevels } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
@@ -199,6 +199,40 @@ export const describeLogDirsOptionsSchema = {
   additionalProperties: false
 }
 
+export const adminListOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                partitionIndex: { type: 'number', minimum: 0 },
+                timestamp: { bigint: true }
+              },
+              required: ['partitionIndex', 'timestamp'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitions'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    isolationLevel: { type: ['number', 'null'], enum: [null, ...Object.values(IsolationLevels)] }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
@@ -208,3 +242,4 @@ export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchem
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
+export const adminListOffsetsOptionsValidator = ajv.compile(adminListOffsetsOptionsSchema)

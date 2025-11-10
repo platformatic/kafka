@@ -6,8 +6,8 @@ import {
   type DescribeLogDirsResponse,
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
-import { type ConsumerGroupState } from '../../apis/enumerations.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type IsolationLevel, type ConsumerGroupState } from '../../apis/enumerations.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
 
@@ -97,4 +97,31 @@ export interface BrokerLogDirDescription {
   broker: number
   throttleTimeMs: DescribeLogDirsResponse['throttleTimeMs']
   results: Omit<DescribeLogDirsResponseResult, 'errorCode'>[]
+}
+
+export interface PartitionTimestamp {
+  partitionIndex: number
+  timestamp: bigint
+}
+
+export interface TopicOffsetRequest {
+  name: string
+  partitions: PartitionTimestamp[]
+}
+
+export interface AdminListOffsetsOptions {
+  topics: TopicOffsetRequest[]
+  isolationLevel?: Nullable<IsolationLevel>
+}
+
+export interface AdminListedOffsetsPartition {
+  partitionIndex: number
+  timestamp: bigint
+  offset: bigint
+  leaderEpoch: number
+}
+
+export interface AdminListedOffsetsTopic {
+  name: string
+  partitions: AdminListedOffsetsPartition[]
 }

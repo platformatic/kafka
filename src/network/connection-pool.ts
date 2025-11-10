@@ -92,7 +92,7 @@ export class ConnectionPool extends EventEmitter {
 
     this.#closed = true
 
-    runConcurrentCallbacks<void>(
+    runConcurrentCallbacks<void, Map<string, Connection>>(
       'Closing connections failed.',
       this.#connections,
       ([key, connection]: [string, Connection], cb: Callback<void>) => {

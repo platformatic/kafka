@@ -1,4 +1,5 @@
-import { Admin, Consumer, debugDump } from '../../src/index.ts'
+import { Admin } from '../../src/clients/admin/index.ts'
+import { Consumer, debugDump } from '../../src/index.ts'
 
 const consumer1 = new Consumer({
   groupId: 'id1',

@@ -1,4 +1,5 @@
-import { Admin, debugDump, sleep } from '../../src/index.ts'
+import { Admin } from '../../src/clients/admin/index.ts'
+import { debugDump, sleep } from '../../src/index.ts'
 import { brokers, topic } from './definitions.ts'
 
 const admin = new Admin({ clientId: 'id', bootstrapBrokers: brokers, strict: true })

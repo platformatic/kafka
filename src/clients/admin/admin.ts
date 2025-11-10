@@ -34,6 +34,11 @@ import {
   type IncrementalAlterConfigsRequest,
   type IncrementalAlterConfigsResponse
 } from '../../apis/admin/incremental-alter-configs-v1.ts'
+import {
+  type ListOffsetsRequest,
+  type ListOffsetsRequestTopic,
+  type ListOffsetsResponse
+} from '../../apis/consumer/list-offsets-v9.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
   type DeleteTopicsRequest,
@@ -68,7 +73,8 @@ import {
   type ConfigResourceTypeValue,
   ConfigResourceTypes,
   FindCoordinatorKeyTypes,
-  type ConsumerGroupStateValue
+  type ConsumerGroupStateValue,
+  FetchIsolationLevels
 } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
@@ -79,6 +85,7 @@ import {
   adminConfigsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
+  adminOffsetsChannel,
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
@@ -121,9 +128,12 @@ import {
   listConsumerGroupOffsetsOptionsValidator,
   deleteAclsOptionsValidator,
   describeAclsOptionsValidator,
-  createAclsOptionsValidator
+  createAclsOptionsValidator,
+  listOffsetsOptionsValidator
 } from './options.ts'
 import {
+  type ListedOffsetsTopic,
+  type ListOffsetsOptions,
   type AdminOptions,
   type AlterClientQuotasOptions,
   type AlterConfigsOptions,
@@ -823,6 +833,38 @@ export class Admin extends Base<AdminOptions> {
     )
 
     return callback[kCallbackPromise]
+  }
+
+  listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void
+  listOffsets (options: ListOffsetsOptions): Promise<ListedOffsetsTopic[]>
+  listOffsets (
+    options: ListOffsetsOptions,
+    callback?: CallbackWithPromise<ListedOffsetsTopic[]>
+  ): void | Promise<ListedOffsetsTopic[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as ListedOffsetsTopic[])
+      return callback[kCallbackPromise]
+    }
+
+    adminOffsetsChannel.traceCallback(
+      this.#listOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback![kCallbackPromise]
   }
 
   #getControllerConnection (callback: Callback<Connection>): void {
@@ -2192,5 +2234,101 @@ export class Admin extends Base<AdminOptions> {
       },
       0
     )
+  }
+
+  #listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void {
+    this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as ListedOffsetsTopic[])
+        return
+      }
+
+      const requests = new Map<number, ListOffsetsRequestTopic[]>()
+
+      for (const topic of options.topics) {
+        for (const partition of topic.partitions) {
+          const { leader, leaderEpoch } = metadata.topics.get(topic.name)!.partitions[partition.partitionIndex]
+          let leaderRequests = requests.get(leader)
+          if (!leaderRequests) {
+            leaderRequests = []
+            requests.set(leader, leaderRequests)
+          }
+
+          let topicRequest = leaderRequests.find(t => t.name === topic.name)
+          if (!topicRequest) {
+            topicRequest = { name: topic.name, partitions: [] }
+            leaderRequests.push(topicRequest)
+          }
+
+          topicRequest.partitions.push({
+            partitionIndex: partition.partitionIndex,
+            currentLeaderEpoch: leaderEpoch,
+            timestamp: partition.timestamp ?? -1n
+          })
+        }
+      }
+
+      runConcurrentCallbacks<ListOffsetsResponse>(
+        'Listing offsets failed.',
+        requests,
+        ([leader, requests], concurrentCallback) => {
+          this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
+            if (error) {
+              concurrentCallback(error, undefined as unknown as ListOffsetsResponse)
+              return
+            }
+            this[kPerformWithRetry](
+              'listOffsets',
+              retryCallback => {
+                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
+                  if (error) {
+                    retryCallback(error, undefined as unknown as ListOffsetsResponse)
+                    return
+                  }
+
+                  api(
+                    connection,
+                    -1,
+                    options.isolationLevel ?? FetchIsolationLevels.READ_UNCOMMITTED,
+                    Array.from(requests.values()),
+                    retryCallback
+                  )
+                })
+              },
+              concurrentCallback,
+              0
+            )
+          })
+        },
+        (error, responses) => {
+          if (error) {
+            callback(error, undefined as unknown as ListedOffsetsTopic[])
+            return
+          }
+
+          const ret: ListedOffsetsTopic[] = []
+
+          for (const response of responses) {
+            for (const topic of response.topics) {
+              let topicOffsets = ret.find(t => t.name === topic.name)
+              if (!topicOffsets) {
+                topicOffsets = { name: topic.name, partitions: [] }
+                ret.push(topicOffsets)
+              }
+              for (const partition of topic.partitions) {
+                topicOffsets.partitions.push({
+                  offset: partition.offset,
+                  timestamp: partition.timestamp,
+                  partitionIndex: partition.partitionIndex,
+                  leaderEpoch: partition.leaderEpoch
+                })
+              }
+            }
+          }
+
+          callback(null, ret)
+        }
+      )
+    })
   }
 }

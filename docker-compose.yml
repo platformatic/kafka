@@ -149,6 +149,9 @@ services:
       # Consumer group options
       KAFKA_CFG_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: "classic,consumer"
       KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      # ACL options
+      KAFKA_AUTHORIZER_CLASS_NAME: "org.apache.kafka.metadata.authorizer.StandardAuthorizer"
+      KAFKA_SUPER_USERS: "User:ANONYMOUS"
 
   broker-cluster-2:
     image: *image

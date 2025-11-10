@@ -65,7 +65,8 @@ export const ResourceTypes = {
   GROUP: 3,
   CLUSTER: 4,
   TRANSACTIONAL_ID: 5,
-  DELEGATION_TOKEN: 6
+  DELEGATION_TOKEN: 6,
+  USER: 7
 } as const
 export const allowedResourceTypes = Object.values(ResourceTypes)
 export type ResourceTypeLabel = keyof typeof ResourceTypes
@@ -93,7 +94,10 @@ export const AclOperations = {
   CLUSTER_ACTION: 9,
   DESCRIBE_CONFIGS: 10,
   ALTER_CONFIGS: 11,
-  IDEMPOTENT_WRITE: 12
+  IDEMPOTENT_WRITE: 12,
+  CREATE_TOKENS: 13,
+  DESCRIBE_TOKENS: 14,
+  TWO_PHASE_COMMIT: 15
 } as const
 export const allowedAclOperations = Object.values(AclOperations)
 export type AclOperationLabel = keyof typeof AclOperations

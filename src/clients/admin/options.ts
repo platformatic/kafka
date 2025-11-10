@@ -3,7 +3,10 @@ import {
   allowedResourceTypes,
   ClientQuotaMatchTypes,
   ConsumerGroupStates,
-  IncrementalAlterConfigOperationTypes
+  IncrementalAlterConfigOperationTypes,
+  allowedAclOperations,
+  allowedAclPermissionTypes,
+  allowedResourcePatternTypes
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
@@ -483,6 +486,77 @@ export const incrementalAlterConfigsOptionsSchema = {
   additionalProperties: false
 }
 
+const aclSchema = {
+  type: 'object',
+  properties: {
+    resourceType: { type: 'number', enum: allowedResourceTypes },
+    resourceName: { type: 'string', minLength: 1 },
+    resourcePatternType: { type: 'number', enum: allowedResourcePatternTypes },
+    principal: { type: 'string', minLength: 1 },
+    host: { type: 'string', minLength: 1 },
+    operation: { type: 'number', enum: allowedAclOperations },
+    permissionType: { type: 'number', enum: allowedAclPermissionTypes }
+  },
+  required: ['resourceType', 'resourceName', 'resourcePatternType', 'principal', 'host', 'operation', 'permissionType'],
+  additionalProperties: false
+}
+
+const aclFilterSchema = {
+  type: 'object',
+  properties: {
+    resourceType: { type: 'number', enum: allowedResourceTypes },
+    resourceName: {
+      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
+    },
+    resourcePatternType: { type: 'number', enum: allowedResourcePatternTypes },
+    principal: {
+      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
+    },
+    host: {
+      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
+    },
+    operation: { type: 'number', enum: allowedAclOperations },
+    permissionType: { type: 'number', enum: allowedAclPermissionTypes }
+  },
+  required: ['resourceType', 'resourcePatternType', 'operation', 'permissionType'],
+  additionalProperties: false
+}
+
+export const createAclsOptionsSchema = {
+  type: 'object',
+  properties: {
+    creations: {
+      type: 'array',
+      items: aclSchema,
+      minItems: 1
+    }
+  },
+  required: ['creations'],
+  additionalProperties: false
+}
+
+export const describeAclsOptionsSchema = {
+  type: 'object',
+  properties: {
+    filter: aclFilterSchema
+  },
+  required: ['filter'],
+  additionalProperties: false
+}
+
+export const deleteAclsOptionsSchema = {
+  type: 'object',
+  properties: {
+    filters: {
+      type: 'array',
+      items: aclFilterSchema,
+      minItems: 1
+    }
+  },
+  required: ['filters'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
@@ -500,3 +574,6 @@ export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumer
 export const describeConfigsOptionsValidator = ajv.compile(describeConfigsOptionsSchema)
 export const alterConfigsOptionsValidator = ajv.compile(alterConfigsOptionsSchema)
 export const incrementalAlterConfigsOptionsValidator = ajv.compile(incrementalAlterConfigsOptionsSchema)
+export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
+export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
+export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)

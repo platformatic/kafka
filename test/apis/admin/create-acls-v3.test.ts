@@ -1,65 +1,30 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { createAclsV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import {
+  AclOperations,
+  AclPermissionTypes,
+  createAclsV3,
+  ResourcePatternTypes,
+  Reader,
+  ResourceTypes,
+  ResponseError,
+  Writer
+} from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = createAclsV3
 
-// Constants for ACL resource types, pattern types, operations, and permission types
-const RESOURCE_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  TOPIC: 2,
-  GROUP: 3,
-  CLUSTER: 4,
-  TRANSACTIONAL_ID: 5,
-  DELEGATION_TOKEN: 6
-}
-
-const PATTERN_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  MATCH: 2,
-  LITERAL: 3,
-  PREFIXED: 4
-}
-
-const OPERATION = {
-  UNKNOWN: 0,
-  ANY: 1,
-  ALL: 2,
-  READ: 3,
-  WRITE: 4,
-  CREATE: 5,
-  DELETE: 6,
-  ALTER: 7,
-  DESCRIBE: 8,
-  CLUSTER_ACTION: 9,
-  DESCRIBE_CONFIGS: 10,
-  ALTER_CONFIGS: 11,
-  IDEMPOTENT_WRITE: 12
-}
-
-const PERMISSION_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  DENY: 2,
-  ALLOW: 3
-}
-
 test('createRequest serializes a single ACL creation correctly', () => {
-  const creations = [
+  const writer = createRequest([
     {
-      resourceType: RESOURCE_TYPE.TOPIC,
+      resourceType: ResourceTypes.TOPIC,
       resourceName: 'test-topic',
-      resourcePatternType: PATTERN_TYPE.LITERAL,
+      resourcePatternType: ResourcePatternTypes.LITERAL,
       principal: 'User:test-user',
       host: '*',
-      operation: OPERATION.READ,
-      permissionType: PERMISSION_TYPE.ALLOW
+      operation: AclOperations.READ,
+      permissionType: AclPermissionTypes.ALLOW
     }
-  ]
-
-  const writer = createRequest(creations)
+  ])
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -93,13 +58,13 @@ test('createRequest serializes a single ACL creation correctly', () => {
     creationsArray,
     [
       {
-        resourceType: RESOURCE_TYPE.TOPIC,
+        resourceType: ResourceTypes.TOPIC,
         resourceName: 'test-topic',
-        resourcePatternType: PATTERN_TYPE.LITERAL,
+        resourcePatternType: ResourcePatternTypes.LITERAL,
         principal: 'User:test-user',
         host: '*',
-        operation: OPERATION.READ,
-        permissionType: PERMISSION_TYPE.ALLOW
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
       }
     ],
     'Serialized data should match expected values'
@@ -107,37 +72,35 @@ test('createRequest serializes a single ACL creation correctly', () => {
 })
 
 test('createRequest serializes multiple ACL creations correctly', () => {
-  const creations = [
+  const writer = createRequest([
     {
-      resourceType: RESOURCE_TYPE.TOPIC,
+      resourceType: ResourceTypes.TOPIC,
       resourceName: 'test-topic',
-      resourcePatternType: PATTERN_TYPE.LITERAL,
+      resourcePatternType: ResourcePatternTypes.LITERAL,
       principal: 'User:test-user',
       host: '*',
-      operation: OPERATION.READ,
-      permissionType: PERMISSION_TYPE.ALLOW
+      operation: AclOperations.READ,
+      permissionType: AclPermissionTypes.ALLOW
     },
     {
-      resourceType: RESOURCE_TYPE.TOPIC,
+      resourceType: ResourceTypes.TOPIC,
       resourceName: 'test-topic',
-      resourcePatternType: PATTERN_TYPE.LITERAL,
+      resourcePatternType: ResourcePatternTypes.LITERAL,
       principal: 'User:test-user',
       host: '*',
-      operation: OPERATION.WRITE,
-      permissionType: PERMISSION_TYPE.ALLOW
+      operation: AclOperations.WRITE,
+      permissionType: AclPermissionTypes.ALLOW
     },
     {
-      resourceType: RESOURCE_TYPE.GROUP,
+      resourceType: ResourceTypes.GROUP,
       resourceName: 'test-group',
-      resourcePatternType: PATTERN_TYPE.LITERAL,
+      resourcePatternType: ResourcePatternTypes.LITERAL,
       principal: 'User:test-user',
       host: '*',
-      operation: OPERATION.READ,
-      permissionType: PERMISSION_TYPE.ALLOW
+      operation: AclOperations.READ,
+      permissionType: AclPermissionTypes.ALLOW
     }
-  ]
-
-  const writer = createRequest(creations)
+  ])
   const reader = Reader.from(writer)
 
   // Read creations array
@@ -165,31 +128,29 @@ test('createRequest serializes multiple ACL creations correctly', () => {
   deepStrictEqual(creationsArray.length, 3, 'Should correctly serialize multiple ACL creations')
 
   // Verify specific fields from different ACL creations
-  deepStrictEqual(creationsArray[0].operation, OPERATION.READ, 'First ACL should have READ operation')
+  deepStrictEqual(creationsArray[0].operation, AclOperations.READ, 'First ACL should have READ operation')
 
-  deepStrictEqual(creationsArray[1].operation, OPERATION.WRITE, 'Second ACL should have WRITE operation')
+  deepStrictEqual(creationsArray[1].operation, AclOperations.WRITE, 'Second ACL should have WRITE operation')
 
-  deepStrictEqual(creationsArray[2].resourceType, RESOURCE_TYPE.GROUP, 'Third ACL should have GROUP resource type')
+  deepStrictEqual(creationsArray[2].resourceType, ResourceTypes.GROUP, 'Third ACL should have GROUP resource type')
 })
 
 test('createRequest serializes pattern type correctly', () => {
-  const patternTypes = [PATTERN_TYPE.LITERAL, PATTERN_TYPE.PREFIXED]
+  const resourcePatternTypes = [ResourcePatternTypes.LITERAL, ResourcePatternTypes.PREFIXED]
 
   // Test each pattern type
-  for (const patternType of patternTypes) {
-    const creations = [
+  for (const resourcePatternType of resourcePatternTypes) {
+    const writer = createRequest([
       {
-        resourceType: RESOURCE_TYPE.TOPIC,
+        resourceType: ResourceTypes.TOPIC,
         resourceName: 'test-topic',
-        resourcePatternType: patternType,
+        resourcePatternType,
         principal: 'User:test-user',
         host: '*',
-        operation: OPERATION.READ,
-        permissionType: PERMISSION_TYPE.ALLOW
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
       }
-    ]
-
-    const writer = createRequest(creations)
+    ])
     const reader = Reader.from(writer)
 
     // Read creation and verify pattern type
@@ -215,8 +176,8 @@ test('createRequest serializes pattern type correctly', () => {
 
     deepStrictEqual(
       creation.resourcePatternType,
-      patternType,
-      `Pattern type ${patternType} should be serialized correctly`
+      resourcePatternType,
+      `Pattern type ${resourcePatternType} should be serialized correctly`
     )
   }
 })

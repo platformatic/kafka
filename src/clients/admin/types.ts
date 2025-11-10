@@ -17,6 +17,7 @@ import { type ConfigResourceTypeValue, type ConsumerGroupStateValue } from '../.
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
+import { type Acl, type AclFilter } from '../../apis/types.ts'
 
 export interface BrokerAssignment {
   partition: number
@@ -188,4 +189,16 @@ export interface AlterConfigsOptions {
 export interface IncrementalAlterConfigsOptions {
   resources: IncrementalAlterConfigsRequestResource[]
   validateOnly?: boolean
+}
+
+export interface CreateAclsOptions {
+  creations: Acl[]
+}
+
+export interface DescribeAclsOptions {
+  filter: AclFilter
+}
+
+export interface DeleteAclsOptions {
+  filters: AclFilter[]
 }

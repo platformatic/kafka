@@ -98,10 +98,10 @@ The return value is an object specifying quotas for the requested user/client co
 
 Options:
 
-| Property   | Type                                     | Description                                                                                             |
-| ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| components | `DescribeClientQuotasRequestComponent[]` | Array of components specifying the entity types and match criteria for which to describe client quotas. |
-| strict     | `boolean`                                | Whether to use strict matching for components. Defaults to `false`.                                     |
+| Property   | Type                                          | Description                                                                                              |
+| ---------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| components | `DescribeClientQuotasRequestComponent[]`      | Array of components specifying the entity types and match criteria for which to describe client quotas.  |
+| strict     | `boolean`                                     | Whether to use strict matching for components. Defaults to `false`.                                      |
 
 ### `alterClientQuotas(options[, callback])`
 
@@ -111,48 +111,10 @@ The return value is a list of entities for which quotas have been changed.
 
 Options:
 
-| Property     | Type                              | Description                                                                         |
-| ------------ | --------------------------------- | ----------------------------------------------------------------------------------- |
-| entries      | `AlterClientQuotasRequestEntry[]` | Array of entries specifying the entities and quotas to change.                      |
-| validateOnly | `boolean`                         | Whether to only validate the request without applying changes. Defaults to `false`. |
-
-### `createAcls(options[, callback])`
-
-Creates Access Control List (ACL) entries to define permissions for Kafka resources.
-
-The return value is `void`.
-
-Options:
-
-| Property   | Type    | Description                     |
-| ---------- | ------- | ------------------------------- |
-| creations  | `Acl[]` | Array of ACL entries to create. |
-
-### `describeAcls(options[, callback])`
-
-Describes existing Access Control List (ACL) entries that match the specified filter criteria.
-
-The return value is an array of resources with their associated ACL entries.
-
-Options:
-
-| Property | Type        | Description                               |
-| -------- | ----------- | ----------------------------------------- |
-| filter   | `AclFilter` | Filter criteria for matching ACL entries. |
-
-The filter contains the same properties as ACL entries, but `resourceName`, `principal`, and `host` can be `null` to match any value.
-
-### `deleteAcls(options[, callback])`
-
-Deletes Access Control List (ACL) entries that match the specified filter criteria.
-
-The return value is an array of deleted ACL entries.
-
-Options:
-
-| Property | Type          | Description                                         |
-| -------- | ------------- | --------------------------------------------------- |
-| filters  | `AclFilter[]` | Array of filter criteria for ACL entries to delete. |
+| Property     | Type                              | Description                                                                               |
+| ------------ | --------------------------------- | ----------------------------------------------------------------------------------------- |
+| entries      | `AlterClientQuotasRequestEntry[]` | Array of entries specifying the entities and quotas to change.                            |
+| validateOnly | `boolean`                         | Whether to only validate the request without applying changes. Defaults to `false`.       |
 
 ### `describeLogDirs(options[, callback])`
 

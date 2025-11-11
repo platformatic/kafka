@@ -1,11 +1,4 @@
-import {
-  AclOperations,
-  AclPermissionTypes,
-  ClientQuotaMatchTypes,
-  ConsumerGroupStates,
-  PatternTypes,
-  ResourceTypes
-} from '../../apis/enumerations.ts'
+import { ClientQuotaMatchTypes, ConsumerGroupStates } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
@@ -206,77 +199,6 @@ export const describeLogDirsOptionsSchema = {
   additionalProperties: false
 }
 
-const aclSchema = {
-  type: 'object',
-  properties: {
-    resourceType: { type: 'number', enum: Object.values(ResourceTypes) },
-    resourceName: { type: 'string', minLength: 1 },
-    patternType: { type: 'number', enum: Object.values(PatternTypes) },
-    principal: { type: 'string', minLength: 1 },
-    host: { type: 'string', minLength: 1 },
-    operation: { type: 'number', enum: Object.values(AclOperations) },
-    permissionType: { type: 'number', enum: Object.values(AclPermissionTypes) }
-  },
-  required: ['resourceType', 'resourceName', 'patternType', 'principal', 'host', 'operation', 'permissionType'],
-  additionalProperties: false
-}
-
-const aclFilterSchema = {
-  type: 'object',
-  properties: {
-    resourceType: { type: 'number', enum: Object.values(ResourceTypes) },
-    resourceName: {
-      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
-    },
-    patternType: { type: 'number', enum: Object.values(PatternTypes) },
-    principal: {
-      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
-    },
-    host: {
-      anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }]
-    },
-    operation: { type: 'number', enum: Object.values(AclOperations) },
-    permissionType: { type: 'number', enum: Object.values(AclPermissionTypes) }
-  },
-  required: ['resourceType', 'patternType', 'operation', 'permissionType'],
-  additionalProperties: false
-}
-
-export const createAclsOptionsSchema = {
-  type: 'object',
-  properties: {
-    creations: {
-      type: 'array',
-      items: aclSchema,
-      minItems: 1
-    }
-  },
-  required: ['creations'],
-  additionalProperties: false
-}
-
-export const describeAclsOptionsSchema = {
-  type: 'object',
-  properties: {
-    filter: aclFilterSchema
-  },
-  required: ['filter'],
-  additionalProperties: false
-}
-
-export const deleteAclsOptionsSchema = {
-  type: 'object',
-  properties: {
-    filters: {
-      type: 'array',
-      items: aclFilterSchema,
-      minItems: 1
-    }
-  },
-  required: ['filters'],
-  additionalProperties: false
-}
-
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
@@ -286,6 +208,3 @@ export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchem
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
-export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
-export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
-export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)

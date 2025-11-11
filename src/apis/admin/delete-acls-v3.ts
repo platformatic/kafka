@@ -3,14 +3,28 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-import { type AclOperation, type AclPermissionType, type PatternType, type ResourceType } from '../enumerations.ts'
-import { type Acl, type AclFilter } from '../types.ts'
 
+export interface DeleteAclsRequestFilter {
+  resourceTypeFilter: number
+  resourceNameFilter?: NullableString
+  patternTypeFilter: number
+  principalFilter?: NullableString
+  hostFilter?: NullableString
+  operation: number
+  permissionType: number
+}
 export type DeleteAclsRequest = Parameters<typeof createRequest>
 
-export interface DeleteAclsResponseMatchingAcl extends Acl {
+export interface DeleteAclsResponseMatchingAcl {
   errorCode: number
   errorMessage: NullableString
+  resourceType: number
+  resourceName: string
+  patternType: number
+  principal: string
+  host: string
+  operation: number
+  permissionType: number
 }
 
 export interface DeleteAclsResponseFilterResults {
@@ -34,14 +48,14 @@ export interface DeleteAclsResponse {
       operation => INT8
       permission_type => INT8
 */
-export function createRequest (filters: AclFilter[]): Writer {
+export function createRequest (filters: DeleteAclsRequestFilter[]): Writer {
   return Writer.create()
     .appendArray(filters, (w, f) => {
-      w.appendInt8(f.resourceType)
-        .appendString(f.resourceName)
-        .appendInt8(f.patternType)
-        .appendString(f.principal)
-        .appendString(f.host)
+      w.appendInt8(f.resourceTypeFilter)
+        .appendString(f.resourceNameFilter)
+        .appendInt8(f.patternTypeFilter)
+        .appendString(f.principalFilter)
+        .appendString(f.hostFilter)
         .appendInt8(f.operation)
         .appendInt8(f.permissionType)
     })
@@ -95,13 +109,13 @@ export function parseResponse (
           return {
             errorCode,
             errorMessage: r.readNullableString(),
-            resourceType: r.readInt8() as ResourceType,
+            resourceType: r.readInt8(),
             resourceName: r.readString(),
-            patternType: r.readInt8() as PatternType,
+            patternType: r.readInt8(),
             principal: r.readString(),
             host: r.readString(),
-            operation: r.readInt8() as AclOperation,
-            permissionType: r.readInt8() as AclPermissionType
+            operation: r.readInt8(),
+            permissionType: r.readInt8()
           }
         })
       }

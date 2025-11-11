@@ -48,13 +48,12 @@ export const ResourceTypes = {
   GROUP: 3,
   CLUSTER: 4,
   TRANSACTIONAL_ID: 5,
-  DELEGATION_TOKEN: 6,
-  USER: 7
+  DELEGATION_TOKEN: 6
 } as const
-export type ResourceType = (typeof ResourceTypes)[keyof typeof ResourceTypes]
+export type ResourceType = keyof typeof ResourceTypes
 
-export const PatternTypes = { UNKNOWN: 0, ANY: 1, MATCH: 2, LITERAL: 3, PREFIXED: 4 } as const
-export type PatternType = (typeof PatternTypes)[keyof typeof PatternTypes]
+export const ResourcePatternTypes = { UNKNOWN: 0, ANY: 1, MATCH: 2, LITERAL: 3, PREFIXED: 4 } as const
+export type ResourcePatternType = keyof typeof ResourcePatternTypes
 
 export const AclOperations = {
   UNKNOWN: 0,
@@ -69,15 +68,12 @@ export const AclOperations = {
   CLUSTER_ACTION: 9,
   DESCRIBE_CONFIGS: 10,
   ALTER_CONFIGS: 11,
-  IDEMPOTENT_WRITE: 12,
-  CREATE_TOKENS: 13,
-  DESCRIBE_TOKENS: 14,
-  TWO_PHASE_COMMIT: 15
+  IDEMPOTENT_WRITE: 12
 } as const
-export type AclOperation = (typeof AclOperations)[keyof typeof AclOperations]
+export type AclOperation = keyof typeof AclOperations
 
 export const AclPermissionTypes = { UNKNOWN: 0, ANY: 1, DENY: 2, ALLOW: 3 } as const
-export type AclPermissionType = (typeof AclPermissionTypes)[keyof typeof AclPermissionTypes]
+export type AclPermissionType = keyof typeof AclPermissionTypes
 
 // ./admin/*-configs.ts
 export const ConfigSources = {

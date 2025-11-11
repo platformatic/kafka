@@ -1,10 +1,3 @@
-import { type CreateAclsRequest, type CreateAclsResponse } from '../../apis/admin/create-acls-v3.ts'
-import { type DeleteAclsRequest, type DeleteAclsResponse } from '../../apis/admin/delete-acls-v3.ts'
-import {
-  type DescribeAclsResponseResource,
-  type DescribeAclsRequest,
-  type DescribeAclsResponse
-} from '../../apis/admin/describe-acls-v3.ts'
 import {
   type AlterClientQuotasRequest,
   type AlterClientQuotasResponse,
@@ -45,7 +38,6 @@ import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enu
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
-  adminAclsChannel,
   adminClientQuotasChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
@@ -78,10 +70,7 @@ import {
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
   listGroupsOptionsValidator,
-  listTopicsOptionsValidator,
-  deleteAclsOptionsValidator,
-  describeAclsOptionsValidator,
-  createAclsOptionsValidator
+  listTopicsOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -98,12 +87,8 @@ import {
   type GroupBase,
   type GroupMember,
   type ListGroupsOptions,
-  type ListTopicsOptions,
-  type DescribeAclsOptions,
-  type CreateAclsOptions,
-  type DeleteAclsOptions
+  type ListTopicsOptions
 } from './types.ts'
-import { type Acl } from '../../apis/types.ts'
 
 export class Admin extends Base<AdminOptions> {
   constructor (options: AdminOptions) {
@@ -399,96 +384,6 @@ export class Admin extends Base<AdminOptions> {
       this.#describeLogDirs,
       1,
       createDiagnosticContext({ client: this, operation: 'describeLogDirs', options }),
-      this,
-      options,
-      callback
-    )
-
-    return callback[kCallbackPromise]
-  }
-
-  createAcls (options: CreateAclsOptions, callback: CallbackWithPromise<void>): void
-  createAcls (options: CreateAclsOptions): Promise<void>
-  createAcls (options: CreateAclsOptions, callback?: CallbackWithPromise<void>): void | Promise<void> {
-    if (!callback) {
-      callback = createPromisifiedCallback()
-    }
-
-    if (this[kCheckNotClosed](callback)) {
-      return callback[kCallbackPromise]
-    }
-
-    const validationError = this[kValidateOptions](options, createAclsOptionsValidator, '/options', false)
-    if (validationError) {
-      callback(validationError, undefined)
-      return callback[kCallbackPromise]
-    }
-
-    adminAclsChannel.traceCallback(
-      this.#createAcls,
-      1,
-      createDiagnosticContext({ client: this, operation: 'createAcls', options }),
-      this,
-      options,
-      callback
-    )
-
-    return callback[kCallbackPromise]
-  }
-
-  describeAcls (options: DescribeAclsOptions, callback: CallbackWithPromise<DescribeAclsResponseResource[]>): void
-  describeAcls (options: DescribeAclsOptions): Promise<DescribeAclsResponseResource[]>
-  describeAcls (
-    options: DescribeAclsOptions,
-    callback?: CallbackWithPromise<DescribeAclsResponseResource[]>
-  ): void | Promise<DescribeAclsResponseResource[]> {
-    if (!callback) {
-      callback = createPromisifiedCallback()
-    }
-
-    if (this[kCheckNotClosed](callback)) {
-      return callback[kCallbackPromise]
-    }
-
-    const validationError = this[kValidateOptions](options, describeAclsOptionsValidator, '/options', false)
-    if (validationError) {
-      callback(validationError, undefined as unknown as DescribeAclsResponseResource[])
-      return callback[kCallbackPromise]
-    }
-
-    adminAclsChannel.traceCallback(
-      this.#describeAcls,
-      1,
-      createDiagnosticContext({ client: this, operation: 'describeAcls', options }),
-      this,
-      options,
-      callback
-    )
-
-    return callback[kCallbackPromise]
-  }
-
-  deleteAcls (options: DeleteAclsOptions, callback: CallbackWithPromise<Acl[]>): void
-  deleteAcls (options: DeleteAclsOptions): Promise<Acl[]>
-  deleteAcls (options: DeleteAclsOptions, callback?: CallbackWithPromise<Acl[]>): void | Promise<Acl[]> {
-    if (!callback) {
-      callback = createPromisifiedCallback()
-    }
-
-    if (this[kCheckNotClosed](callback)) {
-      return callback[kCallbackPromise]
-    }
-
-    const validationError = this[kValidateOptions](options, deleteAclsOptionsValidator, '/options', false)
-    if (validationError) {
-      callback(validationError, undefined as unknown as Acl[])
-      return callback[kCallbackPromise]
-    }
-
-    adminAclsChannel.traceCallback(
-      this.#deleteAcls,
-      1,
-      createDiagnosticContext({ client: this, operation: 'deleteAcls', options }),
       this,
       options,
       callback
@@ -1091,118 +986,5 @@ export class Admin extends Base<AdminOptions> {
         callback
       )
     })
-  }
-
-  #createAcls (options: CreateAclsOptions, callback: CallbackWithPromise<void>): void {
-    this[kPerformWithRetry](
-      'createAcls',
-      retryCallback => {
-        this[kGetBootstrapConnection]((error, connection) => {
-          if (error) {
-            retryCallback(error, undefined)
-            return
-          }
-
-          this[kGetApi]<CreateAclsRequest, CreateAclsResponse>('CreateAcls', (error, api) => {
-            if (error) {
-              retryCallback(error, undefined)
-              return
-            }
-
-            api(connection, options.creations, retryCallback as unknown as Callback<CreateAclsResponse>)
-          })
-        })
-      },
-      error => {
-        if (error) {
-          callback(new MultipleErrors('Creating ACLs failed.', [error]), undefined)
-          return
-        }
-
-        callback(null, undefined)
-      },
-      0
-    )
-  }
-
-  #describeAcls (options: DescribeAclsOptions, callback: CallbackWithPromise<DescribeAclsResponseResource[]>): void {
-    this[kPerformWithRetry]<DescribeAclsResponse>(
-      'describeAcls',
-      retryCallback => {
-        this[kGetBootstrapConnection]((error, connection) => {
-          if (error) {
-            retryCallback(error, undefined as unknown as DescribeAclsResponse)
-            return
-          }
-
-          this[kGetApi]<DescribeAclsRequest, DescribeAclsResponse>('DescribeAcls', (error, api) => {
-            if (error) {
-              retryCallback(error, undefined as unknown as DescribeAclsResponse)
-              return
-            }
-
-            api(connection, options.filter, retryCallback as unknown as Callback<DescribeAclsResponse>)
-          })
-        })
-      },
-      (error, response) => {
-        if (error) {
-          callback(
-            new MultipleErrors('Describing ACLs failed.', [error]),
-            undefined as unknown as DescribeAclsResponseResource[]
-          )
-          return
-        }
-
-        callback(null, response.resources)
-      },
-      0
-    )
-  }
-
-  #deleteAcls (options: DeleteAclsOptions, callback: CallbackWithPromise<Acl[]>): void {
-    this[kPerformWithRetry]<DeleteAclsResponse>(
-      'deleteAcls',
-      retryCallback => {
-        this[kGetBootstrapConnection]((error, connection) => {
-          if (error) {
-            retryCallback(error, undefined as unknown as DeleteAclsResponse)
-            return
-          }
-
-          this[kGetApi]<DeleteAclsRequest, DeleteAclsResponse>('DeleteAcls', (error, api) => {
-            if (error) {
-              retryCallback(error, undefined as unknown as DeleteAclsResponse)
-              return
-            }
-
-            api(connection, options.filters, retryCallback as unknown as Callback<DeleteAclsResponse>)
-          })
-        })
-      },
-      (error, response) => {
-        if (error) {
-          callback(new MultipleErrors('Deleting ACLs failed.', [error]), undefined as unknown as Acl[])
-          return
-        }
-
-        callback(
-          null,
-          response.filterResults.flatMap(results =>
-            results.matchingAcls.map(acl => {
-              return {
-                resourceType: acl.resourceType,
-                resourceName: acl.resourceName,
-                patternType: acl.patternType,
-                principal: acl.principal,
-                host: acl.host,
-                operation: acl.operation,
-                permissionType: acl.permissionType
-              }
-            }))
-        )
-      },
-      0
-    )
   }
 }

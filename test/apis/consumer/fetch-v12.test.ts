@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { fetchV15, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { fetchV12, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = fetchV15
+const { createRequest, parseResponse } = fetchV12
 
 test('createRequest serializes basic parameters correctly', () => {
   const maxWaitMs = 5000
@@ -13,7 +13,7 @@ test('createRequest serializes basic parameters correctly', () => {
   const sessionEpoch = 0
   const topics = [
     {
-      topicId: '12345678-1234-1234-1234-123456789abc',
+      topicId: 'test-topic',
       partitions: [
         {
           partition: 0,
@@ -46,9 +46,10 @@ test('createRequest serializes basic parameters correctly', () => {
   // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
 
-  // Verify basic parameters
+  // Verify basic parameters - v12 includes replica_id
   deepStrictEqual(
     {
+      replicaId: reader.readInt32(),
       maxWaitMs: reader.readInt32(),
       minBytes: reader.readInt32(),
       maxBytes: reader.readInt32(),
@@ -57,6 +58,7 @@ test('createRequest serializes basic parameters correctly', () => {
       sessionEpoch: reader.readInt32()
     },
     {
+      replicaId: -1,
       maxWaitMs,
       minBytes,
       maxBytes,
@@ -66,9 +68,9 @@ test('createRequest serializes basic parameters correctly', () => {
     }
   )
 
-  // Read topics array
+  // Read topics array - v12 uses COMPACT_STRING for topic names, not UUID
   const topicsArray = reader.readArray(() => {
-    const topicId = reader.readUUID()
+    const topicId = reader.readString()
 
     // Read partitions array
     const partitions = reader.readArray(() => {
@@ -95,7 +97,7 @@ test('createRequest serializes basic parameters correctly', () => {
   // Verify the topics details
   deepStrictEqual(topicsArray, [
     {
-      topicId: '12345678-1234-1234-1234-123456789abc',
+      topicId: 'test-topic',
       partitions: [
         {
           partition: 0,
@@ -131,7 +133,7 @@ test('createRequest serializes multiple topics and partitions', () => {
   const sessionEpoch = 5
   const topics = [
     {
-      topicId: '12345678-1234-1234-1234-123456789abc',
+      topicId: 'topic-1',
       partitions: [
         {
           partition: 0,
@@ -150,7 +152,7 @@ test('createRequest serializes multiple topics and partitions', () => {
       ]
     },
     {
-      topicId: '87654321-4321-4321-4321-cba987654321',
+      topicId: 'topic-2',
       partitions: [
         {
           partition: 0,
@@ -179,8 +181,9 @@ test('createRequest serializes multiple topics and partitions', () => {
   // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
 
-  // Verify basic parameters
+  // Verify basic parameters - v12 includes replica_id
   const basicParams = {
+    replicaId: reader.readInt32(),
     maxWaitMs: reader.readInt32(),
     minBytes: reader.readInt32(),
     maxBytes: reader.readInt32(),
@@ -191,6 +194,7 @@ test('createRequest serializes multiple topics and partitions', () => {
 
   // Verify the basic parameters match expected values
   deepStrictEqual(basicParams, {
+    replicaId: -1,
     maxWaitMs,
     minBytes,
     maxBytes,
@@ -209,7 +213,7 @@ test('createRequest handles forgotten topics data', () => {
   const sessionEpoch = 5
   const topics = [
     {
-      topicId: '12345678-1234-1234-1234-123456789abc',
+      topicId: 'test-topic',
       partitions: [
         {
           partition: 0,
@@ -248,7 +252,8 @@ test('createRequest handles forgotten topics data', () => {
   const reader = Reader.from(writer)
 
   // Read the serialized data to verify correctness step by step
-  // Basic parameters
+  // Basic parameters - v12 includes replica_id
+  const replicaIdRead = reader.readInt32()
   const maxWaitMsRead = reader.readInt32()
   const minBytesRead = reader.readInt32()
   const maxBytesRead = reader.readInt32()
@@ -259,6 +264,7 @@ test('createRequest handles forgotten topics data', () => {
   // Basic parameters verification
   deepStrictEqual(
     {
+      replicaId: replicaIdRead,
       maxWaitMs: maxWaitMsRead,
       minBytes: minBytesRead,
       maxBytes: maxBytesRead,
@@ -267,6 +273,7 @@ test('createRequest handles forgotten topics data', () => {
       sessionEpoch: sessionEpochRead
     },
     {
+      replicaId: -1,
       maxWaitMs,
       minBytes,
       maxBytes,
@@ -277,9 +284,9 @@ test('createRequest handles forgotten topics data', () => {
     'Basic parameters should match'
   )
 
-  // Topics array
+  // Topics array - v12 uses COMPACT_STRING for topic names
   const topicsRead = reader.readArray(() => {
-    const topicId = reader.readUUID()
+    const topicId = reader.readString()
     const partitions = reader.readArray(() => {
       return {
         partition: reader.readInt32(),
@@ -298,7 +305,7 @@ test('createRequest handles forgotten topics data', () => {
     topicsRead,
     [
       {
-        topicId: '12345678-1234-1234-1234-123456789abc',
+        topicId: 'test-topic',
         partitions: [
           {
             partition: 0,
@@ -314,7 +321,7 @@ test('createRequest handles forgotten topics data', () => {
     'Topics data should match'
   )
 
-  // Forgotten topics array
+  // Forgotten topics array - v12 still uses UUID for forgotten topics
   const forgottenTopicsRead = reader.readArray(() => {
     const topic = reader.readUUID()
     const partitions = reader.readArray(() => reader.readInt32(), true, false)
@@ -342,7 +349,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'test-topic',
           partitions: [
             {
               partitionIndex: 0,
@@ -357,7 +364,7 @@ test('parseResponse correctly processes a successful simple response', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -375,7 +382,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 12, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -384,7 +391,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     sessionId: 123,
     responses: [
       {
-        topicId: '12345678-1234-1234-1234-123456789abc',
+        topicId: 'test-topic',
         partitions: [
           {
             partitionIndex: 0,
@@ -415,7 +422,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 15, Reader.from(writer))
+      parseResponse(1, 1, 12, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -447,7 +454,7 @@ test('parseResponse handles partition-level error code', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'test-topic',
           partitions: [
             {
               partitionIndex: 0,
@@ -462,7 +469,7 @@ test('parseResponse handles partition-level error code', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -483,7 +490,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 15, Reader.from(writer))
+      parseResponse(1, 1, 12, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -499,7 +506,7 @@ test('parseResponse handles partition-level error code', () => {
         sessionId: 123,
         responses: [
           {
-            topicId: '12345678-1234-1234-1234-123456789abc',
+            topicId: 'test-topic',
             partitions: [
               {
                 partitionIndex: 0,
@@ -530,7 +537,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'topic-1',
           partitions: [
             {
               partitionIndex: 0,
@@ -553,7 +560,7 @@ test('parseResponse handles multiple topics and partitions', () => {
           ]
         },
         {
-          topicId: '87654321-4321-4321-4321-cba987654321',
+          topicId: 'topic-2',
           partitions: [
             {
               partitionIndex: 0,
@@ -568,7 +575,7 @@ test('parseResponse handles multiple topics and partitions', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -586,7 +593,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 12, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -595,7 +602,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     sessionId: 123,
     responses: [
       {
-        topicId: '12345678-1234-1234-1234-123456789abc',
+        topicId: 'topic-1',
         partitions: [
           {
             partitionIndex: 0,
@@ -618,7 +625,7 @@ test('parseResponse handles multiple topics and partitions', () => {
         ]
       },
       {
-        topicId: '87654321-4321-4321-4321-cba987654321',
+        topicId: 'topic-2',
         partitions: [
           {
             partitionIndex: 0,
@@ -661,7 +668,7 @@ test('parseResponse handles aborted transactions', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'test-topic',
           partitions: [
             {
               partitionIndex: 0,
@@ -682,7 +689,7 @@ test('parseResponse handles aborted transactions', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -703,7 +710,7 @@ test('parseResponse handles aborted transactions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 12, Reader.from(writer))
 
   // Verify aborted transactions and records
   deepStrictEqual(
@@ -763,7 +770,7 @@ test('parseResponse parses record data', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'test-topic',
           partitions: [
             {
               partitionIndex: 0,
@@ -779,7 +786,7 @@ test('parseResponse parses record data', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -799,7 +806,7 @@ test('parseResponse parses record data', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 12, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')
@@ -866,7 +873,7 @@ test('parseResponse handles truncated records', () => {
     .appendArray(
       [
         {
-          topicId: '12345678-1234-1234-1234-123456789abc',
+          topicId: 'test-topic',
           partitions: [
             {
               partitionIndex: 0,
@@ -882,7 +889,7 @@ test('parseResponse handles truncated records', () => {
         }
       ],
       (w, topic) => {
-        w.appendUUID(topic.topicId)
+        w.appendString(topic.topicId)
           // Partitions array
           .appendArray(topic.partitions, (w, partition) => {
             w.appendInt32(partition.partitionIndex)
@@ -902,7 +909,7 @@ test('parseResponse handles truncated records', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 12, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')

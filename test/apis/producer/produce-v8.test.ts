@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { type MessageRecord, ProduceAcks, produceV10, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { type MessageRecord, ProduceAcks, produceV8, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = produceV10
+const { createRequest, parseResponse } = produceV8
 
 test('createRequest serializes basic parameters correctly', () => {
   const acks = 1
@@ -27,7 +27,7 @@ test('createRequest serializes basic parameters correctly', () => {
   // Read and verify basic parameters
   deepStrictEqual(
     {
-      transactionalId: reader.readNullableString(),
+      transactionalId: reader.readNullableString(false),
       acks: reader.readInt16(),
       timeout: reader.readInt32()
     },
@@ -41,9 +41,9 @@ test('createRequest serializes basic parameters correctly', () => {
   // We can't easily verify the record batch content directly as it's complex binary format
   // But we can at least check that we have topic data array with length 1
   const topicsArray = reader.readArray(() => {
-    const topicName = reader.readString()
+    const topicName = reader.readString(false)
     return topicName
-  })
+  }, false, false)
 
   // Verify topics array
   deepStrictEqual(topicsArray, ['test-topic'])
@@ -97,7 +97,7 @@ test('createRequest handles multiple topics and partitions', () => {
   // Read and verify basic parameters
   deepStrictEqual(
     {
-      transactionalId: reader.readNullableString(),
+      transactionalId: reader.readNullableString(false),
       acks: reader.readInt16(),
       timeout: reader.readInt32()
     },
@@ -189,7 +189,7 @@ test('createRequest with transactional ID', () => {
   // Read and verify parameters including transactional ID
   deepStrictEqual(
     {
-      transactionalId: reader.readString(),
+      transactionalId: reader.readString(false),
       acks: reader.readInt16(),
       timeout: reader.readInt32()
     },
@@ -229,7 +229,7 @@ test('createRequest with additional record batch options', () => {
   // Read and verify basic parameters
   deepStrictEqual(
     {
-      transactionalId: reader.readNullableString(),
+      transactionalId: reader.readNullableString(false),
       acks: reader.readInt16(),
       timeout: reader.readInt32()
     },
@@ -243,9 +243,9 @@ test('createRequest with additional record batch options', () => {
 
   // Read topic array to verify structure
   const topicsArray = reader.readArray(() => {
-    const topicName = reader.readString()
+    const topicName = reader.readString(false)
     return topicName
-  })
+  }, false, false)
 
   // Verify topics array
   deepStrictEqual(topicsArray, ['test-topic'], 'Topic name should match')
@@ -254,7 +254,7 @@ test('createRequest with additional record batch options', () => {
 test('parseResponse correctly processes a successful response', () => {
   // Create a successful response
   const writer = Writer.create()
-    // Topics array - compact format
+    // Topics array - non-compact format
     .appendArray(
       [
         {
@@ -273,7 +273,7 @@ test('parseResponse correctly processes a successful response', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name)
+        w.appendString(topic.name, false)
           // Partitions array
           .appendArray(topic.partitionResponses, (w, partition) => {
             w.appendInt32(partition.index)
@@ -282,15 +282,16 @@ test('parseResponse correctly processes a successful response', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {})
-              .appendString(partition.errorMessage)
-          })
-      }
+              .appendArray(partition.recordErrors, () => {}, false, false)
+              .appendString(partition.errorMessage, false)
+          }, false, false)
+      },
+      false,
+      false
     )
     .appendInt32(0) // throttleTimeMs
-    .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 10, Reader.from(writer))
+  const response = parseResponse(1, 0, 8, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -317,7 +318,7 @@ test('parseResponse correctly processes a successful response', () => {
 test('parseResponse handles response with multiple topics and partitions', () => {
   // Create a response with multiple topics and partitions
   const writer = Writer.create()
-    // Topics array - compact format
+    // Topics array - non-compact format
     .appendArray(
       [
         {
@@ -359,7 +360,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name)
+        w.appendString(topic.name, false)
           // Partitions array
           .appendArray(topic.partitionResponses, (w, partition) => {
             w.appendInt32(partition.index)
@@ -368,15 +369,16 @@ test('parseResponse handles response with multiple topics and partitions', () =>
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {})
-              .appendString(partition.errorMessage)
-          })
-      }
+              .appendArray(partition.recordErrors, () => {}, false, false)
+              .appendString(partition.errorMessage, false)
+          }, false, false)
+      },
+      false,
+      false
     )
     .appendInt32(0) // throttleTimeMs
-    .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 10, Reader.from(writer))
+  const response = parseResponse(1, 0, 8, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -426,7 +428,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
 test('parseResponse handles partition error codes', () => {
   // Create a response with partition error
   const writer = Writer.create()
-    // Topics array - compact format
+    // Topics array - non-compact format
     .appendArray(
       [
         {
@@ -445,7 +447,7 @@ test('parseResponse handles partition error codes', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name)
+        w.appendString(topic.name, false)
           // Partitions array
           .appendArray(topic.partitionResponses, (w, partition) => {
             w.appendInt32(partition.index)
@@ -454,18 +456,19 @@ test('parseResponse handles partition error codes', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {})
-              .appendString(partition.errorMessage)
-          })
-      }
+              .appendArray(partition.recordErrors, () => {}, false, false)
+              .appendString(partition.errorMessage, false)
+          }, false, false)
+      },
+      false,
+      false
     )
     .appendInt32(0) // throttleTimeMs
-    .appendInt8(0) // Root tagged fields
 
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 10, Reader.from(writer))
+      parseResponse(1, 0, 8, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -507,7 +510,7 @@ test('parseResponse handles partition error codes', () => {
 test('parseResponse handles record-level errors', () => {
   // Create a response with record errors
   const writer = Writer.create()
-    // Topics array - compact format
+    // Topics array - non-compact format
     .appendArray(
       [
         {
@@ -531,7 +534,7 @@ test('parseResponse handles record-level errors', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name)
+        w.appendString(topic.name, false)
           // Partitions array
           .appendArray(topic.partitionResponses, (w, partition) => {
             w.appendInt32(partition.index)
@@ -541,19 +544,20 @@ test('parseResponse handles record-level errors', () => {
               .appendInt64(partition.logStartOffset)
               // Record errors array
               .appendArray(partition.recordErrors, (w, recordError) => {
-                w.appendInt32(recordError.batchIndex).appendString(recordError.batchIndexErrorMessage)
-              })
-              .appendString(partition.errorMessage)
-          })
-      }
+                w.appendInt32(recordError.batchIndex).appendString(recordError.batchIndexErrorMessage, false)
+              }, false, false)
+              .appendString(partition.errorMessage, false)
+          }, false, false)
+      },
+      false,
+      false
     )
     .appendInt32(0) // throttleTimeMs
-    .appendInt8(0) // Root tagged fields
 
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 10, Reader.from(writer))
+      parseResponse(1, 0, 8, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -600,7 +604,7 @@ test('parseResponse handles record-level errors', () => {
 test('parseResponse handles throttling', () => {
   // Create a response with throttling
   const writer = Writer.create()
-    // Topics array - compact format
+    // Topics array - non-compact format
     .appendArray(
       [
         {
@@ -619,7 +623,7 @@ test('parseResponse handles throttling', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name)
+        w.appendString(topic.name, false)
           // Partitions array
           .appendArray(topic.partitionResponses, (w, partition) => {
             w.appendInt32(partition.index)
@@ -628,15 +632,16 @@ test('parseResponse handles throttling', () => {
               .appendInt64(partition.logAppendTimeMs)
               .appendInt64(partition.logStartOffset)
               // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {})
-              .appendString(partition.errorMessage)
-          })
-      }
+              .appendArray(partition.recordErrors, () => {}, false, false)
+              .appendString(partition.errorMessage, false)
+          }, false, false)
+      },
+      false,
+      false
     )
     .appendInt32(100) // throttleTimeMs - non-zero value for throttling
-    .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 10, Reader.from(writer))
+  const response = parseResponse(1, 0, 8, Reader.from(writer))
 
   // Verify response structure with throttling
   deepStrictEqual(response, {

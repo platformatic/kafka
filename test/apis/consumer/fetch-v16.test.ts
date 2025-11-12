@@ -375,7 +375,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, Reader.from(writer))
+  const response = parseResponse(1, 1, 16, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -415,7 +415,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 17, Reader.from(writer))
+      parseResponse(1, 1, 16, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -483,7 +483,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 17, Reader.from(writer))
+      parseResponse(1, 1, 16, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -586,7 +586,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, Reader.from(writer))
+  const response = parseResponse(1, 1, 16, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -703,7 +703,7 @@ test('parseResponse handles aborted transactions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, Reader.from(writer))
+  const response = parseResponse(1, 1, 16, Reader.from(writer))
 
   // Verify aborted transactions and records
   deepStrictEqual(
@@ -799,7 +799,7 @@ test('parseResponse parses record data', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, Reader.from(writer))
+  const response = parseResponse(1, 1, 16, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')
@@ -902,7 +902,7 @@ test('parseResponse handles truncated records', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 17, Reader.from(writer))
+  const response = parseResponse(1, 1, 16, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')

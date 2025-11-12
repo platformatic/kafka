@@ -1508,6 +1508,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           return
         }
 
+        // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
+        this.memberId = response.memberId!
         this.generationId = response.generationId
         this.#isLeader = response.leader === this.memberId
         this.#protocol = response.protocolName!

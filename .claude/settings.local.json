@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:blog.platformatic.dev)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git ls-tree:*)",
+      "Bash(git remote:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

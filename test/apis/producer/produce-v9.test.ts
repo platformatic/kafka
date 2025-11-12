@@ -290,7 +290,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(0) // throttleTimeMs
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, Reader.from(writer))
+  const response = parseResponse(1, 0, 9, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -376,7 +376,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
     .appendInt32(0) // throttleTimeMs
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, Reader.from(writer))
+  const response = parseResponse(1, 0, 9, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -465,7 +465,7 @@ test('parseResponse handles partition error codes', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 11, Reader.from(writer))
+      parseResponse(1, 0, 9, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -553,7 +553,7 @@ test('parseResponse handles record-level errors', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 0, 11, Reader.from(writer))
+      parseResponse(1, 0, 9, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -636,7 +636,7 @@ test('parseResponse handles throttling', () => {
     .appendInt32(100) // throttleTimeMs - non-zero value for throttling
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 0, 11, Reader.from(writer))
+  const response = parseResponse(1, 0, 9, Reader.from(writer))
 
   // Verify response structure with throttling
   deepStrictEqual(response, {

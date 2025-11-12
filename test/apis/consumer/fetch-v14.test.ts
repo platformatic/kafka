@@ -1,8 +1,8 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { fetchV15, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { fetchV14, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = fetchV15
+const { createRequest, parseResponse } = fetchV14
 
 test('createRequest serializes basic parameters correctly', () => {
   const maxWaitMs = 5000
@@ -49,6 +49,7 @@ test('createRequest serializes basic parameters correctly', () => {
   // Verify basic parameters
   deepStrictEqual(
     {
+      replicaId: reader.readInt32(),
       maxWaitMs: reader.readInt32(),
       minBytes: reader.readInt32(),
       maxBytes: reader.readInt32(),
@@ -57,6 +58,7 @@ test('createRequest serializes basic parameters correctly', () => {
       sessionEpoch: reader.readInt32()
     },
     {
+      replicaId: -1,
       maxWaitMs,
       minBytes,
       maxBytes,
@@ -181,6 +183,7 @@ test('createRequest serializes multiple topics and partitions', () => {
 
   // Verify basic parameters
   const basicParams = {
+    replicaId: reader.readInt32(),
     maxWaitMs: reader.readInt32(),
     minBytes: reader.readInt32(),
     maxBytes: reader.readInt32(),
@@ -191,6 +194,7 @@ test('createRequest serializes multiple topics and partitions', () => {
 
   // Verify the basic parameters match expected values
   deepStrictEqual(basicParams, {
+    replicaId: -1,
     maxWaitMs,
     minBytes,
     maxBytes,
@@ -249,6 +253,7 @@ test('createRequest handles forgotten topics data', () => {
 
   // Read the serialized data to verify correctness step by step
   // Basic parameters
+  const replicaIdRead = reader.readInt32()
   const maxWaitMsRead = reader.readInt32()
   const minBytesRead = reader.readInt32()
   const maxBytesRead = reader.readInt32()
@@ -259,6 +264,7 @@ test('createRequest handles forgotten topics data', () => {
   // Basic parameters verification
   deepStrictEqual(
     {
+      replicaId: replicaIdRead,
       maxWaitMs: maxWaitMsRead,
       minBytes: minBytesRead,
       maxBytes: maxBytesRead,
@@ -267,6 +273,7 @@ test('createRequest handles forgotten topics data', () => {
       sessionEpoch: sessionEpochRead
     },
     {
+      replicaId: -1,
       maxWaitMs,
       minBytes,
       maxBytes,
@@ -375,7 +382,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 14, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -415,7 +422,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 15, Reader.from(writer))
+      parseResponse(1, 1, 14, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -483,7 +490,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 1, 15, Reader.from(writer))
+      parseResponse(1, 1, 14, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -586,7 +593,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 14, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -703,7 +710,7 @@ test('parseResponse handles aborted transactions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 14, Reader.from(writer))
 
   // Verify aborted transactions and records
   deepStrictEqual(
@@ -799,7 +806,7 @@ test('parseResponse parses record data', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 14, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')
@@ -902,7 +909,7 @@ test('parseResponse handles truncated records', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 1, 15, Reader.from(writer))
+  const response = parseResponse(1, 1, 14, Reader.from(writer))
 
   // Verify the records were parsed correctly
   ok(response.responses[0].partitions[0].records, 'Records should be defined')

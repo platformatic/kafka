@@ -1,8 +1,8 @@
-# @platformatic/kafka Performance Evolution: A Journey to v1.21.0
+# `@platformatic/kafka` Performance Evolution: A Journey to v1.21.0
 
 In our [previous blog post](https://blog.platformatic.dev/why-we-created-another-kafka-client-for-nodejs), we introduced `@platformatic/kafka` and shared performance benchmarks comparing it against popular Node.js Kafka clients like KafkaJS and node-rdkafka. Since then, we've continued improving the library, and the results speak for themselves.
 
-Over the past several releases leading to v1.21.0, we achieved **dramatic performance improvements** without changing a single line of benchmark code. How? By optimizing the core library implementation and fixing critical bugs that were holding back performance.
+Over the past several releases leading to v1.21.0, we achieved **dramatic performance improvements** through a combination of improved benchmark methodology and core library optimizations that fixed critical bugs and enhanced performance characteristics.
 
 ## Performance-Critical Improvements
 
@@ -10,9 +10,10 @@ Through our journey to v1.21.0, we focused on optimizations that directly impact
 
 ### Core Protocol and Network Layer Enhancements
 
-1. **Back-Pressure Management** ([#127](https://github.com/platformatic/kafka/pull/127)): Added the `handleBackPressure` option to better manage connection flow control and prevent overwhelming the network layer
-2. **Asynchronous Error Handling** ([#154](https://github.com/platformatic/kafka/pull/154)): We refactored request serialization to handle errors asynchronously, preventing blocking operations and improving throughput
-3. **Connection Stability** ([#144](https://github.com/platformatic/kafka/pull/144)): Fixed mixed metadata callbacks in `kPerformDeduplicated`, ensuring more reliable request handling
+1. **Native CRC32C Computation** ([#126](https://github.com/platformatic/kafka/pull/126)): Introduced native CRC32C computation via the `@node-rs/crc32` package, significantly improving checksum calculation performance
+2. **Back-Pressure Management** ([#127](https://github.com/platformatic/kafka/pull/127)): Added the `handleBackPressure` option to better manage connection flow control and prevent overwhelming the network layer
+3. **Asynchronous Error Handling** ([#154](https://github.com/platformatic/kafka/pull/154)): We refactored request serialization to handle errors asynchronously, preventing blocking operations and improving throughput. Thanks to [@baac0](https://github.com/baac0) for this contribution!
+4. **Connection Stability** ([#144](https://github.com/platformatic/kafka/pull/144)): Fixed mixed metadata callbacks in `kPerformDeduplicated`, ensuring more reliable request handling. Thanks to [@jmdev12](https://github.com/jmdev12) for this contribution!
 
 ### Consumer Performance Improvements
 
@@ -26,13 +27,14 @@ Our benchmarks use the same rigorous methodology throughout all versions, ensuri
 ### Test Environment
 
 - **Hardware**: M2 Max MacBook Pro
+- **Node.js Version**: 22.19.0
 - **Kafka Setup**: Three-broker Docker cluster with 3 partitions
 - **Total Messages**: 100,000 messages per test
 - **Libraries Tested**:
-  - `@platformatic/kafka` - Our library across different versions
-  - `kafkajs` - Popular pure JavaScript client
-  - `node-rdkafka` - Native librdkafka bindings
-  - `@confluentinc/kafka-javascript` - Confluent's official client (both KafkaJS and node-rdkafka backends)
+  - **`@platformatic/kafka`** - Our library across different versions
+  - **`kafkajs`** - Popular pure JavaScript client
+  - **`node-rdkafka`** - Native librdkafka bindings
+  - **`@confluentinc/kafka-javascript`** - Confluent's official client (both KafkaJS and node-rdkafka backends)
 
 ### Test Scenarios
 
@@ -43,8 +45,6 @@ Our benchmarks use the same rigorous methodology throughout all versions, ensuri
 **3. Consumer Performance**: Measures message consumption throughput across different consumption patterns (stream-based and event-driven).
 
 ## Performance Results: The Numbers
-
-The key point: **we didn't change any benchmark code across versions**. All performance improvements come purely from library optimizations.
 
 Let's compare the results across our initial baseline and the latest version:
 
@@ -80,9 +80,9 @@ Let's compare the results across our initial baseline and the latest version:
 
 **Analysis:**
 
-- **@platformatic/kafka improved by 16,214%** (from 582.59 to 95,039.18 op/sec)
+- **`@platformatic/kafka` improved by 16,214%** (from 582.59 to 95,039.18 op/sec) - reflecting both improved measurement accuracy and real library optimizations
 - Now **53.59% faster than KafkaJS**, the second-best performer
-- Demonstrates exceptional optimization through core library improvements
+- The dramatic improvements in rdkafka-based libraries (70-220 op/sec → 17,000-20,000 op/sec) primarily reflect corrected benchmark methodology rather than library changes
 
 ### Producer Performance: Batch Messages
 
@@ -116,7 +116,7 @@ Let's compare the results across our initial baseline and the latest version:
 
 **Analysis:**
 
-- **@platformatic/kafka improved by 1,233%** (from 336.80 to 4,488.69 op/sec)
+- **`@platformatic/kafka` improved by 1,233%** (from 336.80 to 4,488.69 op/sec)
 - **42.76% faster than KafkaJS** in batch scenarios
 - Demonstrates excellent scalability for high-throughput workloads
 
@@ -157,13 +157,35 @@ Let's compare the results across our initial baseline and the latest version:
 **Analysis:**
 
 - Consumer results normalized with **10x more samples** (from ~10,000 to 100,000) for statistical accuracy
-- Despite more rigorous testing, **@platformatic/kafka maintains leadership** with 152,567 op/sec
+- Despite more rigorous testing, **`@platformatic/kafka` maintains leadership** with 152,567 op/sec
 - **12.22% faster than node-rdkafka evented**, the second-best performer
 - **Much lower variance** (±1.48%) compared to baseline (±38.21%), indicating significantly more consistent performance
 
 ## What Changed in the Benchmark Methodology?
 
-While the benchmark **code remained identical**, we made one important methodological improvement:
+To ensure fair and accurate comparisons, we made several important improvements to our benchmark code:
+
+### Benchmark Code Improvements
+
+**Producer (Single Message) Benchmarks:**
+
+The initial benchmark code had measurement accuracy issues, particularly with rdkafka-based libraries:
+
+- **node-rdkafka and Confluent rdkafka (initial)**: Messages were sent without waiting for responses, and delivery reports were counted as they arrived. This approach was flawed because delivery reports couldn't be reliably matched to specific send operations, leading to inaccurate timing measurements.
+- **node-rdkafka and Confluent rdkafka (current)**: Now we send a message and wait for the next delivery report, which definitively belongs to that message, ensuring accurate per-message timing.
+
+**Producer (Batch Messages) Benchmarks:**
+
+Similar improvements were made to batch producer benchmarks:
+
+- **node-rdkafka and Confluent rdkafka (initial)**: Batches were sent without properly tracking individual message delivery reports
+- **node-rdkafka and Confluent rdkafka (current)**: We now inspect the delivery report of each message within a batch to ensure we correctly measure processing times for the entire batch operation
+
+**All Libraries:**
+- **Initial**: Timing measurements were taken every 100 messages
+- **Current**: Timing measurements are taken at each individual message, providing much more granular and accurate performance data
+
+These corrections primarily affected the rdkafka-based libraries, explaining why their producer performance improved dramatically. The improvements for other libraries also reflect more accurate measurement methodology.
 
 ### Increased Sample Size
 
@@ -178,7 +200,7 @@ Current version:
 - Producer (batch): 1,000 samples
 - Consumer: 100,000 samples
 
-**Why this matters**: More samples provide statistically significant results and reduce variance. The dramatic improvement in operations per second for producers is partially due to benchmark framework optimizations, but the **relative performance advantages remain consistent**.
+**Why this matters**: More samples provide statistically significant results and reduce variance, giving us greater confidence in the comparative performance metrics.
 
 ### What Stayed the Same
 
@@ -186,13 +208,18 @@ Current version:
 2. **Kafka configuration**: Identical three-broker setup with 3 partitions
 3. **Message structure**: Same message size and headers
 4. **Client configurations**: Identical settings across all libraries
-5. **Benchmark code**: Zero changes to the actual test implementations
 
 ### Interpreting the Results
 
-It's important to note that the dramatic improvements in absolute op/sec numbers for producers are partially due to increased sample sizes (100 → 100,000 for single-message, 100 → 1,000 for batch) and benchmark framework optimizations across versions. The critical metrics to focus on are the **relative performance differences between libraries**, which consistently show @platformatic/kafka maintaining significant leads across all scenarios. Consumer benchmarks have been significantly refined with 10x more samples (10,000 → 100,000) for greater statistical accuracy, resulting in more reliable comparisons.
+The dramatic improvements in absolute op/sec numbers reflect both:
 
-## Why @platformatic/kafka Achieves These Performance Results
+1. **More accurate measurement methodology** - Particularly for rdkafka-based libraries in single-message producer tests
+2. **Increased sample sizes** - Providing more statistically reliable results
+3. **Library optimizations** - Real performance improvements in `@platformatic/kafka` through better async handling, back-pressure management, and protocol optimizations
+
+The critical metrics to focus on are the **relative performance differences between libraries**, which consistently show `@platformatic/kafka` maintaining significant leads across all scenarios when measured with the improved, more accurate methodology.
+
+## Why `@platformatic/kafka` Achieves These Performance Results
 
 Our performance stems from fundamental architectural decisions:
 
@@ -220,25 +247,25 @@ From CRC32C calculations to murmur2 hashing, every hot path is optimized for per
 
 Here's how all libraries stack up in v1.21.0:
 
-| Metric                   | @platformatic/kafka | KafkaJS      | node-rdkafka | Confluent KafkaJS | Confluent rdkafka |
-| ------------------------ | ------------------- | ------------ | ------------ | ----------------- | ----------------- |
-| **Producer Single**      | **95,039 op/s**     | 61,878 op/s  | 17,452 op/s  | 20,215 op/s       | 20,771 op/s       |
-| **Producer Batch**       | **4,489 op/s**      | 3,144 op/s   | 707 op/s     | 2,512 op/s        | 2,569 op/s        |
-| **Consumer**             | **152,567 op/s**    | 126,964 op/s | 135,951 op/s | 123,290 op/s      | 125,987 op/s      |
-| **Avg Performance Lead** | **Baseline**        | -29.3%       | -47.8%       | -42.6%            | -41.4%            |
+| Metric                   | `@platformatic/kafka` | KafkaJS      | node-rdkafka | Confluent KafkaJS | Confluent rdkafka |
+| ------------------------ | --------------------- | ------------ | ------------ | ----------------- | ----------------- |
+| **Producer Single**      | **95,039 op/s**       | 61,878 op/s  | 17,452 op/s  | 20,215 op/s       | 20,771 op/s       |
+| **Producer Batch**       | **4,489 op/s**        | 3,144 op/s   | 707 op/s     | 2,512 op/s        | 2,569 op/s        |
+| **Consumer**             | **152,567 op/s**      | 126,964 op/s | 135,951 op/s | 123,290 op/s      | 125,987 op/s      |
+| **Avg Performance Lead** | **Baseline**          | -29.3%       | -47.8%       | -42.6%            | -41.4%            |
 
 **Key Takeaways:**
 
-1. **@platformatic/kafka leads across all scenarios** - No other library matches its performance
+1. **`@platformatic/kafka` leads across all scenarios** - No other library matches its performance
 2. **Consistent low variance** - ±0.71% to ±3.76% tolerance shows predictable, reliable performance
 3. **Native performance without native code** - Pure JavaScript/TypeScript, no C++ bindings
 4. **Scales better with batching** - Maintains leadership in both single-message and batch scenarios
 
 ## Conclusion
 
-The journey to @platformatic/kafka v1.21.0 demonstrates our commitment to performance optimization. These improvements came from focused optimizations in our core protocol implementation, network layer, and async handling.
+The journey to `@platformatic/kafka` v1.21.0 demonstrates our commitment to performance optimization. These improvements came from focused optimizations in our core protocol implementation, network layer, and async handling.
 
-If you're building Node.js applications that require high-performance Kafka integration, @platformatic/kafka offers:
+If you're building Node.js applications that require high-performance Kafka integration, `@platformatic/kafka` offers:
 
 - **Industry-leading throughput** - 53.59% faster than KafkaJS in single-message scenarios
 - **Consistent performance** - Low variance (±0.71% to ±3.76%) across all tests

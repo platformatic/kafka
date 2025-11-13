@@ -4,7 +4,9 @@
       "WebFetch(domain:blog.platformatic.dev)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(git ls-tree:*)",
-      "Bash(git remote:*)"
+      "Bash(git remote:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

@@ -78,23 +78,31 @@ export function parseResponse (
   const response: OffsetDeleteResponse = {
     errorCode,
     throttleTimeMs: reader.readInt32(),
-    topics: reader.readArray((r, i) => {
-      return {
-        name: r.readString(),
-        partitions: r.readArray((r, j) => {
-          const partition = {
-            partitionIndex: r.readInt32(),
-            errorCode: r.readInt16()
-          }
+    topics: reader.readArray(
+      (r, i) => {
+        return {
+          name: r.readString(false),
+          partitions: r.readArray(
+            (r, j) => {
+              const partition = {
+                partitionIndex: r.readInt32(),
+                errorCode: r.readInt16()
+              }
 
-          if (partition.errorCode !== 0) {
-            errors.push([`/topics/${i}/partitions/${j}`, [partition.errorCode, null]])
-          }
+              if (partition.errorCode !== 0) {
+                errors.push([`/topics/${i}/partitions/${j}`, [partition.errorCode, null]])
+              }
 
-          return partition
-        })
-      }
-    })
+              return partition
+            },
+            false,
+            false
+          )
+        }
+      },
+      false,
+      false
+    )
   }
 
   if (errors.length) {

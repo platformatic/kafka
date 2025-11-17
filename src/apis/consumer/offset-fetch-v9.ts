@@ -1,5 +1,5 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
@@ -13,7 +13,7 @@ export interface OffsetFetchRequestGroup {
   groupId: string
   memberId?: NullableString
   memberEpoch: number
-  topics: OffsetFetchRequestTopic[]
+  topics?: Nullable<OffsetFetchRequestTopic[]>
 }
 
 export type OffsetFetchRequest = Parameters<typeof createRequest>

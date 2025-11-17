@@ -28,8 +28,8 @@ import {
   type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
 import {
-  type OffsetFetchRequest,
   type OffsetFetchRequestTopic,
+  type OffsetFetchRequest,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
 import {

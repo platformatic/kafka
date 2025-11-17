@@ -254,6 +254,111 @@ export const describeLogDirsOptionsSchema = {
   additionalProperties: false
 }
 
+export const listConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groups: {
+      type: 'array',
+      items: {
+        oneOf: [
+          { type: 'string', minLength: 1 },
+          {
+            type: 'object',
+            properties: {
+              groupId: { type: 'string', minLength: 1 },
+              topics: {
+                type: ['array', 'null'],
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', minLength: 1 },
+                    partitionIndexes: {
+                      type: 'array',
+                      items: { type: 'number', minimum: 0 },
+                      minItems: 1
+                    }
+                  },
+                  required: ['name', 'partitionIndexes'],
+                  additionalProperties: false
+                },
+                minItems: 1
+              }
+            },
+            required: ['groupId'],
+            additionalProperties: false
+          }
+        ]
+      },
+      minItems: 1
+    },
+    requireStable: {
+      type: 'boolean'
+    }
+  },
+  required: ['groups'],
+  additionalProperties: false
+}
+
+export const alterConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groupId: { type: 'string', minLength: 1 },
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitionOffsets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                partition: { type: 'number', minimum: 0 },
+                offset: { bigint: true }
+              },
+              required: ['partition', 'offset'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitionOffsets'],
+        additionalProperties: false
+      },
+      minItems: 1
+    }
+  },
+  required: ['groupId', 'topics'],
+  additionalProperties: false
+}
+
+export const deleteConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groupId: { type: 'string', minLength: 1 },
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitionIndexes: {
+            type: 'array',
+            items: { type: 'number', minimum: 0 },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitionIndexes'],
+        additionalProperties: false
+      },
+      minItems: 1
+    }
+  },
+  required: ['groupId', 'topics'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
@@ -265,3 +370,6 @@ export const removeMembersFromConsumerGroupOptionsValidator = ajv.compile(remove
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
+export const alterConsumerGroupOffsetsOptionsValidator = ajv.compile(alterConsumerGroupOffsetsOptionsSchema)
+export const deleteConsumerGroupOffsetsOptionsValidator = ajv.compile(deleteConsumerGroupOffsetsOptionsSchema)
+export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumerGroupOffsetsOptionsSchema)

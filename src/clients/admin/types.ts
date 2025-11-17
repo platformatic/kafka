@@ -7,7 +7,7 @@ import {
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type ConsumerGroupState } from '../../apis/enumerations.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
 
@@ -97,4 +97,51 @@ export interface BrokerLogDirDescription {
   broker: number
   throttleTimeMs: DescribeLogDirsResponse['throttleTimeMs']
   results: Omit<DescribeLogDirsResponseResult, 'errorCode'>[]
+}
+
+interface GroupWithTopicPartitions {
+  groupId: string
+  topics?: Nullable<{ name: string; partitionIndexes: number[] }[]>
+}
+
+export interface ListConsumerGroupOffsetsOptions {
+  groups: (string | GroupWithTopicPartitions)[]
+  requireStable?: boolean
+}
+
+interface ListConsumerGroupOffsetsPartition {
+  partitionIndex: number
+  committedOffset: bigint
+  committedLeaderEpoch: number
+  metadata: NullableString
+}
+
+interface ListConsumerGroupOffsetsTopic {
+  name: string
+  partitions: ListConsumerGroupOffsetsPartition[]
+}
+
+export interface ListConsumerGroupOffsetsGroup {
+  groupId: string
+  topics: ListConsumerGroupOffsetsTopic[]
+}
+
+interface PartitionOffset {
+  partition: number
+  offset: bigint
+}
+
+interface AlterConsumerGroupOffsetsTopic {
+  name: string
+  partitionOffsets: PartitionOffset[]
+}
+
+export interface AlterConsumerGroupOffsetsOptions {
+  groupId: string
+  topics: AlterConsumerGroupOffsetsTopic[]
+}
+
+export interface DeleteConsumerGroupOffsetsOptions {
+  groupId: string
+  topics: { name: string; partitionIndexes: number[] }[]
 }

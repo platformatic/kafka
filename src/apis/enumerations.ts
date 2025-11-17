@@ -3,7 +3,8 @@ export const SASLMechanisms = {
   PLAIN: 'PLAIN',
   SCRAM_SHA_256: 'SCRAM-SHA-256',
   SCRAM_SHA_512: 'SCRAM-SHA-512',
-  OAUTHBEARER: 'OAUTHBEARER'
+  OAUTHBEARER: 'OAUTHBEARER',
+  GSSAPI: 'GSSAPI'
 } as const
 
 export const allowedSASLMechanisms = Object.values(SASLMechanisms) as SASLMechanismValue[]

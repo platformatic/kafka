@@ -6,7 +6,7 @@ import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise }
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
 import { saslAuthenticateV2, saslHandshakeV1 } from '../apis/index.ts'
-import { type SaslAuthenticateResponse } from '../apis/security/sasl-authenticate-v2.ts'
+import { type SaslAuthenticateResponse, type SASLAuthenticationAPI } from '../apis/security/sasl-authenticate-v2.ts'
 import {
   connectionsApiChannel,
   connectionsConnectsChannel,
@@ -38,12 +38,23 @@ export interface Broker {
   port: number
 }
 
+export type SASLCustomAuthenticator = (
+  mechanism: SASLMechanismValue,
+  connection: Connection,
+  authenticate: SASLAuthenticationAPI,
+  usernameProvider: string | SASLCredentialProvider | undefined,
+  passwordProvider: string | SASLCredentialProvider | undefined,
+  tokenProvider: string | SASLCredentialProvider | undefined,
+  callback: CallbackWithPromise<SaslAuthenticateResponse>
+) => void
+
 export interface SASLOptions {
   mechanism: SASLMechanismValue
   username?: string | SASLCredentialProvider
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
+  authenticate?: SASLCustomAuthenticator
 }
 
 export interface ConnectionOptions {
@@ -384,7 +395,7 @@ export class Connection extends EventEmitter {
       this.#status = ConnectionStatuses.AUTHENTICATING
     }
 
-    const { mechanism, username, password, token } = this.#options.sasl!
+    const { mechanism, username, password, token, authenticate } = this.#options.sasl!
 
     if (!allowedSASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
@@ -411,10 +422,17 @@ export class Connection extends EventEmitter {
       this.emit('sasl:handshake', response.mechanisms)
       const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
 
-      if (mechanism === SASLMechanisms.PLAIN) {
+      if (authenticate) {
+        authenticate(mechanism, this, saslAuthenticateV2.api, username, password, token, callback)
+      } else if (mechanism === SASLMechanisms.PLAIN) {
         saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
+      } else if (mechanism === SASLMechanisms.GSSAPI) {
+        callback(
+          new UserError('No custom SASL/GSSAPI authenticator provided.'),
+          undefined as unknown as SaslAuthenticateResponse
+        )
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,

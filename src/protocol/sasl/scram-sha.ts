@@ -3,7 +3,7 @@ import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise }
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type Connection, type SASLCredentialProvider } from '../../network/connection.ts'
-import { getCredential } from './credential-provider.ts'
+import { getCredential } from './utils.ts'
 
 const GS2_HEADER = 'n,,'
 const GS2_HEADER_BASE64 = Buffer.from(GS2_HEADER).toString('base64')
@@ -227,12 +227,14 @@ export function authenticate (
 
   getCredential(`SASL/SCRAM-${algorithm} username`, usernameProvider, (error, username) => {
     if (error) {
-      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      return
     }
 
     getCredential(`SASL/SCRAM-${algorithm} password`, passwordProvider, (error, password) => {
       if (error) {
-        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        return
       }
 
       performAuthentication(connection, algorithm, definition, authenticateAPI, crypto, username, password, callback)

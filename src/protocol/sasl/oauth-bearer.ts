@@ -2,7 +2,7 @@ import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise }
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type Connection, type SASLCredentialProvider } from '../../network/connection.ts'
-import { getCredential } from './credential-provider.ts'
+import { getCredential } from './utils.ts'
 
 export function jwtValidateAuthenticationBytes (authBytes: Buffer, callback: CallbackWithPromise<Buffer>): void {
   let authData: Record<string, string> = {}
@@ -52,7 +52,8 @@ export function authenticate (
 
   getCredential('SASL/OAUTHBEARER token', tokenOrProvider, (error, token) => {
     if (error) {
-      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      return
     }
 
     authenticateAPI(connection, Buffer.from(`n,,\x01auth=Bearer ${token}\x01\x01`), callback!)

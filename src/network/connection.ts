@@ -38,21 +38,23 @@ export interface Broker {
   port: number
 }
 
+export type SASLCustomAuthenticator = (
+  mechanism: SASLMechanismValue,
+  connection: Connection,
+  authenticate: SASLAuthenticationAPI,
+  usernameProvider: string | SASLCredentialProvider | undefined,
+  passwordProvider: string | SASLCredentialProvider | undefined,
+  tokenProvider: string | SASLCredentialProvider | undefined,
+  callback: CallbackWithPromise<SaslAuthenticateResponse>
+) => void
+
 export interface SASLOptions {
   mechanism: SASLMechanismValue
   username?: string | SASLCredentialProvider
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
-  authenticate?: (
-    mechanism: SASLMechanismValue,
-    connection: Connection,
-    authenticate: SASLAuthenticationAPI,
-    usernameProvider: string | SASLCredentialProvider | undefined,
-    passwordProvider: string | SASLCredentialProvider | undefined,
-    tokenProvider: string | SASLCredentialProvider | undefined,
-    callback: CallbackWithPromise<SaslAuthenticateResponse>
-  ) => void
+  authenticate?: SASLCustomAuthenticator
 }
 
 export interface ConnectionOptions {
@@ -426,6 +428,11 @@ export class Connection extends EventEmitter {
         saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
+      } else if (mechanism === SASLMechanisms.GSSAPI) {
+        callback(
+          new UserError('No custom SASL/GSSAPI authenticator provided.'),
+          undefined as unknown as SaslAuthenticateResponse
+        )
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,

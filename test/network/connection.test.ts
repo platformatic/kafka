@@ -35,10 +35,12 @@ import {
 } from '../../src/index.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../../src/protocol/sasl/scram-sha.ts'
 import { createScramUsers } from '../fixtures/create-users.ts'
+import { createAuthenticator } from '../fixtures/kerberos-authenticator.ts'
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
   kafkaSaslBootstrapServers,
+  kafkaSaslKerberosBootstrapServers,
   mockConnectionAPI,
   mockedErrorMessage,
   mockedOperationId
@@ -964,8 +966,25 @@ test('Connection.connect should not connect to SASL protected broker by default'
 })
 
 for (const mechanism of allowedSASLMechanisms) {
-  const sasl: SASLOptions =
-    mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
+  let sasl: SASLOptions
+  let saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+
+  switch (mechanism) {
+    case SASLMechanisms.OAUTHBEARER:
+      sasl = { mechanism, token: 'token' }
+      break
+    case SASLMechanisms.GSSAPI:
+      saslBroker = parseBroker(kafkaSaslKerberosBootstrapServers[0])
+      sasl = {
+        mechanism,
+        username: 'admin-password@EXAMPLE.COM',
+        password: 'admin',
+        authenticate: await createAuthenticator('admin-password@EXAMPLE.COM', 'admin', 'EXAMPLE.COM', 'localhost:8000')
+      }
+      break
+    default:
+      sasl = { mechanism, username: 'admin', password: 'admin' }
+  }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
     const connection = new Connection('clientId', { sasl })
@@ -979,6 +998,18 @@ for (const mechanism of allowedSASLMechanisms) {
 for (const mechanism of allowedSASLMechanisms) {
   const sasl: SASLOptions =
     mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
+
+  const broker =
+    mechanism === SASLMechanisms.GSSAPI
+      ? parseBroker(kafkaSaslKerberosBootstrapServers[0])
+      : parseBroker(kafkaSaslBootstrapServers[0])
+
+  const gssapiAuthenticate = await createAuthenticator(
+    'admin-password@EXAMPLE.COM',
+    'admin',
+    'EXAMPLE.COM',
+    'localhost:8000'
+  )
 
   sasl.authenticate = async function customSaslAuthenticate (
     mechanism: SASLMechanismValue,
@@ -1009,14 +1040,24 @@ for (const mechanism of allowedSASLMechanisms) {
           callback
         )
         break
+      case SASLMechanisms.GSSAPI:
+        gssapiAuthenticate(
+          mechanism,
+          connection,
+          authenticate,
+          usernameProvider,
+          passwordProvider,
+          tokenProvider,
+          callback
+        )
     }
   }
 
-  test.only(`Connection.connect should connect to SASL protected broker using SASL/${mechanism} using a custom implementation`, async t => {
+  test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism} using a custom implementation`, async t => {
     const connection = new Connection('clientId', { sasl })
     t.after(() => connection.close())
 
-    await connection.connect(saslBroker.host, saslBroker.port)
+    await connection.connect(broker.host, broker.port)
     await metadataV12.api.async(connection, [])
   })
 }

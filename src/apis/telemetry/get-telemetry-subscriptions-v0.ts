@@ -50,7 +50,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, null]])
   }
 
   const response: GetTelemetrySubscriptionsResponse = {

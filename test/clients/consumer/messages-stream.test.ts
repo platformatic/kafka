@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
+import { setTimeout as wait } from 'node:timers/promises'
 import * as Prometheus from 'prom-client'
 import {
   type CallbackWithPromise,
@@ -1258,4 +1259,43 @@ test('should report correct isConnected status', async t => {
 
   // Stream should not be live after close
   strictEqual(stream.isConnected(), false)
+})
+
+test.only('should remove all events on stream close', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+  await produceTestMessages(t, topic, 1)
+
+  const consumer = createConsumer(t, groupId)
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000
+  })
+
+  let reference = 1
+
+  stream.on('data', () => {
+    reference++
+    console.log('data event called', reference)
+  })
+
+  stream.on('error', () => {
+    reference++
+    console.log('error event called', reference)
+  })
+
+  await stream.close()
+
+  await wait(10_000) // wait for the events to be removed
+
+  // Stream should have no listeners after close
+  strictEqual(stream.listenerCount('data'), 0)
+  strictEqual(stream.listenerCount('error'), 0)
+  strictEqual(stream.listenerCount('close'), 0)
+  strictEqual(stream.listenerCount('end'), 0)
+  strictEqual(stream.listenerCount('pause'), 0)
+  strictEqual(stream.listenerCount('readable'), 0)
+  strictEqual(stream.listenerCount('resume'), 0)
 })

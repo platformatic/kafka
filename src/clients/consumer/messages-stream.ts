@@ -238,12 +238,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       // We have offsets that are being committed. These are awaited despite of the force parameters
       if (this.#autocommitInflight) {
         this.once('autocommit', error => {
+          // this.removeAllListeners()
           this.#invokeCloseCallbacks(error)
         })
 
         return
       }
 
+      // this.removeAllListeners()
       this.#invokeCloseCallbacks(null)
     })
 

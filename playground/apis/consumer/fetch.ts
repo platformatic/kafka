@@ -1,6 +1,6 @@
 import { api as fetchV17 } from '../../../src/apis/consumer/fetch-v17.ts'
 import { api as offsetCommitV9 } from '../../../src/apis/consumer/offset-commit-v9.ts'
-import { api as offsetFetchV9 } from '../../../src/apis/consumer/offset-fetch-v9.ts'
+import { api as offsetFetchV9 } from '../../../src/apis/admin/offset-fetch-v9.ts'
 import { api as syncGroupV5 } from '../../../src/apis/consumer/sync-group-v5.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
 import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
@@ -45,7 +45,7 @@ const offsetFetch = await performAPICallWithRetry('OffsetFetch', () =>
         topics: [
           {
             name: topicName,
-            partitionIndexes: [0]
+            partitions: [0]
           }
         ]
       }
@@ -103,11 +103,14 @@ for (let i = 0; i < 3; i++) {
     break
   }
 
-  const { nextOffset, records } = batches.reduce<{ nextOffset: bigint, records: KafkaRecord[] }>((acc, batch) => {
-    acc.nextOffset = batch.firstOffset + BigInt(batch.records.length)
-    acc.records.push(...batch.records)
-    return acc
-  }, { nextOffset: fetchOffset, records: [] })
+  const { nextOffset, records } = batches.reduce<{ nextOffset: bigint; records: KafkaRecord[] }>(
+    (acc, batch) => {
+      acc.nextOffset = batch.firstOffset + BigInt(batch.records.length)
+      acc.records.push(...batch.records)
+      return acc
+    },
+    { nextOffset: fetchOffset, records: [] }
+  )
 
   fetchOffset = nextOffset
   console.log(

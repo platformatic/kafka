@@ -2,6 +2,20 @@ import { ClientQuotaMatchTypes, ConsumerGroupStates } from '../../apis/enumerati
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
+export const topicPartitionsSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    partitions: {
+      type: 'array',
+      items: { type: 'number', minimum: 0 },
+      minItems: 1
+    }
+  },
+  required: ['name', 'partitions'],
+  additionalProperties: false
+}
+
 export const groupsProperties = {
   groups: {
     type: 'array',
@@ -199,6 +213,87 @@ export const describeLogDirsOptionsSchema = {
   additionalProperties: false
 }
 
+export const listConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groups: {
+      type: 'array',
+      items: {
+        oneOf: [
+          { type: 'string', minLength: 1 },
+          {
+            type: 'object',
+            properties: {
+              groupId: { type: 'string', minLength: 1 },
+              topics: {
+                type: ['array', 'null'],
+                items: topicPartitionsSchema,
+                minItems: 1
+              }
+            },
+            required: ['groupId'],
+            additionalProperties: false
+          }
+        ]
+      },
+      minItems: 1
+    },
+    requireStable: {
+      type: 'boolean'
+    }
+  },
+  required: ['groups'],
+  additionalProperties: false
+}
+
+export const alterConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groupId: { type: 'string', minLength: 1 },
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitionOffsets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                partition: { type: 'number', minimum: 0 },
+                offset: { bigint: true }
+              },
+              required: ['partition', 'offset'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitionOffsets'],
+        additionalProperties: false
+      },
+      minItems: 1
+    }
+  },
+  required: ['groupId', 'topics'],
+  additionalProperties: false
+}
+
+export const deleteConsumerGroupOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    groupId: { type: 'string', minLength: 1 },
+    topics: {
+      type: 'array',
+      items: topicPartitionsSchema,
+      minItems: 1
+    }
+  },
+  required: ['groupId', 'topics'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
 export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
@@ -208,3 +303,6 @@ export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchem
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
+export const alterConsumerGroupOffsetsOptionsValidator = ajv.compile(alterConsumerGroupOffsetsOptionsSchema)
+export const deleteConsumerGroupOffsetsOptionsValidator = ajv.compile(deleteConsumerGroupOffsetsOptionsSchema)
+export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumerGroupOffsetsOptionsSchema)

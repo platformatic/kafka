@@ -2,15 +2,7 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-
-export interface OffsetDeleteRequestPartition {
-  partitionIndex: number
-}
-
-export interface OffsetDeleteRequestTopic {
-  name: string
-  partitions: OffsetDeleteRequestPartition[]
-}
+import { type TopicPartitions } from '../types.ts'
 
 export type OffsetDeleteRequest = Parameters<typeof createRequest>
 
@@ -38,13 +30,13 @@ export interface OffsetDeleteResponse {
       partitions => partition_index
         partition_index => INT32
 */
-export function createRequest (groupId: string, topics: OffsetDeleteRequestTopic[]): Writer {
+export function createRequest (groupId: string, topics: TopicPartitions[]): Writer {
   return Writer.create()
     .appendString(groupId, false)
     .appendArray(
       topics,
       (w, t) => {
-        w.appendString(t.name, false).appendArray(t.partitions, (w, p) => w.appendInt32(p.partitionIndex), false, false)
+        w.appendString(t.name, false).appendArray(t.partitions, (w, p) => w.appendInt32(p), false, false)
       },
       false,
       false
@@ -78,23 +70,31 @@ export function parseResponse (
   const response: OffsetDeleteResponse = {
     errorCode,
     throttleTimeMs: reader.readInt32(),
-    topics: reader.readArray((r, i) => {
-      return {
-        name: r.readString(),
-        partitions: r.readArray((r, j) => {
-          const partition = {
-            partitionIndex: r.readInt32(),
-            errorCode: r.readInt16()
-          }
+    topics: reader.readArray(
+      (r, i) => {
+        return {
+          name: r.readString(false),
+          partitions: r.readArray(
+            (r, j) => {
+              const partition = {
+                partitionIndex: r.readInt32(),
+                errorCode: r.readInt16()
+              }
 
-          if (partition.errorCode !== 0) {
-            errors.push([`/topics/${i}/partitions/${j}`, partition.errorCode])
-          }
+              if (partition.errorCode !== 0) {
+                errors.push([`/topics/${i}/partitions/${j}`, partition.errorCode])
+              }
 
-          return partition
-        })
-      }
-    })
+              return partition
+            },
+            false,
+            false
+          )
+        }
+      },
+      false,
+      false
+    )
   }
 
   if (errors.length) {

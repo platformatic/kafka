@@ -28,11 +28,7 @@ import {
   type OffsetCommitRequestTopic,
   type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
-import {
-  type OffsetFetchRequest,
-  type OffsetFetchRequestTopic,
-  type OffsetFetchResponse
-} from '../../apis/consumer/offset-fetch-v9.ts'
+import { type OffsetFetchRequest, type OffsetFetchResponse } from '../../apis/admin/offset-fetch-v9.ts'
 import {
   type SyncGroupRequest,
   type SyncGroupRequestAssignment,
@@ -110,6 +106,7 @@ import {
   type Offsets,
   type OffsetsWithTimestamps
 } from './types.ts'
+import { type TopicPartitions } from '../../apis/types.ts'
 
 interface TopicPartition {
   topicId: string
@@ -933,10 +930,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #listCommittedOffsets (options: ListCommitsOptions, callback: CallbackWithPromise<Offsets>): void {
-    const topics: OffsetFetchRequestTopic[] = []
+    const topics: TopicPartitions[] = []
 
     for (const { topic: name, partitions } of options.topics) {
-      topics.push({ name, partitionIndexes: partitions })
+      topics.push({ name, partitions })
     }
 
     this.#performGroupOperation<OffsetFetchResponse>(

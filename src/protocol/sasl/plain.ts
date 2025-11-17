@@ -29,12 +29,14 @@ export function authenticate (
 
   getCredential('SASL/PLAIN username', usernameProvider, (error, username) => {
     if (error) {
-      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      return
     }
 
     getCredential('SASL/PLAIN password', passwordProvider, (error, password) => {
       if (error) {
-        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        return
       }
 
       authenticateAPI(connection, Buffer.from(['', username, password].join('\0')), callback)

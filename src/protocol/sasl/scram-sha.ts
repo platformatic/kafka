@@ -225,12 +225,14 @@ export function authenticate (
 
   getCredential(`SASL/SCRAM-${algorithm} username`, usernameProvider, (error, username) => {
     if (error) {
-      return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      return
     }
 
     getCredential(`SASL/SCRAM-${algorithm} password`, passwordProvider, (error, password) => {
       if (error) {
-        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        return
       }
 
       performAuthentication(connection, algorithm, definition, authenticateAPI, crypto, username, password, callback)

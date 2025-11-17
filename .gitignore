@@ -1,7 +1,10 @@
 dist/
+target/
 external/
 node_modules
 coverage
 .eslintcache
 .env
 .vscode
+*.node
+

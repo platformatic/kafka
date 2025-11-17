@@ -46,6 +46,7 @@ export const baseOptionsSchema = {
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },
+        keytab: { type: 'string' },
         authBytesValidator: { function: true }
       },
       required: ['mechanism'],

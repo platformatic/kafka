@@ -4,8 +4,13 @@ import { type AddressInfo, createServer as createNetworkServer, type Server, Soc
 import test, { before, type TestContext } from 'node:test'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
+  type SaslAuthenticateResponse,
+  type SASLAuthenticationAPI
+} from '../../src/apis/security/sasl-authenticate-v2.ts'
+import {
   allowedSASLMechanisms,
   AuthenticationError,
+  type CallbackWithPromise,
   Connection,
   type ConnectionDiagnosticEvent,
   connectionsApiChannel,
@@ -17,12 +22,18 @@ import {
   parseBroker,
   PromiseWithResolvers,
   type Reader,
+  type SASLCredentialProvider,
   saslHandshakeV1,
   SASLMechanisms,
+  type SASLMechanismValue,
+  saslOAuthBearer,
   type SASLOptions,
+  saslPlain,
+  saslScramSha,
   UnexpectedCorrelationIdError,
   Writer
 } from '../../src/index.ts'
+import { defaultCrypto, type ScramAlgorithm } from '../../src/protocol/sasl/scram-sha.ts'
 import { createScramUsers } from '../fixtures/create-users.ts'
 import {
   createCreationChannelVerifier,
@@ -957,6 +968,51 @@ for (const mechanism of allowedSASLMechanisms) {
     mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
+    const connection = new Connection('clientId', { sasl })
+    t.after(() => connection.close())
+
+    await connection.connect(saslBroker.host, saslBroker.port)
+    await metadataV12.api.async(connection, [])
+  })
+}
+
+for (const mechanism of allowedSASLMechanisms) {
+  const sasl: SASLOptions =
+    mechanism === 'OAUTHBEARER' ? { mechanism, token: 'token' } : { mechanism, username: 'admin', password: 'admin' }
+
+  sasl.authenticate = async function customSaslAuthenticate (
+    mechanism: SASLMechanismValue,
+    connection: Connection,
+    authenticate: SASLAuthenticationAPI,
+    usernameProvider: string | SASLCredentialProvider | undefined,
+    passwordProvider: string | SASLCredentialProvider | undefined,
+    tokenProvider: string | SASLCredentialProvider | undefined,
+    callback: CallbackWithPromise<SaslAuthenticateResponse>
+  ) {
+    switch (mechanism) {
+      case SASLMechanisms.PLAIN:
+        saslPlain.authenticate(authenticate, connection, usernameProvider!, passwordProvider!, callback)
+
+        break
+      case SASLMechanisms.OAUTHBEARER:
+        saslOAuthBearer.authenticate(authenticate, connection, tokenProvider!, callback)
+        break
+      case SASLMechanisms.SCRAM_SHA_256:
+      case SASLMechanisms.SCRAM_SHA_512:
+        saslScramSha.authenticate(
+          authenticate,
+          connection,
+          mechanism.substring(6) as ScramAlgorithm,
+          usernameProvider!,
+          passwordProvider!,
+          defaultCrypto,
+          callback
+        )
+        break
+    }
+  }
+
+  test.only(`Connection.connect should connect to SASL protected broker using SASL/${mechanism} using a custom implementation`, async t => {
     const connection = new Connection('clientId', { sasl })
     t.after(() => connection.close())
 

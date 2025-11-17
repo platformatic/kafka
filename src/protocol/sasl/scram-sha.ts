@@ -26,11 +26,13 @@ export interface ScramCryptoModule {
 
 export const ScramAlgorithms = {
   'SHA-256': {
+    id: 'SHA-256',
     keyLength: 32,
     algorithm: 'sha256',
     minIterations: 4096
   },
   'SHA-512': {
+    id: 'SHA-512',
     keyLength: 64,
     algorithm: 'sha512',
     minIterations: 4096

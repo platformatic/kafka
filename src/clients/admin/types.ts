@@ -7,7 +7,7 @@ import {
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type ConsumerGroupState } from '../../apis/enumerations.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
 
@@ -77,6 +77,16 @@ export interface DescribeGroupsOptions {
 
 export interface DeleteGroupsOptions {
   groups: string[]
+}
+
+interface MemberRemoval {
+  memberId: string
+  reason?: string
+}
+
+export interface RemoveMembersFromConsumerGroupOptions {
+  groupId: string
+  members?: Nullable<MemberRemoval[]>
 }
 
 export interface DescribeClientQuotasOptions {

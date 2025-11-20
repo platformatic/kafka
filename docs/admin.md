@@ -90,6 +90,19 @@ Options:
 | -------- | ---------- | ----------------- |
 | groups   | `string[]` | Groups to delete. |
 
+### `removeMembersFromConsumerGroup(options[, callback])`
+
+Removes members from a consumer group.
+
+The return value is `void`.
+
+Options:
+
+| Property | Type                                  | Description                                                                                                                                                               |
+| -------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| groupId  | `string`                              | The consumer group ID.                                                                                                                                                    |
+| members  | `(string \| MemberRemoval)[] \| null` | Array of member IDs to remove (as strings), or an array of `MemberRemoval` objects with `memberId` and optional `reason`, or `null` to remove all members from the group. |
+
 ### `describeClientQuotas(options[, callback])`
 
 Gets detailed information about client quotas.

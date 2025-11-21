@@ -11,6 +11,7 @@ import {
   Connection,
   MultipleErrors,
   sleep,
+  TimeoutError,
   UnsupportedApiError,
   type ClientDiagnosticEvent,
   type ClusterMetadata
@@ -541,22 +542,13 @@ test('metadata should handle connection failures to non-existent broker', async 
     strictEqual(['MultipleErrors', 'AggregateError'].includes(error.name), true)
 
     // Error message should indicate failure
-    strictEqual(error.message.includes('failed'), true)
+    strictEqual(error.message, 'Cannot connect to any broker.')
 
     // Should contain nested errors
     strictEqual(Array.isArray(error.errors), true)
-    strictEqual(error.errors.length > 0, true)
-
-    // At least one error should be a network error
-    const hasNetworkError = error.errors.some(
-      (err: any) =>
-        err.message.includes('ECONNREFUSED') ||
-        err.message.includes('ETIMEDOUT') ||
-        err.message.includes('getaddrinfo') ||
-        err.message.includes('connect')
-    )
-
-    strictEqual(hasNetworkError, true)
+    strictEqual(error.errors.length, 1)
+    strictEqual(error.errors[0] instanceof TimeoutError, true)
+    strictEqual(error.errors[0].message, 'Connection to 192.0.2.1:9092 timed out.')
   }
 })
 

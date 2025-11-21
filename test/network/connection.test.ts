@@ -424,6 +424,99 @@ test('Connection.send should enqueue request and process response', async t => {
   verifyTracingChannel()
 })
 
+test('Connection.send should handle requests with response', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  // Setup a simple echo server
+  server.on('connection', socket => {
+    socket.on('data', () => {
+      setTimeout(() => socket.write(Buffer.from([0, 0, 0, 0, 0, 0, 0, 1])), 1000)
+    })
+  })
+
+  await connection.connect('localhost', port)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  await new Promise<string>((resolve, reject) => {
+    connection.send(
+      0, // apiKey
+      0, // apiVersion
+      payloadFn,
+      function () {
+        return 'Success'
+      }, // Dummy parser
+      false, // hasRequestHeaderTaggedFields
+      false, // hasResponseHeaderTaggedFields
+      (err, returnValue) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(returnValue)
+        }
+      }
+    )
+  })
+})
+
+test('Connection.send should time out eventually (custom timeout)', async t => {
+  const { server, port } = await createServer(t)
+  const customTimeout = 2000
+  const connection = new Connection('test-client', { requestTimeout: customTimeout })
+  t.after(() => connection.close())
+
+  // Setup a simple echo server
+  server.on('connection', socket => {
+    socket.on('data', () => {
+      setTimeout(() => socket.write(Buffer.from([0, 0, 0, 0, 0, 0, 0, 1])), 10000)
+    })
+  })
+
+  await connection.connect('localhost', port)
+
+  // Create payload function that indicates no response is expected
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  const startTime = performance.now()
+  try {
+    await new Promise<string>((resolve, reject) => {
+      connection.send(
+        0, // apiKey
+        0, // apiVersion
+        payloadFn,
+        function () {
+          return 'Success'
+        }, // Dummy parser
+        false, // hasRequestHeaderTaggedFields
+        false, // hasResponseHeaderTaggedFields
+        (err, returnValue) => {
+          if (err) {
+            reject(err)
+          } else {
+            resolve(returnValue)
+          }
+        }
+      )
+    })
+    throw new Error('Expected request to time out')
+  } catch (error) {
+    deepStrictEqual((error as Error).message, 'Request timed out')
+    const timeoutMargin = customTimeout * 0.01 // Allow 1% margin
+    const timeoutDiff = Math.abs(performance.now() - startTime - customTimeout)
+    strictEqual(timeoutDiff <= timeoutMargin, true, 'Should time out with custom timeout')
+  }
+})
+
 test('Connection.send should handle requests with no response', async t => {
   const { server, port } = await createServer(t)
   const connection = new Connection('test-client')

@@ -625,8 +625,7 @@ export class Connection extends EventEmitter {
       const request = this.#inflightRequests.get(correlationId)
 
       if (!request) {
-        this.emit(
-          'error',
+        this.#socket.destroy(
           new UnexpectedCorrelationIdError(`Received unexpected response with correlation_id=${correlationId}`, {
             raw: this.#responseReader.buffer.slice(0, this.#nextMessage + INT32_SIZE)
           })

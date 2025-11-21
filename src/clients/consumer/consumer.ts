@@ -2,7 +2,6 @@ import { type ValidateFunction } from 'ajv'
 import {
   type CallbackWithPromise,
   createPromisifiedCallback,
-  createTimeoutCallback,
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
@@ -1141,8 +1140,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          const timeoutCallback = createTimeoutCallback(groupCallback, this[kOptions].timeout!, 'Heartbeat timeout.')
-
           api(
             connection,
             this.groupId,
@@ -1154,7 +1151,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.topics.current,
             this.#groupRemoteAssignor,
             this.#assignments,
-            timeoutCallback
+            groupCallback
           )
         })
       },

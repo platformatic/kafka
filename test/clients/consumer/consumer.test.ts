@@ -929,7 +929,7 @@ test('fetch should support both promise and callback API', async t => {
   const topicInfo = metadata.topics.get(topic)!
 
   await new Promise<void>((resolve, reject) => {
-    const consumer = createConsumer(t)
+    const consumer = createConsumer(t, { requestTimeout: 100000 })
 
     // First test callback API
     consumer.fetch(

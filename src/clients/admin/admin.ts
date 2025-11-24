@@ -53,6 +53,8 @@ import {
   kGetApi,
   kGetBootstrapConnection,
   kGetConnection,
+  kGetControllerConnection,
+  kHandleNotControllerError,
   kMetadata,
   kOptions,
   kPerformDeduplicated,
@@ -470,7 +472,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'createTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetControllerConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as CreateTopicsResponse)
                 return
@@ -482,13 +484,9 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api(
-                  connection,
-                  requests,
-                  this[kOptions].timeout!,
-                  false,
-                  retryCallback as unknown as Callback<CreateTopicsResponse>
-                )
+                api(connection, requests, this[kOptions].timeout!, false, (error, response) => {
+                  this[kHandleNotControllerError](error, response, retryCallback)
+                })
               })
             })
           },
@@ -532,7 +530,7 @@ export class Admin extends Base<AdminOptions> {
         this[kPerformWithRetry](
           'deleteTopics',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            this[kGetControllerConnection]((error, connection) => {
               if (error) {
                 retryCallback(error, undefined)
                 return
@@ -549,12 +547,9 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api(
-                  connection,
-                  requests,
-                  this[kOptions].timeout!,
-                  retryCallback as unknown as Callback<DeleteTopicsResponse>
-                )
+                api(connection, requests, this[kOptions].timeout!, (error, response) => {
+                  this[kHandleNotControllerError](error, response, retryCallback)
+                })
               })
             })
           },

@@ -61,6 +61,9 @@ export const kFormatValidationErrors = Symbol('plt.kafka.base.formatValidationEr
 export const kPrometheus = Symbol('plt.kafka.base.prometheus')
 export const kClientType = Symbol('plt.kafka.base.clientType')
 export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
+export const kController = Symbol('plt.kafka.base.controller')
+export const kGetControllerConnection = Symbol('plt.kafka.base.getControllerConnection')
+export const kHandleNotControllerError = Symbol('plt.kafka.base.handleNotControllerError')
 
 let currentInstance = 0
 
@@ -76,7 +79,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kOptions]: OptionsType;
   [kConnections]: ConnectionPool;
   [kClosed]: boolean;
-  [kPrometheus]: Metrics | undefined
+  [kPrometheus]: Metrics | undefined;
+  [kController]: Broker | undefined
 
   #metadata: ClusterMetadata | undefined
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
@@ -478,6 +482,28 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     this[kConnections].getFirstAvailable(this[kBootstrapBrokers], callback)
   }
 
+  [kGetControllerConnection] (callback: Callback<Connection>): void {
+    if (this[kController]) {
+      this[kConnections].get(this[kController], callback)
+    } else {
+      this[kGetBootstrapConnection](callback)
+    }
+  }
+
+  [kHandleNotControllerError]<T> (error: Error | null, value: T, callback: Callback<T>): void {
+    if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
+      this.metadata({ topics: [] }, (metadataError, metadata) => {
+        if (metadataError) {
+          callback(metadataError, undefined as unknown as T)
+        }
+        this[kController] = metadata.brokers.get(metadata.controllerId)
+        callback(error, undefined as unknown as T)
+      })
+    } else {
+      callback(error, value)
+    }
+  }
+
   [kValidateOptions] (
     target: unknown,
     validator: ValidateFunction<unknown>,
@@ -590,7 +616,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 id: metadata.clusterId!,
                 brokers: new Map(),
                 topics: new Map(),
-                lastUpdate
+                lastUpdate,
+                controllerId: metadata.controllerId
               }
             } else {
               this.#metadata.lastUpdate = lastUpdate

@@ -76,7 +76,7 @@ export function parseResponse (
           }
 
           if (partition.errorCode !== 0) {
-            errors.push([`/results/${i}/partitions/${j}`, partition.errorCode])
+            errors.push([`/results/${i}/partitions/${j}`, [partition.errorCode, null]])
           }
 
           return partition

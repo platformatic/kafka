@@ -121,7 +121,7 @@ test('consumer should handle fenced member epoch error', skipConsumerGroupProtoc
     new ResponseError(
       consumerGroupHeartbeatV0.api.key,
       0,
-      { '': 110 },
+      { '/': [110, null] },
       {
         throttleTimeMs: 0,
         errorCode: 110,

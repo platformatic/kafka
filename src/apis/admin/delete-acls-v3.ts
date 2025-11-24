@@ -91,24 +91,26 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     filterResults: reader.readArray((r, i) => {
       const errorCode = r.readInt16()
+      const errorMessage = r.readNullableString()
 
       if (errorCode !== 0) {
-        errors.push([`/filter_results/${i}`, errorCode])
+        errors.push([`/filter_results/${i}`, [errorCode, errorMessage]])
       }
 
       return {
         errorCode,
-        errorMessage: r.readNullableString(),
+        errorMessage,
         matchingAcls: r.readArray((r, j) => {
           const errorCode = r.readInt16()
+          const errorMessage = r.readNullableString()
 
           if (errorCode !== 0) {
-            errors.push([`/filter_results/${i}/matching_acls/${j}`, errorCode])
+            errors.push([`/filter_results/${i}/matching_acls/${j}`, [errorCode, errorMessage]])
           }
 
           return {
             errorCode,
-            errorMessage: r.readNullableString(),
+            errorMessage,
             resourceType: r.readInt8(),
             resourceName: r.readString(),
             patternType: r.readInt8(),

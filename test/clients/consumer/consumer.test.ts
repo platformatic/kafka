@@ -3068,7 +3068,7 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
   mockAPI(
     consumer[kConnections],
     syncGroupV5.api.key,
-    new ProtocolError('REBALANCE_IN_PROGRESS', { cancelMembership: true })
+    new ProtocolError('REBALANCE_IN_PROGRESS', null, { cancelMembership: true })
   )
 
   deepStrictEqual(await consumer.joinGroup({}), undefined)
@@ -3080,7 +3080,7 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
   mockAPI(
     consumer[kConnections],
     syncGroupV5.api.key,
-    new ProtocolError('UNKNOWN_MEMBER_ID', { cancelMembership: true })
+    new ProtocolError('UNKNOWN_MEMBER_ID', null, { cancelMembership: true })
   )
 
   deepStrictEqual(await consumer.joinGroup({}), undefined)

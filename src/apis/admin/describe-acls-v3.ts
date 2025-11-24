@@ -99,7 +99,7 @@ export function parseResponse (
   }
 
   if (response.errorCode) {
-    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode }, response)
+    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)
   }
 
   return response

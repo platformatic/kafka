@@ -3,6 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type ConfigResource } from '../enumerations.ts'
 
 export interface AlterConfigsRequestConfig {
   name: string
@@ -10,7 +11,7 @@ export interface AlterConfigsRequestConfig {
 }
 
 export interface AlterConfigsRequestResource {
-  resourceType: number
+  resourceType: ConfigResource
   resourceName: string
   configs: AlterConfigsRequestConfig[]
 }
@@ -20,7 +21,7 @@ export type AlterConfigsRequest = Parameters<typeof createRequest>
 export interface AlterConfigsResponseResult {
   errorCode: number
   errorMessage: NullableString
-  resourceType: number
+  resourceType: ConfigResource
   resourceName: string
 }
 
@@ -81,7 +82,7 @@ export function parseResponse (
       return {
         errorCode,
         errorMessage: r.readNullableString(),
-        resourceType: r.readInt8(),
+        resourceType: r.readInt8() as ConfigResource,
         resourceName: r.readString()
       }
     })

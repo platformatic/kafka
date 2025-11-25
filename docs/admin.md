@@ -128,6 +128,46 @@ Options:
 | -------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | topics   | `DescribeLogDirsRequestTopic[]` | Array of topics specifying the topics and partitions for which to describe logs. |
 
+### `describeConfigs(options[, callback])`
+
+Describes configuration parameters for specified resources.
+
+The return value is an array of resource configurations, each containing the resource type, name, and configuration entries.
+
+Options:
+
+| Property             | Type                               | Description                                                                                |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| resources            | `DescribeConfigsRequestResource[]` | Array of resources specifying the resource type, name, and configuration keys to describe. |
+| includeSynonyms      | `boolean`                          | Whether to include configuration synonyms in the response. Defaults to `false`.            |
+| includeDocumentation | `boolean`                          | Whether to include configuration documentation in the response. Defaults to `false`.       |
+
+### `alterConfigs(options[, callback])`
+
+Alters configuration parameters for specified resources.
+
+The return value is `void`.
+
+Options:
+
+| Property     | Type                            | Description                                                                          |
+| ------------ | ------------------------------- | ------------------------------------------------------------------------------------ |
+| resources    | `AlterConfigsRequestResource[]` | Array of resources specifying the resource type, name, and configurations to change. |
+| validateOnly | `boolean`                       | Whether to only validate the request without applying changes. Defaults to `false`.  |
+
+### `incrementalAlterConfigs(options[, callback])`
+
+Incrementally alters configuration parameters for specified resources using specific operations (Set, delete, append, subract).
+
+The return value is `void`.
+
+Options:
+
+| Property     | Type                                       | Description                                                                            |
+| ------------ | ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| resources    | `IncrementalAlterConfigsRequestResource[]` | Array of resources specifying the resource type, name, and incremental configurations. |
+| validateOnly | `boolean`                                  | Whether to only validate the request without applying changes. Defaults to `false`.    |
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

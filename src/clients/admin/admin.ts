@@ -3,6 +3,17 @@ import {
   type AlterClientQuotasResponse,
   type AlterClientQuotasResponseEntries
 } from '../../apis/admin/alter-client-quotas-v1.ts'
+import { type OffsetDeleteRequest, type OffsetDeleteResponse } from '../../apis/admin/offset-delete-v0.ts'
+import {
+  type OffsetFetchRequest,
+  type OffsetFetchResponse,
+  type OffsetFetchRequestGroup
+} from '../../apis/admin/offset-fetch-v9.ts'
+import {
+  type OffsetCommitRequest,
+  type OffsetCommitRequestTopic,
+  type OffsetCommitResponse
+} from '../../apis/consumer/offset-commit-v9.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
@@ -39,6 +50,7 @@ import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../..
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   adminClientQuotasChannel,
+  adminConsumerGroupOffsetsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminTopicsChannel,
@@ -70,7 +82,10 @@ import {
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
   listGroupsOptionsValidator,
-  listTopicsOptionsValidator
+  listTopicsOptionsValidator,
+  alterConsumerGroupOffsetsOptionsValidator,
+  deleteConsumerGroupOffsetsOptionsValidator,
+  listConsumerGroupOffsetsOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -81,14 +96,19 @@ import {
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
   type DescribeClientQuotasOptions,
+  type DeleteConsumerGroupOffsetsOptions,
+  type ListConsumerGroupOffsetsOptions,
+  type AlterConsumerGroupOffsetsOptions,
   type DescribeGroupsOptions,
   type DescribeLogDirsOptions,
   type Group,
   type GroupBase,
   type GroupMember,
   type ListGroupsOptions,
-  type ListTopicsOptions
+  type ListTopicsOptions,
+  type ListConsumerGroupOffsetsGroup
 } from './types.ts'
+import { type TopicPartitions } from '../../apis/types.ts'
 
 export class Admin extends Base<AdminOptions> {
   constructor (options: AdminOptions) {
@@ -384,6 +404,118 @@ export class Admin extends Base<AdminOptions> {
       this.#describeLogDirs,
       1,
       createDiagnosticContext({ client: this, operation: 'describeLogDirs', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  listConsumerGroupOffsets (
+    options: ListConsumerGroupOffsetsOptions,
+    callback: CallbackWithPromise<ListConsumerGroupOffsetsGroup[]>
+  ): void
+  listConsumerGroupOffsets (options: ListConsumerGroupOffsetsOptions): Promise<ListConsumerGroupOffsetsGroup[]>
+  listConsumerGroupOffsets (
+    options: ListConsumerGroupOffsetsOptions,
+    callback?: CallbackWithPromise<ListConsumerGroupOffsetsGroup[]>
+  ): void | Promise<ListConsumerGroupOffsetsGroup[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, listConsumerGroupOffsetsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as ListConsumerGroupOffsetsGroup[])
+      return callback[kCallbackPromise]
+    }
+
+    adminConsumerGroupOffsetsChannel.traceCallback(
+      this.#listConsumerGroupOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listConsumerGroupOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  alterConsumerGroupOffsets (options: AlterConsumerGroupOffsetsOptions, callback: CallbackWithPromise<void>): void
+  alterConsumerGroupOffsets (options: AlterConsumerGroupOffsetsOptions): Promise<void>
+  alterConsumerGroupOffsets (
+    options: AlterConsumerGroupOffsetsOptions,
+    callback?: CallbackWithPromise<void>
+  ): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](
+      options,
+      alterConsumerGroupOffsetsOptionsValidator,
+      '/options',
+      false
+    )
+    if (validationError) {
+      callback(validationError)
+      return callback[kCallbackPromise]
+    }
+
+    adminConsumerGroupOffsetsChannel.traceCallback(
+      this.#alterConsumerGroupOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'alterConsumerGroupOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  deleteConsumerGroupOffsets (
+    options: DeleteConsumerGroupOffsetsOptions,
+    callback: CallbackWithPromise<TopicPartitions[]>
+  ): void
+  deleteConsumerGroupOffsets (options: DeleteConsumerGroupOffsetsOptions): Promise<TopicPartitions[]>
+  deleteConsumerGroupOffsets (
+    options: DeleteConsumerGroupOffsetsOptions,
+    callback?: CallbackWithPromise<TopicPartitions[]>
+  ): void | Promise<TopicPartitions[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](
+      options,
+      deleteConsumerGroupOffsetsOptionsValidator,
+      '/options',
+      false
+    )
+    if (validationError) {
+      callback(validationError, undefined as unknown as TopicPartitions[])
+      return callback[kCallbackPromise]
+    }
+
+    adminConsumerGroupOffsetsChannel.traceCallback(
+      this.#deleteConsumerGroupOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'deleteConsumerGroupOffsets', options }),
       this,
       options,
       callback
@@ -985,6 +1117,282 @@ export class Admin extends Base<AdminOptions> {
         },
         callback
       )
+    })
+  }
+
+  #listConsumerGroupOffsets (
+    options: ListConsumerGroupOffsetsOptions,
+    callback: CallbackWithPromise<ListConsumerGroupOffsetsGroup[]>
+  ): void {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as ListConsumerGroupOffsetsGroup[])
+        return
+      }
+
+      const groupIds = options.groups.map(group => (typeof group === 'string' ? group : group.groupId))
+
+      this.#findGroupCoordinator(groupIds, (error, response) => {
+        if (error) {
+          callback(
+            new MultipleErrors('Listing consumer group offsets failed.', [error]),
+            undefined as unknown as ListConsumerGroupOffsetsGroup[]
+          )
+          return
+        }
+
+        const coordinators: Map<number, OffsetFetchRequestGroup[]> = new Map()
+        for (const { key: groupId, nodeId: node } of response.coordinators) {
+          const groupRequest: OffsetFetchRequestGroup = {
+            groupId,
+            memberId: null,
+            memberEpoch: -1
+          }
+
+          for (const group of options.groups) {
+            if (typeof group !== 'string' && group.groupId === groupId && !!group.topics && group.topics.length > 0) {
+              groupRequest.topics = group.topics
+              break
+            }
+          }
+
+          let coordinator = coordinators.get(node)
+          if (!coordinator) {
+            coordinator = []
+            coordinators.set(node, coordinator)
+          }
+
+          coordinator.push(groupRequest)
+        }
+
+        runConcurrentCallbacks<OffsetFetchResponse>(
+          'Listing consumer group offsets failed.',
+          coordinators,
+          ([node, groups], concurrentCallback) => {
+            this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
+              if (error) {
+                concurrentCallback(error, undefined as unknown as OffsetFetchResponse)
+                return
+              }
+
+              this[kPerformWithRetry]<OffsetFetchResponse>(
+                'offsetFetch',
+                retryCallback => {
+                  this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (error, api) => {
+                    if (error) {
+                      retryCallback(error, undefined as unknown as OffsetFetchResponse)
+                      return
+                    }
+
+                    api(connection, groups, options.requireStable ?? false, retryCallback)
+                  })
+                },
+                concurrentCallback,
+                0
+              )
+            })
+          },
+          (error, responses) => {
+            if (error) {
+              callback(error, undefined as unknown as ListConsumerGroupOffsetsGroup[])
+              return
+            }
+
+            callback(
+              null,
+              responses.flatMap(r =>
+                r.groups.map(group => ({
+                  groupId: group.groupId,
+                  topics: group.topics.map(topic => ({
+                    name: topic.name,
+                    partitions: topic.partitions.map(p => ({
+                      partitionIndex: p.partitionIndex,
+                      committedOffset: p.committedOffset,
+                      committedLeaderEpoch: p.committedLeaderEpoch,
+                      metadata: p.metadata
+                    }))
+                  }))
+                })))
+            )
+          }
+        )
+      })
+    })
+  }
+
+  #alterConsumerGroupOffsets (options: AlterConsumerGroupOffsetsOptions, callback: CallbackWithPromise<void>): void {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined)
+        return
+      }
+
+      this.#findGroupCoordinator([options.groupId], (error, response) => {
+        if (error) {
+          callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
+          return
+        }
+
+        const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        if (!coordinator) {
+          callback(
+            new MultipleErrors('Altering consumer group offsets failed.', [
+              new Error(`No coordinator found for group ${options.groupId}`)
+            ])
+          )
+          return
+        }
+
+        const broker = metadata.brokers.get(coordinator.nodeId)
+        if (!broker) {
+          callback(
+            new MultipleErrors('Altering consumer group offsets failed.', [
+              new Error(`Broker ${coordinator.nodeId} not found`)
+            ])
+          )
+          return
+        }
+
+        this[kGetConnection](broker, (error, connection) => {
+          if (error) {
+            callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
+            return
+          }
+
+          this[kPerformWithRetry]<OffsetCommitResponse>(
+            'alterConsumerGroupOffsets',
+            retryCallback => {
+              this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as OffsetCommitResponse)
+                  return
+                }
+
+                const topics: OffsetCommitRequestTopic[] = []
+                for (const topic of options.topics) {
+                  const partitions = topic.partitionOffsets.map(p => ({
+                    partitionIndex: p.partition,
+                    committedOffset: p.offset,
+                    committedLeaderEpoch: -1,
+                    committedMetadata: null
+                  }))
+                  topics.push({ name: topic.name, partitions })
+                }
+
+                api(
+                  connection,
+                  options.groupId,
+                  -1,
+                  '',
+                  null,
+                  topics,
+                  retryCallback as unknown as Callback<OffsetCommitResponse>
+                )
+              })
+            },
+            (error: Error | null) => {
+              if (error) {
+                callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
+                return
+              }
+
+              callback(null)
+            },
+            0
+          )
+        })
+      })
+    })
+  }
+
+  #deleteConsumerGroupOffsets (
+    options: DeleteConsumerGroupOffsetsOptions,
+    callback: CallbackWithPromise<TopicPartitions[]>
+  ): void {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as TopicPartitions[])
+        return
+      }
+
+      this.#findGroupCoordinator([options.groupId], (error, response) => {
+        if (error) {
+          callback(
+            new MultipleErrors('Deleting consumer group offsets failed.', [error]),
+            undefined as unknown as TopicPartitions[]
+          )
+          return
+        }
+
+        const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        if (!coordinator) {
+          callback(
+            new MultipleErrors('Deleting consumer group offsets failed.', [
+              new Error(`No coordinator found for group ${options.groupId}`)
+            ]),
+            undefined as unknown as TopicPartitions[]
+          )
+          return
+        }
+
+        const broker = metadata.brokers.get(coordinator.nodeId)
+        if (!broker) {
+          callback(
+            new MultipleErrors('Deleting consumer group offsets failed.', [
+              new Error(`Broker ${coordinator.nodeId} not found`)
+            ]),
+            undefined as unknown as TopicPartitions[]
+          )
+          return
+        }
+
+        this[kGetConnection](broker, (error, connection) => {
+          if (error) {
+            callback(
+              new MultipleErrors('Deleting consumer group offsets failed.', [error]),
+              undefined as unknown as TopicPartitions[]
+            )
+            return
+          }
+
+          this[kPerformWithRetry]<OffsetDeleteResponse>(
+            'deleteOffset',
+            retryCallback => {
+              this[kGetApi]<OffsetDeleteRequest, OffsetDeleteResponse>('OffsetDelete', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as OffsetDeleteResponse)
+                  return
+                }
+
+                api(
+                  connection,
+                  options.groupId,
+                  options.topics,
+                  retryCallback as unknown as Callback<OffsetDeleteResponse>
+                )
+              })
+            },
+            (error: Error | null, response: OffsetDeleteResponse) => {
+              if (error) {
+                callback(
+                  new MultipleErrors('Deleting consumer group offsets failed.', [error]),
+                  undefined as unknown as TopicPartitions[]
+                )
+                return
+              }
+
+              callback(
+                null,
+                response.topics.map(topic => ({
+                  name: topic.name,
+                  partitions: topic.partitions.map(p => p.partitionIndex)
+                }))
+              )
+            },
+            0
+          )
+        })
+      })
     })
   }
 }

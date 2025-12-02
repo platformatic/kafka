@@ -94,7 +94,6 @@ function performChallenge (
         return
       }
 
-      // Altrimenti continua normalmente
       performChallenge(connection, authenticate, client, response.authBytes.toString('base64'), callback)
     })
   })

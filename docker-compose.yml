@@ -1,6 +1,9 @@
 services:
   kdc:
-    image: alpine:latest
+    image: plt-kafka-kdc:latest
+    pull_policy: never
+    build:
+      context: ./docker/kerberos
     container_name: kdc
     ports:
       - '8000:88/tcp'

@@ -979,7 +979,7 @@ for (const mechanism of allowedSASLMechanisms) {
         mechanism,
         username: 'admin-password@EXAMPLE.COM',
         password: 'admin',
-        authenticate: await createAuthenticator('admin-password@EXAMPLE.COM', 'admin', 'EXAMPLE.COM', 'localhost:8000')
+        authenticate: await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
       }
       break
     default:
@@ -1004,12 +1004,7 @@ for (const mechanism of allowedSASLMechanisms) {
       ? parseBroker(kafkaSaslKerberosBootstrapServers[0])
       : parseBroker(kafkaSaslBootstrapServers[0])
 
-  const gssapiAuthenticate = await createAuthenticator(
-    'admin-password@EXAMPLE.COM',
-    'admin',
-    'EXAMPLE.COM',
-    'localhost:8000'
-  )
+  const gssapiAuthenticate = await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
 
   sasl.authenticate = async function customSaslAuthenticate (
     mechanism: SASLMechanismValue,

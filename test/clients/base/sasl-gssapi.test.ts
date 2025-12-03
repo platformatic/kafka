@@ -42,7 +42,7 @@ test('should connect to SASL protected broker using SASL/GSSAPI using a custom a
       mechanism: 'GSSAPI',
       username: 'admin-password@EXAMPLE.COM',
       password: 'admin',
-      authenticate: await createAuthenticator('admin-password@EXAMPLE.COM', 'admin', 'EXAMPLE.COM', 'localhost:8000')
+      authenticate: await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
     }
   })
 

@@ -1,9 +1,8 @@
 import krb, { type KerberosClient } from 'kerberos'
 import { execSync } from 'node:child_process'
-import { rm } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { resolve as resolvePaths } from 'node:path'
 import {
   AuthenticationError,
   EMPTY_BUFFER,
@@ -76,7 +75,6 @@ function performChallenge (
               return
             }
 
-            // Invia la risposta wrappata a Kafka
             authenticate(connection, Buffer.from(wrapped, 'base64'), (error, response) => {
               if (error) {
                 callback(
@@ -99,14 +97,14 @@ function performChallenge (
   })
 }
 
-function restoreEnvironment (
+async function restoreEnvironment (
   callback: Callback<SaslAuthenticateResponse>,
   kerberosRoot: string,
   originalKrb5Config: string | undefined,
   originalKrbCCName: string | undefined,
   error: Error | null,
   response: SaslAuthenticateResponse
-): void {
+): Promise<void> {
   if (typeof originalKrb5Config !== 'undefined') {
     process.env.KRB5_CONFIG = originalKrb5Config
   } else {
@@ -119,12 +117,11 @@ function restoreEnvironment (
     delete process.env.KRB5CCNAME
   }
 
-  rm(kerberosRoot, { recursive: true, force: true }, () => {
-    callback(error, response)
-  })
+  await rm(kerberosRoot, { recursive: true, force: true })
+  callback(error, response)
 }
 
-function authenticate (
+async function authenticate (
   service: string,
   kerberosRoot: string,
   _m: SASLMechanismValue,
@@ -134,74 +131,77 @@ function authenticate (
   passwordProvider: string | SASLCredentialProvider | undefined,
   _t: string | SASLCredentialProvider | undefined,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
-): void {
-  saslUtils.getCredential('SASL/GSSAPI username', usernameProvider!, (error, username) => {
-    if (error) {
-      callback!(error, undefined as unknown as SaslAuthenticateResponse)
-      return
+): Promise<void> {
+  const afterRestoreCallback = restoreEnvironment.bind(
+    null,
+    callback,
+    kerberosRoot,
+    process.env.KRB5_CONFIG,
+    process.env.KRB5CCNAME
+  )
+
+  try {
+    const username = await saslUtils.getCredential('SASL/GSSAPI username', usernameProvider!)
+    let password = await saslUtils.getCredential('SASL/GSSAPI password', passwordProvider!)
+
+    process.env.KRB5_CONFIG = `${kerberosRoot}/krb5.conf`
+    process.env.KRB5CCNAME = `${kerberosRoot}/krb5.cache`
+
+    // Using a password
+    if (!password.startsWith('keytab:')) {
+      // On MIT Kerberos, kinit does not support reading password from stdin or a password file
+      // so we convert it to a keytab file if needed using ktutil
+      if (process.platform !== 'darwin') {
+        execSync(`ktutil --keytab ${kerberosRoot}/keytab`, {
+          input: `addent -password -p ${username} -k 1 -f \n${password}\nwkt ${kerberosRoot}/keytab\nquit\n`
+        })
+
+        password = `keytab:${kerberosRoot}/keytab`
+      } else {
+        // On MacOS, we can use a password file directly since it uses Heimdal Kerberos
+        await writeFile(`${kerberosRoot}/password`, password, 'utf-8')
+      }
     }
 
-    saslUtils.getCredential('SASL/GSSAPI password', passwordProvider!, (error, password) => {
+    let args = ''
+    if (password.startsWith('keytab:')) {
+      args = `-kt ${password.slice(7)}`
+    } else {
+      args = `--password-file=${kerberosRoot}/password`
+    }
+
+    // Import the password via kinit
+    execSync(`kinit ${args} ${username}`, { stdio: 'pipe', env: process.env })
+
+    krb.initializeClient(service, {}, (error: string | null, client: KerberosClient) => {
       if (error) {
-        callback!(error, undefined as unknown as SaslAuthenticateResponse)
-        return
-      }
-
-      const afterRestoreCallback = restoreEnvironment.bind(
-        null,
-        callback!,
-        kerberosRoot,
-        process.env.KRB5_CONFIG,
-        process.env.KRB5CCNAME
-      )
-      process.env.KRB5_CONFIG = `${kerberosRoot}/krb5.conf`
-      process.env.KRB5CCNAME = `${kerberosRoot}/krb5.cache`
-
-      let args = ''
-      if (password.startsWith('keytab:')) {
-        args = `-kt ${password.substring('keytab:'.length)}`
-      } else {
-        args = `--password-file=${kerberosRoot}/password`
-      }
-
-      // Import the password via kinit
-      try {
-        execSync(`kinit ${args} ${username}`, { stdio: 'pipe' })
-      } catch (error) {
-        afterRestoreCallback(
-          new AuthenticationError('Cannot execute kinit to import user Kerberos credentials', { error }),
+        callback(
+          createKerberosAuthenticationError('Cannot initialize Kerberos client.', error),
           undefined as unknown as SaslAuthenticateResponse
         )
         return
       }
 
-      krb.initializeClient(service, { principal: username }, (error: string | null, client: KerberosClient) => {
-        if (error) {
-          callback(
-            createKerberosAuthenticationError('Cannot initialize Kerberos client.', error),
-            undefined as unknown as SaslAuthenticateResponse
-          )
-          return
-        }
-
-        performChallenge(connection, authenticate, client, '', afterRestoreCallback)
-      })
+      performChallenge(connection, authenticate, client, '', afterRestoreCallback)
     })
-  })
+  } catch (error) {
+    await afterRestoreCallback(error, undefined as unknown as SaslAuthenticateResponse)
+  }
 }
 
 export async function createAuthenticator (
-  _u: string,
-  password: string,
+  service: string,
   realm: string,
   kdc: string
 ): Promise<SASLCustomAuthenticator> {
-  const tmpDir = await mkdtemp(resolve(tmpdir(), 'sasl-gssapi-'))
+  const tmpDir = await mkdtemp(resolvePaths(tmpdir(), 'sasl-gssapi-'))
 
+  // We disable shortname qualification to avoid issues with domain-less hostnames on CI
   await writeFile(
     `${tmpDir}/krb5.conf`,
     `
 [libdefaults]
+  qualify_shortname = ""
   default_realm = ${realm}
   default_ccache_name = FILE:${tmpDir}/krb5.cache
 
@@ -217,9 +217,5 @@ export async function createAuthenticator (
     'utf-8'
   )
 
-  if (!password.startsWith('keytab:')) {
-    await writeFile(`${tmpDir}/password`, password, 'utf-8')
-  }
-
-  return authenticate.bind(null, 'broker@broker-sasl-kerberos', tmpDir)
+  return authenticate.bind(null, service, tmpDir)
 }

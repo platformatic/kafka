@@ -1,18 +1,28 @@
-import { type Callback } from '../../apis/index.ts'
+import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../../apis/index.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type SASLCredentialProvider } from '../../network/connection.ts'
 
 export function getCredential (
   label: string,
   credentialOrProvider: string | SASLCredentialProvider,
-  callback: Callback<string>
-): void {
+  callback: CallbackWithPromise<string>
+): void
+export function getCredential (label: string, credentialOrProvider: string | SASLCredentialProvider): Promise<string>
+export function getCredential (
+  label: string,
+  credentialOrProvider: string | SASLCredentialProvider,
+  callback?: CallbackWithPromise<string>
+): void | Promise<string> {
+  if (!callback) {
+    callback = createPromisifiedCallback<string>()
+  }
+
   if (typeof credentialOrProvider === 'string') {
     callback(null, credentialOrProvider)
-    return
+    return callback[kCallbackPromise]
   } else if (typeof credentialOrProvider !== 'function') {
     callback(new AuthenticationError(`The ${label} should be a string or a function.`), undefined as unknown as string)
-    return
+    return callback[kCallbackPromise]
   }
 
   try {
@@ -20,14 +30,14 @@ export function getCredential (
 
     if (typeof credential === 'string') {
       callback(null, credential)
-      return
+      return callback[kCallbackPromise]
     } else if (typeof (credential as Promise<string>)?.then !== 'function') {
       callback(
         new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a string.`),
         undefined as unknown as string
       )
 
-      return
+      return callback[kCallbackPromise]
     }
 
     credential
@@ -39,7 +49,7 @@ export function getCredential (
             undefined as unknown as string
           )
 
-          return
+          return callback[kCallbackPromise]
         }
 
         process.nextTick(callback, null, token)
@@ -56,4 +66,6 @@ export function getCredential (
       undefined as unknown as string
     )
   }
+
+  return callback[kCallbackPromise]
 }

@@ -9,6 +9,11 @@ import {
   type CreateTopicsRequestTopicAssignment,
   type CreateTopicsResponse
 } from '../../apis/admin/create-topics-v7.ts'
+import {
+  type ListOffsetsRequest,
+  type ListOffsetsRequestTopic,
+  type ListOffsetsResponse
+} from '../../apis/consumer/list-offsets-v9.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
   type DeleteTopicsRequest,
@@ -34,13 +39,14 @@ import {
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import { type Callback } from '../../apis/definitions.ts'
-import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
+import { IsolationLevels, FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   adminClientQuotasChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
+  adminOffsetsChannel,
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
@@ -70,9 +76,12 @@ import {
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
   listGroupsOptionsValidator,
+  adminListOffsetsOptionsValidator,
   listTopicsOptionsValidator
 } from './options.ts'
 import {
+  type AdminListedOffsetsTopic,
+  type AdminListOffsetsOptions,
   type AdminOptions,
   type AlterClientQuotasOptions,
   type BrokerLogDirDescription,
@@ -89,6 +98,7 @@ import {
   type ListGroupsOptions,
   type ListTopicsOptions
 } from './types.ts'
+import { type Broker } from '../../index.ts'
 
 export class Admin extends Base<AdminOptions> {
   constructor (options: AdminOptions) {
@@ -392,6 +402,38 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
+  listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<AdminListedOffsetsTopic[]>): void
+  listOffsets (options: AdminListOffsetsOptions): Promise<AdminListedOffsetsTopic[]>
+  listOffsets (
+    options: AdminListOffsetsOptions,
+    callback?: CallbackWithPromise<AdminListedOffsetsTopic[]>
+  ): void | Promise<AdminListedOffsetsTopic[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, adminListOffsetsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as AdminListedOffsetsTopic[])
+      return callback[kCallbackPromise]
+    }
+
+    adminOffsetsChannel.traceCallback(
+      this.#listOffsets,
+      1,
+      createDiagnosticContext({ client: this, operation: 'listOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback![kCallbackPromise]
+  }
+
   #listTopics (options: ListTopicsOptions, callback: CallbackWithPromise<string[]>): void {
     const includeInternals = options.includeInternals ?? false
 
@@ -574,7 +616,7 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      runConcurrentCallbacks<ListGroupsResponse>(
+      runConcurrentCallbacks<ListGroupsResponse, Map<number, Broker>>(
         'Listing groups failed.',
         metadata.brokers,
         ([, broker], concurrentCallback) => {
@@ -658,7 +700,7 @@ export class Admin extends Base<AdminOptions> {
           coordinator.push(group)
         }
 
-        runConcurrentCallbacks<DescribeGroupsResponse>(
+        runConcurrentCallbacks<DescribeGroupsResponse, Map<number, string[]>>(
           'Describing groups failed.',
           coordinators,
           ([node, groups], concurrentCallback) => {
@@ -940,7 +982,7 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      runConcurrentCallbacks<BrokerLogDirDescription>(
+      runConcurrentCallbacks<BrokerLogDirDescription, Map<number, Broker>>(
         'Describing log dirs failed.',
         metadata.brokers,
         ([id, broker], concurrentCallback) => {
@@ -984,6 +1026,102 @@ export class Admin extends Base<AdminOptions> {
           })
         },
         callback
+      )
+    })
+  }
+
+  #listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<AdminListedOffsetsTopic[]>): void {
+    this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as AdminListedOffsetsTopic[])
+        return
+      }
+
+      const requests = new Map<number, ListOffsetsRequestTopic[]>()
+
+      for (const topic of options.topics) {
+        for (const partition of topic.partitions) {
+          const { leader, leaderEpoch } = metadata.topics.get(topic.name)!.partitions[partition.partitionIndex]
+          let leaderRequests = requests.get(leader)
+          if (!leaderRequests) {
+            leaderRequests = []
+            requests.set(leader, leaderRequests)
+          }
+
+          let topicRequest = leaderRequests.find(t => t.name === topic.name)
+          if (!topicRequest) {
+            topicRequest = { name: topic.name, partitions: [] }
+            leaderRequests.push(topicRequest)
+          }
+
+          topicRequest.partitions.push({
+            partitionIndex: partition.partitionIndex,
+            currentLeaderEpoch: leaderEpoch,
+            timestamp: partition.timestamp ?? -1n
+          })
+        }
+      }
+
+      runConcurrentCallbacks<ListOffsetsResponse, Map<number, ListOffsetsRequestTopic[]>>(
+        'Listing offsets failed.',
+        requests,
+        ([leader, requests], concurrentCallback) => {
+          this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
+            if (error) {
+              concurrentCallback(error, undefined as unknown as ListOffsetsResponse)
+              return
+            }
+            this[kPerformWithRetry](
+              'listOffsets',
+              retryCallback => {
+                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
+                  if (error) {
+                    retryCallback(error, undefined as unknown as ListOffsetsResponse)
+                    return
+                  }
+
+                  api(
+                    connection,
+                    -1,
+                    options.isolationLevel ?? IsolationLevels.READ_UNCOMMITTED,
+                    Array.from(requests.values()),
+                    retryCallback
+                  )
+                })
+              },
+              concurrentCallback,
+              0
+            )
+          })
+        },
+        (error, responses) => {
+          if (error) {
+            callback(error, undefined as unknown as AdminListedOffsetsTopic[])
+            return
+          }
+
+          const ret: AdminListedOffsetsTopic[] = []
+
+          for (const response of responses) {
+            for (const topic of response.topics) {
+              let topicOffsets = ret.find(t => t.name === topic.name)
+              if (!topicOffsets) {
+                topicOffsets = { name: topic.name, partitions: [] }
+                ret.push(topicOffsets)
+              }
+              for (const partition of topic.partitions) {
+                topicOffsets.partitions.push({
+                  offset: partition.offset,
+                  timestamp: partition.timestamp,
+                  partitionIndex: partition.partitionIndex,
+                  leaderEpoch: partition.leaderEpoch
+                })
+              }
+            }
+          }
+
+          callback(null, ret)
+        }
       )
     })
   }

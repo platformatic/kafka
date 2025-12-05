@@ -405,7 +405,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       // Track nodes so that we can get their ID for delayed write reporting
       const nodes: number[] = []
 
-      runConcurrentCallbacks<ProduceResponse | boolean>(
+      runConcurrentCallbacks<ProduceResponse | boolean, Map<number, MessageRecord[]>>(
         'Producing messages failed.',
         messagesByDestination,
         ([destination, destinationMessages], concurrentCallback) => {

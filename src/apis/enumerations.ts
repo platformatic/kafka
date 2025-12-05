@@ -32,9 +32,8 @@ export const allowedGroupProtocols = Object.values(GroupProtocols)
 export type GroupProtocol = keyof typeof GroupProtocols
 
 // ./consumer/fetch.ts
-export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }
-export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels) as number[]
-export type FetchIsolationLevel = keyof typeof FetchIsolationLevels
+export const IsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 } as const
+export type IsolationLevel = (typeof IsolationLevels)[keyof typeof IsolationLevels]
 
 export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n }
 export type ListOffsetTimestamp = keyof typeof ListOffsetTimestamps

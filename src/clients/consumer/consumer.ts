@@ -38,7 +38,7 @@ import {
   type SyncGroupRequestAssignment,
   type SyncGroupResponse
 } from '../../apis/consumer/sync-group-v5.ts'
-import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
+import { FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import {
   consumerCommitsChannel,
@@ -89,7 +89,7 @@ import {
   groupIdAndOptionsValidator,
   groupOptionsValidator,
   listCommitsOptionsValidator,
-  listOffsetsOptionsValidator
+  consumerListOffsetsOptionsValidator
 } from './options.ts'
 import { roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
@@ -106,7 +106,7 @@ import {
   type GroupPartitionsAssigner,
   type GroupProtocolSubscription,
   type ListCommitsOptions,
-  type ListOffsetsOptions,
+  type ConsumerListOffsetsOptions,
   type Offsets,
   type OffsetsWithTimestamps
 } from './types.ts'
@@ -400,9 +400,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback![kCallbackPromise]
   }
 
-  listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<Offsets>): void
-  listOffsets (options: ListOffsetsOptions): Promise<Offsets>
-  listOffsets (options: ListOffsetsOptions, callback?: CallbackWithPromise<Offsets>): void | Promise<Offsets> {
+  listOffsets (options: ConsumerListOffsetsOptions, callback: CallbackWithPromise<Offsets>): void
+  listOffsets (options: ConsumerListOffsetsOptions): Promise<Offsets>
+  listOffsets (options: ConsumerListOffsetsOptions, callback?: CallbackWithPromise<Offsets>): void | Promise<Offsets> {
     if (!callback) {
       callback = createPromisifiedCallback<Offsets>()
     }
@@ -411,7 +411,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, consumerListOffsetsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as Offsets)
       return callback[kCallbackPromise]
@@ -430,10 +430,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback![kCallbackPromise]
   }
 
-  listOffsetsWithTimestamps (options: ListOffsetsOptions, callback: CallbackWithPromise<OffsetsWithTimestamps>): void
-  listOffsetsWithTimestamps (options: ListOffsetsOptions): Promise<OffsetsWithTimestamps>
   listOffsetsWithTimestamps (
-    options: ListOffsetsOptions,
+    options: ConsumerListOffsetsOptions,
+    callback: CallbackWithPromise<OffsetsWithTimestamps>
+  ): void
+  listOffsetsWithTimestamps (options: ConsumerListOffsetsOptions): Promise<OffsetsWithTimestamps>
+  listOffsetsWithTimestamps (
+    options: ConsumerListOffsetsOptions,
     callback?: CallbackWithPromise<OffsetsWithTimestamps>
   ): void | Promise<OffsetsWithTimestamps> {
     if (!callback) {
@@ -444,7 +447,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, consumerListOffsetsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError, undefined as unknown as OffsetsWithTimestamps)
       return callback[kCallbackPromise]
@@ -732,7 +735,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
                 options.minBytes ?? this[kOptions].minBytes!,
                 options.maxBytes ?? this[kOptions].maxBytes!,
-                FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                options.isolationLevel ?? this[kOptions].isolationLevel!,
                 0,
                 0,
                 options.topics,
@@ -795,7 +798,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #listOffsets (
     withTimestamps: boolean,
-    options: ListOffsetsOptions,
+    options: ConsumerListOffsetsOptions,
     callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
   ): void {
     let topics = options.topics
@@ -849,7 +852,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
       }
 
-      runConcurrentCallbacks<ListOffsetsResponse>(
+      runConcurrentCallbacks<ListOffsetsResponse, Map<number, Map<string, ListOffsetsRequestTopic>>>(
         'Listing offsets failed.',
         requests,
         ([leader, requests], concurrentCallback) => {
@@ -871,7 +874,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   api(
                     connection,
                     -1,
-                    FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                    options.isolationLevel ?? this[kOptions].isolationLevel!,
                     Array.from(requests.values()),
                     retryCallback
                   )
@@ -1579,7 +1582,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      runConcurrentCallbacks<void>(
+      runConcurrentCallbacks<void, Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>>(
         'Closing streams failed.',
         this.#streams,
         (stream, concurrentCallback) => {

@@ -30,9 +30,8 @@ test('UNAUTHENTICATED - should not connect to SASL protected broker by default',
 })
 
 for (const mechanism of allowedSASLMechanisms) {
-  if (mechanism === 'OAUTHBEARER') {
-    // GSSAPI requires a properly configured Kerberos environment
-    // which is out of scope for these tests
+  // These are tested in their own file
+  if (mechanism === 'OAUTHBEARER' || mechanism === 'GSSAPI') {
     continue
   }
 

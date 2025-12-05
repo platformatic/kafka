@@ -1,7 +1,7 @@
 import { deepStrictEqual } from 'node:assert'
 import { test } from 'node:test'
 import { AuthenticationError } from '../../../src/errors.ts'
-import { getCredential } from '../../../src/protocol/sasl/credential-provider.ts'
+import { getCredential } from '../../../src/protocol/sasl/utils.ts'
 
 test('getCredential with string credential', (_, done) => {
   const credential = 'test-credential'

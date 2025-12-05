@@ -46,7 +46,8 @@ export const baseOptionsSchema = {
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },
-        authBytesValidator: { function: true }
+        authBytesValidator: { function: true },
+        authenticate: { function: true }
       },
       required: ['mechanism'],
       additionalProperties: false

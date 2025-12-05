@@ -715,7 +715,7 @@ test('send should handle synchronuous error during payload creation', async t =>
   const testTopic = await createTopic(t)
 
   const compression = 'lz4'
-  const expectedError = new GenericError('PLT_KFK_UNSUPPORTED_COMPRESSION', 'Avoid RUD')
+  const expectedError = new GenericError('PLT_KFK_UNSUPPORTED_COMPRESSION', 'Avoid RUD', { canRetry: false })
   t.mock.method(compressionsAlgorithms[compression], 'compressSync', () => {
     throw expectedError
   })

@@ -24,7 +24,7 @@ import {
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { ConnectionPool } from '../../network/connection-pool.ts'
-import { type Broker, type Connection, type ConnectionOptions } from '../../network/connection.ts'
+import { type Broker, type Connection } from '../../network/connection.ts'
 import { parseBroker } from '../../network/utils.ts'
 import { kInstance } from '../../symbols.ts'
 import { ajv, debugDump, loggers } from '../../utils.ts'
@@ -269,7 +269,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
   [kCreateConnectionPool] (): ConnectionPool {
     const pool = new ConnectionPool(this[kClientId], {
       ownerId: this[kInstance],
-      ...(this[kOptions] as ConnectionOptions)
+      ...this[kOptions]
     })
 
     this.#forwardEvents(pool, [
@@ -356,7 +356,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     operation((error, result) => {
       if (error) {
         const genericError = error as GenericError
-        const retriable = genericError.findBy?.('code', NetworkError.code) || genericError.findBy?.('canRetry', true)
+        // Only retry if all the errors in the chain are retriable
+        const retriable = !genericError.findBy?.('canRetry', false)
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {

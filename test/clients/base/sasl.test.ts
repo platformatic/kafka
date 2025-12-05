@@ -49,7 +49,7 @@ for (const mechanism of allowedSASLMechanisms) {
 
     const metadata = await base.metadata({ topics: [] })
 
-    deepStrictEqual(metadata.brokers.get(1), saslBroker)
+    deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
   })
 
   test(`${mechanism} - should handle authentication errors`, async t => {
@@ -90,7 +90,7 @@ for (const mechanism of allowedSASLMechanisms) {
 
     const metadata = await base.metadata({ topics: [] })
 
-    deepStrictEqual(metadata.brokers.get(1), saslBroker)
+    deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
   })
 
   test(`${mechanism} - should accept an async function as credential provider`, async t => {
@@ -113,7 +113,7 @@ for (const mechanism of allowedSASLMechanisms) {
 
     const metadata = await base.metadata({ topics: [] })
 
-    deepStrictEqual(metadata.brokers.get(1), saslBroker)
+    deepStrictEqual(metadata.brokers.get(1), { ...saslBroker, rack: null })
   })
 
   test(`${mechanism} - should handle sync credential provider errors`, async t => {

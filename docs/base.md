@@ -119,10 +119,11 @@ const producer = new Producer({
   serializers: stringSerializers,
   sasl: {
     mechanism: 'PLAIN', // Also SCRAM-SHA-256, SCRAM-SHA-512 and OAUTHBEARER are supported
-    // username, password or token can also be (async) functions returning a string
+    // username, password, token and oauthBearerExtensions can also be (async) functions returning a value
     username: 'username', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
     password: 'password', // This is used from PLAIN, SCRAM-SHA-256 and SCRAM-SHA-512
     token: 'token', // This is used from OAUTHBEARER
+    oauthBearerExtensions: {}, // This is used from OAUTHBEARER to add extension according to RFC 7628
     // This is needed if your Kafka server returns a exitCode 0 when invalid credentials are sent and only stores
     // authentication information in auth bytes.
     //

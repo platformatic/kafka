@@ -36,7 +36,8 @@ test('authenticate should create proper payload with the token - promise', async
   const result = await saslOAuthBearer.authenticate(
     api as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
     mockConnection as any,
-    'token'
+    'token',
+    {}
   )
 
   // Verify the function was called
@@ -78,6 +79,7 @@ test('authenticate should create proper payload with the token - callback', (_, 
     api as unknown as saslAuthenticateV2.SASLAuthenticationAPI,
     mockConnection as any,
     'token',
+    {},
     (error, result) => {
       ifError(error)
 

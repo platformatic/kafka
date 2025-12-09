@@ -3375,7 +3375,7 @@ test('#heartbeat should emit events when it was cancelled while waiting for API 
 
   consumer.on('consumer:heartbeat:start', () => {
     mockMetadata(consumer, 1, null, null, (original, options, callback) => {
-      consumer.leaveGroup()
+      consumer.leaveGroup(false, () => {})
       original(options, callback)
     })
   })
@@ -3389,7 +3389,7 @@ test('#heartbeat should emit events when it was cancelled while waiting for Hear
   const consumer = createConsumer(t)
 
   mockAPI(consumer[kConnections], heartbeatV4.api.key, null, null, (original: Function, ...args: any[]) => {
-    consumer.leaveGroup()
+    consumer.leaveGroup(false, () => {})
     original(...args)
   })
 

@@ -33,17 +33,20 @@ export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   tokenOrProvider: string | SASLCredentialProvider,
+  extensions: Record<string, string> | SASLCredentialProvider<Record<string, string>>,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  tokenOrProvider: string | SASLCredentialProvider
+  tokenOrProvider: string | SASLCredentialProvider,
+  extensions: Record<string, string> | SASLCredentialProvider<Record<string, string>>
 ): Promise<SaslAuthenticateResponse>
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   tokenOrProvider: string | SASLCredentialProvider,
+  extensionsOrProvider: Record<string, string> | SASLCredentialProvider<Record<string, string>>,
   callback?: CallbackWithPromise<SaslAuthenticateResponse>
 ): void | Promise<SaslAuthenticateResponse> {
   if (!callback) {
@@ -55,7 +58,20 @@ export function authenticate (
       return callback!(error, undefined as unknown as SaslAuthenticateResponse)
     }
 
-    authenticateAPI(connection, Buffer.from(`n,,\x01auth=Bearer ${token}\x01\x01`), callback!)
+    getCredential('SASL/OAUTHBEARER extensions', extensionsOrProvider ?? {}, (error, extensionsMap) => {
+      if (error) {
+        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      }
+
+      let extensions = ''
+      if (extensionsMap) {
+        for (const [key, value] of Object.entries(extensionsMap)) {
+          extensions += `\x01${key}=${value}`
+        }
+      }
+
+      authenticateAPI(connection, Buffer.from(`n,,\x01auth=Bearer ${token}${extensions}\x01\x01`), callback!)
+    })
   })
 
   return callback[kCallbackPromise]

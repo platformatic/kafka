@@ -14,12 +14,12 @@ test('getCredential with string credential', (_, done) => {
 })
 
 test('getCredential with invalid credential type', (_, done) => {
-  const credential = 123 as any
+  const credential = undefined as any
 
   getCredential('username', credential, error => {
     const authenticationError = error as AuthenticationError
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
-    deepStrictEqual(authenticationError.message, 'The username should be a string or a function.')
+    deepStrictEqual(authenticationError.message, 'The username should be a value or a function.')
     deepStrictEqual(authenticationError.code, 'PLT_KFK_AUTHENTICATION')
     done()
   })
@@ -47,8 +47,8 @@ test('getCredential with function provider returning promise', (_, done) => {
   })
 })
 
-test('getCredential with function provider returning non-string', (_, done) => {
-  const provider = () => 123 as any
+test('getCredential with function provider returning non-value', (_, done) => {
+  const provider = () => undefined
 
   getCredential('username', provider, (error: Error | null) => {
     const authenticationError = error as AuthenticationError
@@ -56,21 +56,21 @@ test('getCredential with function provider returning non-string', (_, done) => {
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
     deepStrictEqual(
       authenticationError.message,
-      'The username provider should return a string or a promise that resolves to a string.'
+      'The username provider should return a string or a promise that resolves to a value.'
     )
     deepStrictEqual(authenticationError.code, 'PLT_KFK_AUTHENTICATION')
     done()
   })
 })
 
-test('getCredential with promise provider resolving to non-string', (_, done) => {
-  const provider = () => Promise.resolve(123 as any)
+test('getCredential with promise provider resolving to non-value', (_, done) => {
+  const provider = () => Promise.resolve(null as any)
 
   getCredential('password', provider, (error: Error | null) => {
     const authenticationError = error as AuthenticationError
 
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
-    deepStrictEqual(authenticationError.message, 'The password provider should resolve to a string.')
+    deepStrictEqual(authenticationError.message, 'The password provider should resolve to a value.')
     deepStrictEqual(authenticationError.code, 'PLT_KFK_AUTHENTICATION')
     done()
   })

@@ -46,6 +46,9 @@ export const baseOptionsSchema = {
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },
+        oauthBearerExtensions: {
+          oneOf: [{ type: 'object', patternProperties: { '.+': { type: 'string' } } }, { function: true }]
+        },
         authBytesValidator: { function: true }
       },
       required: ['mechanism'],

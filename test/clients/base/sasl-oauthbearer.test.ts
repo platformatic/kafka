@@ -53,6 +53,31 @@ test('should connect to SASL protected broker using SASL/OAUTHBEARER', async t =
   deepStrictEqual(metadata.brokers.get(1), saslBroker)
 })
 
+test('should connect to SASL protected broker using SASL/OAUTHBEARER and custom extensions', async t => {
+  const signSync = createSigner({
+    algorithm: 'none',
+    iss: 'kafka',
+    aud: ['users'],
+    sub: 'admin',
+    expiresIn: '2h'
+  })
+  const token = signSync({ scope: 'test' })
+
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: kafkaSaslBootstrapServers,
+    strict: true,
+    retries: 0,
+    sasl: { mechanism: SASLMechanisms.OAUTHBEARER, token, oauthBearerExtensions: { aaa: 'bbb', ccc: 'ddd' } }
+  })
+
+  t.after(() => base.close())
+
+  const metadata = await base.metadata({ topics: [] })
+
+  deepStrictEqual(metadata.brokers.get(1), saslBroker)
+})
+
 test('should handle authentication errors', async t => {
   const base = new Base({
     clientId: 'clientId',
@@ -178,7 +203,8 @@ test('should handle async credential provider errors', async t => {
     retries: 0,
     sasl: {
       mechanism: 'OAUTHBEARER',
-      async token () {
+      token: 'token',
+      async oauthBearerExtensions () {
         throw new Error('Kaboom!')
       }
     }
@@ -198,7 +224,7 @@ test('should handle async credential provider errors', async t => {
 
     const authenticationError = networkError.cause
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
-    deepStrictEqual(authenticationError.message, 'The SASL/OAUTHBEARER token provider threw an error.')
+    deepStrictEqual(authenticationError.message, 'The SASL/OAUTHBEARER extensions provider threw an error.')
     deepStrictEqual(authenticationError.cause.message, 'Kaboom!')
   }
 })

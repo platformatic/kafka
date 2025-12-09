@@ -2,58 +2,54 @@ import { type Callback } from '../../apis/index.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type SASLCredentialProvider } from '../../network/connection.ts'
 
-export function getCredential (
+export function getCredential<T> (
   label: string,
-  credentialOrProvider: string | SASLCredentialProvider,
-  callback: Callback<string>
+  credentialOrProvider: T | SASLCredentialProvider<T>,
+  callback: Callback<T>
 ): void {
-  if (typeof credentialOrProvider === 'string') {
-    callback(null, credentialOrProvider)
+  if (typeof credentialOrProvider === 'undefined') {
+    callback(new AuthenticationError(`The ${label} should be a value or a function.`), undefined as unknown as T)
     return
   } else if (typeof credentialOrProvider !== 'function') {
-    callback(new AuthenticationError(`The ${label} should be a string or a function.`), undefined as unknown as string)
+    callback(null, credentialOrProvider)
     return
   }
 
   try {
-    const credential = credentialOrProvider()
+    const credential = (credentialOrProvider as SASLCredentialProvider<T>)()
 
-    if (typeof credential === 'string') {
-      callback(null, credential)
+    if (credential == null) {
+      callback(
+        new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a value.`),
+        undefined as unknown as T
+      )
       return
     } else if (typeof (credential as Promise<string>)?.then !== 'function') {
-      callback(
-        new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a string.`),
-        undefined as unknown as string
-      )
-
+      callback(null, credential as T)
       return
     }
 
-    credential
-      .then(token => {
-        if (typeof token !== 'string') {
+    ;(credential as Promise<T>)
+      .then((result: T) => {
+        if (result == null) {
           process.nextTick(
             callback,
-            new AuthenticationError(`The ${label} provider should resolve to a string.`),
+            new AuthenticationError(`The ${label} provider should resolve to a value.`),
             undefined as unknown as string
           )
 
           return
         }
 
-        process.nextTick(callback, null, token)
+        process.nextTick(callback, null, result)
       })
-      .catch(error => {
-        process.nextTick(
-          callback,
-          new AuthenticationError(`The ${label} provider threw an error.`, { cause: error as Error })
-        )
+      .catch((error: Error) => {
+        process.nextTick(callback, new AuthenticationError(`The ${label} provider threw an error.`, { cause: error }))
       })
   } catch (error) {
     callback(
       new AuthenticationError(`The ${label} provider threw an error.`, { cause: error as Error }),
-      undefined as unknown as string
+      undefined as unknown as T
     )
   }
 }

@@ -32,7 +32,7 @@ import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.t
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
 
-export type SASLCredentialProvider = () => string | Promise<string>
+export type SASLCredentialProvider<T = string> = () => T | Promise<T>
 export interface Broker {
   host: string
   port: number
@@ -44,6 +44,7 @@ export interface SASLOptions {
   password?: string | SASLCredentialProvider
   token?: string | SASLCredentialProvider
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
+  oauthBearerExtensions?: Record<string, string> | SASLCredentialProvider<Record<string, string>>
 }
 
 export interface ConnectionOptions {
@@ -384,7 +385,7 @@ export class Connection extends EventEmitter {
       this.#status = ConnectionStatuses.AUTHENTICATING
     }
 
-    const { mechanism, username, password, token } = this.#options.sasl!
+    const { mechanism, username, password, token, oauthBearerExtensions } = this.#options.sasl!
 
     if (!allowedSASLMechanisms.includes(mechanism)) {
       this.#onConnectionError(
@@ -414,7 +415,7 @@ export class Connection extends EventEmitter {
       if (mechanism === SASLMechanisms.PLAIN) {
         saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
-        saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, callback)
+        saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, oauthBearerExtensions!, callback)
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,

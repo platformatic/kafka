@@ -143,11 +143,11 @@ export class Connection extends EventEmitter {
   }
 
   get host (): string | undefined {
-    return this.#status === ConnectionStatuses.CONNECTED ? this.#host : undefined
+    return this.#status === ConnectionStatuses.CONNECTING || ConnectionStatuses.CONNECTED ? this.#host : undefined
   }
 
   get port (): number | undefined {
-    return this.#status === ConnectionStatuses.CONNECTED ? this.#port : undefined
+    return this.#status === ConnectionStatuses.CONNECTING || ConnectionStatuses.CONNECTED ? this.#port : undefined
   }
 
   get instanceId (): number {

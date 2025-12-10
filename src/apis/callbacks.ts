@@ -29,10 +29,19 @@ export function createPromisifiedCallback<ReturnType> (): CallbackWithPromise<Re
   return callback
 }
 
-export function runConcurrentCallbacks<ReturnType> (
+export function runConcurrentCallbacks<ReturnType, Collection extends any[] | Set<any> | Map<any, any>> (
   errorMessage: string,
-  collection: unknown[] | Set<unknown> | Map<unknown, unknown>,
-  operation: (item: any, cb: Callback<ReturnType>) => void,
+  collection: Collection,
+  operation: (
+    item: Collection extends Map<infer K, infer V>
+      ? [K, V]
+      : Collection extends Set<infer U>
+        ? U
+        : Collection extends (infer U)[]
+          ? U
+          : never,
+    cb: Callback<ReturnType>
+  ) => void,
   callback: Callback<ReturnType[]>
 ): void {
   let remaining = Array.isArray(collection) ? collection.length : collection.size

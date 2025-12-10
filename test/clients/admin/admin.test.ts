@@ -2,13 +2,14 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { scheduler } from 'node:timers/promises'
-import { ClientQuotaEntityTypes, ClientQuotaKeys } from '../../../src/apis/enumerations.ts'
+import { ClientQuotaEntityTypes, ClientQuotaKeys, ListOffsetTimestamps } from '../../../src/apis/enumerations.ts'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
   adminClientQuotasChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
+  adminOffsetsChannel,
   adminTopicsChannel,
   alterClientQuotasV1,
   type BrokerLogDirDescription,
@@ -25,13 +26,16 @@ import {
   type GroupBase,
   instancesChannel,
   listGroupsV5,
+  listOffsetsV9,
   MultipleErrors,
   sleep,
+  stringSerializers,
   UnsupportedApiError
 } from '../../../src/index.ts'
 import {
   createAdmin,
   createCreationChannelVerifier,
+  createProducer,
   createTopic,
   createTracingChannelVerifier,
   kafkaBootstrapServers,
@@ -44,6 +48,7 @@ import {
   mockUnavailableAPI,
   retry
 } from '../../helpers.ts'
+import { type ListOffsetsResponse } from '../../../src/apis/consumer/list-offsets-v9.ts'
 
 test('constructor should initialize properly', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -171,6 +176,16 @@ test('all operations should fail when admin is closed', async t => {
   // Attempt to call alterClientQuotas on closed admin
   try {
     await admin.alterClientQuotas({ entries: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call listOffsets on closed admin
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }] }]
+    })
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
@@ -2407,5 +2422,477 @@ test('describeLogDirs should handle unavailable API errors', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.errors[0].message.includes('Unsupported API DescribeLogDirs.'), true)
+  }
+})
+
+test('listOffsets should list offsets for topics and partitions', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 2,
+    replicas: 1
+  })
+
+  const producer = createProducer(t, { acks: 1, serializers: stringSerializers })
+
+  const messages = Array.from({ length: 10 }, (_, i) => ({
+    key: `key-${i}`,
+    value: `value-${i}`,
+    topic: topicName
+  }))
+
+  for (const message of messages) {
+    await producer.send({ messages: [message] })
+
+    await scheduler.wait(100)
+  }
+
+  await scheduler.wait(500)
+
+  const listOffsetsResult = await admin.listOffsets({
+    topics: [
+      {
+        name: topicName,
+        partitions: [
+          { partitionIndex: 0, timestamp: BigInt(0) },
+          { partitionIndex: 1, timestamp: BigInt(0) }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(Array.isArray(listOffsetsResult), true)
+  strictEqual(listOffsetsResult.length, 1)
+  strictEqual(listOffsetsResult[0].name, topicName)
+  strictEqual(listOffsetsResult[0].partitions.length, 2)
+  strictEqual(listOffsetsResult[0].partitions[0].partitionIndex, 0)
+  strictEqual(listOffsetsResult[0].partitions[1].partitionIndex, 1)
+  strictEqual(listOffsetsResult[0].partitions[0].offset, 0n)
+  strictEqual(listOffsetsResult[0].partitions[1].offset, 0n)
+
+  const firstTimestamps = listOffsetsResult[0].partitions.map(p => p.timestamp)
+
+  const listOffsetsResult2 = await admin.listOffsets({
+    topics: [
+      {
+        name: topicName,
+        partitions: [
+          { partitionIndex: 0, timestamp: firstTimestamps[0] + 1n },
+          { partitionIndex: 1, timestamp: firstTimestamps[1] + 1n }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(listOffsetsResult2[0].partitions[0].offset, 1n)
+  strictEqual(listOffsetsResult2[0].partitions[1].offset, 1n)
+
+  const listOffsetsResultEarliest = await admin.listOffsets({
+    topics: [
+      {
+        name: topicName,
+        partitions: [
+          { partitionIndex: 0, timestamp: ListOffsetTimestamps.EARLIEST },
+          { partitionIndex: 1, timestamp: ListOffsetTimestamps.EARLIEST }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(listOffsetsResultEarliest[0].partitions[0].offset, 0n)
+  strictEqual(listOffsetsResultEarliest[0].partitions[1].offset, 0n)
+
+  const listOffsetsResultLatest = await admin.listOffsets({
+    topics: [
+      {
+        name: topicName,
+        partitions: [
+          { partitionIndex: 0, timestamp: ListOffsetTimestamps.LATEST },
+          { partitionIndex: 1, timestamp: ListOffsetTimestamps.LATEST }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(listOffsetsResultLatest[0].partitions[0].offset + listOffsetsResultLatest[0].partitions[1].offset, 10n)
+
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('listOffsets should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+      }
+    ]
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminOffsetsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'listOffsets',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as ListOffsetsResponse[]
+        ok(result)
+        strictEqual(Array.isArray(result), true)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'listOffsets'
+  )
+
+  await admin.listOffsets(options)
+
+  verifyTracingChannel()
+})
+
+test('listOffsets should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (topics)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.listOffsets({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid additional property in options
+  try {
+    await admin.listOffsets({
+      topics: [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.listOffsets({ topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid type for isolationLevel
+  try {
+    await admin.listOffsets({
+      topics: [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ],
+      isolationLevel: 'not-a-number'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('isolationLevel'), true)
+  }
+
+  // Test with invalid value for isolationLevel
+  try {
+    await admin.listOffsets({
+      topics: [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ],
+      // @ts-expect-error - Intentionally passing invalid options
+      isolationLevel: 5
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('isolationLevel'), true)
+  }
+
+  // Test with empty topics array
+  try {
+    await admin.listOffsets({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topic object (missing name)
+  try {
+    await admin.listOffsets({
+      topics: [{ partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (missing partitions)
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitions'), true)
+  }
+
+  // Test with invalid name type
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 123, partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with empty name
+  try {
+    await admin.listOffsets({
+      topics: [{ name: '', partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid partitions type
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: 'not-an-array' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitions'), true)
+  }
+
+  // Test with invalid additional property in topic
+  try {
+    await admin.listOffsets({
+      topics: [
+        { name: 'test-topic', partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }], invalidProperty: true } as any
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with empty partitions array
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitions'), true)
+  }
+
+  // Test with invalid partition object (missing partitionIndex)
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ timestamp: BigInt(0) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndex'), true)
+  }
+
+  // Test with invalid partition object (missing timestamp)
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0 }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('timestamp'), true)
+  }
+
+  // Test with invalid partitionIndex type
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 'not-a-number', timestamp: BigInt(0) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndex'), true)
+  }
+
+  // Test with invalid partitionIndex value
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ partitionIndex: -1, timestamp: BigInt(0) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndex'), true)
+  }
+
+  // Test with invalid timestamp type
+  try {
+    await admin.listOffsets({
+      topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, timestamp: 'not-a-bigint' }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('timestamp'), true)
+  }
+
+  // Test with invalid additional property in partition
+  try {
+    await admin.listOffsets({
+      topics: [
+        { name: 'test-topic', partitions: [{ partitionIndex: 0, timestamp: BigInt(0), invalidProperty: true }] as any }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('listOffsets should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin, 1)
+
+  try {
+    // Attempt to delete groups - should fail with connection error
+    await admin.listOffsets({
+      topics: [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('listOffsets should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockConnectionPoolGet(admin[kConnections], 2)
+
+  try {
+    // Attempt to delete groups - should fail with connection error
+    await admin.listOffsets({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should contain our mock error message
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Listing offsets failed.'), true)
+  }
+})
+
+test('listOffsets should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockAPI(admin[kConnections], listOffsetsV9.api.key)
+
+  try {
+    await admin.listOffsets({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Listing offsets failed.'), true)
+  }
+})
+
+test('listOffsets should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockUnavailableAPI(admin, 'ListOffsets')
+
+  try {
+    await admin.listOffsets({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API ListOffsets.'), true)
   }
 })

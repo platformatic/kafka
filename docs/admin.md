@@ -128,6 +128,52 @@ Options:
 | -------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | topics   | `DescribeLogDirsRequestTopic[]` | Array of topics specifying the topics and partitions for which to describe logs. |
 
+### `listOffsets(options[, callback])`
+
+Lists offsets for specified topic partitions.
+
+The return value is an array of topics, each containing partition offset information including the offset, timestamp, partition index, and leader epoch.
+
+Options:
+
+| Property       | Type                       | Description                                                                                                                                                           |
+| -------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| topics         | `TopicOffsetRequest[]`     | Array of topics with their partitions to query offsets for. Each topic has `name` and `partitions` (array of `{ partitionIndex, timestamp }`).                        |
+| isolationLevel | `IsolationLevel` \| `null` | Isolation level for reading offsets. Valid values are `IsolationLevels.READ_UNCOMMITTED` (0) or `IsolationLevels.READ_COMMITTED` (1). Defaults to `READ_UNCOMMITTED`. |
+
+Example:
+
+```typescript
+const offsets = await admin.listOffsets({
+  topics: [
+    {
+      name: 'my-topic',
+      partitions: [
+        { partitionIndex: 0, timestamp: -1n }, // Latest offset
+        { partitionIndex: 1, timestamp: -2n }  // Earliest offset
+      ]
+    }
+  ],
+  isolationLevel: IsolationLevels.READ_COMMITTED
+})
+
+// offsets is an array of AdminListedOffsetsTopic:
+// [
+//   {
+//     name: 'my-topic',
+//     partitions: [
+//       { partitionIndex: 0, offset: 12345n, timestamp: 1234567890n, leaderEpoch: 1 },
+//       { partitionIndex: 1, offset: 100n, timestamp: 1234567800n, leaderEpoch: 1 }
+//     ]
+//   }
+// ]
+```
+
+Special timestamp values:
+- `-1n` - Get the latest offset (end of the log)
+- `-2n` - Get the earliest offset (beginning of the log)
+- Any other positive value - Get the offset at or after the specified timestamp
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

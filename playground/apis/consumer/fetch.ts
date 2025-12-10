@@ -2,7 +2,7 @@ import { api as fetchV17 } from '../../../src/apis/consumer/fetch-v17.ts'
 import { api as offsetCommitV9 } from '../../../src/apis/consumer/offset-commit-v9.ts'
 import { api as offsetFetchV9 } from '../../../src/apis/consumer/offset-fetch-v9.ts'
 import { api as syncGroupV5 } from '../../../src/apis/consumer/sync-group-v5.ts'
-import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
+import { IsolationLevels, FindCoordinatorKeyTypes } from '../../../src/apis/enumerations.ts'
 import { api as findCoordinatorV6 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
 import { api as metadataV12 } from '../../../src/apis/metadata/metadata-v12.ts'
 import type { KafkaRecord } from '../../../src/index.ts'
@@ -72,7 +72,7 @@ for (let i = 0; i < 3; i++) {
         0,
         0,
         1024 ** 3,
-        FetchIsolationLevels.READ_UNCOMMITTED,
+        IsolationLevels.READ_UNCOMMITTED,
         -1,
         -1,
         [

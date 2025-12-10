@@ -27,6 +27,7 @@ import {
   type GroupPartitionsAssignments,
   heartbeatV4,
   instancesChannel,
+  IsolationLevels,
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
@@ -164,7 +165,7 @@ test('constructor should initialize with custom options', t => {
     minBytes: 100,
     maxBytes: 5242880, // 5MB
     maxWaitTime: 3000,
-    isolationLevel: 'READ_UNCOMMITTED',
+    isolationLevel: IsolationLevels.READ_UNCOMMITTED,
     highWaterMark: 512
   })
 
@@ -1777,7 +1778,7 @@ test('listOffsets should use custom isolation level when provided', async t => {
   const topic = await createTopic(t, true)
 
   // Use a specific isolation level
-  const isolationLevel = 'READ_COMMITTED'
+  const isolationLevel = IsolationLevels.READ_COMMITTED
   const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel })
 
   // Verification is implicit - if the call doesn't throw, it succeeded

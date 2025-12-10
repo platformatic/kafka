@@ -49,7 +49,8 @@ export const baseOptionsSchema = {
         oauthBearerExtensions: {
           oneOf: [{ type: 'object', patternProperties: { '.+': { type: 'string' } } }, { function: true }]
         },
-        authBytesValidator: { function: true }
+        authBytesValidator: { function: true },
+        authenticate: { function: true }
       },
       required: ['mechanism'],
       additionalProperties: false

@@ -36,6 +36,7 @@ import {
 
 export const kafkaBootstrapServers = ['localhost:9011']
 export const kafkaSaslBootstrapServers = ['localhost:9002']
+export const kafkaSaslKerberosBootstrapServers = ['localhost:9003']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION

@@ -1,18 +1,28 @@
-import { type Callback } from '../../apis/index.ts'
+import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/index.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type SASLCredentialProvider } from '../../network/connection.ts'
 
 export function getCredential<T> (
   label: string,
   credentialOrProvider: T | SASLCredentialProvider<T>,
-  callback: Callback<T>
-): void {
+  callback: CallbackWithPromise<T>
+): void
+export function getCredential<T> (label: string, credentialOrProvider: T | SASLCredentialProvider<T>): Promise<T>
+export function getCredential<T> (
+  label: string,
+  credentialOrProvider: T | SASLCredentialProvider<T>,
+  callback?: CallbackWithPromise<T>
+): void | Promise<T> {
+  if (!callback) {
+    callback = createPromisifiedCallback<T>()
+  }
+
   if (typeof credentialOrProvider === 'undefined') {
     callback(new AuthenticationError(`The ${label} should be a value or a function.`), undefined as unknown as T)
-    return
+    return callback[kCallbackPromise]
   } else if (typeof credentialOrProvider !== 'function') {
     callback(null, credentialOrProvider)
-    return
+    return callback[kCallbackPromise]
   }
 
   try {
@@ -23,10 +33,10 @@ export function getCredential<T> (
         new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a value.`),
         undefined as unknown as T
       )
-      return
+      return callback[kCallbackPromise]
     } else if (typeof (credential as Promise<string>)?.then !== 'function') {
       callback(null, credential as T)
-      return
+      return callback[kCallbackPromise]
     }
 
     ;(credential as Promise<T>)
@@ -52,4 +62,6 @@ export function getCredential<T> (
       undefined as unknown as T
     )
   }
+
+  return callback[kCallbackPromise]
 }

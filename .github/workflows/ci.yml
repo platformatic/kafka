@@ -39,10 +39,14 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: latest
+      - name: Install kinit for Kerberos
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
-        run: docker compose up -d --wait
+        run: docker compose up --build --force-recreate -d --wait
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests

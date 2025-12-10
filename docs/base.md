@@ -133,4 +133,56 @@ const producer = new Producer({
 })
 ```
 
+## Connecting to Kafka via SASL using a custom authenticator
+
+For advanced use cases where you need full control over the SASL authentication process, you can provide a custom `authenticate` function in the `sasl` options. This allows you to implement custom authentication flows, handle complex credential management, or integrate with external authentication systems.
+
+Example:
+
+```javascript
+import { Producer, stringSerializers } from '@platformatic/kafka'
+
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializers,
+  sasl: {
+    mechanism: 'PLAIN',
+    authenticate: async (mechanism, connection, authenticate, usernameProvider, passwordProvider, tokenProvider, callback) => {
+      try {
+        // Custom logic to retrieve or generate credentials
+        const username = typeof usernameProvider === 'function'
+          ? await usernameProvider()
+          : usernameProvider
+        const password = typeof passwordProvider === 'function'
+          ? await passwordProvider()
+          : passwordProvider
+
+        // Perform the SASL authentication
+        const authData = Buffer.from(`\u0000${username}\u0000${password}`)
+        const response = await authenticate({
+          authBytes: authData
+        })
+
+        callback(null, response)
+      } catch (err) {
+        callback(err)
+      }
+    }
+  }
+})
+```
+
+The `authenticate` function receives the following parameters:
+
+- `mechanism`: The SASL mechanism being used (e.g., 'PLAIN', 'SCRAM-SHA-256')
+- `connection`: The Connection instance being authenticated
+- `authenticate`: The SASL authentication API function to send auth bytes to the server
+- `usernameProvider`: The username (string or async function) from the sasl options
+- `passwordProvider`: The password (string or async function) from the sasl options
+- `tokenProvider`: The token (string or async function) from the sasl options
+- `callback`: A callback function to call with the authentication result
+
+**Important**: The `authenticate` function should never throw exceptions, especially when using async functions. The function is not awaited and exceptions are not handled, which can lead to memory leaks, resource leaks, and unexpected behavior. Always wrap your code in a try-catch block and pass errors to the callback instead.
+
 [node-socket-write]: https://nodejs.org/dist/latest/docs/api/stream.html#writablewritechunk-encoding-callback

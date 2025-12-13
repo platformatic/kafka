@@ -13,7 +13,7 @@ test('createRequest serializes basic parameters correctly', () => {
       topics: [
         {
           name: 'test-topic',
-          partitionIndexes: [0, 1]
+          partitions: [0, 1]
         }
       ]
     }
@@ -68,7 +68,7 @@ test('createRequest with requireStable flag set to true', () => {
   const topics = [
     {
       name: 'test-topic',
-      partitionIndexes: [0]
+      partitions: [0]
     }
   ]
 
@@ -155,11 +155,11 @@ test('createRequest with multiple groups and topics', () => {
       topics: [
         {
           name: 'topic-1',
-          partitionIndexes: [0, 1]
+          partitions: [0, 1]
         },
         {
           name: 'topic-2',
-          partitionIndexes: [0]
+          partitions: [0]
         }
       ]
     },
@@ -170,7 +170,7 @@ test('createRequest with multiple groups and topics', () => {
       topics: [
         {
           name: 'topic-3',
-          partitionIndexes: [0]
+          partitions: [0]
         }
       ]
     }

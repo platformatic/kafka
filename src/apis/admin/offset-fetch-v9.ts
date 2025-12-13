@@ -1,19 +1,15 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-
-export interface OffsetFetchRequestTopic {
-  name: string
-  partitionIndexes: number[]
-}
+import { type TopicPartitions } from '../types.ts'
 
 export interface OffsetFetchRequestGroup {
   groupId: string
   memberId?: NullableString
   memberEpoch: number
-  topics: OffsetFetchRequestTopic[]
+  topics?: Nullable<TopicPartitions[]>
 }
 
 export type OffsetFetchRequest = Parameters<typeof createRequest>
@@ -43,29 +39,32 @@ export interface OffsetFetchResponse {
 }
 
 /*
-  OffsetFetch Request (Version: 8) => [groups] require_stable TAG_BUFFER
+  OffsetFetch Request (Version: 9) => [groups] require_stable TAG_BUFFER
     groups => group_id member_id member_epoch [topics] TAG_BUFFER
       group_id => COMPACT_STRING
+      member_id => COMPACT_NULLABLE_STRING
+      member_epoch => INT32
       topics => name [partition_indexes] TAG_BUFFER
         name => COMPACT_STRING
         partition_indexes => INT32
     require_stable => BOOLEAN
-
-  Note that OffsetFetchRequestGroup contains a memberId and memberEpoch fields, which is not used in version 8.
 */
 export function createRequest (groups: OffsetFetchRequestGroup[], requireStable: boolean): Writer {
   return Writer.create()
     .appendArray(groups, (w, g) => {
-      w.appendString(g.groupId).appendArray(g.topics, (w, t) => {
-        w.appendString(t.name).appendArray(t.partitionIndexes, (w, i) => w.appendInt32(i), true, false)
-      })
+      w.appendString(g.groupId)
+        .appendString(g.memberId)
+        .appendInt32(g.memberEpoch)
+        .appendArray(g.topics, (w, t) => {
+          w.appendString(t.name).appendArray(t.partitions, (w, i) => w.appendInt32(i), true, false)
+        })
     })
     .appendBoolean(requireStable)
     .appendTaggedFields()
 }
 
 /*
-  OffsetFetch Response (Version: 8) => throttle_time_ms [groups] TAG_BUFFER
+  OffsetFetch Response (Version: 9) => throttle_time_ms [groups] TAG_BUFFER
     throttle_time_ms => INT32
     groups => group_id [topics] error_code TAG_BUFFER
       group_id => COMPACT_STRING
@@ -130,4 +129,4 @@ export function parseResponse (
   return response
 }
 
-export const api = createAPI<OffsetFetchRequest, OffsetFetchResponse>(9, 8, createRequest, parseResponse)
+export const api = createAPI<OffsetFetchRequest, OffsetFetchResponse>(9, 9, createRequest, parseResponse)

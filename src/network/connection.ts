@@ -60,6 +60,7 @@ export interface SASLOptions {
 
 export interface ConnectionOptions {
   connectTimeout?: number
+  requestTimeout?: number
   maxInflights?: number
   tls?: TLSConnectionOptions
   tlsServerName?: string | boolean
@@ -78,6 +79,8 @@ export interface Request {
   parser: ResponseParser<unknown>
   callback: Callback<any>
   diagnostic: Record<string, unknown>
+  timeoutHandle: NodeJS.Timeout | null
+  timedOut: boolean
 }
 
 export const ConnectionStatuses = {
@@ -90,11 +93,11 @@ export const ConnectionStatuses = {
   ERROR: 'error'
 } as const
 
-export type ConnectionStatus = keyof typeof ConnectionStatuses
-export type ConnectionStatusValue = (typeof ConnectionStatuses)[keyof typeof ConnectionStatuses]
+export type ConnectionStatus = (typeof ConnectionStatuses)[keyof typeof ConnectionStatuses]
 
-export const defaultOptions: ConnectionOptions = {
+export const defaultOptions = {
   connectTimeout: 5000,
+  requestTimeout: 30000,
   maxInflights: 5
 }
 
@@ -104,7 +107,7 @@ export class Connection extends EventEmitter {
   #host: string | undefined
   #port: number | undefined
   #options: ConnectionOptions
-  #status: ConnectionStatusValue
+  #status: ConnectionStatus
   #instanceId: number
   #clientId: string | undefined
   // @ts-ignore This is used just for debugging
@@ -157,7 +160,7 @@ export class Connection extends EventEmitter {
     return this.#instanceId
   }
 
-  get status (): ConnectionStatusValue {
+  get status (): ConnectionStatus {
     return this.#status
   }
 
@@ -201,7 +204,7 @@ export class Connection extends EventEmitter {
           typeof this.#options.tlsServerName === 'string' ? this.#options.tlsServerName : host
       }
 
-      const connectionTimeoutHandler = () => {
+      const connectingSocketTimeoutHandler = () => {
         const error = new TimeoutError(`Connection to ${host}:${port} timed out.`)
         diagnosticContext.error = error
         this.#socket.destroy()
@@ -215,7 +218,7 @@ export class Connection extends EventEmitter {
         connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
       }
 
-      const connectionErrorHandler = (error: Error) => {
+      const connectingSocketErrorHandler = (error: Error) => {
         this.#onConnectionError(host, port, diagnosticContext, error)
       }
 
@@ -230,10 +233,10 @@ export class Connection extends EventEmitter {
       this.#socket.setNoDelay(true)
 
       this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
-        this.#socket.removeListener('timeout', connectionTimeoutHandler)
-        this.#socket.removeListener('error', connectionErrorHandler)
+        this.#socket.removeListener('timeout', connectingSocketTimeoutHandler)
+        this.#socket.removeListener('error', connectingSocketErrorHandler)
 
-        this.#socket.on('error', this.#onError.bind(this))
+        this.#socket.on('error', this.#connectedSocketErrorHandler.bind(this))
         this.#socket.on('data', this.#onData.bind(this))
         if (this.#handleBackPressure) {
           this.#socket.on('drain', this.#onDrain.bind(this))
@@ -249,8 +252,8 @@ export class Connection extends EventEmitter {
         }
       })
 
-      this.#socket.once('timeout', connectionTimeoutHandler)
-      this.#socket.once('error', connectionErrorHandler)
+      this.#socket.once('timeout', connectingSocketTimeoutHandler)
+      this.#socket.once('error', connectingSocketErrorHandler)
     } catch (error) {
       this.#status = ConnectionStatuses.ERROR
 
@@ -378,11 +381,23 @@ export class Connection extends EventEmitter {
       callback: null as unknown as Callback<any>, // Will be set later
       hasResponseHeaderTaggedFields,
       noResponse: payload.context.noResponse ?? false,
-      diagnostic
+      diagnostic,
+      timeoutHandle: null,
+      timedOut: false
     }
 
     this.#requestsQueue.push(fastQueueCallback => {
-      request.callback = fastQueueCallback
+      request.callback = (error: Error | null, payload: any) => {
+        clearTimeout(request.timeoutHandle!)
+        request.timeoutHandle = null
+        fastQueueCallback(error, payload)
+      }
+      if (!request.noResponse) {
+        request.timeoutHandle = setTimeout(() => {
+          request.timedOut = true
+          request.callback(new TimeoutError('Request timed out'), null)
+        }, this.#options.requestTimeout)
+      }
 
       if (this.#socketMustBeDrained) {
         this.#afterDrainRequests.push(request)
@@ -637,7 +652,11 @@ export class Connection extends EventEmitter {
 
       this.#inflightRequests.delete(correlationId)
 
-      const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback } = request
+      const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback, timedOut } = request
+
+      if (timedOut) {
+        return
+      }
 
       let deserialized: any
       let responseError: Error | null = null
@@ -725,7 +744,7 @@ export class Connection extends EventEmitter {
     }
   }
 
-  #onError (error: Error): void {
+  #connectedSocketErrorHandler (error: Error): void {
     clearTimeout(this.#reauthenticationTimeout)
     this.emit('error', new NetworkError('Connection error', { cause: error }))
   }

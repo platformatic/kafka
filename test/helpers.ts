@@ -131,7 +131,9 @@ export function mockMethod (
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
 ) {
   if (typeof errorToMock === 'undefined') {
-    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')])
+    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')], {
+      canRetry: false
+    })
   }
 
   const original = target[method].bind(target)
@@ -260,7 +262,9 @@ export function mockAPI (
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
 ) {
   if (typeof errorToMock === 'undefined') {
-    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')])
+    errorToMock = new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')], {
+      canRetry: false
+    })
   }
 
   const originalGet = pool.get.bind(pool)

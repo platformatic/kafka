@@ -11,10 +11,14 @@ import {
   adminLogDirsChannel,
   adminTopicsChannel,
   alterClientQuotasV1,
+  type Broker,
   type BrokerLogDirDescription,
+  type Callback,
+  type CallbackWithPromise,
   type ClientDiagnosticEvent,
   ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
+  type Connection,
   Consumer,
   type CreatedTopic,
   type DescribeClientQuotasOptions,
@@ -26,8 +30,11 @@ import {
   instancesChannel,
   listGroupsV5,
   MultipleErrors,
+  ResponseError,
+  type ResponseParser,
   sleep,
-  UnsupportedApiError
+  UnsupportedApiError,
+  type Writer
 } from '../../../src/index.ts'
 import {
   createAdmin,
@@ -458,6 +465,70 @@ test('createTopics using assignments', async t => {
   await admin.deleteTopics({ topics: [topicName] })
 })
 
+test('createTopics should retarget controller when needed', async t => {
+  const admin = createAdmin(t)
+
+  // Generate a unique topic name for testing
+  const topicName = `test-topic-partitions-${randomUUID()}`
+  let correctControllerId: number | null = null
+
+  const pool = admin[kConnections]
+  const originalGet = pool.get.bind(pool)
+  // @ts-ignore
+  pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
+    originalGet(broker, (error: Error | null, connection: Connection) => {
+      // Define the next broker in sequence as the correct controller
+      if (correctControllerId === null) {
+        correctControllerId = (connection.port! - 9010 + 1) % 3
+        mockMetadata(admin, 1, null, {
+          brokers: new Map([
+            [1, { host: 'localhost', port: 9011 }],
+            [2, { host: 'localhost', port: 9012 }],
+            [3, { host: 'localhost', port: 9013 }]
+          ]),
+          controllerId: correctControllerId
+        })
+      }
+
+      const originalSend = connection.send.bind(connection)
+
+      connection.send = function <ReturnType>(
+        apiKey: number,
+        apiVersion: number,
+        payload: () => Writer,
+        responseParser: ResponseParser<ReturnType>,
+        hasRequestHeaderTaggedFields: boolean,
+        hasResponseHeaderTaggedFields: boolean,
+        callback: Callback<ReturnType>
+      ) {
+        if (apiKey === 19) {
+          if (connection.port! - 9010 !== correctControllerId) {
+            callback(new ResponseError(19, 7, { '/': 41 }, {}), undefined as unknown as ReturnType)
+            return
+          }
+        }
+
+        originalSend(
+          apiKey,
+          apiVersion,
+          payload,
+          responseParser,
+          hasRequestHeaderTaggedFields,
+          hasResponseHeaderTaggedFields,
+          callback
+        )
+      }
+
+      callback(error, connection)
+    })
+  }
+
+  await admin.createTopics({ topics: [topicName] })
+
+  // Clean up by deleting the topic
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
 test('createTopics should validate options in strict mode', async t => {
   const admin = createAdmin(t, { strict: true })
 
@@ -614,6 +685,70 @@ test('deleteTopics should delete a topic and support diagnostic channels', async
   verifyTracingChannel()
 
   // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('deleteTopics should retarget controller when needed', async t => {
+  const admin = createAdmin(t)
+
+  // Generate a unique topic name for testing
+  const topicName = `test-topic-partitions-${randomUUID()}`
+  await admin.createTopics({ topics: [topicName] })
+
+  let correctControllerId: number | null = null
+
+  const pool = admin[kConnections]
+  const originalGet = pool.get.bind(pool)
+  // @ts-ignore
+  pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
+    originalGet(broker, (error: Error | null, connection: Connection) => {
+      // Define the next broker in sequence as the correct controller
+      if (correctControllerId === null) {
+        correctControllerId = (connection.port! - 9010 + 1) % 3
+        mockMetadata(admin, 1, null, {
+          brokers: new Map([
+            [1, { host: 'localhost', port: 9011 }],
+            [2, { host: 'localhost', port: 9012 }],
+            [3, { host: 'localhost', port: 9013 }]
+          ]),
+          controllerId: correctControllerId
+        })
+      }
+
+      const originalSend = connection.send.bind(connection)
+
+      connection.send = function <ReturnType>(
+        apiKey: number,
+        apiVersion: number,
+        payload: () => Writer,
+        responseParser: ResponseParser<ReturnType>,
+        hasRequestHeaderTaggedFields: boolean,
+        hasResponseHeaderTaggedFields: boolean,
+        callback: Callback<ReturnType>
+      ) {
+        if (apiKey === 20) {
+          if (connection.port! - 9010 !== correctControllerId) {
+            callback(new ResponseError(20, 6, { '/': 41 }, {}), undefined as unknown as ReturnType)
+            return
+          }
+        }
+
+        originalSend(
+          apiKey,
+          apiVersion,
+          payload,
+          responseParser,
+          hasRequestHeaderTaggedFields,
+          hasResponseHeaderTaggedFields,
+          callback
+        )
+      }
+
+      callback(error, connection)
+    })
+  }
+
+  // Clean up by deleting the topic
   await admin.deleteTopics({ topics: [topicName] })
 })
 

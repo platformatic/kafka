@@ -590,7 +590,8 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 id: metadata.clusterId!,
                 brokers: new Map(),
                 topics: new Map(),
-                lastUpdate
+                lastUpdate,
+                controllerId: metadata.controllerId
               }
             } else {
               this.#metadata.lastUpdate = lastUpdate

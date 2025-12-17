@@ -91,7 +91,7 @@ export function parseResponse (
       }
 
       if (group.errorCode !== 0) {
-        errors.push([`/groups/${i}`, group.errorCode])
+        errors.push([`/groups/${i}`, [group.errorCode, null]])
       }
 
       return group

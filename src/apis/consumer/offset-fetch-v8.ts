@@ -105,7 +105,7 @@ export function parseResponse (
               }
 
               if (partition.errorCode !== 0) {
-                errors.push([`/groups/${i}/topics/${j}/partitions/${k}`, partition.errorCode])
+                errors.push([`/groups/${i}/topics/${j}/partitions/${k}`, [partition.errorCode, null]])
               }
 
               return partition
@@ -116,7 +116,7 @@ export function parseResponse (
       }
 
       if (group.errorCode !== 0) {
-        errors.push([`/groups/${i}`, group.errorCode])
+        errors.push([`/groups/${i}`, [group.errorCode, null]])
       }
 
       return group

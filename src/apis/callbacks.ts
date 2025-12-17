@@ -1,4 +1,4 @@
-import { MultipleErrors, TimeoutError } from '../errors.ts'
+import { MultipleErrors } from '../errors.ts'
 import { PromiseWithResolvers } from '../utils.ts'
 import { type Callback } from './definitions.ts'
 
@@ -63,27 +63,5 @@ export function runConcurrentCallbacks<ReturnType> (
 
   for (const item of collection) {
     operation(item, operationCallback.bind(null, i++))
-  }
-}
-
-export function createTimeoutCallback<ReturnType> (
-  callback: Callback<ReturnType>,
-  timeout: number,
-  errorMessage: string
-): Callback<ReturnType> {
-  let timeoutFired = false
-  const timeoutHandle = setTimeout(() => {
-    timeoutFired = true
-    callback(new TimeoutError(errorMessage), undefined as unknown as ReturnType)
-  }, timeout)
-
-  return (error: Error | null, result: ReturnType) => {
-    /* c8 ignore next 3 - Hard to test */
-    if (timeoutFired) {
-      return
-    }
-
-    clearTimeout(timeoutHandle)
-    callback(error, result)
   }
 }

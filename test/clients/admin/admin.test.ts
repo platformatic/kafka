@@ -31,6 +31,7 @@ import {
 } from '../../../src/index.ts'
 import {
   createAdmin,
+  createConsumer,
   createCreationChannelVerifier,
   createTopic,
   createTracingChannelVerifier,
@@ -171,6 +172,17 @@ test('all operations should fail when admin is closed', async t => {
   // Attempt to call alterClientQuotas on closed admin
   try {
     await admin.alterClientQuotas({ entries: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call removeMembersFromConsumerGroup on closed admin
+  try {
+    await admin.removeMembersFromConsumerGroup({
+      groupId: 'test-group',
+      members: [{ memberId: 'test-member', reason: 'test-reason' }]
+    })
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
@@ -1373,6 +1385,311 @@ test('deleteGroups should handle unavailable API errors (FindCoordinator)', asyn
     // Error should contain our mock error message
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should remove specific members', async t => {
+  const admin = createAdmin(t)
+  const groupId = `test-group-${randomUUID()}`
+  const clientId = `test-client-${randomUUID()}`
+  const consumer = createConsumer(t, { clientId, groupId })
+  await consumer.joinGroup({})
+
+  ok(consumer.memberId)
+
+  const groups1 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups1.get(groupId)!.members.has(consumer.memberId), true)
+
+  await admin.removeMembersFromConsumerGroup({ groupId, members: [{ memberId: consumer.memberId }] })
+  const groups2 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups2.get(groupId)!.members.has(consumer.memberId), false)
+})
+
+test('removeMembersFromConsumerGroup should remove specific members with custom reason', async t => {
+  const admin = createAdmin(t)
+  const groupId = `test-group-${randomUUID()}`
+  const clientId = `test-client-${randomUUID()}`
+  const consumer = createConsumer(t, { clientId, groupId })
+  await consumer.joinGroup({})
+
+  ok(consumer.memberId)
+
+  const groups1 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups1.get(groupId)!.members.has(consumer.memberId), true)
+
+  await admin.removeMembersFromConsumerGroup({
+    groupId,
+    members: [{ memberId: consumer.memberId, reason: 'Custom reason' }]
+  })
+
+  const groups2 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups2.get(groupId)!.members.has(consumer.memberId), false)
+})
+
+test('removeMembersFromConsumerGroup should remove all members', async t => {
+  const admin = createAdmin(t)
+  const groupId = `test-group-${randomUUID()}`
+  const clientId = `test-client-${randomUUID()}`
+  const consumer = createConsumer(t, { clientId, groupId })
+  await consumer.joinGroup({})
+
+  ok(consumer.memberId)
+
+  const groups1 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups1.get(groupId)!.members.has(consumer.memberId), true)
+
+  await admin.removeMembersFromConsumerGroup({ groupId })
+
+  const groups2 = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups2.get(groupId)!.members.size, 0)
+})
+
+test('removeMembersFromConsumerGroup should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+  const groupId = `test-group-${randomUUID()}`
+  const clientId = `test-client-${randomUUID()}`
+  const consumer = createConsumer(t, { clientId, groupId })
+  await consumer.joinGroup({})
+
+  ok(consumer.memberId)
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminGroupsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'removeMembersFromConsumerGroup',
+          options: { groupId, members: [{ memberId: consumer.memberId }] },
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'removeMembersFromConsumerGroup'
+  )
+
+  // Remove one specific member
+  await admin.removeMembersFromConsumerGroup({ groupId, members: [{ memberId: consumer.memberId }] })
+  verifyTracingChannel()
+})
+
+test('removeMembersFromConsumerGroup should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (groupId)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: null, invalidProperty: true })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for groupId
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 0 })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid empty groupId
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: '' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid type for members
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: 123 })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid member type
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: [true] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member missing memberId
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: [{ reason: 'No memberId' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member with non-string memberId
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: [{ memberId: 123 }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member with empty string memberId
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'test-group', members: [{ memberId: '' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member with non-string reason
+  try {
+    await admin.removeMembersFromConsumerGroup({
+      groupId: 'test-group',
+      // @ts-expect-error - Intentionally passing invalid options
+      members: [{ memberId: 'valid-id', reason: 123 }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member with empty string reason
+  try {
+    await admin.removeMembersFromConsumerGroup({
+      groupId: 'test-group',
+      members: [{ memberId: 'valid-id', reason: '' }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+
+  // Test with invalid object member with additional property
+  try {
+    await admin.removeMembersFromConsumerGroup({
+      groupId: 'test-group',
+      // @ts-expect-error - Intentionally passing invalid options
+      members: [{ memberId: 'valid-id', reason: 'Valid reason', extra: true }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('members'), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin)
+
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
+
+  try {
+    await admin.removeMembersFromConsumerGroup({
+      groupId: 'test-group',
+      members: [{ memberId: 'fake-member' }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 4)
+
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Removing members from consumer group failed.'), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle unavailable API errors (LeaveGroup)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'LeaveGroup')
+
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API LeaveGroup.'), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Removing members from consumer group failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('removeMembersFromConsumerGroup should handle unavailable API errors (DescribeGroups)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DescribeGroups')
+
+  try {
+    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: null })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Removing members from consumer group failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, 'Describing groups failed.')
+    const subSubError = subError.errors[0]
+    ok(subSubError)
+    strictEqual(subSubError instanceof UnsupportedApiError, true)
+    strictEqual(subSubError.message.includes('Unsupported API DescribeGroups.'), true)
   }
 })
 

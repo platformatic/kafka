@@ -9,11 +9,7 @@ await performAPICallWithRetry('OffsetDelete', () =>
   offsetDeleteV0.async(connection, 'g2', [
     {
       name: 'temp',
-      partitions: [
-        {
-          partitionIndex: 0
-        }
-      ]
+      partitions: [{ partitionIndex: 0 }]
     }
   ]))
 

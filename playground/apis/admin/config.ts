@@ -1,7 +1,7 @@
 import { api as alterConfigsV2 } from '../../../src/apis/admin/alter-configs-v2.ts'
 import { api as describeConfigsV4 } from '../../../src/apis/admin/describe-configs-v4.ts'
 import { api as incrementalAlterConfigsV1 } from '../../../src/apis/admin/incremental-alter-configs-v1.ts'
-import { IncrementalAlterConfigTypes, ResourceTypes } from '../../../src/apis/enumerations.ts'
+import { IncrementalAlterConfigOperationTypes, ResourceTypes } from '../../../src/apis/enumerations.ts'
 import { Connection } from '../../../src/network/connection.ts'
 import { performAPICallWithRetry } from '../../utils.ts'
 
@@ -50,7 +50,7 @@ await performAPICallWithRetry('IncrementalAlterConfig', () =>
         configs: [
           {
             name: 'compression.type',
-            configOperation: IncrementalAlterConfigTypes.SET,
+            configOperation: IncrementalAlterConfigOperationTypes.SET,
             value: 'gzip'
           }
         ]

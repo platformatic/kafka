@@ -6,17 +6,20 @@ import { Reader, ResponseError, Writer, describeConfigsV4 } from '../../../src/i
 const { createRequest, parseResponse } = describeConfigsV4
 
 test('createRequest serializes basic parameters correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // TOPIC
-      resourceName: 'test-topic',
-      configurationKeys: []
-    }
-  ]
   const includeSynonyms = true
   const includeDocumentation = false
 
-  const writer = createRequest(resources, includeSynonyms, includeDocumentation)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // TOPIC
+        resourceName: 'test-topic',
+        configurationKeys: []
+      }
+    ],
+    includeSynonyms,
+    includeDocumentation
+  )
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -61,17 +64,20 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes configurationKeys correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // TOPIC
-      resourceName: 'test-topic',
-      configurationKeys: ['cleanup.policy', 'compression.type']
-    }
-  ]
   const includeSynonyms = false
   const includeDocumentation = false
 
-  const writer = createRequest(resources, includeSynonyms, includeDocumentation)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // TOPIC
+        resourceName: 'test-topic',
+        configurationKeys: ['cleanup.policy', 'compression.type']
+      }
+    ],
+    includeSynonyms,
+    includeDocumentation
+  )
   const reader = Reader.from(writer)
 
   // Read resources array
@@ -91,22 +97,25 @@ test('createRequest serializes configurationKeys correctly', () => {
 })
 
 test('createRequest serializes multiple resources correctly', () => {
-  const resources = [
-    {
-      resourceType: 2, // TOPIC
-      resourceName: 'topic-1',
-      configurationKeys: ['cleanup.policy']
-    },
-    {
-      resourceType: 4, // BROKER
-      resourceName: '1',
-      configurationKeys: ['num.io.threads']
-    }
-  ]
   const includeSynonyms = false
   const includeDocumentation = false
 
-  const writer = createRequest(resources, includeSynonyms, includeDocumentation)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2, // TOPIC
+        resourceName: 'topic-1',
+        configurationKeys: ['cleanup.policy']
+      },
+      {
+        resourceType: 4, // BROKER
+        resourceName: '1',
+        configurationKeys: ['num.io.threads']
+      }
+    ],
+    includeSynonyms,
+    includeDocumentation
+  )
   const reader = Reader.from(writer)
 
   // Read resources array
@@ -137,17 +146,20 @@ test('createRequest serializes multiple resources correctly', () => {
 })
 
 test('createRequest serializes include flags correctly', () => {
-  const resources = [
-    {
-      resourceType: 2,
-      resourceName: 'test-topic',
-      configurationKeys: []
-    }
-  ]
   const includeSynonyms = true
   const includeDocumentation = true
 
-  const writer = createRequest(resources, includeSynonyms, includeDocumentation)
+  const writer = createRequest(
+    [
+      {
+        resourceType: 2,
+        resourceName: 'test-topic',
+        configurationKeys: []
+      }
+    ],
+    includeSynonyms,
+    includeDocumentation
+  )
   const reader = Reader.from(writer)
 
   // Skip resources array
@@ -229,14 +241,9 @@ test('parseResponse correctly processes a successful response with configs', () 
               .appendBoolean(config.readOnly)
               .appendInt8(config.configSource)
               .appendBoolean(config.isSensitive)
-              .appendArray(
-                config.synonyms,
-                (w, synonym) => {
-                  w.appendString(synonym.name).appendString(synonym.value).appendInt8(synonym.source)
-                },
-                true,
-                false
-              )
+              .appendArray(config.synonyms, (w, synonym) => {
+                w.appendString(synonym.name).appendString(synonym.value).appendInt8(synonym.source)
+              })
               .appendInt8(config.configType)
               .appendString(config.documentation)
           })
@@ -318,7 +325,7 @@ test('parseResponse correctly processes multiple config entries', () => {
               .appendBoolean(config.readOnly)
               .appendInt8(config.configSource)
               .appendBoolean(config.isSensitive)
-              .appendArray(config.synonyms, () => {}, true, false)
+              .appendArray(config.synonyms, () => {})
               .appendInt8(config.configType)
               .appendString(config.documentation)
           })
@@ -428,7 +435,7 @@ test('parseResponse handles multiple resources with mixed errors', () => {
                 .appendBoolean(config.readOnly)
                 .appendInt8(config.configSource)
                 .appendBoolean(config.isSensitive)
-                .appendArray([], () => {}, true, false) // Empty synonyms
+                .appendArray([], () => {}) // Empty synonyms
                 .appendInt8(config.configType)
                 .appendString(config.documentation)
             }

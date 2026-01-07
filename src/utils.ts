@@ -22,7 +22,14 @@ export type DebugDumpLogger = (...args: any[]) => void
 export { setTimeout as sleep } from 'node:timers/promises'
 
 /* c8 ignore start - Hard to test */
-function PromiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
+// This is replicated explicitly from the standard library to ensure compatibility in Typescript 4
+interface PromiseWithResolvers<T> {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: any) => void
+}
+
+function promiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
   let resolve: (value: T | PromiseLike<T>) => void
   let reject: (reason?: any) => void
 
@@ -34,9 +41,9 @@ function PromiseWithResolversPolyfill<T> (): PromiseWithResolvers<T> {
   return { promise, resolve, reject }
 }
 
-export const PromiseWithResolvers = Promise.withResolvers
+export const promiseWithResolvers: <T>() => PromiseWithResolvers<T> = Promise.withResolvers
   ? Promise.withResolvers.bind(Promise)
-  : PromiseWithResolversPolyfill
+  : promiseWithResolversPolyfill
 /* c8 ignore end */
 
 export const ajv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true })

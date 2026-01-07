@@ -3,14 +3,14 @@ import RDKafka from '@platformatic/rdkafka'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS, logLevel } from 'kafkajs'
 import { randomUUID } from 'node:crypto'
-import { Consumer, MessagesStreamModes, PromiseWithResolvers } from '../src/index.ts'
+import { Consumer, MessagesStreamModes, promiseWithResolvers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
 const iterations = 100000
 const maxBytes = 2048
 
 function rdkafkaEvented (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const consumer = new RDKafka.KafkaConsumer(
@@ -70,7 +70,7 @@ function rdkafkaEvented (): Promise<Result> {
 }
 
 function rdkafkaStream (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const stream = RDKafka.KafkaConsumer.createReadStream(
@@ -109,7 +109,7 @@ function rdkafkaStream (): Promise<Result> {
 }
 
 function confluentRdkafkaEvented (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const consumer = new ConfluentRDKafka.KafkaConsumer(
@@ -169,7 +169,7 @@ function confluentRdkafkaEvented (): Promise<Result> {
 }
 
 function confluentRdkafkaStream (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const stream = ConfluentRDKafka.KafkaConsumer.createReadStream(
@@ -208,7 +208,7 @@ function confluentRdkafkaStream (): Promise<Result> {
 }
 
 async function kafkajs (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const client = new KafkaJS({ clientId: 'benchmarks', brokers, logLevel: logLevel.ERROR })
@@ -240,7 +240,7 @@ async function kafkajs (): Promise<Result> {
 }
 
 async function confluentKafkaJS (): Promise<Result> {
-  const { promise, resolve } = PromiseWithResolvers<Result>()
+  const { promise, resolve } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const client = new ConfluentKafka.Kafka({
@@ -282,7 +282,7 @@ async function confluentKafkaJS (): Promise<Result> {
 }
 
 async function platformaticKafka (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const consumer = new Consumer({

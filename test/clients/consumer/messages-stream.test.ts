@@ -24,7 +24,7 @@ import {
   ProduceAcks,
   Producer,
   type ProducerOptions,
-  PromiseWithResolvers,
+  promiseWithResolvers,
   type Serializers,
   sleep,
   type StreamOptions,
@@ -154,7 +154,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   })
 
   const messages: Message<K, V, HK, HV>[] = []
-  const { promise, resolve, reject } = PromiseWithResolvers<void>()
+  const { promise, resolve, reject } = promiseWithResolvers<void>()
 
   function onData (message: Message<K, V, HK, HV>) {
     messages.push(message)
@@ -431,7 +431,7 @@ test('should consume messages with LATEST mode', async t => {
   // Verify no messages are returned initially
   strictEqual(messages.length, 0, 'Should consume 0 messages')
 
-  const { promise, resolve } = PromiseWithResolvers<void>()
+  const { promise, resolve } = promiseWithResolvers<void>()
   function onData (message: Message<string, string, string, string>) {
     messages.push(message)
 

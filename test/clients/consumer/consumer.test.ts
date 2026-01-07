@@ -42,7 +42,7 @@ import {
   parseBroker,
   ProduceAcks,
   type ProducerOptions,
-  PromiseWithResolvers,
+  promiseWithResolvers,
   ProtocolError,
   type RecordsBatch,
   sleep,
@@ -107,7 +107,7 @@ async function fetchFromOffset ({
   fetchOffset = 0n,
   partition = 0
 }: {
-  consumer: Consumer<Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>, Buffer<ArrayBufferLike>>
+  consumer: Consumer<Buffer, Buffer, Buffer, Buffer>
   topic: string
   fetchOffset: bigint
   partition?: number
@@ -2335,7 +2335,7 @@ test('getLag should handle unavailable API errors', async t => {
 test('startLagMonitoring should regularly check consumer lag', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)
-  const { promise, resolve } = PromiseWithResolvers<Offsets[]>()
+  const { promise, resolve } = promiseWithResolvers<Offsets[]>()
   const lagsViaEvent: Offsets[] = []
   const lagsViaChannel: Offsets[] = []
 
@@ -2408,7 +2408,7 @@ test('startLagMonitoring should handle errors', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)
 
-  const { promise, resolve } = PromiseWithResolvers<MultipleErrors>()
+  const { promise, resolve } = promiseWithResolvers<MultipleErrors>()
   consumer.startLagMonitoring({ topics: ['invalid'] }, 1000)
 
   consumer.on('consumer:lag:error', error => {

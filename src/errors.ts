@@ -139,7 +139,7 @@ export class NetworkError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_NETWORK'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(NetworkError.code, message, properties)
+    super(NetworkError.code, message, { canRetry: true, ...properties })
   }
 }
 
@@ -199,7 +199,7 @@ export class TimeoutError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_TIMEOUT'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(NetworkError.code, message, properties)
+    super(NetworkError.code, message, { canRetry: false, ...properties })
   }
 }
 

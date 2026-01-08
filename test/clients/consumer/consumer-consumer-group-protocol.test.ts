@@ -8,6 +8,7 @@ import {
   ProduceAcks,
   ResponseError,
   sleep,
+  TimeoutError,
   UnsupportedApiError,
   type MessageToProduce,
   type ProducerOptions
@@ -165,11 +166,22 @@ test('#consumerGroupHeartbeat should ignore response when closed ', skipConsumer
 })
 
 test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', skipConsumerGroupProtocol, async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, timeout: 200 })
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, requestTimeout: 200 })
   const topic = await createTopic(t, true, 1)
   const stream = await consumer.consume({ topics: [topic] })
-  let mockCount = 1
-  mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, () => mockCount-- > 0)
+  mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, (
+    _originalSend,
+    _apiKey,
+    _apiVersion,
+    _payload,
+    _responseParser,
+    _hasRequestHeaderTaggedFields,
+    _hasResponseHeaderTaggedFields,
+    callback
+  ) => {
+    callback(new TimeoutError('Request timed out'), null)
+    return false
+  })
   await once(consumer, 'consumer:heartbeat:error')
   await once(consumer, 'consumer:heartbeat:end')
   await stream.close()

@@ -470,8 +470,9 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #createTopics (options: CreateTopicsOptions, callback: CallbackWithPromise<CreatedTopic[]>): void {
-    const numPartitions = options.partitions ?? 1
-    const replicationFactor = options.replicas ?? 1
+    // -1 is required if manual assignments are used. If no manual assignments are used, -1 will default to broker settings.
+    const numPartitions = options.partitions ?? -1
+    const replicationFactor = options.replicas ?? -1
     const assignments: CreateTopicsRequestTopicAssignment[] = []
     const configs = options.configs ?? []
 

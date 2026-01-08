@@ -105,14 +105,15 @@ export function parseResponse (
     results: reader.readArray(
       (r, i) => {
         const errorCode = r.readInt16()
+        const errorMessage = r.readNullableString(false)
 
         if (errorCode !== 0) {
-          errors.push([`/results/${i}`, errorCode])
+          errors.push([`/results/${i}`, [errorCode, errorMessage]])
         }
 
         return {
           errorCode,
-          errorMessage: r.readNullableString(false),
+          errorMessage,
           resourceType: r.readInt8(),
           resourceName: r.readString(false),
           configs: r.readArray(

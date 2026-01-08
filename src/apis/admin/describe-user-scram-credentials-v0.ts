@@ -63,27 +63,29 @@ export function parseResponse (
 
   const throttleTimeMs = reader.readInt32()
   const errorCode = reader.readInt16()
+  const errorMessage = reader.readNullableString()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, errorMessage]])
   }
 
   const response: DescribeUserScramCredentialsResponse = {
     throttleTimeMs,
     errorCode,
-    errorMessage: reader.readNullableString(),
+    errorMessage,
     results: reader.readArray((r, i) => {
       const user = r.readString()
       const errorCode = r.readInt16()
+      const errorMessage = r.readNullableString()
 
       if (errorCode !== 0) {
-        errors.push([`/results/${i}`, errorCode])
+        errors.push([`/results/${i}`, [errorCode, errorMessage]])
       }
 
       return {
         user,
         errorCode,
-        errorMessage: r.readNullableString(),
+        errorMessage,
         credentialInfos: r.readArray(r => {
           return {
             mechanism: r.readInt8(),

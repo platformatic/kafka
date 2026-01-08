@@ -117,16 +117,9 @@ export function parseResponse (
       const topicResponse = {
         name: r.readString(),
         partitionResponses: r.readArray((r, j) => {
-          const index = r.readInt32()
-          const errorCode = r.readInt16()
-
-          if (errorCode !== 0) {
-            errors.push([`/responses/${i}/partition_responses/${j}`, errorCode])
-          }
-
-          return {
-            index,
-            errorCode,
+          const partitionResponse = {
+            index: r.readInt32(),
+            errorCode: r.readInt16(),
             baseOffset: r.readInt64(),
             logAppendTimeMs: r.readInt64(),
             logStartOffset: r.readInt64(),
@@ -137,13 +130,25 @@ export function parseResponse (
               }
 
               if (recordError.batchIndexErrorMessage) {
-                errors.push([`/responses/${i}/partition_responses/${j}/record_errors/${k}`, -1])
+                errors.push([
+                  `/responses/${i}/partition_responses/${j}/record_errors/${k}`,
+                  [-1, recordError.batchIndexErrorMessage]
+                ])
               }
 
               return recordError
             }),
             errorMessage: r.readNullableString()
           }
+
+          if (partitionResponse.errorCode !== 0) {
+            errors.push([
+              `/responses/${i}/partition_responses/${j}`,
+              [partitionResponse.errorCode, partitionResponse.errorMessage]
+            ])
+          }
+
+          return partitionResponse
         })
       }
 

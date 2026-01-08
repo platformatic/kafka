@@ -111,7 +111,7 @@ export function parseResponse (
       const errorCode = r.readInt16()
 
       if (errorCode !== 0) {
-        errors.push([`/topics/${i}`, errorCode])
+        errors.push([`/topics/${i}`, [errorCode, null]])
       }
 
       const name = r.readNullableString()
@@ -125,7 +125,7 @@ export function parseResponse (
           const errorCode = r.readInt16()
 
           if (errorCode !== 0) {
-            errors.push([`/topics/${i}/partitions/${j}`, errorCode])
+            errors.push([`/topics/${i}/partitions/${j}`, [errorCode, null]])
           }
 
           return {

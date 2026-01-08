@@ -63,7 +63,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
 
   if (errorCode !== 0) {
-    errors.push(['', errorCode])
+    errors.push(['', [errorCode, null]])
   }
 
   const response: LeaveGroupResponse = {
@@ -77,7 +77,7 @@ export function parseResponse (
       }
 
       if (member.errorCode !== 0) {
-        errors.push([`/members/${i}`, member.errorCode])
+        errors.push([`/members/${i}`, [member.errorCode, null]])
       }
 
       return member

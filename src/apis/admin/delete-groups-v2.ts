@@ -49,7 +49,7 @@ export function parseResponse (
       }
 
       if (group.errorCode !== 0) {
-        errors.push([`/results/${i}`, group.errorCode])
+        errors.push([`/results/${i}`, [group.errorCode, null]])
       }
 
       return group

@@ -123,7 +123,7 @@ export function parseResponse (
               const errorCode = r.readInt16()
 
               if (errorCode !== 0) {
-                errors.push([`/responses/${i}/partition_responses/${j}`, errorCode])
+                errors.push([`/responses/${i}/partition_responses/${j}`, [errorCode, null]])
               }
 
               return {

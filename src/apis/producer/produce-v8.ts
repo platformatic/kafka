@@ -123,16 +123,9 @@ export function parseResponse (
           name: r.readString(false),
           partitionResponses: r.readArray(
             (r, j) => {
-              const index = r.readInt32()
-              const errorCode = r.readInt16()
-
-              if (errorCode !== 0) {
-                errors.push([`/responses/${i}/partition_responses/${j}`, errorCode])
-              }
-
-              return {
-                index,
-                errorCode,
+              const partitionResponse: ProduceResponsePartition = {
+                index: r.readInt32(),
+                errorCode: r.readInt16(),
                 baseOffset: r.readInt64(),
                 logAppendTimeMs: r.readInt64(),
                 logStartOffset: r.readInt64(),
@@ -144,7 +137,10 @@ export function parseResponse (
                     }
 
                     if (recordError.batchIndexErrorMessage) {
-                      errors.push([`/responses/${i}/partition_responses/${j}/record_errors/${k}`, -1])
+                      errors.push([
+                        `/responses/${i}/partition_responses/${j}/record_errors/${k}`,
+                        [-1, recordError.batchIndexErrorMessage]
+                      ])
                     }
 
                     return recordError
@@ -154,6 +150,15 @@ export function parseResponse (
                 ),
                 errorMessage: r.readNullableString(false)
               }
+
+              if (partitionResponse.errorCode !== 0) {
+                errors.push([
+                  `/responses/${i}/partition_responses/${j}`,
+                  [partitionResponse.errorCode, partitionResponse.errorMessage]
+                ])
+              }
+
+              return partitionResponse
             },
             false,
             false

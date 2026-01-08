@@ -152,7 +152,7 @@ test('NetworkError', () => {
 })
 
 test('ProtocolError with string code', () => {
-  const error = new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', { topic: 'test-topic' })
+  const error = new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION', null, { topic: 'test-topic' })
   deepStrictEqual(error.code, 'PLT_KFK_PROTOCOL')
   deepStrictEqual(error.message, 'This server does not host this topic-partition.')
   deepStrictEqual(error.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
@@ -163,7 +163,7 @@ test('ProtocolError with string code', () => {
 })
 
 test('ProtocolError with numeric code', () => {
-  const error = new ProtocolError(3, { partition: 1 })
+  const error = new ProtocolError(3, null, { partition: 1 })
   deepStrictEqual(error.code, 'PLT_KFK_PROTOCOL')
   deepStrictEqual(error.message, 'This server does not host this topic-partition.')
   deepStrictEqual(error.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
@@ -175,7 +175,7 @@ test('ProtocolError with numeric code', () => {
 
 test('ProtocolError with response containing memberId', () => {
   const response = { memberId: 'test-member-id' }
-  const error = new ProtocolError('REBALANCE_IN_PROGRESS', {}, response)
+  const error = new ProtocolError('REBALANCE_IN_PROGRESS', null, {}, response)
   deepStrictEqual(error.code, 'PLT_KFK_PROTOCOL')
   deepStrictEqual(error.apiId, 'REBALANCE_IN_PROGRESS')
   ok(error.rebalanceInProgress)
@@ -186,9 +186,9 @@ test('ProtocolError with response containing memberId', () => {
 test('ResponseError', () => {
   const apiName = 3 // Metadata
   const apiVersion = 1
-  const errors = {
-    'topics[0]': 3, // UNKNOWN_TOPIC_OR_PARTITION
-    'topics[1]': 5 // LEADER_NOT_AVAILABLE
+  const errors: Record<string, [number, null]> = {
+    'topics[0]': [3, null], // UNKNOWN_TOPIC_OR_PARTITION
+    'topics[1]': [5, null] // LEADER_NOT_AVAILABLE
   }
   const response = { topics: ['topic1', 'topic2'] }
 

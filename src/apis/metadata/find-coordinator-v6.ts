@@ -64,7 +64,7 @@ export function parseResponse (
       }
 
       if (coordinator.errorCode !== 0) {
-        errors.push([`/coordinators/${i}`, coordinator.errorCode])
+        errors.push([`/coordinators/${i}`, [coordinator.errorCode, coordinator.errorMessage]])
       }
 
       return coordinator

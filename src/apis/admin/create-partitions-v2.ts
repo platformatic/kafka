@@ -79,7 +79,7 @@ export function parseResponse (
       }
 
       if (result.errorCode !== 0) {
-        errors.push([`/results/${i}`, result.errorCode])
+        errors.push([`/results/${i}`, [result.errorCode, result.errorMessage]])
       }
 
       return result

@@ -6,8 +6,8 @@ import { createAPI } from '../definitions.ts'
 export type SaslHandshakeRequest = Parameters<typeof createRequest>
 
 export interface SaslHandshakeResponse {
-  errorCode?: number
-  mechanisms?: string[]
+  errorCode: number
+  mechanisms: string[]
 }
 
 /*
@@ -41,7 +41,7 @@ export function parseResponse (
   }
 
   if (response.errorCode !== 0) {
-    throw new ResponseError(apiKey, apiVersion, { '': response.errorCode! }, response)
+    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response

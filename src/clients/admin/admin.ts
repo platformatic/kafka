@@ -24,6 +24,11 @@ import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../a
 import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
+  type LeaveGroupRequest,
+  type LeaveGroupRequestMember,
+  type LeaveGroupResponse
+} from '../../apis/consumer/leave-group-v5.ts'
+import {
   type ListGroupsRequest as ListGroupsRequestV5,
   type ListGroupsResponse
 } from '../../apis/admin/list-groups-v5.ts'
@@ -72,7 +77,8 @@ import {
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
   listGroupsOptionsValidator,
-  listTopicsOptionsValidator
+  listTopicsOptionsValidator,
+  removeMembersFromConsumerGroupOptionsValidator
 } from './options.ts'
 import {
   type AdminOptions,
@@ -89,7 +95,8 @@ import {
   type GroupBase,
   type GroupMember,
   type ListGroupsOptions,
-  type ListTopicsOptions
+  type ListTopicsOptions,
+  type RemoveMembersFromConsumerGroupOptions
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
@@ -285,6 +292,46 @@ export class Admin extends Base<AdminOptions> {
       this.#deleteGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteGroups', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  removeMembersFromConsumerGroup (
+    options: RemoveMembersFromConsumerGroupOptions,
+    callback: CallbackWithPromise<void>
+  ): void
+  removeMembersFromConsumerGroup (options: RemoveMembersFromConsumerGroupOptions): Promise<void>
+  removeMembersFromConsumerGroup (
+    options: RemoveMembersFromConsumerGroupOptions,
+    callback?: CallbackWithPromise<void>
+  ): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](
+      options,
+      removeMembersFromConsumerGroupOptionsValidator,
+      '/options',
+      false
+    )
+    if (validationError) {
+      callback(validationError)
+      return callback[kCallbackPromise]
+    }
+
+    adminGroupsChannel.traceCallback(
+      this.#removeMembersFromConsumerGroup,
+      1,
+      createDiagnosticContext({ client: this, operation: 'removeMembersFromConsumerGroup', options }),
       this,
       options,
       callback
@@ -827,6 +874,108 @@ export class Admin extends Base<AdminOptions> {
           },
           error => callback(error)
         )
+      })
+    })
+  }
+
+  #removeMembersFromConsumerGroup (
+    options: RemoveMembersFromConsumerGroupOptions,
+    callback: CallbackWithPromise<void>
+  ): void {
+    if (!options.members || options.members.length === 0) {
+      this.#describeGroups({ groups: [options.groupId] }, (error, groupsMap) => {
+        if (error) {
+          callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
+          return
+        }
+
+        const group = groupsMap.get(options.groupId)
+        if (!group) {
+          callback(new MultipleErrors('Removing members from consumer group failed.', []))
+          return
+        }
+
+        const allMemberIds = Array.from(group.members.keys())
+        if (allMemberIds.length === 0) {
+          callback(null)
+          return
+        }
+
+        this.#removeMembersFromConsumerGroup(
+          { ...options, members: allMemberIds.map(memberId => ({ memberId })) },
+          callback
+        )
+      })
+      return
+    }
+
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined)
+        return
+      }
+
+      this.#findGroupCoordinator([options.groupId], (error, response) => {
+        if (error) {
+          callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
+          return
+        }
+
+        const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        if (!coordinator) {
+          callback(
+            new MultipleErrors('Removing members from consumer group failed.', [
+              new Error(`No coordinator found for group ${options.groupId}`)
+            ])
+          )
+          return
+        }
+
+        const broker = metadata.brokers.get(coordinator.nodeId)
+        if (!broker) {
+          callback(
+            new MultipleErrors('Removing members from consumer group failed.', [
+              new Error(`Broker ${coordinator.nodeId} not found`)
+            ])
+          )
+          return
+        }
+
+        this[kGetConnection](broker, (error, connection) => {
+          if (error) {
+            callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
+            return
+          }
+
+          this[kPerformWithRetry]<LeaveGroupResponse>(
+            'removeMembersFromConsumerGroup',
+            retryCallback => {
+              this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as LeaveGroupResponse)
+                  return
+                }
+
+                const members: LeaveGroupRequestMember[] = options.members!.map(member => ({
+                  memberId: typeof member === 'string' ? member : member.memberId,
+                  groupInstanceId: null,
+                  reason: typeof member === 'string' ? 'Not specified' : member.reason
+                }))
+
+                api(connection, options.groupId, members, retryCallback as unknown as Callback<LeaveGroupResponse>)
+              })
+            },
+            (error: Error | null) => {
+              if (error) {
+                callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
+                return
+              }
+
+              callback(null)
+            },
+            0
+          )
+        })
       })
     })
   }

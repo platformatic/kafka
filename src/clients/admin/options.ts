@@ -91,6 +91,28 @@ export const deleteGroupsOptionsSchema = {
   additionalProperties: false
 }
 
+export const removeMembersFromConsumerGroupOptionsSchema = {
+  type: 'object',
+  properties: {
+    groupId: idProperty,
+    members: {
+      type: ['array', 'null'],
+      items: {
+        type: 'object',
+        properties: {
+          memberId: idProperty,
+          reason: { type: 'string', minLength: 1 }
+        },
+        required: ['memberId'],
+        additionalProperties: false
+      },
+      default: null
+    }
+  },
+  required: ['groupId'],
+  additionalProperties: false
+}
+
 export const describeClientQuotasOptionsSchema = {
   type: 'object',
   properties: {
@@ -205,6 +227,7 @@ export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema
 export const listGroupsOptionsValidator = ajv.compile(listGroupsOptionsSchema)
 export const describeGroupsOptionsValidator = ajv.compile(describeGroupsOptionsSchema)
 export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchema)
+export const removeMembersFromConsumerGroupOptionsValidator = ajv.compile(removeMembersFromConsumerGroupOptionsSchema)
 export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
 export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)

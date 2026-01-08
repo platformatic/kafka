@@ -17,4 +17,5 @@ export const EMPTY_TAGGED_FIELDS_BUFFER = Buffer.from([0])
 
 export type Collection = string | Buffer | DynamicBuffer | Array<unknown> | Map<unknown, unknown> | Set<unknown>
 
-export type NullableString = string | undefined | null
+export type Nullable<T> = T | null | undefined
+export type NullableString = Nullable<string>

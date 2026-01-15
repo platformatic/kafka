@@ -9,7 +9,10 @@ import { test } from 'node:test'
 
 test('should import library without hanging when OTEL hook is active', async () => {
   // Create a minimal test script that imports the library
-  const indexFile = resolve(import.meta.dirname, '../../dist/index.js')
+  const indexFile = resolve(
+    import.meta.dirname,
+    process.versions.node.startsWith('20') ? '../../src/index.js' : '../../dist/index.js'
+  )
   const testScript = `
     import '${indexFile}'
     console.log('SUCCESS')

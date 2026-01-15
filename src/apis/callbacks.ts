@@ -1,5 +1,5 @@
 import { MultipleErrors } from '../errors.ts'
-import { PromiseWithResolvers } from '../utils.ts'
+import { promiseWithResolvers } from '../utils.ts'
 import { type Callback } from './definitions.ts'
 
 export const kCallbackPromise = Symbol('plt.kafka.callbackPromise')
@@ -14,7 +14,7 @@ export const noopCallback: CallbackWithPromise<any> = () => {
 export type CallbackWithPromise<ReturnType> = Callback<ReturnType> & { [kCallbackPromise]?: Promise<ReturnType> }
 
 export function createPromisifiedCallback<ReturnType> (): CallbackWithPromise<ReturnType> {
-  const { promise, resolve, reject } = PromiseWithResolvers<ReturnType>()
+  const { promise, resolve, reject } = promiseWithResolvers<ReturnType>()
 
   function callback (error?: Error | null, payload?: ReturnType): void {
     if (error) {

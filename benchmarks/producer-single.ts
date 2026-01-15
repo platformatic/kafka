@@ -3,13 +3,13 @@ import RDKafka from '@platformatic/rdkafka'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
 import { once } from 'node:events'
-import { ProduceAcks, Producer, PromiseWithResolvers, stringSerializers } from '../src/index.ts'
+import { ProduceAcks, Producer, promiseWithResolvers, stringSerializers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
 const iterations = 100000
 
 async function rdkafka (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const producer = new RDKafka.Producer(
@@ -46,7 +46,7 @@ async function rdkafka (): Promise<Result> {
 }
 
 async function confluentRdKafka (): Promise<Result> {
-  const { promise, resolve, reject } = PromiseWithResolvers<Result>()
+  const { promise, resolve, reject } = promiseWithResolvers<Result>()
   const tracker = new Tracker()
 
   const producer = new ConfluentRDKafka.Producer(

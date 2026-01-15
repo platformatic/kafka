@@ -513,7 +513,7 @@ test('createTopics should retarget controller when needed', async t => {
       ) {
         if (apiKey === 19) {
           if (connection.port! - 9010 !== correctControllerId) {
-            callback(new ResponseError(19, 7, { '/': 41 }, {}), undefined as unknown as ReturnType)
+            callback(new ResponseError(19, 7, { '/': [41, 'Kaboom!'] }, {}), undefined as unknown as ReturnType)
             return
           }
         }
@@ -738,7 +738,7 @@ test('deleteTopics should retarget controller when needed', async t => {
       ) {
         if (apiKey === 20) {
           if (connection.port! - 9010 !== correctControllerId) {
-            callback(new ResponseError(20, 6, { '/': 41 }, {}), undefined as unknown as ReturnType)
+            callback(new ResponseError(20, 6, { '/': [41, 'Kaboom!'] }, {}), undefined as unknown as ReturnType)
             return
           }
         }

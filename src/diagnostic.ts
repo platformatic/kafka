@@ -81,6 +81,7 @@ export const adminLogDirsChannel = createTracingChannel<ClientDiagnosticEvent>('
 // Producer channels
 export const producerInitIdempotentChannel = createTracingChannel<ClientDiagnosticEvent>('producer:initIdempotent')
 export const producerSendsChannel = createTracingChannel<ClientDiagnosticEvent>('producer:sends')
+export const producerTransactionsChannel = createTracingChannel<ClientDiagnosticEvent>('producer:transactions')
 
 // Consumer channels
 export const consumerGroupChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:group')

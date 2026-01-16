@@ -32,6 +32,7 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
 
 export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
   ProduceOptions<Key, Value, HeaderKey, HeaderValue> & {
+    transactionalId?: string
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
   }
 

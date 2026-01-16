@@ -71,6 +71,7 @@ function createProducer<K = string, V = string, HK = string, HV = string> (
     bootstrapBrokers: kafkaBootstrapServers,
     serializers: stringSerializers as Serializers<K, V, HK, HV>,
     autocreateTopics: false,
+    retryDelay: 250,
     ...options
   })
 
@@ -97,6 +98,7 @@ function createConsumer<K = string, V = string, HK = string, HV = string> (
     rebalanceTimeout: 6000,
     heartbeatInterval: 1000,
     retries: 1,
+    retryDelay: 250,
     ...options
   })
 
@@ -279,6 +281,7 @@ test('should support diagnostic channels', async t => {
         partition: 0,
         timestamp: 0n,
         offset: 0n,
+        metadata: message.metadata,
         commit: noopCallback
       })
     },
@@ -576,6 +579,154 @@ test('should support different fallback modes', async t => {
 
   // With EARLIEST fallback, we should get all messages
   strictEqual(earliestMessages.length, 3, 'With EARLIEST fallback, should consume all messages')
+})
+
+test('should consume messages from committed transaction, filtering out control markers', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+  let i = 0
+  const { promise, resolve } = promiseWithResolvers<void>()
+
+  // Create a consumer
+  const producer = createProducer(t, {
+    idempotent: true,
+    transactionalId: randomUUID()
+  })
+  const consumer = createConsumer(t, groupId)
+
+  const messages: Message<string, string, string, string>[] = []
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.LATEST,
+    maxWaitTime: 4000,
+    autocommit: false
+  })
+
+  stream.on('data', message => {
+    messages.push(message)
+
+    if (message.key === 'key-end') {
+      resolve()
+    }
+  })
+
+  // Create a first transaction and commit it
+  await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await producer.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await producer.commitTransaction()
+
+  // Create a second transaction and abort it
+  await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await producer.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await producer.abortTransaction()
+
+  // Create a third transaction and commit it
+  await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await producer.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await producer.commitTransaction()
+
+  // Send a final message wihtout a transaction to end consumption
+  await producer.send({ messages: [{ topic, key: 'key-end', value: 'value-end' }] })
+
+  await promise
+
+  deepStrictEqual(
+    messages.map(m => ({ key: m.key, value: m.value })),
+    [
+      {
+        key: 'key-1',
+        value: 'value-1'
+      },
+      {
+        key: 'key-2',
+        value: 'value-2'
+      },
+      {
+        key: 'key-3',
+        value: 'value-3'
+      },
+      {
+        key: 'key-7',
+        value: 'value-7'
+      },
+      {
+        key: 'key-8',
+        value: 'value-8'
+      },
+      {
+        key: 'key-9',
+        value: 'value-9'
+      },
+      {
+        key: 'key-end',
+        value: 'value-end'
+      }
+    ]
+  )
+})
+
+test('should support consume-transform-produce patterns', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce 10 messages which will be fed to the consumer
+  await produceTestMessages(t, topic, 10)
+
+  // Create a consumer and a producer
+  const consumer = createConsumer(t, groupId, { autocommit: false })
+  const producer = createProducer(t, {
+    idempotent: true,
+    transactionalId: randomUUID(),
+    retries: 1,
+    retryDelay: 1000
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.COMMITTED,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 4000
+  })
+
+  await producer.beginTransaction()
+  await producer.linkMessageStreamToTransaction(stream)
+
+  // Consumer and immediately commit each message
+  let i = 0
+  for await (const message of stream) {
+    await producer.commit(message)
+
+    if (++i === 10) {
+      break
+    }
+  }
+
+  await producer.commitTransaction()
+  await consumer.close(true)
+
+  // Now consume again to verify all messages were committed
+  const { promise, resolve } = promiseWithResolvers<string>()
+  const consumer2 = createConsumer(t, groupId, { autocommit: false })
+  const stream2 = await consumer2.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.COMMITTED,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 4000
+  })
+
+  stream2.on('data', message => resolve(message.key))
+
+  // This will return immediately if there are messages
+  deepStrictEqual(await executeWithTimeout(promise, 1000, 'timeout'), 'timeout')
 })
 
 test('should support maxFetches option', async t => {
@@ -1161,7 +1312,7 @@ test('should properly handle deleting topics in between', async t => {
   const topic2 = await createTopic(t)
   const topic3 = await createTopic(t)
 
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, undefined, { retries: 5 })
   await admin.createTopics({ topics: [topic1, topic2, topic3] })
 
   const stream1 = await consumer.consume({

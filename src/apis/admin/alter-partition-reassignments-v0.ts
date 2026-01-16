@@ -79,7 +79,7 @@ export function parseResponse (
   const errorMessage = reader.readNullableString()
 
   if (errorCode !== 0) {
-    errors.push(['', [errorCode, errorMessage ?? '']])
+    errors.push(['', [errorCode, errorMessage]])
   }
 
   const response: AlterPartitionReassignmentsResponse = {

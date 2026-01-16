@@ -41,7 +41,7 @@ export interface BaseOptions extends ConnectionOptions {
 }
 
 export interface MetadataOptions {
-  topics: string[]
+  topics?: string[]
   autocreateTopics?: boolean
   forceUpdate?: boolean
   metadataMaxAge?: number

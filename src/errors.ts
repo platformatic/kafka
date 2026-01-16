@@ -163,6 +163,7 @@ export class ProtocolError extends GenericError {
       canRetry,
       hasStaleMetadata: ['UNKNOWN_TOPIC_OR_PARTITION', 'LEADER_NOT_AVAILABLE', 'NOT_LEADER_OR_FOLLOWER'].includes(id),
       needsRejoin: ['MEMBER_ID_REQUIRED', 'UNKNOWN_MEMBER_ID', 'REBALANCE_IN_PROGRESS'].includes(id),
+      producerFenced: id === 'INVALID_PRODUCER_EPOCH',
       rebalanceInProgress: id === 'REBALANCE_IN_PROGRESS',
       unknownMemberId: id === 'UNKNOWN_MEMBER_ID',
       memberId: (response as JoinGroupResponse)?.memberId as string | undefined,

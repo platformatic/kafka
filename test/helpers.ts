@@ -34,9 +34,10 @@ import {
   type Writer
 } from '../src/index.ts'
 
-export const kafkaBootstrapServers = ['localhost:9011']
+export const kafkaSingleBootstrapServers = ['localhost:9001']
 export const kafkaSaslBootstrapServers = ['localhost:9002']
 export const kafkaSaslKerberosBootstrapServers = ['localhost:9003']
+export const kafkaBootstrapServers = ['localhost:9011']
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION
@@ -46,6 +47,7 @@ export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions
   const options: BaseOptions = {
     clientId: `test-client-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers,
+    retryDelay: 250,
     ...overrideOptions
   }
 
@@ -59,6 +61,7 @@ export function createAdmin (t: TestContext, overrideOptions = {}) {
   const options: AdminOptions = {
     clientId: `test-admin-admin-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers,
+    retryDelay: 250,
     ...overrideOptions
   }
 
@@ -76,6 +79,7 @@ export function createProducer<K = Buffer, V = Buffer, HK = Buffer, HV = Buffer>
     clientId: `test-producer-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers,
     autocreateTopics: true,
+    retryDelay: 250,
     ...overrideOptions
   }
 
@@ -97,7 +101,7 @@ export function createConsumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer,
     sessionTimeout: 6000,
     rebalanceTimeout: 6000,
     heartbeatInterval: 1000,
-    retries: 1,
+    retryDelay: 250,
     ...overrideOptions
   }
 
@@ -117,6 +121,9 @@ export async function createTopic (t: TestContext, create: boolean = false, part
   if (create) {
     const admin = createAdmin(t)
     await admin.createTopics({ topics: [topic], partitions })
+    // Wait for the topic to be fully created across all brokers
+    await sleep(500)
+    await admin.metadata({ topics: [topic] })
   }
 
   return topic
@@ -446,7 +453,7 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
         verifier(eventsData[label])
       }
     } else {
-      deepStrictEqual(operationsId.size, 1, 'Only one operationId should be present, got: ' + operationsId.toString())
+      deepStrictEqual(operationsId.size, 1, 'Only one operationId should be present, got: ' + Array.from(operationsId))
 
       for (const [label, verifier] of Object.entries(verifiers)) {
         verifier(eventsData[label]?.[0])

@@ -4,13 +4,32 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
-import { ProduceAcks } from '../../apis/enumerations.ts'
+import { FindCoordinatorKeyTypes, ProduceAcks } from '../../apis/enumerations.ts'
+import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
+import { type AddOffsetsToTxnRequest, type AddOffsetsToTxnResponse } from '../../apis/producer/add-offsets-to-txn-v4.ts'
+import {
+  type AddPartitionsToTxnRequest,
+  type AddPartitionsToTxnRequestTopic
+} from '../../apis/producer/add-partitions-to-txn-v5.ts'
+import { type EndTxnRequest, type EndTxnResponse } from '../../apis/producer/end-txn-v4.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
 import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
-import { createDiagnosticContext, producerInitIdempotentChannel, producerSendsChannel } from '../../diagnostic.ts'
-import { type GenericError, UserError } from '../../errors.ts'
+import { type TxnOffsetCommitRequest, type TxnOffsetCommitResponse } from '../../apis/producer/txn-offset-commit-v4.ts'
+import {
+  createDiagnosticContext,
+  producerInitIdempotentChannel,
+  producerSendsChannel,
+  producerTransactionsChannel
+} from '../../diagnostic.ts'
+import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { type Connection } from '../../network/connection.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
-import { type CreateRecordsBatchOptions, type MessageRecord } from '../../protocol/records.ts'
+import {
+  type CreateRecordsBatchOptions,
+  type Message,
+  type MessageConsumerMetadata,
+  type MessageRecord
+} from '../../protocol/records.ts'
 import { NumericMap } from '../../utils.ts'
 import {
   Base,
@@ -28,6 +47,7 @@ import {
   kValidateOptions
 } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
+import { type MessagesStream } from '../consumer/messages-stream.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
 import { type Serializer, type SerializerWithHeaders } from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
@@ -51,13 +71,17 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #partitionsRoundRobin: NumericMap
   // These two values should be serializable and loadable in the constructor in order to restore
   // the idempotent producer status.
-  #producerInfo!: ProducerInfo
+  #producerInfo: ProducerInfo | undefined
   #sequences: NumericMap
   #keySerializer: SerializerWithHeaders<Key, HeaderKey, HeaderValue>
   #valueSerializer: SerializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
   #metricsProducedMessages: Counter | undefined
+  #coordinatorId!: number
+  #transactionalId: string | undefined
+  #transactionTopicPartitions: Set<string>
+  #transactionConsumerGroups: Set<string>
 
   constructor (options: ProducerOptions<Key, Value, HeaderKey, HeaderValue>) {
     if (options.idempotent) {
@@ -77,6 +101,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#valueSerializer = options.serializers?.value ?? (noopSerializer as Serializer<Value>)
     this.#headerKeySerializer = options.serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = options.serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
+    this.#transactionTopicPartitions = new Set()
+    this.#transactionConsumerGroups = new Set()
 
     this[kValidateOptions](options, producerOptionsValidator, '/options')
 
@@ -100,6 +126,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get producerEpoch (): number | undefined {
     return this.#producerInfo?.producerEpoch
+  }
+
+  get transactionalId (): string | undefined {
+    return this.#transactionalId
+  }
+
+  get coordinatorId (): number {
+    return this.#coordinatorId
   }
 
   close (callback: CallbackWithPromise<void>): void
@@ -200,6 +234,210 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback[kCallbackPromise]
   }
 
+  beginTransaction (callback: CallbackWithPromise<void>): void
+  beginTransaction (): Promise<void>
+  beginTransaction (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].idempotent) {
+      callback(new UserError('Cannot begin a transaction on a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].transactionalId) {
+      callback(new UserError('transactionalId must be set when creating a producer to begin a transaction.'))
+      return callback[kCallbackPromise]
+    }
+
+    producerTransactionsChannel.traceCallback(
+      this.#beginTransaction,
+      0,
+      createDiagnosticContext({ client: this, operation: 'begin' }),
+      this,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  commitTransaction (callback: CallbackWithPromise<void>): void
+  commitTransaction (): Promise<void>
+  commitTransaction (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].idempotent) {
+      callback(new UserError('Cannot commit a transaction of a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (!this.#transactionalId) {
+      callback(new UserError('No active transaction to commit.'))
+      return callback[kCallbackPromise]
+    }
+
+    producerTransactionsChannel.traceCallback(
+      this.#endTransaction,
+      1,
+      createDiagnosticContext({ client: this, operation: 'commit' }),
+      this,
+      true,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  abortTransaction (callback: CallbackWithPromise<void>): void
+  abortTransaction (): Promise<void>
+  abortTransaction (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].idempotent) {
+      callback(new UserError('Cannot abort a transaction of a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (!this.#transactionalId) {
+      callback(new UserError('No active transaction to abort.'))
+      return callback[kCallbackPromise]
+    }
+
+    producerTransactionsChannel.traceCallback(
+      this.#endTransaction,
+      1,
+      createDiagnosticContext({ client: this, operation: 'abort' }),
+      this,
+      false,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  linkMessageStreamToTransaction<
+    LinkKey = Buffer,
+    LinkValue = Buffer,
+    LinkHeaderKey = Buffer,
+    LinkHeaderValue = Buffer
+  > (
+    stream: MessagesStream<LinkKey, LinkValue, LinkHeaderKey, LinkHeaderValue>,
+    callback: CallbackWithPromise<void>
+  ): void
+  linkMessageStreamToTransaction<
+    LinkKey = Buffer,
+    LinkValue = Buffer,
+    LinkHeaderKey = Buffer,
+    LinkHeaderValue = Buffer
+  > (stream: MessagesStream<LinkKey, LinkValue, LinkHeaderKey, LinkHeaderValue>): Promise<void>
+  linkMessageStreamToTransaction<
+    LinkKey = Buffer,
+    LinkValue = Buffer,
+    LinkHeaderKey = Buffer,
+    LinkHeaderValue = Buffer
+  > (
+    stream: MessagesStream<LinkKey, LinkValue, LinkHeaderKey, LinkHeaderValue>,
+    callback?: CallbackWithPromise<void>
+  ): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].idempotent) {
+      callback(new UserError('Cannot link a message stream to a transaction on a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (!this.#transactionalId) {
+      callback(new UserError('No active transaction to link stream to.'))
+      return callback[kCallbackPromise]
+    }
+
+    // TODO@PI: If the stream has autocommit enabled, we should throw an error
+
+    const groupId = stream.consumer.groupId
+
+    if (this.#transactionConsumerGroups.has(groupId)) {
+      callback(null)
+      return
+    }
+
+    this.#transactionConsumerGroups.add(groupId)
+
+    producerTransactionsChannel.traceCallback(
+      this.#addOffsetsToTransaction,
+      1,
+      createDiagnosticContext({ client: this, operation: 'linkConsumerGroup', groupId }),
+      this,
+      groupId,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  commit<MessageKey = Buffer, MessageValue = Buffer, MessageHeaderKey = Buffer, MessageHeaderValue = Buffer> (
+    message: Message<MessageKey, MessageValue, MessageHeaderKey, MessageHeaderValue>,
+    callback: CallbackWithPromise<void>
+  ): void
+  commit<MessageKey = Buffer, MessageValue = Buffer, MessageHeaderKey = Buffer, MessageHeaderValue = Buffer> (
+    message: Message<MessageKey, MessageValue, MessageHeaderKey, MessageHeaderValue>
+  ): Promise<void>
+  commit<MessageKey = Buffer, MessageValue = Buffer, MessageHeaderKey = Buffer, MessageHeaderValue = Buffer> (
+    message: Message<MessageKey, MessageValue, MessageHeaderKey, MessageHeaderValue>,
+    callback?: CallbackWithPromise<void>
+  ): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    if (!this[kOptions].idempotent) {
+      callback(new UserError('Cannot commit a message to a transaction on a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (!this.#transactionalId) {
+      callback(new UserError('No active transaction to commit message to.'))
+      return callback[kCallbackPromise]
+    }
+
+    producerTransactionsChannel.traceCallback(
+      this.#commit,
+      1,
+      createDiagnosticContext({ client: this, operation: 'commit', message }),
+      this,
+      message,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
   #initIdempotentProducer (
     options: ProduceOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProducerInfo>
@@ -210,7 +448,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this[kPerformWithRetry]<InitProducerIdResponse>(
           'initProducerId',
           retryCallback => {
-            this[kGetBootstrapConnection]((error, connection) => {
+            const connector = this.#transactionalId
+              ? this.#getCoordinatorConnection.bind(this)
+              : this[kGetBootstrapConnection].bind(this)
+
+            connector((error, connection) => {
               if (error) {
                 retryCallback(error, undefined as unknown as InitProducerIdResponse)
                 return
@@ -224,7 +466,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
                 api(
                   connection,
-                  null,
+                  this.#transactionalId,
                   this[kOptions].timeout!,
                   options.producerId ?? this[kOptions].producerId ?? 0n,
                   options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
@@ -235,6 +477,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           },
           (error, response) => {
             if (error) {
+              this.#handleFencingError(error)
               deduplicateCallback(error, undefined as unknown as ProducerInfo)
               return
             }
@@ -249,17 +492,48 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
+  #beginTransaction (callback: CallbackWithPromise<void>) {
+    this.#findCoordinator(error => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      this.#transactionalId = this[kOptions].transactionalId!
+
+      if (!this.#producerInfo) {
+        this.initIdempotentProducer({}, error => {
+          if (error) {
+            this.#transactionalId = undefined
+            callback(error)
+            return
+          }
+
+          callback(null)
+        })
+
+        return
+      }
+
+      callback(null)
+    })
+  }
+
   #send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void {
     options.idempotent ??= this[kOptions].idempotent
     options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata
     options.partitioner ??= this[kOptions].partitioner
 
-    const { idempotent, partitioner } = options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>
+    let { idempotent, partitioner } = options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>
+    let producerId: bigint | undefined = options.producerId
+    let producerEpoch: number | undefined = options.producerEpoch
 
-    if (idempotent) {
-      options.acks ??= ProduceAcks.ALL
+    // Some values are overriden when using transactions
+    if (this.#transactionalId) {
+      idempotent = true
+      options.acks = ProduceAcks.ALL
     } else {
-      options.acks ??= ProduceAcks.LEADER
+      options.acks ??= idempotent ? ProduceAcks.ALL : ProduceAcks.LEADER
     }
 
     // We still need to initialize the producerId
@@ -278,6 +552,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         return
       }
+
+      producerId = this.#producerInfo!.producerId
+      producerEpoch = this.#producerInfo!.producerEpoch
 
       if (typeof options.producerId !== 'undefined' || typeof options.producerEpoch !== 'undefined') {
         callback(
@@ -300,9 +577,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const produceOptions: Partial<CreateRecordsBatchOptions> = {
       compression: options.compression ?? this[kOptions].compression,
-      producerId: idempotent ? this.#producerInfo.producerId : options.producerId,
-      producerEpoch: idempotent ? this.#producerInfo.producerEpoch : options.producerEpoch,
-      sequences: idempotent ? this.#sequences : undefined
+      producerId,
+      producerEpoch,
+      sequences: idempotent ? this.#sequences : undefined,
+      transactionalId: this.#transactionalId
     }
 
     // Build messages records out of messages
@@ -353,13 +631,85 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       })
     }
 
-    this.#performSend(
-      Array.from(topics),
-      messages,
-      options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
-      produceOptions,
-      callback
-    )
+    if (this.#transactionalId) {
+      this.#addPartitionsToTransaction(
+        Array.from(topics),
+        messages,
+        options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+        produceOptions,
+        callback
+      )
+    } else {
+      this.#performSend(
+        Array.from(topics),
+        messages,
+        options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+        produceOptions,
+        callback
+      )
+    }
+  }
+
+  #addPartitionsToTransaction (
+    topics: string[],
+    messages: MessageRecord[],
+    sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+    produceOptions: Partial<CreateRecordsBatchOptions>,
+    callback: CallbackWithPromise<ProduceResult>
+  ): void {
+    // Get the metadata for topics, we need to normalize the partitions
+    this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics }, (
+      error: Error | null,
+      metadata: ClusterMetadata
+    ) => {
+      if (error) {
+        callback(error, undefined as unknown as ProduceResult)
+        return
+      }
+
+      // Scan all messages to find the partitions we need to add to the transaction
+      const toAdd = new Map<string, Set<number>>()
+      for (const message of messages) {
+        message.partition! %= metadata.topics.get(message.topic)!.partitionsCount
+
+        const { topic, partition } = message
+        const key = `${topic}:${partition}`
+
+        if (!this.#transactionTopicPartitions.has(key)) {
+          this.#transactionTopicPartitions.add(key)
+
+          let partitionsSet = toAdd.get(topic)
+          if (!partitionsSet) {
+            partitionsSet = new Set<number>()
+            toAdd.set(topic, partitionsSet)
+          }
+
+          partitionsSet.add(partition!)
+        }
+      }
+
+      // Nothing to add, continue sending
+      if (toAdd.size === 0) {
+        this.#performSend(topics, messages, sendOptions, produceOptions, callback)
+        return
+      }
+
+      producerTransactionsChannel.traceCallback(
+        this.#performAddPartitionsToTransaction,
+        1,
+        createDiagnosticContext({ client: this, operation: 'addPartitions' }),
+        this,
+        toAdd,
+        (error?: Error | null) => {
+          if (error) {
+            callback!(error, undefined as unknown as ProduceResult)
+            return
+          }
+
+          this.#performSend(topics, messages, sendOptions, produceOptions, callback)
+        }
+      )
+    })
   }
 
   #performSend (
@@ -541,5 +891,313 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
       )
     })
+  }
+
+  #findCoordinator (callback: CallbackWithPromise<void>): void {
+    if (this.#coordinatorId !== undefined) {
+      callback(null)
+      return
+    }
+
+    const transactionalId = this[kOptions].transactionalId!
+
+    this[kPerformDeduplicated](
+      'findCoordinator',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<FindCoordinatorResponse>(
+          'findCoordinator',
+          retryCallback => {
+            this[kGetBootstrapConnection]((error, connection) => {
+              if (error) {
+                retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                return
+              }
+
+              this[kGetApi]<FindCoordinatorRequest, FindCoordinatorResponse>('FindCoordinator', (error, api) => {
+                if (error) {
+                  retryCallback(error, undefined as unknown as FindCoordinatorResponse)
+                  return
+                }
+
+                api(connection, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], retryCallback)
+              })
+            })
+          },
+          (error, response) => {
+            if (error) {
+              deduplicateCallback(error)
+              return
+            }
+
+            const groupInfo = response.coordinators.find(coordinator => coordinator.key === transactionalId)!
+            this.#coordinatorId = groupInfo.nodeId
+
+            deduplicateCallback(null)
+          },
+          0
+        )
+      },
+      callback
+    )
+  }
+
+  #getCoordinatorConnection (callback: CallbackWithPromise<Connection>): void {
+    // Get a connection to the coordinator
+    this[kMetadata]({}, (error: Error | null, metadata: ClusterMetadata) => {
+      if (error) {
+        callback(error, undefined as unknown as Connection)
+        return
+      }
+
+      this[kPerformWithRetry](
+        'getCoordinatorConnection',
+        retryCallback => {
+          this[kGetConnection](metadata.brokers.get(this.#coordinatorId)!, (error, connection) => {
+            if (error) {
+              retryCallback(error, undefined as unknown as Connection)
+              return
+            }
+
+            retryCallback(null, connection)
+          })
+        },
+        callback
+      )
+    })
+  }
+
+  #endTransaction (commit: boolean, callback: CallbackWithPromise<void>): void {
+    this[kPerformDeduplicated](
+      'endTransaction',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<void>(
+          'endTransaction',
+          retryCallback => {
+            this.#getCoordinatorConnection((error, connection) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              this[kGetApi]<EndTxnRequest, EndTxnResponse>('EndTxn', (error, api) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                api(
+                  connection,
+                  this.#transactionalId!,
+                  this.#producerInfo!.producerId,
+                  this.#producerInfo!.producerEpoch,
+                  commit,
+                  (error: Error | null) => {
+                    if (error) {
+                      this.#handleFencingError(error)
+                      retryCallback(error)
+                      return
+                    }
+
+                    this.#transactionTopicPartitions.clear()
+                    this.#transactionConsumerGroups.clear()
+                    this.#transactionalId = undefined
+                    retryCallback(null)
+                  }
+                )
+              })
+            })
+          },
+          deduplicateCallback
+        )
+      },
+      callback
+    )
+  }
+
+  #performAddPartitionsToTransaction (
+    topicsPartitions: Map<string, Set<number>>,
+    callback: CallbackWithPromise<void>
+  ): void {
+    const transactions: AddPartitionsToTxnRequestTopic[] = []
+
+    for (const [topic, partitionsSet] of topicsPartitions) {
+      transactions.push({
+        name: topic,
+        partitions: Array.from(partitionsSet)
+      })
+    }
+
+    this[kPerformDeduplicated](
+      'addPartitionsToTransaction',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<void>(
+          'addPartitionsToTransaction',
+          retryCallback => {
+            this.#getCoordinatorConnection((error, connection) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              this[kGetApi]<AddPartitionsToTxnRequest, AddOffsetsToTxnResponse>('AddPartitionsToTxn', (error, api) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                api(
+                  connection,
+                  [
+                    {
+                      transactionalId: this.#transactionalId!,
+                      producerId: this.#producerInfo!.producerId,
+                      producerEpoch: this.#producerInfo!.producerEpoch,
+                      topics: transactions,
+                      verifyOnly: false
+                    }
+                  ],
+                  (error: Error | null) => {
+                    if (error) {
+                      retryCallback(error)
+                      return
+                    }
+
+                    retryCallback(null)
+                  }
+                )
+              })
+            })
+          },
+          deduplicateCallback
+        )
+      },
+      callback
+    )
+  }
+
+  #addOffsetsToTransaction (groupId: string, callback: CallbackWithPromise<void>): void {
+    this[kPerformDeduplicated](
+      'addOffsetsToTransaction',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<void>(
+          'addOffsetsToTransaction',
+          retryCallback => {
+            this.#getCoordinatorConnection((error, connection) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              this[kGetApi]<AddOffsetsToTxnRequest, AddOffsetsToTxnResponse>('AddOffsetsToTxn', (error, api) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                api(
+                  connection,
+                  this.#transactionalId!,
+                  this.#producerInfo!.producerId,
+                  this.#producerInfo!.producerEpoch,
+                  groupId,
+                  (error: Error | null) => {
+                    if (error) {
+                      retryCallback(error)
+                      return
+                    }
+
+                    retryCallback(null)
+                  }
+                )
+              })
+            })
+          },
+          deduplicateCallback
+        )
+      },
+      callback
+    )
+  }
+
+  #commit<MessageKey = Buffer, MessageValue = Buffer, MessageHeaderKey = Buffer, MessageHeaderValue = Buffer> (
+    message: Message<MessageKey, MessageValue, MessageHeaderKey, MessageHeaderValue>,
+    callback: CallbackWithPromise<void>
+  ): void {
+    this[kPerformDeduplicated](
+      'commit',
+      deduplicateCallback => {
+        this[kPerformWithRetry]<void>(
+          'commit',
+          retryCallback => {
+            this[kMetadata]({ topics: [message.topic] }, (error: Error | null, metadata: ClusterMetadata) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              const { groupId, generationId, memberId, coordinatorId } = message.metadata
+                .consumer as MessageConsumerMetadata
+
+              this[kGetConnection](metadata.brokers.get(coordinatorId)!, (error, connection) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                this[kGetApi]<TxnOffsetCommitRequest, TxnOffsetCommitResponse>('TxnOffsetCommit', (error, api) => {
+                  if (error) {
+                    retryCallback(error)
+                    return
+                  }
+
+                  const { topic, partition } = message
+
+                  api(
+                    connection,
+                    this.#transactionalId!,
+                    groupId,
+                    this.#producerInfo!.producerId,
+                    this.#producerInfo!.producerEpoch,
+                    generationId,
+                    memberId,
+                    null,
+                    [
+                      {
+                        name: topic,
+                        partitions: [
+                          {
+                            partitionIndex: message.partition!,
+                            committedOffset: message.offset!,
+                            committedLeaderEpoch: metadata.topics.get(topic)!.partitions[partition].leaderEpoch
+                          }
+                        ]
+                      }
+                    ],
+                    (error: Error | null) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      retryCallback(null)
+                    }
+                  )
+                })
+              })
+            })
+          },
+          deduplicateCallback
+        )
+      },
+      callback
+    )
+  }
+
+  #handleFencingError (error: Error): void {
+    if ((error as GenericError).findBy<ProtocolError>?.('producerFenced', true)) {
+      this.#producerInfo = undefined
+      this.#transactionTopicPartitions.clear()
+      this.#transactionalId = undefined
+    }
   }
 }

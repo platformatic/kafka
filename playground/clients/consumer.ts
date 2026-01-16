@@ -1,21 +1,24 @@
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
+import { Consumer, debugDump, FetchIsolationLevels, stringDeserializers } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
-// const consumer = new Consumer({ groupId: 'id7', clientId: 'id', bootstrapBrokers: ['localhost:9092'], strict: true })
 const consumer = new Consumer({
-  groupId: 'id9',
+  groupId: randomUUID(),
   clientId: 'id',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   strict: true,
   deserializers: stringDeserializers
 })
 
 const stream = await consumer.consume({
   autocommit: false,
-  topics: ['temp1', 'temp2'],
+  topics: ['temp1'],
   sessionTimeout: 10000,
+  rebalanceTimeout: 10000,
   heartbeatInterval: 500,
-  maxWaitTime: 500
+  maxWaitTime: 500,
+  isolationLevel: FetchIsolationLevels.READ_COMMITTED
 })
 
 // This is purposely not catched to show the error handling if we remove the force parameter

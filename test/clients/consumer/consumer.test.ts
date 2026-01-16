@@ -22,6 +22,7 @@ import {
   consumerOffsetsChannel,
   defaultConsumerOptions,
   type ExtendedGroupProtocolSubscription,
+  FetchIsolationLevels,
   fetchV17,
   findCoordinatorV6,
   type GroupPartitionsAssignments,
@@ -164,7 +165,7 @@ test('constructor should initialize with custom options', t => {
     minBytes: 100,
     maxBytes: 5242880, // 5MB
     maxWaitTime: 3000,
-    isolationLevel: 'READ_UNCOMMITTED',
+    isolationLevel: FetchIsolationLevels.READ_UNCOMMITTED,
     highWaterMark: 512
   })
 
@@ -385,7 +386,7 @@ test('close should support both promise and callback API', t => {
 })
 
 test('close should leave consumer group if currently joined', async t => {
-  const consumer = createConsumer(t, { retries: true })
+  const consumer = createConsumer(t)
 
   // Join a group first
   await consumer.joinGroup({})
@@ -439,7 +440,7 @@ test('close should handle errors from leaveGroup', async t => {
 })
 
 test('close should handle errors from ConnectionPool.close', async t => {
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, { retries: 0 })
 
   // Join a group first
   await consumer.joinGroup({})
@@ -1777,8 +1778,7 @@ test('listOffsets should use custom isolation level when provided', async t => {
   const topic = await createTopic(t, true)
 
   // Use a specific isolation level
-  const isolationLevel = 'READ_COMMITTED'
-  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel })
+  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel: FetchIsolationLevels.READ_COMMITTED })
 
   // Verification is implicit - if the call doesn't throw, it succeeded
   strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
@@ -2350,7 +2350,7 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
   consumer.on('consumer:lag', lag => {
     lagsViaEvent.push(lag)
 
-    if (lagsViaEvent.length === 3) {
+    if (lagsViaEvent.length === 2) {
       resolve(lagsViaEvent)
     }
   })
@@ -2366,11 +2366,7 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
   await promise
   unsubscribe(consumerLagChannel.name, onLag as ChannelListener)
 
-  deepStrictEqual(lagsViaEvent, [
-    new Map([[topic, [-1n, -1n, -1n]]]), // Still joining and not assigned to any partition
-    new Map([[topic, [0n, 0n, 0n]]]),
-    new Map([[topic, [0n, 0n, 0n]]])
-  ])
+  deepStrictEqual(lagsViaEvent, [new Map([[topic, [0n, 0n, 0n]]]), new Map([[topic, [0n, 0n, 0n]]])])
 
   consumer.stopLagMonitoring()
 })

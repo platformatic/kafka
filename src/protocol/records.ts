@@ -12,10 +12,12 @@ import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
-const CURRENT_RECORD_VERSION = 2
-const IS_TRANSACTIONAL = 0b10000 // Bit 4 set
-const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
-const BATCH_HEAD = INT64_SIZE + INT32_SIZE // FirstOffset + Length
+export const CURRENT_RECORD_VERSION = 2
+export const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
+// Byte 3 is timestamp type, currently unused by this package
+export const IS_TRANSACTIONAL = 1 << 4 // Bit 4 set
+export const IS_CONTROL = 1 << 5 // Bits 5 set
+export const BATCH_HEAD = INT64_SIZE + INT32_SIZE // FirstOffset + Length
 
 export interface MessageBase<Key = Buffer, Value = Buffer> {
   key?: Key
@@ -31,11 +33,20 @@ export interface MessageToProduce<Key = Buffer, Value = Buffer, HeaderKey = Buff
   headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
 }
 
+// This is used by producer for consume-transform-produce flows
+export interface MessageConsumerMetadata {
+  coordinatorId: number
+  groupId: string
+  generationId: number
+  memberId: string
+}
+
 // This is used in consume
 export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer>
   extends Required<MessageBase<Key, Value>> {
   headers: Map<HeaderKey, HeaderValue>
   offset: bigint
+  metadata: Record<string, unknown>
   commit (callback?: (error?: Error) => void): void | Promise<void>
 }
 

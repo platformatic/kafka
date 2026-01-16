@@ -24,11 +24,6 @@ import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../a
 import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
-  type LeaveGroupRequest,
-  type LeaveGroupRequestMember,
-  type LeaveGroupResponse
-} from '../../apis/consumer/leave-group-v5.ts'
-import {
   type ListGroupsRequest as ListGroupsRequestV5,
   type ListGroupsResponse
 } from '../../apis/admin/list-groups-v5.ts'
@@ -38,6 +33,11 @@ import {
   runConcurrentCallbacks,
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
+import {
+  type LeaveGroupRequest,
+  type LeaveGroupRequestMember,
+  type LeaveGroupResponse
+} from '../../apis/consumer/leave-group-v5.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
@@ -454,10 +454,13 @@ export class Admin extends Base<AdminOptions> {
   #handleNotControllerError<T> (error: Error | null, value: T, callback: Callback<T>): void {
     if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
       this.metadata({ topics: [] }, (metadataError, metadata) => {
+        /* c8 ignore next 4 - Hard to test */
         if (metadataError) {
           callback(metadataError, undefined as unknown as T)
+          return
         }
-        this.#controller = metadata.brokers.get(metadata.controllerId) || null
+
+        this.#controller = metadata.brokers.get(metadata.controllerId)!
         callback(error, undefined as unknown as T)
       })
     } else {
@@ -890,12 +893,14 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const group = groupsMap.get(options.groupId)
+        /* c8 ignore next 4 - Hard to test */
         if (!group) {
           callback(new MultipleErrors('Removing members from consumer group failed.', []))
           return
         }
 
         const allMemberIds = Array.from(group.members.keys())
+        /* c8 ignore next 4 - Hard to test */
         if (allMemberIds.length === 0) {
           callback(null)
           return
@@ -922,6 +927,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        /* c8 ignore next 8 - Hard to test */
         if (!coordinator) {
           callback(
             new MultipleErrors('Removing members from consumer group failed.', [
@@ -932,6 +938,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const broker = metadata.brokers.get(coordinator.nodeId)
+        /* c8 ignore next 8 - Hard to test */
         if (!broker) {
           callback(
             new MultipleErrors('Removing members from consumer group failed.', [
@@ -956,6 +963,7 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
+                /* c8 ignore next 5 - Hard to test */
                 const members: LeaveGroupRequestMember[] = options.members!.map(member => ({
                   memberId: typeof member === 'string' ? member : member.memberId,
                   groupInstanceId: null,

@@ -72,7 +72,6 @@ export const metadataOptionsSchema = {
     forceUpdate: { type: 'boolean' },
     metadataMaxAge: { type: 'number', minimum: 0 }
   },
-  required: ['topics'],
   additionalProperties: false
 }
 

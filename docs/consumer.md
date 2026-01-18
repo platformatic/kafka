@@ -8,18 +8,54 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 ## Events
 
-| Name                        | Description                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------ |
-| `consumer:group:join`       | Emitted when joining a group.                                                              |
-| `consumer:group:leave`      | Emitted when leaving a group.                                                              |
-| `consumer:group:rejoin`     | Emitted when re-joining a group after a rebalance.                                         |
-| `consumer:group:rebalance`  | Emitted when group rebalancing occurs.                                                     |
-| `consumer:heartbeat:start`  | Emitted when starting new heartbeats.                                                      |
-| `consumer:heartbeat:cancel` | Emitted if a scheduled heartbeat has been canceled.                                        |
-| `consumer:heartbeat:end`    | Emitted during successful heartbeats.                                                      |
-| `consumer:heartbeat:error`  | Emitted during failed heartbeats.                                                          |
-| `consumer:lag`              | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
-| `consumer:lag:error`        | Emitted when lag calculation fails during monitoring operations.                           |
+| Name                        | Payload Type                     | Description                                                                                |
+| --------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| `consumer:group:join`       | `ConsumerGroupJoinPayload`       | Emitted when joining a group.                                                              |
+| `consumer:group:leave`      | `ConsumerGroupLeavePayload`      | Emitted when leaving a group.                                                              |
+| `consumer:group:rejoin`     | (none)                           | Emitted when re-joining a group after a rebalance.                                         |
+| `consumer:group:rebalance`  | `ConsumerGroupRebalancePayload`  | Emitted when group rebalancing occurs.                                                     |
+| `consumer:heartbeat:start`  | `ConsumerHeartbeatPayload?`      | Emitted when starting new heartbeats.                                                      |
+| `consumer:heartbeat:cancel` | `ConsumerHeartbeatPayload`       | Emitted if a scheduled heartbeat has been canceled.                                        |
+| `consumer:heartbeat:end`    | `ConsumerHeartbeatPayload?`      | Emitted during successful heartbeats.                                                      |
+| `consumer:heartbeat:error`  | `ConsumerHeartbeatErrorPayload`  | Emitted during failed heartbeats.                                                          |
+| `consumer:lag`              | `Offsets`                        | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
+| `consumer:lag:error`        | `Error`                          | Emitted when lag calculation fails during monitoring operations.                           |
+
+### Event Payload Types
+
+```typescript
+interface ConsumerGroupJoinPayload {
+  groupId: string
+  memberId: string
+  generationId?: number
+  isLeader?: boolean
+  assignments?: GroupAssignment[]
+}
+
+interface ConsumerGroupLeavePayload {
+  groupId: string
+  memberId: string | null
+  generationId?: number
+}
+
+interface ConsumerGroupRebalancePayload {
+  groupId: string
+}
+
+interface ConsumerHeartbeatPayload {
+  groupId?: string
+  memberId?: string | null
+  generationId?: number
+}
+
+interface ConsumerHeartbeatErrorPayload extends ConsumerHeartbeatPayload {
+  error: Error
+}
+
+// Offsets is a Map<string, bigint[]> where keys are topic names
+// and values are arrays of offsets (position represents the partition)
+type Offsets = Map<string, bigint[]>
+```
 
 ## Constructor
 

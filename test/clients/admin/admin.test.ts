@@ -21,6 +21,7 @@ import {
   type Connection,
   Consumer,
   type CreatedTopic,
+  createPartitionsV3,
   type DescribeClientQuotasOptions,
   describeClientQuotasV0,
   describeGroupsV5,
@@ -891,6 +892,295 @@ test('deleteTopics should handle unavailable API errors', async t => {
     // Error should contain our mock error message
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual(error.message.includes('Unsupported API DeleteTopics.'), true)
+  }
+})
+
+test('createPartitions should create additional partitions with manual assignments', async t => {
+  const admin = createAdmin(t)
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        count: 2,
+        assignments: [
+          {
+            brokerIds: [1]
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  }
+
+  await admin.createPartitions(options)
+
+  await scheduler.wait(1000)
+
+  const metadata = await admin.metadata({ topics: [topicName] })
+
+  strictEqual(metadata.topics.get(topicName)?.partitionsCount, 2)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('createPartitions should create additional partitions with automatic assignments', async t => {
+  const admin = createAdmin(t)
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        count: 2,
+        assignments: null
+      }
+    ],
+    validateOnly: false
+  }
+
+  await admin.createPartitions(options)
+
+  await scheduler.wait(1000)
+
+  const metadata = await admin.metadata({ topics: [topicName] })
+
+  strictEqual(metadata.topics.get(topicName)?.partitionsCount, 2)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('createPartitions should support validateOnly option', async t => {
+  const admin = createAdmin(t)
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        count: 2,
+        assignments: null
+      }
+    ],
+    validateOnly: true
+  }
+
+  await admin.createPartitions(options)
+
+  const metadata = await admin.metadata({ topics: [topicName] })
+
+  await scheduler.wait(1000)
+
+  strictEqual(metadata.topics.get(topicName)?.partitionsCount, 1)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('createPartitions support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        count: 2,
+        assignments: [
+          {
+            brokerIds: [1]
+          }
+        ]
+      }
+    ],
+    validateOnly: false
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminTopicsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'createPartitions',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'createPartitions'
+  )
+
+  await admin.createPartitions(options)
+
+  verifyTracingChannel()
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('createPartitions should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (topics)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createPartitions({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid type for topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createPartitions({ topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with empty topics array
+  try {
+    await admin.createPartitions({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topic object (missing name)
+  try {
+    await admin.createPartitions({
+      topics: [{ count: 3 }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (missing count)
+  try {
+    await admin.createPartitions({
+      topics: [{ name: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('count'), true)
+  }
+
+  // Test with invalid validateOnly type
+  try {
+    await admin.createPartitions({
+      topics: [{ name: 'test-topic', count: 3 }],
+      validateOnly: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('validateOnly'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.createPartitions({
+      topics: [{ name: 'test-topic', count: 3 }],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('createPartitions should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 3)
+
+  try {
+    // Attempt to list groups - should fail with connection error
+    await admin.createPartitions({
+      topics: [
+        { name: 'test-topic', count: 3, assignments: [{ brokerIds: [1] }, { brokerIds: [2] }, { brokerIds: [3] }] }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about connection failure
+    strictEqual(error instanceof Error, true)
+    strictEqual(error.message, 'Creating partitions failed.')
+  }
+})
+
+test('createPartitions should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  mockAPI(admin[kConnections], createPartitionsV3.api.key)
+
+  try {
+    // Attempt to list groups - should fail with connection error
+    await admin.createPartitions({
+      topics: [
+        { name: 'test-topic', count: 3, assignments: [{ brokerIds: [1] }, { brokerIds: [2] }, { brokerIds: [3] }] }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about connection failure
+    strictEqual(error instanceof Error, true)
+    strictEqual(error.message, 'Creating partitions failed.')
+  }
+})
+
+test('listGroups should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'CreatePartitions')
+
+  try {
+    // Attempt to create partitions - should fail with connection error
+    await admin.createPartitions({
+      topics: [
+        { name: 'test-topic', count: 3, assignments: [{ brokerIds: [1] }, { brokerIds: [2] }, { brokerIds: [3] }] }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about connection failure
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API CreatePartitions.'), true)
   }
 })
 

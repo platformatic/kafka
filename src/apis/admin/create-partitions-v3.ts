@@ -1,5 +1,5 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
@@ -11,7 +11,7 @@ export interface CreatePartitionsRequestAssignment {
 export interface CreatePartitionsRequestTopic {
   name: string
   count: number
-  assignments: CreatePartitionsRequestAssignment[]
+  assignments?: Nullable<CreatePartitionsRequestAssignment[]>
 }
 
 export type CreatePartitionsRequest = Parameters<typeof createRequest>

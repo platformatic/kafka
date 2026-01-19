@@ -2,7 +2,7 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ConsumerGroupState } from '../enumerations.ts'
+import { type ConsumerGroupStateValue } from '../enumerations.ts'
 
 export type ListGroupsRequest = Parameters<typeof createRequest>
 
@@ -24,7 +24,7 @@ export interface ListGroupsResponse {
     states_filter => COMPACT_STRING
     types_filter => COMPACT_STRING
 */
-export function createRequest (statesFilter: ConsumerGroupState[], typesFilter: string[]): Writer {
+export function createRequest (statesFilter: ConsumerGroupStateValue[], typesFilter: string[]): Writer {
   return Writer.create()
     .appendArray(statesFilter, (w, s) => w.appendString(s as string), true, false)
     .appendArray(typesFilter, (w, t) => w.appendString(t), true, false)

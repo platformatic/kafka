@@ -6,16 +6,16 @@ export const SASLMechanisms = {
   OAUTHBEARER: 'OAUTHBEARER',
   GSSAPI: 'GSSAPI'
 } as const
-
-export const allowedSASLMechanisms = Object.values(SASLMechanisms) as SASLMechanismValue[]
-
-export type SASLMechanism = keyof typeof SASLMechanisms
-export type SASLMechanismValue = (typeof SASLMechanisms)[keyof typeof SASLMechanisms]
+export const allowedSASLMechanisms = Object.values(SASLMechanisms)
+export type SASLMechanismLabel = keyof typeof SASLMechanisms
+export type SASLMechanismValue = (typeof SASLMechanisms)[SASLMechanismLabel]
 
 // Metadata API
 // ./metadata/find-coordinator.ts
 export const FindCoordinatorKeyTypes = { GROUP: 0, TRANSACTION: 1, SHARE: 2 } as const
-export type FindCoordinatorKeyType = keyof typeof FindCoordinatorKeyTypes
+export const allowedFindCoordinatorKeyTypes = Object.values(FindCoordinatorKeyTypes)
+export type FindCoordinatorKeyTypeLabel = keyof typeof FindCoordinatorKeyTypes
+export type FindCoordinatorKeyTypeValue = (typeof FindCoordinatorKeyTypes)[FindCoordinatorKeyTypeLabel]
 
 // Producer API
 export const ProduceAcks = {
@@ -23,22 +23,26 @@ export const ProduceAcks = {
   NO_RESPONSE: 0,
   LEADER: 1
 } as const
-export const allowedProduceAcks = Object.values(ProduceAcks) as number[]
-export type ProduceAck = keyof typeof ProduceAcks
+export const allowedProduceAcks = Object.values(ProduceAcks)
+export type ProduceAckLabel = keyof typeof ProduceAcks
+export type ProduceAcksValue = (typeof ProduceAcks)[ProduceAckLabel]
 
 // Consumer API
-
 export const GroupProtocols = { CLASSIC: 'classic', CONSUMER: 'consumer' } as const
 export const allowedGroupProtocols = Object.values(GroupProtocols)
-export type GroupProtocol = keyof typeof GroupProtocols
+export type GroupProtocolLabel = keyof typeof GroupProtocols
+export type GroupProtocolValue = (typeof GroupProtocols)[GroupProtocolLabel]
 
 // ./consumer/fetch.ts
-export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 }
-export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels) as number[]
-export type FetchIsolationLevel = keyof typeof FetchIsolationLevels
+export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 } as const
+export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels)
+export type FetchIsolationLevelLabel = keyof typeof FetchIsolationLevels
+export type FetchIsolationLevelValue = (typeof FetchIsolationLevels)[FetchIsolationLevelLabel]
 
-export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n }
-export type ListOffsetTimestamp = keyof typeof ListOffsetTimestamps
+export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n } as const
+export const allowedListOffsetTimestamps = Object.values(ListOffsetTimestamps)
+export type ListOffsetTimestampLabel = keyof typeof ListOffsetTimestamps
+export type ListOffsetTimestampValue = (typeof ListOffsetTimestamps)[ListOffsetTimestampLabel]
 
 // Admin API
 // ./admin/*-acls.ts - See: https://cwiki.apache.org/confluence/display/KAFKA/KIP-140%3A+Add+administrative+RPCs+for+adding%2C+deleting%2C+and+listing+ACLs
@@ -51,10 +55,14 @@ export const ResourceTypes = {
   TRANSACTIONAL_ID: 5,
   DELEGATION_TOKEN: 6
 } as const
-export type ResourceType = keyof typeof ResourceTypes
+export const allowedResourceTypes = Object.values(ResourceTypes)
+export type ResourceTypeLabel = keyof typeof ResourceTypes
+export type ResourceTypeValue = (typeof ResourceTypes)[ResourceTypeLabel]
 
 export const ResourcePatternTypes = { UNKNOWN: 0, ANY: 1, MATCH: 2, LITERAL: 3, PREFIXED: 4 } as const
-export type ResourcePatternType = keyof typeof ResourcePatternTypes
+export const allowedResourcePatternTypes = Object.values(ResourcePatternTypes)
+export type ResourcePatternTypeLabel = keyof typeof ResourcePatternTypes
+export type ResourcePatternTypeValue = (typeof ResourcePatternTypes)[ResourcePatternTypeLabel]
 
 export const AclOperations = {
   UNKNOWN: 0,
@@ -71,10 +79,14 @@ export const AclOperations = {
   ALTER_CONFIGS: 11,
   IDEMPOTENT_WRITE: 12
 } as const
-export type AclOperation = keyof typeof AclOperations
+export const allowedAclOperations = Object.values(AclOperations)
+export type AclOperationLabel = keyof typeof AclOperations
+export type AclOperationValue = (typeof AclOperations)[AclOperationLabel]
 
 export const AclPermissionTypes = { UNKNOWN: 0, ANY: 1, DENY: 2, ALLOW: 3 } as const
-export type AclPermissionType = keyof typeof AclPermissionTypes
+export const allowedAclPermissionTypes = Object.values(AclPermissionTypes)
+export type AclPermissionTypeLabel = keyof typeof AclPermissionTypes
+export type AclPermissionTypeValue = (typeof AclPermissionTypes)[AclPermissionTypeLabel]
 
 // ./admin/*-configs.ts
 export const ConfigSources = {
@@ -86,7 +98,9 @@ export const ConfigSources = {
   DEFAULT_CONFIG: 5,
   DYNAMIC_BROKER_LOGGER_CONFIG: 6
 } as const
-export type ConfigSource = keyof typeof ConfigSources
+export const allowedConfigSources = Object.values(ConfigSources)
+export type ConfigSourceLabel = keyof typeof ConfigSources
+export type ConfigSourceValue = (typeof ConfigSources)[ConfigSourceLabel]
 
 export const ConfigTypes = {
   UNKNOWN: 0,
@@ -94,36 +108,50 @@ export const ConfigTypes = {
   BROKER: 4,
   BROKER_LOGGER: 8
 } as const
-export type ConfigType = keyof typeof ConfigTypes
+export const allowedConfigTypes = Object.values(ConfigTypes)
+export type ConfigTypeLabel = keyof typeof ConfigTypes
+export type ConfigTypeValue = (typeof ConfigTypes)[ConfigTypeLabel]
 
-export const IncrementalAlterConfigTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 }
-export type IncrementalAlterConfigType = keyof typeof IncrementalAlterConfigTypes
+export const IncrementalAlterConfigTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 } as const
+export const allowedIncrementalAlterConfigTypes = Object.values(IncrementalAlterConfigTypes)
+export type IncrementalAlterConfigTypeLabel = keyof typeof IncrementalAlterConfigTypes
+export type IncrementalAlterConfigTypeValue = (typeof IncrementalAlterConfigTypes)[IncrementalAlterConfigTypeLabel]
 
 // ./admin/*-client-quotas.ts
 export const ClientQuotaMatchTypes = { EXACT: 0, DEFAULT: 1, ANY: 2 } as const
-export type ClientQuotaMatchType = (typeof ClientQuotaMatchTypes)[keyof typeof ClientQuotaMatchTypes]
+export const allowedClientQuotaMatchTypes = Object.values(ClientQuotaMatchTypes)
+export type ClientQuotaMatchTypeLabel = keyof typeof ClientQuotaMatchTypes
+export type ClientQuotaMatchTypeValue = (typeof ClientQuotaMatchTypes)[ClientQuotaMatchTypeLabel]
 
 export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
-export type ClientQuotaEntityType = (typeof ClientQuotaEntityTypes)[keyof typeof ClientQuotaEntityTypes]
+export const allowedClientQuotaEntityTypes = Object.values(ClientQuotaEntityTypes)
+export type ClientQuotaEntityTypeLabel = keyof typeof ClientQuotaEntityTypes
+export type ClientQuotaEntityTypeValue = (typeof ClientQuotaEntityTypes)[ClientQuotaEntityTypeLabel]
 
 export const ClientQuotaKeys = {
   PRODUCER_BYTE_RATE: 'producer_byte_rate',
   CONSUMER_BYTE_RATE: 'consumer_byte_rate',
   REQUEST_PERCENTAGE: 'request_percentage'
 } as const
-export type ClientQuotaKey = (typeof ClientQuotaKeys)[keyof typeof ClientQuotaKeys]
+export const allowedClientQuotaKeys = Object.values(ClientQuotaKeys)
+export type ClientQuotaKeyLabel = keyof typeof ClientQuotaKeys
+export type ClientQuotaKeyValue = (typeof ClientQuotaKeys)[ClientQuotaKeyLabel]
 
 // ./admin/*-scram-credentials.ts
 export const ScramMechanisms = { UNKNOWN: 0, SCRAM_SHA_256: 1, SCRAM_SHA_512: 2 } as const
-export type ScramMechanism = keyof typeof ScramMechanisms
+export const allowedScramMechanisms = Object.values(ScramMechanisms)
+export type ScramMechanismLabel = keyof typeof ScramMechanisms
+export type ScramMechanismValue = (typeof ScramMechanisms)[ScramMechanismLabel]
 
 // ./admin/describe-cluster.ts
-export const DescribeClusterEndpointTypes = { BROKERS: 1, CONTROLLERS: 2 }
-export type DescribeClusterEndpointType = keyof typeof DescribeClusterEndpointTypes
+export const DescribeClusterEndpointTypes = { BROKERS: 1, CONTROLLERS: 2 } as const
+export const allowedDescribeClusterEndpointTypes = Object.values(DescribeClusterEndpointTypes)
+export type DescribeClusterEndpointTypeLabel = keyof typeof DescribeClusterEndpointTypes
+export type DescribeClusterEndpointTypeValue = (typeof DescribeClusterEndpointTypes)[DescribeClusterEndpointTypeLabel]
 
 // ./admin/list-groups.ts
 export const ConsumerGroupStates = ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'] as const
-export type ConsumerGroupState = (typeof ConsumerGroupStates)[number]
+export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number]
 
 // ./admin/list-transactions.ts
 export const TransactionStates = [
@@ -139,4 +167,6 @@ export type TransactionState = (typeof TransactionStates)[number]
 
 // ./admin/update-features.ts
 export const FeatureUpgradeTypes = { UPGRADE: 1, SAFE_DOWNGRADE: 2, UNSAFE_DOWNGRADE: 3 } as const
-export type FeatureUpgradeType = keyof typeof FeatureUpgradeTypes
+export const allowedFeatureUpgradeTypes = Object.values(FeatureUpgradeTypes)
+export type FeatureUpgradeTypeLabel = keyof typeof FeatureUpgradeTypes
+export type FeatureUpgradeTypeValue = (typeof FeatureUpgradeTypes)[FeatureUpgradeTypeLabel]

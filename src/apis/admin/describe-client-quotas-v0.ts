@@ -3,16 +3,16 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ClientQuotaEntityType, type ClientQuotaKey, type ClientQuotaMatchTypes } from '../enumerations.ts'
+import { type ClientQuotaEntityTypeValue, type ClientQuotaKeyValue, type ClientQuotaMatchTypes } from '../enumerations.ts'
 
 export interface DescribeClientQuotasRequestMatchComponent {
-  entityType: ClientQuotaEntityType
+  entityType: ClientQuotaEntityTypeValue
   matchType: typeof ClientQuotaMatchTypes.EXACT
   match: string
 }
 
 export interface DescribeClientQuotasRequestSpecialComponent {
-  entityType: ClientQuotaEntityType
+  entityType: ClientQuotaEntityTypeValue
   matchType: typeof ClientQuotaMatchTypes.DEFAULT | typeof ClientQuotaMatchTypes.ANY
 }
 
@@ -23,12 +23,12 @@ export type DescribeClientQuotasRequestComponent =
 export type DescribeClientQuotasRequest = Parameters<typeof createRequest>
 
 export interface DescribeClientQuotasResponseValue {
-  key: ClientQuotaKey
+  key: ClientQuotaKeyValue
   value: number
 }
 
 export interface DescribeClientQuotasResponseEntity {
-  entityType: ClientQuotaEntityType
+  entityType: ClientQuotaEntityTypeValue
   entityName: NullableString
 }
 
@@ -88,11 +88,11 @@ export function parseResponse (
     entries: reader.readArray(r => {
       return {
         entity: r.readArray(r => {
-          return { entityType: r.readString() as ClientQuotaEntityType, entityName: r.readNullableString() }
+          return { entityType: r.readString() as ClientQuotaEntityTypeValue, entityName: r.readNullableString() }
         }),
         values: r.readArray(r => {
           return {
-            key: r.readString() as ClientQuotaKey,
+            key: r.readString() as ClientQuotaKeyValue,
             value: r.readFloat64()
           }
         })

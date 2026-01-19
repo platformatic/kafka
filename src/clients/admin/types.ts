@@ -6,7 +6,7 @@ import {
   type DescribeLogDirsResponse,
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
-import { type ConsumerGroupState } from '../../apis/enumerations.ts'
+import { type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
@@ -35,7 +35,7 @@ export interface GroupMember {
 
 export interface GroupBase {
   id: string
-  state: ConsumerGroupState
+  state: ConsumerGroupStateValue
   groupType: string
   protocolType: string
 }
@@ -66,7 +66,7 @@ export interface DeleteTopicsOptions {
 }
 
 export interface ListGroupsOptions {
-  states?: ConsumerGroupState[]
+  states?: ConsumerGroupStateValue[]
   types?: string[]
 }
 

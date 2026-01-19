@@ -357,7 +357,7 @@ test('should support timed autocommits', async t => {
   // Get committed offsets again
   {
     const committedOffsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
-    deepStrictEqual(committedOffsets.get(topic), [messages.at(-1)!.offset])
+    deepStrictEqual(committedOffsets.get(topic), [messages.at(-1)!.offset + 1n])
   }
 })
 
@@ -400,6 +400,10 @@ test('should support manual commits', async t => {
   strictEqual(firstBatch.length, 3, 'Should consume 3 messages in first batch')
   // Manually commit the first message
   await firstBatch[0].commit()
+
+  // Verify committed offset is offset + 1 (next offset to consume)
+  const offsets = await firstConsumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(offsets.get(topic), [1n], 'Committed offset should be 1n (offset 0 + 1)')
 
   // Have the first consumer leave the group so that we are sure assignments are sent to the second consumer
   await firstStream.close()

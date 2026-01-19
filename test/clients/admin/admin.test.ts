@@ -539,6 +539,25 @@ test('createTopics should retarget controller when needed', async t => {
   await admin.deleteTopics({ topics: [topicName] })
 })
 
+test('createTopics should not deduplicate creation of different topics', async t => {
+  const admin = createAdmin(t)
+
+  const topicNames = [`test-topic-${randomUUID()}`, `test-topic-${randomUUID()}`]
+
+  await Promise.all(
+    topicNames.map(topicName =>
+      admin.createTopics({
+        topics: [topicName]
+      }))
+  )
+
+  const topicMetadata = await admin.metadata({ topics: topicNames })
+  strictEqual(topicMetadata.topics.has(topicNames[0]), true)
+  strictEqual(topicMetadata.topics.has(topicNames[1]), true)
+
+  await admin.deleteTopics({ topics: topicNames })
+})
+
 test('createTopics should validate options in strict mode', async t => {
   const admin = createAdmin(t, { strict: true })
 
@@ -760,6 +779,43 @@ test('deleteTopics should retarget controller when needed', async t => {
 
   // Clean up by deleting the topic
   await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('deleteTopics should not deduplicate deletion of different topics', async t => {
+  const admin = createAdmin(t)
+
+  const topicNames = [`test-topic-${randomUUID()}`, `test-topic-${randomUUID()}`]
+
+  admin.createTopics({ topics: topicNames })
+
+  const topicMetadata = await admin.metadata({ topics: topicNames })
+  strictEqual(topicMetadata.topics.has(topicNames[0]), true)
+  strictEqual(topicMetadata.topics.has(topicNames[1]), true)
+
+  await Promise.all(
+    topicNames.map(topicName =>
+      admin.deleteTopics({
+        topics: [topicName]
+      }))
+  )
+
+  // Deletion needs some time to propagate, retry a few times
+  await retry(15, 500, async () => {
+    try {
+      await admin.metadata({ topics: [topicNames[0]] })
+      throw Error('Topic still exists: ' + topicNames[0])
+    } catch (error) {
+      // ApiCode 3 = UnknownTopicOrPartition
+      ok(error.findBy?.('apiCode', 3))
+    }
+    try {
+      await admin.metadata({ topics: [topicNames[1]] })
+      throw Error('Topic still exists: ' + topicNames[1])
+    } catch (error) {
+      // ApiCode 3 = UnknownTopicOrPartition
+      ok(error.findBy?.('apiCode', 3))
+    }
+  })
 })
 
 test('deleteTopics should validate options in strict mode', async t => {

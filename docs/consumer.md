@@ -21,42 +21,6 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:lag`              | `Offsets`                        | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
 | `consumer:lag:error`        | `Error`                          | Emitted when lag calculation fails during monitoring operations.                           |
 
-### Event Payload Types
-
-```typescript
-interface ConsumerGroupJoinPayload {
-  groupId: string
-  memberId: string
-  generationId?: number
-  isLeader?: boolean
-  assignments?: GroupAssignment[]
-}
-
-interface ConsumerGroupLeavePayload {
-  groupId: string
-  memberId: string | null
-  generationId?: number
-}
-
-interface ConsumerGroupRebalancePayload {
-  groupId: string
-}
-
-interface ConsumerHeartbeatPayload {
-  groupId?: string
-  memberId?: string | null
-  generationId?: number
-}
-
-interface ConsumerHeartbeatErrorPayload extends ConsumerHeartbeatPayload {
-  error: Error
-}
-
-// Offsets is a Map<string, bigint[]> where keys are topic names
-// and values are arrays of offsets (position represents the partition)
-type Offsets = Map<string, bigint[]>
-```
-
 ## Constructor
 
 Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.

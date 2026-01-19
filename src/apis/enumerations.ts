@@ -9,6 +9,8 @@ export const SASLMechanisms = {
 export const allowedSASLMechanisms = Object.values(SASLMechanisms)
 export type SASLMechanismLabel = keyof typeof SASLMechanisms
 export type SASLMechanismValue = (typeof SASLMechanisms)[SASLMechanismLabel]
+/** @deprecated Use SASLMechanismLabel */
+export type SASLMechanism = SASLMechanismLabel
 
 // Metadata API
 // ./metadata/find-coordinator.ts
@@ -16,6 +18,8 @@ export const FindCoordinatorKeyTypes = { GROUP: 0, TRANSACTION: 1, SHARE: 2 } as
 export const allowedFindCoordinatorKeyTypes = Object.values(FindCoordinatorKeyTypes)
 export type FindCoordinatorKeyTypeLabel = keyof typeof FindCoordinatorKeyTypes
 export type FindCoordinatorKeyTypeValue = (typeof FindCoordinatorKeyTypes)[FindCoordinatorKeyTypeLabel]
+/** @deprecated Use FindCoordinatorKeyTypeLabel */
+export type FindCoordinatorKeyType = FindCoordinatorKeyTypeLabel
 
 // Producer API
 export const ProduceAcks = {
@@ -25,24 +29,32 @@ export const ProduceAcks = {
 } as const
 export const allowedProduceAcks = Object.values(ProduceAcks)
 export type ProduceAckLabel = keyof typeof ProduceAcks
-export type ProduceAcksValue = (typeof ProduceAcks)[ProduceAckLabel]
+export type ProduceAckValue = (typeof ProduceAcks)[ProduceAckLabel]
+/** @deprecated Use ProduceAckLabel */
+export type ProduceAck = ProduceAckLabel
 
 // Consumer API
 export const GroupProtocols = { CLASSIC: 'classic', CONSUMER: 'consumer' } as const
 export const allowedGroupProtocols = Object.values(GroupProtocols)
 export type GroupProtocolLabel = keyof typeof GroupProtocols
 export type GroupProtocolValue = (typeof GroupProtocols)[GroupProtocolLabel]
+/** @deprecated Use GroupProtocolLabel */
+export type GroupProtocol = GroupProtocolLabel
 
 // ./consumer/fetch.ts
 export const FetchIsolationLevels = { READ_UNCOMMITTED: 0, READ_COMMITTED: 1 } as const
 export const allowedFetchIsolationLevels = Object.values(FetchIsolationLevels)
 export type FetchIsolationLevelLabel = keyof typeof FetchIsolationLevels
 export type FetchIsolationLevelValue = (typeof FetchIsolationLevels)[FetchIsolationLevelLabel]
+/** @deprecated Use FetchIsolationLevelLabel */
+export type FetchIsolationLevel = FetchIsolationLevelLabel
 
 export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n } as const
 export const allowedListOffsetTimestamps = Object.values(ListOffsetTimestamps)
 export type ListOffsetTimestampLabel = keyof typeof ListOffsetTimestamps
 export type ListOffsetTimestampValue = (typeof ListOffsetTimestamps)[ListOffsetTimestampLabel]
+/** @deprecated Use ListOffsetTimestampLabel */
+export type ListOffsetTimestamp = ListOffsetTimestampLabel
 
 // Admin API
 // ./admin/*-acls.ts - See: https://cwiki.apache.org/confluence/display/KAFKA/KIP-140%3A+Add+administrative+RPCs+for+adding%2C+deleting%2C+and+listing+ACLs
@@ -58,11 +70,15 @@ export const ResourceTypes = {
 export const allowedResourceTypes = Object.values(ResourceTypes)
 export type ResourceTypeLabel = keyof typeof ResourceTypes
 export type ResourceTypeValue = (typeof ResourceTypes)[ResourceTypeLabel]
+/** @deprecated Use ResourceTypeLabel */
+export type ResourceType = ResourceTypeLabel
 
 export const ResourcePatternTypes = { UNKNOWN: 0, ANY: 1, MATCH: 2, LITERAL: 3, PREFIXED: 4 } as const
 export const allowedResourcePatternTypes = Object.values(ResourcePatternTypes)
 export type ResourcePatternTypeLabel = keyof typeof ResourcePatternTypes
 export type ResourcePatternTypeValue = (typeof ResourcePatternTypes)[ResourcePatternTypeLabel]
+/** @deprecated Use ResourcePatternTypeLabel */
+export type ResourcePatternType = ResourcePatternTypeLabel
 
 export const AclOperations = {
   UNKNOWN: 0,
@@ -82,11 +98,15 @@ export const AclOperations = {
 export const allowedAclOperations = Object.values(AclOperations)
 export type AclOperationLabel = keyof typeof AclOperations
 export type AclOperationValue = (typeof AclOperations)[AclOperationLabel]
+/** @deprecated Use AclOperationLabel */
+export type AclOperation = AclOperationLabel
 
 export const AclPermissionTypes = { UNKNOWN: 0, ANY: 1, DENY: 2, ALLOW: 3 } as const
 export const allowedAclPermissionTypes = Object.values(AclPermissionTypes)
 export type AclPermissionTypeLabel = keyof typeof AclPermissionTypes
 export type AclPermissionTypeValue = (typeof AclPermissionTypes)[AclPermissionTypeLabel]
+/** @deprecated Use AclPermissionTypeLabel */
+export type AclPermissionType = AclPermissionTypeLabel
 
 // ./admin/*-configs.ts
 export const ConfigSources = {
@@ -101,6 +121,8 @@ export const ConfigSources = {
 export const allowedConfigSources = Object.values(ConfigSources)
 export type ConfigSourceLabel = keyof typeof ConfigSources
 export type ConfigSourceValue = (typeof ConfigSources)[ConfigSourceLabel]
+/** @deprecated Use ConfigSourceLabel */
+export type ConfigSource = ConfigSourceLabel
 
 export const ConfigTypes = {
   UNKNOWN: 0,
@@ -111,22 +133,30 @@ export const ConfigTypes = {
 export const allowedConfigTypes = Object.values(ConfigTypes)
 export type ConfigTypeLabel = keyof typeof ConfigTypes
 export type ConfigTypeValue = (typeof ConfigTypes)[ConfigTypeLabel]
+/** @deprecated Use ConfigTypeLabel */
+export type ConfigType = ConfigTypeLabel
 
 export const IncrementalAlterConfigTypes = { SET: 0, DELETE: 1, APPEND: 2, SUBTRACT: 3 } as const
 export const allowedIncrementalAlterConfigTypes = Object.values(IncrementalAlterConfigTypes)
 export type IncrementalAlterConfigTypeLabel = keyof typeof IncrementalAlterConfigTypes
 export type IncrementalAlterConfigTypeValue = (typeof IncrementalAlterConfigTypes)[IncrementalAlterConfigTypeLabel]
+/** @deprecated Use IncrementalAlterConfigTypeLabel */
+export type IncrementalAlterConfigType = IncrementalAlterConfigTypeLabel
 
 // ./admin/*-client-quotas.ts
 export const ClientQuotaMatchTypes = { EXACT: 0, DEFAULT: 1, ANY: 2 } as const
 export const allowedClientQuotaMatchTypes = Object.values(ClientQuotaMatchTypes)
 export type ClientQuotaMatchTypeLabel = keyof typeof ClientQuotaMatchTypes
 export type ClientQuotaMatchTypeValue = (typeof ClientQuotaMatchTypes)[ClientQuotaMatchTypeLabel]
+/** @deprecated Use ClientQuotaMatchTypeValue */
+export type ClientQuotaMatchType = ClientQuotaMatchTypeValue
 
 export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
 export const allowedClientQuotaEntityTypes = Object.values(ClientQuotaEntityTypes)
 export type ClientQuotaEntityTypeLabel = keyof typeof ClientQuotaEntityTypes
 export type ClientQuotaEntityTypeValue = (typeof ClientQuotaEntityTypes)[ClientQuotaEntityTypeLabel]
+/** @deprecated Use ClientQuotaEntityTypeValue */
+export type ClientQuotaEntityType = ClientQuotaEntityTypeValue
 
 export const ClientQuotaKeys = {
   PRODUCER_BYTE_RATE: 'producer_byte_rate',
@@ -136,22 +166,30 @@ export const ClientQuotaKeys = {
 export const allowedClientQuotaKeys = Object.values(ClientQuotaKeys)
 export type ClientQuotaKeyLabel = keyof typeof ClientQuotaKeys
 export type ClientQuotaKeyValue = (typeof ClientQuotaKeys)[ClientQuotaKeyLabel]
+/** @deprecated Use ClientQuotaKeyValue */
+export type ClientQuotaKey = ClientQuotaKeyValue
 
 // ./admin/*-scram-credentials.ts
 export const ScramMechanisms = { UNKNOWN: 0, SCRAM_SHA_256: 1, SCRAM_SHA_512: 2 } as const
 export const allowedScramMechanisms = Object.values(ScramMechanisms)
 export type ScramMechanismLabel = keyof typeof ScramMechanisms
 export type ScramMechanismValue = (typeof ScramMechanisms)[ScramMechanismLabel]
+/** @deprecated Use ScramMechanismLabel */
+export type ScramMechanism = ScramMechanismLabel
 
 // ./admin/describe-cluster.ts
 export const DescribeClusterEndpointTypes = { BROKERS: 1, CONTROLLERS: 2 } as const
 export const allowedDescribeClusterEndpointTypes = Object.values(DescribeClusterEndpointTypes)
 export type DescribeClusterEndpointTypeLabel = keyof typeof DescribeClusterEndpointTypes
 export type DescribeClusterEndpointTypeValue = (typeof DescribeClusterEndpointTypes)[DescribeClusterEndpointTypeLabel]
+/** @deprecated Use DescribeClusterEndpointTypeLabel */
+export type DescribeClusterEndpointType = DescribeClusterEndpointTypeLabel
 
 // ./admin/list-groups.ts
 export const ConsumerGroupStates = ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'] as const
 export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number]
+/** @deprecated Use ConsumerGroupStateValue */
+export type ConsumerGroupState = ConsumerGroupStateValue
 
 // ./admin/list-transactions.ts
 export const TransactionStates = [
@@ -170,3 +208,5 @@ export const FeatureUpgradeTypes = { UPGRADE: 1, SAFE_DOWNGRADE: 2, UNSAFE_DOWNG
 export const allowedFeatureUpgradeTypes = Object.values(FeatureUpgradeTypes)
 export type FeatureUpgradeTypeLabel = keyof typeof FeatureUpgradeTypes
 export type FeatureUpgradeTypeValue = (typeof FeatureUpgradeTypes)[FeatureUpgradeTypeLabel]
+/** @deprecated Use FeatureUpgradeTypeLabel */
+export type FeatureUpgradeType = FeatureUpgradeTypeLabel

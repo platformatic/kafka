@@ -39,7 +39,7 @@ import {
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import { type Callback } from '../../apis/definitions.ts'
-import { FindCoordinatorKeyTypes, type ConsumerGroupState } from '../../apis/enumerations.ts'
+import { FindCoordinatorKeyTypes, type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
@@ -665,9 +665,9 @@ export class Admin extends Base<AdminOptions> {
 
                   /* c8 ignore next 5 */
                   if (api.version === 4) {
-                    api(connection, (options.states as ConsumerGroupState[]) ?? [], retryCallback)
+                    api(connection, (options.states as ConsumerGroupStateValue[]) ?? [], retryCallback)
                   } else {
-                    api(connection, (options.states as ConsumerGroupState[]) ?? [], options.types!, retryCallback)
+                    api(connection, (options.states as ConsumerGroupStateValue[]) ?? [], options.types!, retryCallback)
                   }
                 })
               },
@@ -687,7 +687,7 @@ export class Admin extends Base<AdminOptions> {
             for (const raw of result.groups) {
               groups.set(raw.groupId, {
                 id: raw.groupId,
-                state: raw.groupState.toUpperCase() as ConsumerGroupState,
+                state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
                 groupType: raw.groupType,
                 protocolType: raw.protocolType
               })
@@ -763,7 +763,7 @@ export class Admin extends Base<AdminOptions> {
               for (const raw of result.groups) {
                 const group: Group = {
                   id: raw.groupId,
-                  state: raw.groupState.toUpperCase() as ConsumerGroupState,
+                  state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
                   protocolType: raw.protocolType,
                   protocol: raw.protocolData,
                   members: new Map(),

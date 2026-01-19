@@ -3,7 +3,7 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ConsumerGroupState } from '../enumerations.ts'
+import { type ConsumerGroupStateValue } from '../enumerations.ts'
 
 export type ListGroupsRequest = Parameters<typeof createRequest>
 
@@ -23,7 +23,7 @@ export interface ListGroupsResponse {
   ListGroups Request (Version: 4) => [states_filter] TAG_BUFFER
     states_filter => COMPACT_STRING
 */
-export function createRequest (statesFilter: ConsumerGroupState[]): Writer {
+export function createRequest (statesFilter: ConsumerGroupStateValue[]): Writer {
   return Writer.create()
     .appendArray(statesFilter, (w, s) => w.appendString(pascalCase(s, { normalize: true })), true, false)
     .appendTaggedFields()

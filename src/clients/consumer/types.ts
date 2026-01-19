@@ -1,5 +1,5 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
-import { type FetchIsolationLevel, type GroupProtocols } from '../../apis/enumerations.ts'
+import { type FetchIsolationLevelLabel, type GroupProtocols } from '../../apis/enumerations.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
@@ -89,7 +89,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   minBytes?: number
   maxBytes?: number
   maxWaitTime?: number
-  isolationLevel?: FetchIsolationLevel
+  isolationLevel?: FetchIsolationLevelLabel
   deserializers?: Partial<Deserializers<Key, Value, HeaderKey, HeaderValue>>
   highWaterMark?: number
 }
@@ -136,7 +136,7 @@ export interface ListOffsetsOptions {
   topics: string[]
   partitions?: Record<string, number[]>
   timestamp?: bigint
-  isolationLevel?: FetchIsolationLevel
+  isolationLevel?: FetchIsolationLevelLabel
 }
 
 export type GetLagOptions = Omit<ListOffsetsOptions, 'timestamp' | 'isolationLevel'>

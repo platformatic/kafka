@@ -3,21 +3,21 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-import { type ClientQuotaEntityType, type ClientQuotaKey } from '../enumerations.ts'
+import { type ClientQuotaEntityTypeValue, type ClientQuotaKeyValue } from '../enumerations.ts'
 
 export interface AlterClientQuotasRequestEntity {
-  entityType: ClientQuotaEntityType
+  entityType: ClientQuotaEntityTypeValue
   entityName?: NullableString
 }
 
 export interface AlterClientQuotaRequestOpAddition {
-  key: ClientQuotaKey
+  key: ClientQuotaKeyValue
   value: number
   remove: false
 }
 
 export interface AlterClientQuotaRequestOpRemoval {
-  key: ClientQuotaKey
+  key: ClientQuotaKeyValue
   remove: true
 }
 

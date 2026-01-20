@@ -40,10 +40,14 @@ test('createRequest serializes basic parameters correctly', () => {
 
   // We can't easily verify the record batch content directly as it's complex binary format
   // But we can at least check that we have topic data array with length 1
-  const topicsArray = reader.readArray(() => {
-    const topicName = reader.readString(false)
-    return topicName
-  }, false, false)
+  const topicsArray = reader.readArray(
+    () => {
+      const topicName = reader.readString(false)
+      return topicName
+    },
+    false,
+    false
+  )
 
   // Verify topics array
   deepStrictEqual(topicsArray, ['test-topic'])
@@ -242,10 +246,14 @@ test('createRequest with additional record batch options', () => {
   )
 
   // Read topic array to verify structure
-  const topicsArray = reader.readArray(() => {
-    const topicName = reader.readString(false)
-    return topicName
-  }, false, false)
+  const topicsArray = reader.readArray(
+    () => {
+      const topicName = reader.readString(false)
+      return topicName
+    },
+    false,
+    false
+  )
 
   // Verify topics array
   deepStrictEqual(topicsArray, ['test-topic'], 'Topic name should match')
@@ -275,16 +283,21 @@ test('parseResponse correctly processes a successful response', () => {
       (w, topic) => {
         w.appendString(topic.name, false)
           // Partitions array
-          .appendArray(topic.partitionResponses, (w, partition) => {
-            w.appendInt32(partition.index)
-              .appendInt16(partition.errorCode)
-              .appendInt64(partition.baseOffset)
-              .appendInt64(partition.logAppendTimeMs)
-              .appendInt64(partition.logStartOffset)
-              // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, false, false)
-              .appendString(partition.errorMessage, false)
-          }, false, false)
+          .appendArray(
+            topic.partitionResponses,
+            (w, partition) => {
+              w.appendInt32(partition.index)
+                .appendInt16(partition.errorCode)
+                .appendInt64(partition.baseOffset)
+                .appendInt64(partition.logAppendTimeMs)
+                .appendInt64(partition.logStartOffset)
+                // Record errors array (empty)
+                .appendArray(partition.recordErrors, () => {}, false, false)
+                .appendString(partition.errorMessage, false)
+            },
+            false,
+            false
+          )
       },
       false,
       false
@@ -362,16 +375,21 @@ test('parseResponse handles response with multiple topics and partitions', () =>
       (w, topic) => {
         w.appendString(topic.name, false)
           // Partitions array
-          .appendArray(topic.partitionResponses, (w, partition) => {
-            w.appendInt32(partition.index)
-              .appendInt16(partition.errorCode)
-              .appendInt64(partition.baseOffset)
-              .appendInt64(partition.logAppendTimeMs)
-              .appendInt64(partition.logStartOffset)
-              // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, false, false)
-              .appendString(partition.errorMessage, false)
-          }, false, false)
+          .appendArray(
+            topic.partitionResponses,
+            (w, partition) => {
+              w.appendInt32(partition.index)
+                .appendInt16(partition.errorCode)
+                .appendInt64(partition.baseOffset)
+                .appendInt64(partition.logAppendTimeMs)
+                .appendInt64(partition.logStartOffset)
+                // Record errors array (empty)
+                .appendArray(partition.recordErrors, () => {}, false, false)
+                .appendString(partition.errorMessage, false)
+            },
+            false,
+            false
+          )
       },
       false,
       false
@@ -449,16 +467,21 @@ test('parseResponse handles partition error codes', () => {
       (w, topic) => {
         w.appendString(topic.name, false)
           // Partitions array
-          .appendArray(topic.partitionResponses, (w, partition) => {
-            w.appendInt32(partition.index)
-              .appendInt16(partition.errorCode)
-              .appendInt64(partition.baseOffset)
-              .appendInt64(partition.logAppendTimeMs)
-              .appendInt64(partition.logStartOffset)
-              // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, false, false)
-              .appendString(partition.errorMessage, false)
-          }, false, false)
+          .appendArray(
+            topic.partitionResponses,
+            (w, partition) => {
+              w.appendInt32(partition.index)
+                .appendInt16(partition.errorCode)
+                .appendInt64(partition.baseOffset)
+                .appendInt64(partition.logAppendTimeMs)
+                .appendInt64(partition.logStartOffset)
+                // Record errors array (empty)
+                .appendArray(partition.recordErrors, () => {}, false, false)
+                .appendString(partition.errorMessage, false)
+            },
+            false,
+            false
+          )
       },
       false,
       false
@@ -536,18 +559,28 @@ test('parseResponse handles record-level errors', () => {
       (w, topic) => {
         w.appendString(topic.name, false)
           // Partitions array
-          .appendArray(topic.partitionResponses, (w, partition) => {
-            w.appendInt32(partition.index)
-              .appendInt16(partition.errorCode)
-              .appendInt64(partition.baseOffset)
-              .appendInt64(partition.logAppendTimeMs)
-              .appendInt64(partition.logStartOffset)
-              // Record errors array
-              .appendArray(partition.recordErrors, (w, recordError) => {
-                w.appendInt32(recordError.batchIndex).appendString(recordError.batchIndexErrorMessage, false)
-              }, false, false)
-              .appendString(partition.errorMessage, false)
-          }, false, false)
+          .appendArray(
+            topic.partitionResponses,
+            (w, partition) => {
+              w.appendInt32(partition.index)
+                .appendInt16(partition.errorCode)
+                .appendInt64(partition.baseOffset)
+                .appendInt64(partition.logAppendTimeMs)
+                .appendInt64(partition.logStartOffset)
+                // Record errors array
+                .appendArray(
+                  partition.recordErrors,
+                  (w, recordError) => {
+                    w.appendInt32(recordError.batchIndex).appendString(recordError.batchIndexErrorMessage, false)
+                  },
+                  false,
+                  false
+                )
+                .appendString(partition.errorMessage, false)
+            },
+            false,
+            false
+          )
       },
       false,
       false
@@ -625,16 +658,21 @@ test('parseResponse handles throttling', () => {
       (w, topic) => {
         w.appendString(topic.name, false)
           // Partitions array
-          .appendArray(topic.partitionResponses, (w, partition) => {
-            w.appendInt32(partition.index)
-              .appendInt16(partition.errorCode)
-              .appendInt64(partition.baseOffset)
-              .appendInt64(partition.logAppendTimeMs)
-              .appendInt64(partition.logStartOffset)
-              // Record errors array (empty)
-              .appendArray(partition.recordErrors, () => {}, false, false)
-              .appendString(partition.errorMessage, false)
-          }, false, false)
+          .appendArray(
+            topic.partitionResponses,
+            (w, partition) => {
+              w.appendInt32(partition.index)
+                .appendInt16(partition.errorCode)
+                .appendInt64(partition.baseOffset)
+                .appendInt64(partition.logAppendTimeMs)
+                .appendInt64(partition.logStartOffset)
+                // Record errors array (empty)
+                .appendArray(partition.recordErrors, () => {}, false, false)
+                .appendString(partition.errorMessage, false)
+            },
+            false,
+            false
+          )
       },
       false,
       false

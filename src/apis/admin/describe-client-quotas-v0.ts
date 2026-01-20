@@ -3,7 +3,11 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ClientQuotaEntityTypeValue, type ClientQuotaKeyValue, type ClientQuotaMatchTypes } from '../enumerations.ts'
+import {
+  type ClientQuotaEntityTypeValue,
+  type ClientQuotaKeyValue,
+  type ClientQuotaMatchTypes
+} from '../enumerations.ts'
 
 export interface DescribeClientQuotasRequestMatchComponent {
   entityType: ClientQuotaEntityTypeValue

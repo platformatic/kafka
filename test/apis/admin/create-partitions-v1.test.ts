@@ -24,18 +24,26 @@ test('createRequest serializes basic parameters correctly', () => {
   const reader = Reader.from(writer)
 
   // Read topics array
-  const topicsArray = reader.readArray(() => {
-    const name = reader.readString(false)
-    const count = reader.readInt32()
+  const topicsArray = reader.readArray(
+    () => {
+      const name = reader.readString(false)
+      const count = reader.readInt32()
 
-    // Read assignments array (empty in this case)
-    const assignments = reader.readArray(() => {
-      const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
-      return { brokerIds }
-    }, false, false)
+      // Read assignments array (empty in this case)
+      const assignments = reader.readArray(
+        () => {
+          const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
+          return { brokerIds }
+        },
+        false,
+        false
+      )
 
-    return { name, count, assignments }
-  }, false, false)
+      return { name, count, assignments }
+    },
+    false,
+    false
+  )
 
   // Read timeoutMs and validateOnly
   const serializedTimeoutMs = reader.readInt32()
@@ -82,18 +90,26 @@ test('createRequest serializes topic with assignments correctly', () => {
   const reader = Reader.from(writer)
 
   // Read topics array
-  const topicsArray = reader.readArray(() => {
-    const name = reader.readString(false)
-    const count = reader.readInt32()
+  const topicsArray = reader.readArray(
+    () => {
+      const name = reader.readString(false)
+      const count = reader.readInt32()
 
-    // Read assignments array
-    const assignments = reader.readArray(() => {
-      const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
-      return { brokerIds }
-    }, false, false)
+      // Read assignments array
+      const assignments = reader.readArray(
+        () => {
+          const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
+          return { brokerIds }
+        },
+        false,
+        false
+      )
 
-    return { name, count, assignments }
-  }, false, false)
+      return { name, count, assignments }
+    },
+    false,
+    false
+  )
 
   // Skip timeoutMs and validateOnly
   reader.readInt32()
@@ -127,18 +143,26 @@ test('createRequest serializes multiple topics correctly', () => {
   const reader = Reader.from(writer)
 
   // Read topics array
-  const topicsArray = reader.readArray(() => {
-    const name = reader.readString(false)
-    const count = reader.readInt32()
+  const topicsArray = reader.readArray(
+    () => {
+      const name = reader.readString(false)
+      const count = reader.readInt32()
 
-    // Skip assignments details
-    reader.readArray(() => {
-      reader.readArray(() => reader.readInt32(), false, false)
-      return {}
-    }, false, false)
+      // Skip assignments details
+      reader.readArray(
+        () => {
+          reader.readArray(() => reader.readInt32(), false, false)
+          return {}
+        },
+        false,
+        false
+      )
 
-    return { name, count }
-  }, false, false)
+      return { name, count }
+    },
+    false,
+    false
+  )
 
   // Skip timeoutMs and validateOnly
   reader.readInt32()
@@ -183,18 +207,26 @@ test('createRequest serializes multiple assignments correctly', () => {
   const reader = Reader.from(writer)
 
   // Read topics array
-  const topicsArray = reader.readArray(() => {
-    const name = reader.readString(false)
-    const count = reader.readInt32()
+  const topicsArray = reader.readArray(
+    () => {
+      const name = reader.readString(false)
+      const count = reader.readInt32()
 
-    // Read assignments array
-    const assignments = reader.readArray(() => {
-      const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
-      return { brokerIds }
-    }, false, false)
+      // Read assignments array
+      const assignments = reader.readArray(
+        () => {
+          const brokerIds = reader.readArray(() => reader.readInt32(), false, false)
+          return { brokerIds }
+        },
+        false,
+        false
+      )
 
-    return { name, count, assignments }
-  }, false, false)
+      return { name, count, assignments }
+    },
+    false,
+    false
+  )
 
   // Skip timeoutMs and validateOnly
   reader.readInt32()
@@ -230,15 +262,23 @@ test('createRequest serializes validateOnly flag correctly', () => {
   const reader = Reader.from(writer)
 
   // Skip topics array
-  reader.readArray(() => {
-    reader.readString(false)
-    reader.readInt32()
-    reader.readArray(() => {
-      reader.readArray(() => reader.readInt32(), false, false)
+  reader.readArray(
+    () => {
+      reader.readString(false)
+      reader.readInt32()
+      reader.readArray(
+        () => {
+          reader.readArray(() => reader.readInt32(), false, false)
+          return {}
+        },
+        false,
+        false
+      )
       return {}
-    }, false, false)
-    return {}
-  }, false, false)
+    },
+    false,
+    false
+  )
 
   // Skip timeoutMs
   reader.readInt32()

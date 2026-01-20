@@ -25,12 +25,16 @@ test('createRequest serializes basic parameters correctly', () => {
   const reader = Reader.from(writer)
 
   // Read resources array
-  const resourcesArray = reader.readArray(() => {
-    const resourceType = reader.readInt8()
-    const resourceName = reader.readString(false)
-    const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
-    return { resourceType, resourceName, configurationKeys }
-  }, false, false)
+  const resourcesArray = reader.readArray(
+    () => {
+      const resourceType = reader.readInt8()
+      const resourceName = reader.readString(false)
+      const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
+      return { resourceType, resourceName, configurationKeys }
+    },
+    false,
+    false
+  )
 
   // Read includeSynonyms boolean
   const includeSynonymsValue = reader.readBoolean()
@@ -75,12 +79,16 @@ test('createRequest serializes configurationKeys correctly', () => {
   const reader = Reader.from(writer)
 
   // Read resources array
-  const resourcesArray = reader.readArray(() => {
-    const resourceType = reader.readInt8()
-    const resourceName = reader.readString(false)
-    const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
-    return { resourceType, resourceName, configurationKeys }
-  }, false, false)
+  const resourcesArray = reader.readArray(
+    () => {
+      const resourceType = reader.readInt8()
+      const resourceName = reader.readString(false)
+      const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
+      return { resourceType, resourceName, configurationKeys }
+    },
+    false,
+    false
+  )
 
   // Verify configuration keys
   deepStrictEqual(
@@ -110,12 +118,16 @@ test('createRequest serializes multiple resources correctly', () => {
   const reader = Reader.from(writer)
 
   // Read resources array
-  const resourcesArray = reader.readArray(() => {
-    const resourceType = reader.readInt8()
-    const resourceName = reader.readString(false)
-    const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
-    return { resourceType, resourceName, configurationKeys }
-  }, false, false)
+  const resourcesArray = reader.readArray(
+    () => {
+      const resourceType = reader.readInt8()
+      const resourceName = reader.readString(false)
+      const configurationKeys = reader.readArray(() => reader.readString(false), false, false)
+      return { resourceType, resourceName, configurationKeys }
+    },
+    false,
+    false
+  )
 
   // Verify multiple resources
   deepStrictEqual(
@@ -151,12 +163,16 @@ test('createRequest serializes include flags correctly', () => {
   const reader = Reader.from(writer)
 
   // Skip resources array
-  reader.readArray(() => {
-    reader.readInt8()
-    reader.readString(false)
-    reader.readArray(() => reader.readString(false), false, false)
-    return {}
-  }, false, false)
+  reader.readArray(
+    () => {
+      reader.readInt8()
+      reader.readString(false)
+      reader.readArray(() => reader.readString(false), false, false)
+      return {}
+    },
+    false,
+    false
+  )
 
   // Read include flags
   const includeSynonymsValue = reader.readBoolean()

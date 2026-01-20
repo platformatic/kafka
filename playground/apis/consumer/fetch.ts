@@ -103,11 +103,14 @@ for (let i = 0; i < 3; i++) {
     break
   }
 
-  const { nextOffset, records } = batches.reduce<{ nextOffset: bigint, records: KafkaRecord[] }>((acc, batch) => {
-    acc.nextOffset = batch.firstOffset + BigInt(batch.records.length)
-    acc.records.push(...batch.records)
-    return acc
-  }, { nextOffset: fetchOffset, records: [] })
+  const { nextOffset, records } = batches.reduce<{ nextOffset: bigint; records: KafkaRecord[] }>(
+    (acc, batch) => {
+      acc.nextOffset = batch.firstOffset + BigInt(batch.records.length)
+      acc.records.push(...batch.records)
+      return acc
+    },
+    { nextOffset: fetchOffset, records: [] }
+  )
 
   fetchOffset = nextOffset
   console.log(

@@ -210,10 +210,17 @@ test('parseResponse correctly processes a successful response', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   const response = parseResponse(1, 47, 0, Reader.from(writer))
@@ -267,10 +274,17 @@ test('parseResponse correctly processes multiple topics', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   const response = parseResponse(1, 47, 0, Reader.from(writer))
@@ -310,10 +324,17 @@ test('parseResponse correctly processes multiple partitions', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   const response = parseResponse(1, 47, 0, Reader.from(writer))
@@ -345,10 +366,17 @@ test('parseResponse handles partition level errors correctly', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   // Verify that parsing throws ResponseError
@@ -389,10 +417,17 @@ test('parseResponse handles mixed partition successes and errors', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   // Verify that parsing throws ResponseError
@@ -426,7 +461,7 @@ test('parseResponse handles top-level error correctly', () => {
   const writer = Writer.create()
     .appendInt16(16) // GROUP_AUTHORIZATION_FAILED
     .appendInt32(0) // throttleTimeMs
-    .appendArray([], () => {}) // Empty topics array
+    .appendArray([], () => {}, false, false) // Empty topics array
 
   // Verify that parsing throws ResponseError
   throws(
@@ -460,10 +495,17 @@ test('parseResponse handles throttle time correctly', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
-        })
-      }
+        w.appendString(topic.name, false).appendArray(
+          topic.partitions,
+          (w, partition) => {
+            w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
     )
 
   const response = parseResponse(1, 47, 0, Reader.from(writer))

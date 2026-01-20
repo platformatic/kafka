@@ -154,6 +154,45 @@ Options:
 | -------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | topics   | `DescribeLogDirsRequestTopic[]` | Array of topics specifying the topics and partitions for which to describe logs. |
 
+### `listConsumerGroupOffsets(options[, callback])`
+
+Lists committed offsets for consumer groups.
+
+The return value is an array of groups with information about committed offsets per partition per topic.
+
+Options:
+
+| Property      | Type                        | Description                                                                 |
+| ------------- | --------------------------- | --------------------------------------------------------------------------- |
+| groups        | `OffsetFetchRequestGroup[]` | Array of groups specifying the groups and topics for which to list offsets. |
+| requireStable | `boolean`                   | Whether to require stable offsets.                                          |
+
+### `alterConsumerGroupOffsets(options[, callback])`
+
+Alters committed offsets for a consumer group. Note, that the consumer group must be empty to succeed.
+
+The return value is `void`.
+
+Options:
+
+| Property | Type                               | Description                                                  |
+| -------- | ---------------------------------- | ------------------------------------------------------------ |
+| groupId  | `string`                           | The consumer group ID for which to alter offsets.            |
+| topics   | `AlterConsumerGroupOffsetsTopic[]` | Array of topics with partitions and their new offset values. |
+
+### `deleteConsumerGroupOffsets(options[, callback])`
+
+Deletes committed offsets for specific topics of a consumer group.
+
+The return value is an array of topic partitions indicating which offsets were deleted.
+
+Options:
+
+| Property | Type                                             | Description                                                 |
+| -------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| groupId  | `string`                                         | The consumer group ID from which to delete offsets.         |
+| topics   | `{ name: string, partitionIndexes: number[] }[]` | Array of topics and partitions for which to delete offsets. |
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

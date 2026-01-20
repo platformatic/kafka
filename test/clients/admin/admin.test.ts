@@ -7,6 +7,7 @@ import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   Admin,
   adminClientQuotasChannel,
+  adminConsumerGroupOffsetsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminTopicsChannel,
@@ -29,6 +30,7 @@ import {
   EMPTY_BUFFER,
   type GroupBase,
   instancesChannel,
+  type ListConsumerGroupOffsetsGroup,
   listGroupsV5,
   MultipleErrors,
   ResponseError,
@@ -190,6 +192,38 @@ test('all operations should fail when admin is closed', async t => {
     await admin.removeMembersFromConsumerGroup({
       groupId: 'test-group',
       members: [{ memberId: 'test-member', reason: 'test-reason' }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call listConsumerGroupOffsets on closed admin
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: ['test-group']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call alterConsumerGroupOffsets on closed admin
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: []
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call deleteConsumerGroupOffsets on closed admin
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: []
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -3203,5 +3237,1317 @@ test('describeLogDirs should handle unavailable API errors', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.errors[0].message.includes('Unsupported API DescribeLogDirs.'), true)
+  }
+})
+
+test('listConsumerGroupOffsets should list selected offsets', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  const consumer = createConsumer(t, { groupId })
+  await admin.createTopics({ topics: [topicName], partitions: 3 })
+  await consumer.joinGroup({})
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 2, leaderEpoch: 1002, offset: BigInt(3) }] })
+
+  const listOptions = {
+    groups: [
+      {
+        groupId,
+        topics: [
+          {
+            name: topicName,
+            partitionIndexes: [0, 1]
+          }
+        ]
+      }
+    ],
+    requireStable: false
+  }
+
+  const offsets = await admin.listConsumerGroupOffsets(listOptions)
+
+  offsets[0].topics[0].partitions.sort((a, b) => a.partitionIndex - b.partitionIndex)
+  deepStrictEqual(offsets, [
+    {
+      groupId,
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            {
+              partitionIndex: 0,
+              committedOffset: 1n,
+              committedLeaderEpoch: 1000,
+              metadata: ''
+            },
+            {
+              partitionIndex: 1,
+              committedOffset: 2n,
+              committedLeaderEpoch: 1001,
+              metadata: ''
+            }
+          ]
+        }
+      ]
+    }
+  ])
+})
+
+test('listConsumerGroupOffsets should list all offsets', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  const consumer = createConsumer(t, { groupId })
+  await admin.createTopics({ topics: [topicName], partitions: 3 })
+  await consumer.joinGroup({})
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 2, leaderEpoch: 1002, offset: BigInt(3) }] })
+
+  const listOptions = {
+    groups: [
+      {
+        groupId,
+        topics: null
+      }
+    ],
+    requireStable: false
+  }
+
+  const offsets = await admin.listConsumerGroupOffsets(listOptions)
+
+  offsets[0].topics[0].partitions.sort((a, b) => a.partitionIndex - b.partitionIndex)
+  deepStrictEqual(offsets, [
+    {
+      groupId,
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            {
+              partitionIndex: 0,
+              committedOffset: 1n,
+              committedLeaderEpoch: 1000,
+              metadata: ''
+            },
+            {
+              partitionIndex: 1,
+              committedOffset: 2n,
+              committedLeaderEpoch: 1001,
+              metadata: ''
+            },
+            {
+              partitionIndex: 2,
+              committedOffset: 3n,
+              committedLeaderEpoch: 1002,
+              metadata: ''
+            }
+          ]
+        }
+      ]
+    }
+  ])
+})
+
+test('alterConsumerGroupOffsets should alter offsets', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  await admin.createTopics({ topics: [topicName], partitions: 2 })
+
+  const alterOptions = {
+    groupId,
+    topics: [
+      {
+        name: topicName,
+        partitionOffsets: [
+          { partition: 0, offset: BigInt(10) },
+          { partition: 1, offset: BigInt(20) }
+        ]
+      }
+    ]
+  }
+
+  await admin.alterConsumerGroupOffsets(alterOptions)
+
+  const listOptions = {
+    groups: [
+      {
+        groupId,
+        topics: [
+          {
+            name: topicName,
+            partitionIndexes: [0, 1]
+          }
+        ]
+      }
+    ],
+    requireStable: false
+  }
+
+  const offsets = await admin.listConsumerGroupOffsets(listOptions)
+
+  deepStrictEqual(offsets, [
+    {
+      groupId,
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            {
+              partitionIndex: 0,
+              committedOffset: 10n,
+              committedLeaderEpoch: -1,
+              metadata: ''
+            },
+            {
+              partitionIndex: 1,
+              committedOffset: 20n,
+              committedLeaderEpoch: -1,
+              metadata: ''
+            }
+          ]
+        }
+      ]
+    }
+  ])
+})
+
+test('deleteConsumerGroupOffsets should delete offsets', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  const consumer = createConsumer(t, { groupId })
+  await admin.createTopics({ topics: [topicName], partitions: 2 })
+  await consumer.joinGroup({})
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
+
+  const listOptions = {
+    groups: [
+      {
+        groupId,
+        topics: [
+          {
+            name: topicName,
+            partitionIndexes: [0, 1]
+          }
+        ]
+      }
+    ],
+    requireStable: false
+  }
+
+  const offsets1 = await admin.listConsumerGroupOffsets(listOptions)
+
+  deepStrictEqual(offsets1, [
+    {
+      groupId,
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            {
+              partitionIndex: 0,
+              committedOffset: 1n,
+              committedLeaderEpoch: 1000,
+              metadata: ''
+            },
+            {
+              partitionIndex: 1,
+              committedOffset: 2n,
+              committedLeaderEpoch: 1001,
+              metadata: ''
+            }
+          ]
+        }
+      ]
+    }
+  ])
+
+  const deleteOptions = {
+    groupId,
+    topics: [
+      {
+        name: topicName,
+        partitionIndexes: [1]
+      }
+    ]
+  }
+
+  const deleteResult = await admin.deleteConsumerGroupOffsets(deleteOptions)
+
+  deepStrictEqual(deleteResult, [
+    {
+      name: topicName,
+      partitionIndexes: [1]
+    }
+  ])
+
+  const offsets2 = await admin.listConsumerGroupOffsets(listOptions)
+
+  deepStrictEqual(offsets2, [
+    {
+      groupId,
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            {
+              partitionIndex: 0,
+              committedOffset: 1n,
+              committedLeaderEpoch: 1000,
+              metadata: ''
+            },
+            {
+              partitionIndex: 1,
+              committedOffset: -1n,
+              committedLeaderEpoch: -1,
+              metadata: ''
+            }
+          ]
+        }
+      ]
+    }
+  ])
+})
+
+test('listConsumerGroupOffsets should support diagnostic channels', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  await admin.createTopics({ topics: [topicName], partitions: 2 })
+
+  const verifyListTracingChannel = createTracingChannelVerifier(
+    adminConsumerGroupOffsetsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'listConsumerGroupOffsets',
+          options: listOptions,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as ListConsumerGroupOffsetsGroup[]
+        ok(result)
+        strictEqual(Array.isArray(result), true)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'listConsumerGroupOffsets'
+  )
+
+  const listOptions = {
+    groups: [
+      {
+        groupId,
+        topics: null
+      }
+    ],
+    requireStable: false
+  }
+
+  await admin.listConsumerGroupOffsets(listOptions)
+
+  verifyListTracingChannel()
+})
+
+test('alterConsumerGroupOffsets should support diagnostic channels', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  await admin.createTopics({ topics: [topicName], partitions: 2 })
+
+  const alterOptions = {
+    groupId,
+    topics: [
+      {
+        name: topicName,
+        partitionOffsets: [
+          { partition: 0, offset: BigInt(10) },
+          { partition: 1, offset: BigInt(20) }
+        ]
+      }
+    ]
+  }
+
+  const verifyAlterTracingChannel = createTracingChannelVerifier(
+    adminConsumerGroupOffsetsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'alterConsumerGroupOffsets',
+          options: alterOptions,
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'alterConsumerGroupOffsets'
+  )
+
+  await admin.alterConsumerGroupOffsets(alterOptions)
+
+  verifyAlterTracingChannel()
+})
+
+test('deleteConsumerGroupOffsets should support diagnostic channels', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const topicName = `test-topic-${randomUUID()}`
+
+  const admin = createAdmin(t)
+  const consumer = createConsumer(t, { groupId })
+  await admin.createTopics({ topics: [topicName], partitions: 2 })
+  await consumer.joinGroup({})
+  await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
+
+  const verifyDeleteTracingChannel = createTracingChannelVerifier(
+    adminConsumerGroupOffsetsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'deleteConsumerGroupOffsets',
+          options: deleteOptions,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result
+        ok(result)
+        strictEqual(Array.isArray(result), true)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'deleteConsumerGroupOffsets'
+  )
+
+  const deleteOptions = {
+    groupId,
+    topics: [
+      {
+        name: topicName,
+        partitionIndexes: [1]
+      }
+    ]
+  }
+
+  await admin.deleteConsumerGroupOffsets(deleteOptions)
+
+  verifyDeleteTracingChannel()
+})
+
+test('listConsumerGroupOffsets should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (groups)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.listConsumerGroupOffsets({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groups'), true)
+  }
+
+  // Test with invalid type for groups
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.listConsumerGroupOffsets({ groups: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groups'), true)
+  }
+
+  // Test with empty groups array
+  try {
+    await admin.listConsumerGroupOffsets({ groups: [], requireStable: false })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groups'), true)
+  }
+
+  // Test with invalid requireStable type
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: 'not-a-boolean'
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('requireStable'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid group (wrong type)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [0] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must match exactly one schema in oneOf'), true)
+  }
+
+  // Test with invalid group (empty string)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: ['']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have fewer than 1 characters'), true)
+  }
+
+  // Test with invalid group object (no groupId)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{}] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid group object (wrong type for groupId)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 123, topics: [{ name: 'test-topic', partitionIndexes: [0] }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid group object (empty groupId)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: '', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid group object (additional property)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [
+        { groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }], invalidProperty: true }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid group object (invalid topics type)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: 'not-an-array' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid group object (empty topics array)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topic object (missing name)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ partitionIndexes: [0] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (empty name)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: '', partitionIndexes: [0] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (wrong type for name)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 123, partitionIndexes: [0] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (missing partitions)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic' }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (empty partitions array)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (invalid partitions type)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: 'not-an-array' }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (additional property)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [
+        { groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0], invalidProperty: true }] as any }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid partition (invalid type)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: ['not-a-number'] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid partition (invalid negative number)
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [-1] }] as any }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (groupId)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.alterConsumerGroupOffsets({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with missing required field (topics)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.alterConsumerGroupOffsets({ groupId: 'test-group' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for groupId
+  try {
+    await admin.alterConsumerGroupOffsets({
+      // @ts-expect-error - Intentionally passing invalid options
+      groupId: 123,
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid empty groupId
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: '',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid type for topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.alterConsumerGroupOffsets({ groupId: 'test-group', topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid empty topics array
+  try {
+    await admin.alterConsumerGroupOffsets({ groupId: 'test-group', topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid topic object (wrong type)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [0] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must be object'), true)
+  }
+
+  // Test with invalid topic object (missing name)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (empty name)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: '', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (wrong type for name)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 123, partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (missing partitionOffsets)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionOffsets'), true)
+  }
+
+  // Test with invalid topic object (empty partitionOffsets)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionOffsets'), true)
+  }
+
+  // Test with invalid topic object (wrong type for partitionOffsets)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: 'not-an-array' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionOffsets'), true)
+  }
+
+  // Test with invalid topic object (invalid additional property)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [
+        { name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }], invalidProperty: true }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid partitionOffset object (wrong type)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [0] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partition'), true)
+  }
+
+  // Test with invalid partitionOffset object (missing partition)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ offset: BigInt(10) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partition'), true)
+  }
+
+  // Test with invalid partitionOffset object (invalid partition type)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 'not-a-number', offset: BigInt(10) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partition'), true)
+  }
+
+  // Test with invalid partitionOffset object (negative partition number)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: -1, offset: BigInt(10) }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partition'), true)
+  }
+
+  // Test with invalid partitionOffset object (missing offset)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0 }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('offset'), true)
+  }
+
+  // Test with invalid partitionOffset object (invalid offset type)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: 'not-a-bigint' }] as any }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('offset'), true)
+  }
+
+  // Test with invalid partitionOffset object (additional property)
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [
+        { name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10), invalidProperty: true }] as any }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (groupId)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteConsumerGroupOffsets({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with missing required field (topics)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteConsumerGroupOffsets({ groupId: 'test-group' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid type for groupId
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteConsumerGroupOffsets({ groupId: 123, topics: [{ name: 'test-topic', partitionIndexes: [0] }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('groupId'), true)
+  }
+
+  // Test with invalid type for topics
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteConsumerGroupOffsets({ groupId: 'test-group', topics: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with empty topics array
+  try {
+    await admin.deleteConsumerGroupOffsets({ groupId: 'test-group', topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }],
+      invalidProperty: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid topic object (missing name)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ partitionIndexes: [0] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (empty name)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: '', partitionIndexes: [0] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (wrong type for name)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 123, partitionIndexes: [0] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('name'), true)
+  }
+
+  // Test with invalid topic object (missing partitions)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (empty partitions array)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (invalid partitions type)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: 'not-an-array' }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid topic object (additional property)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0], invalidProperty: true }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid partition (invalid type)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: ['not-a-number'] }] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+
+  // Test with invalid partition (invalid negative number)
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [-1] }] as any
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partitionIndexes'), true)
+  }
+})
+
+test('listConsumerGroupOffsets should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin)
+
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: false
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin)
+
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin)
+
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('listConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
+
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: false
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
+
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
+
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
+  }
+})
+
+test('listConsumerGroupOffsets should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 4)
+
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: false
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 4)
+
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 4)
+
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
+  }
+})
+
+test('listConsumerGroupOffsets should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: false
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should handle unavailable API errors (FindCoordinator)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+  }
+})
+
+test('listConsumerGroupOffsets should handle unavailable API errors (OffsetFetch)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'OffsetFetch')
+
+  try {
+    await admin.listConsumerGroupOffsets({
+      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
+      requireStable: false
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API OffsetFetch.'), true)
+  }
+})
+
+test('alterConsumerGroupOffsets should handle unavailable API errors (OffsetCommit)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'OffsetCommit')
+
+  try {
+    await admin.alterConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API OffsetCommit.'), true)
+  }
+})
+
+test('deleteConsumerGroupOffsets should handle unavailable API errors (OffsetDelete)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'OffsetDelete')
+
+  try {
+    await admin.deleteConsumerGroupOffsets({
+      groupId: 'test-group',
+      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
+    strictEqual(error.errors[0].message.includes('Unsupported API OffsetDelete.'), true)
   }
 })

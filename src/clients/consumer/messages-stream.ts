@@ -559,7 +559,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             consumerReceivesChannel.start.publish(diagnosticContext)
 
-            const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset, leaderEpoch)
+            const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
 
             try {
               const headers = new Map()
@@ -617,7 +617,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             // Autocommit if needed
             if (autocommit) {
-              this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset, leaderEpoch })
+              this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset + 1n, leaderEpoch })
             }
           }
         }
@@ -785,7 +785,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const offset = partitions[i]
 
         if (offset >= 0n) {
-          this.#offsetsToFetch.set(`${topic}:${i}`, offset + 1n)
+          this.#offsetsToFetch.set(`${topic}:${i}`, offset)
         } else if (this.#fallbackMode === MessagesStreamFallbackModes.FAIL) {
           callback(
             new UserError(
@@ -811,7 +811,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const partition of partitions) {
         const committed = this.#offsetsToFetch.get(`${topic}:${partition}`)!
-        this.#offsetsCommitted.set(`${topic}:${partition}`, committed - 1n)
+        this.#offsetsCommitted.set(`${topic}:${partition}`, committed)
       }
     }
 

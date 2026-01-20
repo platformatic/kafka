@@ -631,8 +631,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           const committed = committeds.get(`${topic}:${i}`)
 
           // If the consumer is not assigned to this partition, we return -1n.
-          // Otherwise we compute the lag as latest - committed - 1. The -1 is because latest is the offset of the next message to be produced.
-          partitionLags.push(typeof committed === 'undefined' ? -1n : latest - committed - 1n)
+          // Otherwise we compute the lag as latest - committed.
+          partitionLags.push(typeof committed === 'undefined' ? -1n : latest - committed)
         }
 
         lag.set(topic, partitionLags)

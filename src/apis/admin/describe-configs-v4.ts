@@ -3,11 +3,12 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type ConfigSourceValue, type ConfigResourceTypeValue, type ConfigTypeValue } from '../enumerations.ts'
 
 export interface DescribeConfigsRequestResource {
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
-  configurationKeys: string[]
+  configurationKeys?: string[] | null | undefined
 }
 
 export type DescribeConfigsRequest = Parameters<typeof createRequest>
@@ -15,24 +16,24 @@ export type DescribeConfigsRequest = Parameters<typeof createRequest>
 export interface DescribeConfigsResponseSynonym {
   name: string
   value: NullableString
-  source: number
+  source: ConfigSourceValue
 }
 
 export interface DescribeConfigsResponseConfig {
   name: string
   value: NullableString
   readOnly: boolean
-  configSource: number
+  configSource: ConfigSourceValue
   isSensitive: boolean
   synonyms: DescribeConfigsResponseSynonym[]
-  configType: number
+  configType: ConfigTypeValue
   documentation: NullableString
 }
 
 export interface DescribeConfigsResponseResult {
   errorCode: number
   errorMessage: NullableString
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
   configs: DescribeConfigsResponseConfig[]
 }
@@ -109,27 +110,23 @@ export function parseResponse (
       return {
         errorCode,
         errorMessage,
-        resourceType: r.readInt8(),
+        resourceType: r.readInt8() as ConfigResourceTypeValue,
         resourceName: r.readString(),
         configs: r.readArray(r => {
           return {
             name: r.readString(),
             value: r.readNullableString(),
             readOnly: r.readBoolean(),
-            configSource: r.readInt8(),
+            configSource: r.readInt8() as ConfigSourceValue,
             isSensitive: r.readBoolean(),
-            synonyms: r.readArray(
-              r => {
-                return {
-                  name: r.readString(),
-                  value: r.readNullableString(),
-                  source: r.readInt8()
-                }
-              },
-              true,
-              false
-            ),
-            configType: r.readInt8(),
+            synonyms: r.readArray(r => {
+              return {
+                name: r.readString(),
+                value: r.readNullableString(),
+                source: r.readInt8() as ConfigSourceValue
+              }
+            }),
+            configType: r.readInt8() as ConfigTypeValue,
             documentation: r.readNullableString()
           }
         })

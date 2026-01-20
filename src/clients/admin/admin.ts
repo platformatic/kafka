@@ -15,12 +15,18 @@ import {
   type OffsetCommitRequestTopic,
   type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
+import { type AlterConfigsRequest, type AlterConfigsResponse } from '../../apis/admin/alter-configs-v2.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
   type CreateTopicsRequestTopicAssignment,
   type CreateTopicsResponse
 } from '../../apis/admin/create-topics-v7.ts'
+import { type DescribeConfigsRequest, type DescribeConfigsResponse } from '../../apis/admin/describe-configs-v4.ts'
+import {
+  type IncrementalAlterConfigsRequest,
+  type IncrementalAlterConfigsResponse
+} from '../../apis/admin/incremental-alter-configs-v1.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
   type DeleteTopicsRequest,
@@ -51,12 +57,18 @@ import {
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import { type Callback } from '../../apis/definitions.ts'
-import { FindCoordinatorKeyTypes, type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
+import {
+  type ConfigResourceTypeValue,
+  ConfigResourceTypes,
+  FindCoordinatorKeyTypes,
+  type ConsumerGroupStateValue
+} from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   adminClientQuotasChannel,
   adminConsumerGroupOffsetsChannel,
+  adminConfigsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminTopicsChannel,
@@ -84,12 +96,15 @@ import { type GroupAssignment } from '../consumer/types.ts'
 import {
   alterClientQuotasOptionsValidator,
   createPartitionsOptionsValidator,
+  alterConfigsOptionsValidator,
   createTopicsOptionsValidator,
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
   describeClientQuotasOptionsValidator,
+  describeConfigsOptionsValidator,
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
+  incrementalAlterConfigsOptionsValidator,
   listGroupsOptionsValidator,
   listTopicsOptionsValidator,
   removeMembersFromConsumerGroupOptionsValidator,
@@ -100,6 +115,7 @@ import {
 import {
   type AdminOptions,
   type AlterClientQuotasOptions,
+  type AlterConfigsOptions,
   type BrokerLogDirDescription,
   type CreatedTopic,
   type CreatePartitionsOptions,
@@ -110,15 +126,18 @@ import {
   type DeleteConsumerGroupOffsetsOptions,
   type ListConsumerGroupOffsetsOptions,
   type AlterConsumerGroupOffsetsOptions,
+  type DescribeConfigsOptions,
   type DescribeGroupsOptions,
   type DescribeLogDirsOptions,
   type Group,
   type GroupBase,
   type GroupMember,
+  type IncrementalAlterConfigsOptions,
   type ListGroupsOptions,
   type ListTopicsOptions,
   type RemoveMembersFromConsumerGroupOptions,
-  type ListConsumerGroupOffsetsGroup
+  type ListConsumerGroupOffsetsGroup,
+  type ConfigDescription
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {
@@ -600,6 +619,99 @@ export class Admin extends Base<AdminOptions> {
       this.#deleteConsumerGroupOffsets,
       1,
       createDiagnosticContext({ client: this, operation: 'deleteConsumerGroupOffsets', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  describeConfigs (options: DescribeConfigsOptions, callback: CallbackWithPromise<ConfigDescription[]>): void
+  describeConfigs (options: DescribeConfigsOptions): Promise<ConfigDescription[]>
+  describeConfigs (
+    options: DescribeConfigsOptions,
+    callback?: CallbackWithPromise<ConfigDescription[]>
+  ): void | Promise<ConfigDescription[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, describeConfigsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined as unknown as ConfigDescription[])
+      return callback[kCallbackPromise]
+    }
+
+    adminConfigsChannel.traceCallback(
+      this.#describeConfigs,
+      1,
+      createDiagnosticContext({ client: this, operation: 'describeConfigs', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  alterConfigs (options: AlterConfigsOptions, callback: CallbackWithPromise<void>): void
+  alterConfigs (options: AlterConfigsOptions): Promise<void>
+  alterConfigs (options: AlterConfigsOptions, callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, alterConfigsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined)
+      return callback[kCallbackPromise]
+    }
+
+    adminConfigsChannel.traceCallback(
+      this.#alterConfigs,
+      1,
+      createDiagnosticContext({ client: this, operation: 'alterConfigs', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  incrementalAlterConfigs (options: IncrementalAlterConfigsOptions, callback: CallbackWithPromise<void>): void
+  incrementalAlterConfigs (options: IncrementalAlterConfigsOptions): Promise<void>
+  incrementalAlterConfigs (
+    options: IncrementalAlterConfigsOptions,
+    callback?: CallbackWithPromise<void>
+  ): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, incrementalAlterConfigsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError, undefined)
+      return callback[kCallbackPromise]
+    }
+
+    adminConfigsChannel.traceCallback(
+      this.#incrementalAlterConfigs,
+      1,
+      createDiagnosticContext({ client: this, operation: 'incrementalAlterConfigs', options }),
       this,
       options,
       callback
@@ -1641,5 +1753,226 @@ export class Admin extends Base<AdminOptions> {
         })
       })
     })
+  }
+
+  #getConfigRequestsDistributedToBrokers<T extends { resourceType: ConfigResourceTypeValue; resourceName: string }> (
+    resources: T[]
+  ): Map<number, T[]> {
+    const brokerConfigResourceMap = new Map<number, T[]>()
+    for (const resource of resources) {
+      if (
+        resource.resourceType === ConfigResourceTypes.BROKER ||
+        resource.resourceType === ConfigResourceTypes.BROKER_LOGGER
+      ) {
+        if (!brokerConfigResourceMap.has(Number(resource.resourceName))) {
+          brokerConfigResourceMap.set(Number(resource.resourceName), [])
+        }
+        brokerConfigResourceMap.get(Number(resource.resourceName))!.push(resource)
+      } else {
+        if (!brokerConfigResourceMap.has(-1)) {
+          brokerConfigResourceMap.set(-1, [])
+        }
+        brokerConfigResourceMap.get(-1)!.push(resource)
+      }
+    }
+    return brokerConfigResourceMap
+  }
+
+  #getAnyOrSpecificBrokerConnection (brokerId: number, callback: CallbackWithPromise<Connection>): void {
+    if (brokerId === -1) {
+      this[kGetBootstrapConnection](callback)
+      return
+    }
+
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
+      if (error) {
+        callback(error, undefined as unknown as Connection)
+        return
+      }
+
+      const brokerInstance = metadata.brokers.get(brokerId)
+      if (!brokerInstance) {
+        callback(new Error(`Broker with id ${brokerId} not found in cluster.`), undefined as unknown as Connection)
+        return
+      }
+
+      this[kGetConnection](brokerInstance, callback)
+    })
+  }
+
+  #describeConfigs (options: DescribeConfigsOptions, callback: CallbackWithPromise<ConfigDescription[]>): void {
+    runConcurrentCallbacks<ConfigDescription[]>(
+      'Describing configs failed.',
+      this.#getConfigRequestsDistributedToBrokers(options.resources),
+      ([brokerId, resources], concurrentCallback) => {
+        this.#describeConfigsOnBroker({ ...options, resources }, brokerId, (error, response) => {
+          if (error) {
+            concurrentCallback(error, undefined as unknown as ConfigDescription[])
+            return
+          }
+
+          concurrentCallback(null, response)
+        })
+      },
+      (error, results) => {
+        callback(error, results?.flat())
+      }
+    )
+  }
+
+  #describeConfigsOnBroker (
+    options: DescribeConfigsOptions,
+    broker: number | Connection,
+    callback: CallbackWithPromise<ConfigDescription[]>
+  ): void {
+    if (typeof broker === 'number') {
+      this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        if (error) {
+          callback(error, undefined as unknown as ConfigDescription[])
+          return
+        }
+        this.#describeConfigsOnBroker(options, connection, callback)
+      })
+      return
+    }
+
+    this[kPerformWithRetry](
+      'describeConfigs',
+      retryCallback => {
+        this[kGetApi]<DescribeConfigsRequest, DescribeConfigsResponse>('DescribeConfigs', (error, api) => {
+          if (error) {
+            retryCallback(error, undefined as unknown as DescribeConfigsResponse)
+            return
+          }
+
+          api(
+            broker,
+            options.resources,
+            options.includeSynonyms ?? false,
+            options.includeDocumentation ?? false,
+            retryCallback as unknown as Callback<DescribeConfigsResponse>
+          )
+        })
+      },
+      (error: Error | null, response: DescribeConfigsResponse) => {
+        if (error) {
+          callback(error, undefined as unknown as ConfigDescription[])
+          return
+        }
+
+        const resultsWithoutErrors = response.results.map(result => ({
+          resourceType: result.resourceType,
+          resourceName: result.resourceName,
+          configs: result.configs
+        }))
+        callback(null, resultsWithoutErrors)
+      },
+      0
+    )
+  }
+
+  #alterConfigs (options: DescribeConfigsOptions, callback: CallbackWithPromise<void>): void {
+    runConcurrentCallbacks<void>(
+      'Altering configs failed.',
+      this.#getConfigRequestsDistributedToBrokers(options.resources),
+      ([brokerId, resources], concurrentCallback) => {
+        this.#alterConfigsOnBroker({ ...options, resources }, brokerId, concurrentCallback)
+      },
+      error => {
+        callback(error)
+      }
+    )
+  }
+
+  #alterConfigsOnBroker (
+    options: AlterConfigsOptions,
+    broker: number | Connection,
+    callback: CallbackWithPromise<void>
+  ): void {
+    if (typeof broker === 'number') {
+      this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        if (error) {
+          callback(error)
+          return
+        }
+        this.#alterConfigsOnBroker(options, connection, callback)
+      })
+      return
+    }
+
+    this[kPerformWithRetry](
+      'alterConfigs',
+      retryCallback => {
+        this[kGetApi]<AlterConfigsRequest, AlterConfigsResponse>('AlterConfigs', (error, api) => {
+          if (error) {
+            retryCallback(error)
+            return
+          }
+
+          api(
+            broker,
+            options.resources,
+            options.validateOnly ?? false,
+            retryCallback as unknown as Callback<AlterConfigsResponse>
+          )
+        })
+      },
+      callback,
+      0
+    )
+  }
+
+  #incrementalAlterConfigs (options: IncrementalAlterConfigsOptions, callback: CallbackWithPromise<void>): void {
+    runConcurrentCallbacks<void>(
+      'Incrementally altering configs failed.',
+      this.#getConfigRequestsDistributedToBrokers(options.resources),
+      ([brokerId, resources], concurrentCallback) => {
+        this.#incrementalAlterConfigsOnBroker({ ...options, resources }, brokerId, concurrentCallback)
+      },
+      error => {
+        callback(error)
+      }
+    )
+  }
+
+  #incrementalAlterConfigsOnBroker (
+    options: IncrementalAlterConfigsOptions,
+    broker: number | Connection,
+    callback: CallbackWithPromise<void>
+  ): void {
+    if (typeof broker === 'number') {
+      this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        if (error) {
+          callback(error)
+          return
+        }
+        this.#incrementalAlterConfigsOnBroker(options, connection, callback)
+      })
+      return
+    }
+
+    this[kPerformWithRetry](
+      'incrementalAlterConfigs',
+      retryCallback => {
+        this[kGetApi]<IncrementalAlterConfigsRequest, IncrementalAlterConfigsResponse>('IncrementalAlterConfigs', (
+          error,
+          api
+        ) => {
+          if (error) {
+            retryCallback(error)
+            return
+          }
+
+          api(
+            broker,
+            options.resources,
+            options.validateOnly ?? false,
+            retryCallback as unknown as Callback<IncrementalAlterConfigsResponse>
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 }

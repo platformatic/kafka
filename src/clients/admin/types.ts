@@ -1,13 +1,19 @@
 import { type AlterClientQuotasRequestEntry } from '../../apis/admin/alter-client-quotas-v1.ts'
 import { type CreatePartitionsRequestTopic } from '../../apis/admin/create-partitions-v3.ts'
 import { type CreateTopicsRequestTopicConfig } from '../../apis/admin/create-topics-v7.ts'
+import { type AlterConfigsRequestResource } from '../../apis/admin/alter-configs-v2.ts'
+import {
+  type DescribeConfigsRequestResource,
+  type DescribeConfigsResponseConfig
+} from '../../apis/admin/describe-configs-v4.ts'
 import { type DescribeClientQuotasRequestComponent } from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type DescribeLogDirsRequestTopic,
   type DescribeLogDirsResponse,
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
-import { type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
+import { type IncrementalAlterConfigsRequestResource } from '../../apis/admin/incremental-alter-configs-v1.ts'
+import { type ConfigResourceTypeValue, type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
@@ -160,4 +166,26 @@ export interface AlterConsumerGroupOffsetsOptions {
 export interface DeleteConsumerGroupOffsetsOptions {
   groupId: string
   topics: { name: string; partitionIndexes: number[] }[]
+}
+
+export interface DescribeConfigsOptions {
+  resources: DescribeConfigsRequestResource[]
+  includeSynonyms?: boolean
+  includeDocumentation?: boolean
+}
+
+export interface ConfigDescription {
+  resourceType: ConfigResourceTypeValue
+  resourceName: string
+  configs: DescribeConfigsResponseConfig[]
+}
+
+export interface AlterConfigsOptions {
+  resources: AlterConfigsRequestResource[]
+  validateOnly?: boolean
+}
+
+export interface IncrementalAlterConfigsOptions {
+  resources: IncrementalAlterConfigsRequestResource[]
+  validateOnly?: boolean
 }

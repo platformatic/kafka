@@ -1,4 +1,10 @@
-import { ClientQuotaMatchTypes, ConsumerGroupStates } from '../../apis/enumerations.ts'
+import {
+  allowedIncrementalAlterConfigOperationTypes,
+  allowedResourceTypes,
+  ClientQuotaMatchTypes,
+  ConsumerGroupStates,
+  IncrementalAlterConfigOperationTypes
+} from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
@@ -359,6 +365,124 @@ export const deleteConsumerGroupOffsetsOptionsSchema = {
   additionalProperties: false
 }
 
+export const describeConfigsOptionsSchema = {
+  type: 'object',
+  properties: {
+    resources: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          resourceType: { type: 'number', enum: allowedResourceTypes },
+          resourceName: { type: 'string', minLength: 1 },
+          configurationKeys: {
+            type: ['array', 'null'],
+            items: { type: 'string', minLength: 1 }
+          }
+        },
+        required: ['resourceType', 'resourceName'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    includeSynonyms: { type: 'boolean' },
+    includeDocumentation: { type: 'boolean' }
+  },
+  required: ['resources'],
+  additionalProperties: false
+}
+
+export const alterConfigsOptionsSchema = {
+  type: 'object',
+  properties: {
+    resources: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          resourceType: { type: 'number', enum: allowedResourceTypes },
+          resourceName: { type: 'string', minLength: 1 },
+          configs: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', minLength: 1 },
+                value: { type: ['string', 'null'] }
+              },
+              required: ['name'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['resourceType', 'resourceName', 'configs'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    validateOnly: { type: 'boolean' }
+  },
+  required: ['resources'],
+  additionalProperties: false
+}
+
+export const incrementalAlterConfigsOptionsSchema = {
+  type: 'object',
+  properties: {
+    resources: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          resourceType: { type: 'number', enum: allowedResourceTypes },
+          resourceName: { type: 'string', minLength: 1 },
+          configs: {
+            type: 'array',
+            items: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', minLength: 1 },
+                    configOperation: {
+                      type: 'number',
+                      enum: [
+                        ...allowedIncrementalAlterConfigOperationTypes.filter(
+                          v => v !== IncrementalAlterConfigOperationTypes.DELETE
+                        )
+                      ]
+                    },
+                    value: { type: 'string' }
+                  },
+                  required: ['name', 'configOperation', 'value'],
+                  additionalProperties: false
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', minLength: 1 },
+                    configOperation: { type: 'number', enum: [IncrementalAlterConfigOperationTypes.DELETE] }
+                  },
+                  required: ['name', 'configOperation'],
+                  additionalProperties: false
+                }
+              ]
+            },
+            minItems: 1
+          }
+        },
+        required: ['resourceType', 'resourceName', 'configs'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    validateOnly: { type: 'boolean' }
+  },
+  required: ['resources'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
@@ -373,3 +497,6 @@ export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOption
 export const alterConsumerGroupOffsetsOptionsValidator = ajv.compile(alterConsumerGroupOffsetsOptionsSchema)
 export const deleteConsumerGroupOffsetsOptionsValidator = ajv.compile(deleteConsumerGroupOffsetsOptionsSchema)
 export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumerGroupOffsetsOptionsSchema)
+export const describeConfigsOptionsValidator = ajv.compile(describeConfigsOptionsSchema)
+export const alterConfigsOptionsValidator = ajv.compile(alterConfigsOptionsSchema)
+export const incrementalAlterConfigsOptionsValidator = ajv.compile(incrementalAlterConfigsOptionsSchema)

@@ -12,7 +12,10 @@ import {
 } from '../../../src/apis/enumerations.ts'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
+  AclOperations,
+  AclPermissionTypes,
   Admin,
+  adminAclsChannel,
   adminClientQuotasChannel,
   adminConsumerGroupOffsetsChannel,
   adminConfigsChannel,
@@ -31,8 +34,11 @@ import {
   type Connection,
   type ConfigDescription,
   Consumer,
+  createAclsV3,
   type CreatedTopic,
   createPartitionsV3,
+  deleteAclsV3,
+  describeAclsV3,
   type DescribeClientQuotasOptions,
   describeClientQuotasV0,
   describeConfigsV4,
@@ -47,6 +53,8 @@ import {
   MultipleErrors,
   ResponseError,
   type ResponseParser,
+  ResourcePatternTypes,
+  ResourceTypes,
   sleep,
   UnsupportedApiError,
   type Writer
@@ -267,6 +275,48 @@ test('all operations should fail when admin is closed', async t => {
     await admin.incrementalAlterConfigs({
       resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configs: [] }]
     })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call describeLogDirs on closed admin
+  try {
+    await admin.describeLogDirs({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call createAcls on closed admin
+  try {
+    await admin.createAcls({ creations: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call describeAcls on closed admin
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.ANY,
+        resourceName: null,
+        resourcePatternType: ResourcePatternTypes.ANY,
+        principal: null,
+        host: null,
+        operation: AclOperations.ANY,
+        permissionType: AclPermissionTypes.ANY
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call deleteAcls on closed admin
+  try {
+    await admin.deleteAcls({ filters: [] })
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error.message, 'Client is closed.')
@@ -6628,5 +6678,934 @@ test('incrementalAlterConfigs should handle unavailable API errors', async t => 
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.errors[0].message.includes('Unsupported API IncrementalAlterConfigs.'), true)
+  }
+})
+
+const aclTestCases = [
+  {
+    resourceType: ResourceTypes.TOPIC,
+    resourceName: 'test-topic',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: 'User:test-user',
+    host: '*',
+    operation: AclOperations.READ,
+    permissionType: AclPermissionTypes.ALLOW
+  },
+  {
+    resourceType: ResourceTypes.GROUP,
+    resourceName: 'test-group',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: 'User:test-user2',
+    host: '192.168.1.1',
+    operation: AclOperations.WRITE,
+    permissionType: AclPermissionTypes.DENY
+  },
+  {
+    resourceType: ResourceTypes.CLUSTER,
+    resourceName: 'kafka-cluster',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: 'User:admin',
+    host: '*',
+    operation: AclOperations.ALTER,
+    permissionType: AclPermissionTypes.ALLOW
+  }
+]
+
+for (const testCase of aclTestCases) {
+  test(`ACLs should be created, described, and deleted for ${testCase.principal} on ${testCase.resourceName}`, async t => {
+    const admin = createAdmin(t)
+
+    const createOptions = {
+      creations: [testCase]
+    }
+
+    await admin.createAcls(createOptions)
+
+    const describeOptions = {
+      filter: {
+        resourceType: testCase.resourceType,
+        resourceName: testCase.resourceName,
+        resourcePatternType: testCase.resourcePatternType,
+        principal: testCase.principal,
+        host: testCase.host,
+        operation: testCase.operation,
+        permissionType: testCase.permissionType
+      }
+    }
+
+    await scheduler.wait(1000)
+
+    const describeResult = await admin.describeAcls(describeOptions)
+
+    deepStrictEqual(describeResult, [
+      {
+        resourceType: testCase.resourceType,
+        resourceName: testCase.resourceName,
+        resourcePatternType: testCase.resourcePatternType,
+        acls: [
+          {
+            principal: testCase.principal,
+            host: testCase.host,
+            operation: testCase.operation,
+            permissionType: testCase.permissionType
+          }
+        ]
+      }
+    ])
+
+    const deleteOptions = {
+      filters: [testCase]
+    }
+
+    const deleteResult = await admin.deleteAcls(deleteOptions)
+
+    deepStrictEqual(deleteResult, [testCase])
+
+    await scheduler.wait(1000)
+
+    const verifyResult = await admin.describeAcls(describeOptions)
+    deepStrictEqual(verifyResult, [])
+  })
+}
+
+test('createAcls, describeAcls, and deleteAcls should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+
+  const testAcl = {
+    resourceType: ResourceTypes.TOPIC,
+    resourceName: 'test-topic-diagnostic',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: 'User:test-diagnostic',
+    host: '*',
+    operation: AclOperations.READ,
+    permissionType: AclPermissionTypes.ALLOW
+  }
+
+  const createOptions = { creations: [testAcl] }
+
+  const verifyCreateTracingChannel = createTracingChannelVerifier(
+    adminAclsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'createAcls',
+          options: createOptions,
+          operationId: mockedOperationId
+        })
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'createAcls'
+  )
+
+  await admin.createAcls(createOptions)
+  verifyCreateTracingChannel()
+
+  const describeOptions = {
+    filter: {
+      resourceType: testAcl.resourceType,
+      resourceName: testAcl.resourceName,
+      resourcePatternType: testAcl.resourcePatternType,
+      principal: testAcl.principal,
+      host: testAcl.host,
+      operation: testAcl.operation,
+      permissionType: testAcl.permissionType
+    }
+  }
+
+  const verifyDescribeTracingChannel = createTracingChannelVerifier(
+    adminAclsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'describeAcls',
+          options: describeOptions,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as any
+        ok(Array.isArray(result))
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'describeAcls'
+  )
+
+  await admin.describeAcls(describeOptions)
+  verifyDescribeTracingChannel()
+
+  const deleteOptions = { filters: [testAcl] }
+
+  const verifyDeleteTracingChannel = createTracingChannelVerifier(
+    adminAclsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'deleteAcls',
+          options: deleteOptions,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as any
+        ok(Array.isArray(result))
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'deleteAcls'
+  )
+
+  await admin.deleteAcls(deleteOptions)
+  verifyDeleteTracingChannel()
+})
+
+test('createAcls should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (creations)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createAcls({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('creations'), true)
+  }
+
+  // Test with invalid type for creations
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createAcls({ creations: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('creations'), true)
+  }
+
+  // Test with empty creations array
+  try {
+    await admin.createAcls({ creations: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('creations'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ],
+      invalidOption: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid ACL object (missing resourceType)
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ] as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid resourceType
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: 'INVALID_RESOURCE_TYPE' as any,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: '',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW,
+          invalidProperty: true
+        }
+      ],
+      invalidOption: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('describeAcls should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (filter)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.describeAcls({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('filter'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      },
+      invalidOption: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for filter
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.describeAcls({ filter: 'not-an-object' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('filter'), true)
+  }
+
+  // Test with missing resourceType
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      } as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid resourceType
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: 'INVALID_RESOURCE_TYPE' as any,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: '',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with null resourceName (allowed)
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: null,
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+  } catch (error) {
+    throw new Error('Did not expect an error to be thrown')
+  }
+
+  // Test with missing resourceName (allowed)
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      } as any
+    })
+  } catch (error) {
+    throw new Error('Did not expect an error to be thrown')
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW,
+        invalidProperty: true
+      }
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('deleteAcls should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required field (filters)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteAcls({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('filters'), true)
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.deleteAcls({
+      filters: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ],
+      invalidOption: true
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+
+  // Test with invalid type for filters
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteAcls({ filters: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('filters'), true)
+  }
+
+  // Test with empty filters array
+  try {
+    await admin.deleteAcls({ filters: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('filters'), true)
+  }
+
+  // Test with missing resourceType
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      } as any
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid resourceType
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: 'INVALID_RESOURCE_TYPE' as any,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceType'), true)
+  }
+
+  // Test with invalid empty resourceName
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: '',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('resourceName'), true)
+  }
+
+  // Test with null resourceName (allowed)
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: null,
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+  } catch (error) {
+    throw new Error('Did not expect an error to be thrown')
+  }
+
+  // Test with missing resourceName (allowed)
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      } as any
+    })
+  } catch (error) {
+    throw new Error('Did not expect an error to be thrown')
+  }
+
+  // Test with invalid additional property
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW,
+        invalidProperty: true
+      }
+    } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('must NOT have additional properties'), true)
+  }
+})
+
+test('createAcls should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 1)
+
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Creating ACLs failed.'), true)
+  }
+})
+
+test('describeAcls should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 1)
+
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Describing ACLs failed.'), true)
+  }
+})
+
+test('deleteAcls should handle errors from Connection.getFirstAvailable', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], 1)
+
+  try {
+    await admin.deleteAcls({
+      filters: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting ACLs failed.'), true)
+  }
+})
+
+test('createAcls should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 1)
+
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Creating ACLs failed.'), true)
+  }
+})
+
+test('describeAcls should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 1)
+
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Describing ACLs failed.'), true)
+  }
+})
+
+test('deleteAcls should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  mockConnectionPoolGet(admin[kConnections], 1)
+
+  try {
+    await admin.deleteAcls({
+      filters: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting ACLs failed.'), true)
+  }
+})
+
+test('createAcls should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  mockAPI(admin[kConnections], createAclsV3.api.key)
+
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Creating ACLs failed.'), true)
+  }
+})
+
+test('describeAcls should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  mockAPI(admin[kConnections], describeAclsV3.api.key)
+
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Describing ACLs failed.'), true)
+  }
+})
+
+test('deleteAcls should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  mockAPI(admin[kConnections], deleteAclsV3.api.key)
+
+  try {
+    await admin.deleteAcls({
+      filters: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting ACLs failed.'), true)
+  }
+})
+
+test('createAcls should handle unavailable API errors (CreateAcls)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'CreateAcls')
+
+  try {
+    await admin.createAcls({
+      creations: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API CreateAcls.'), true)
+  }
+})
+
+test('describeAcls should handle unavailable API errors (DescribeAcls)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DescribeAcls')
+
+  try {
+    await admin.describeAcls({
+      filter: {
+        resourceType: ResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        resourcePatternType: ResourcePatternTypes.LITERAL,
+        principal: 'User:test',
+        host: '*',
+        operation: AclOperations.READ,
+        permissionType: AclPermissionTypes.ALLOW
+      }
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DescribeAcls.'), true)
+  }
+})
+
+test('deleteAcls should handle unavailable API errors (DeleteAcls)', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'DeleteAcls')
+
+  try {
+    await admin.deleteAcls({
+      filters: [
+        {
+          resourceType: ResourceTypes.TOPIC,
+          resourceName: 'test-topic',
+          resourcePatternType: ResourcePatternTypes.LITERAL,
+          principal: 'User:test',
+          host: '*',
+          operation: AclOperations.READ,
+          permissionType: AclPermissionTypes.ALLOW
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DeleteAcls.'), true)
   }
 })

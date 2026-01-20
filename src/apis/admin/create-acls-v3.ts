@@ -3,16 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-
-export interface CreateAclsRequestCreation {
-  resourceType: number
-  resourceName: string
-  resourcePatternType: number
-  principal: string
-  host: string
-  operation: number
-  permissionType: number
-}
+import { type Acl } from '../types.ts'
 
 export type CreateAclsRequest = Parameters<typeof createRequest>
 
@@ -37,7 +28,7 @@ CreateAcls Request (Version: 3) => [creations] TAG_BUFFER
     operation => INT8
     permission_type => INT8
 */
-export function createRequest (creations: CreateAclsRequestCreation[]): Writer {
+export function createRequest (creations: Acl[]): Writer {
   return Writer.create()
     .appendArray(creations, (w, c) => {
       w.appendInt8(c.resourceType)

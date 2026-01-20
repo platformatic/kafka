@@ -3,28 +3,19 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import {
+  type AclOperationValue,
+  type AclPermissionTypeValue,
+  type ResourcePatternTypeValue,
+  type ResourceTypeValue
+} from '../enumerations.ts'
+import { type Acl, type AclFilter } from '../types.ts'
 
-export interface DeleteAclsRequestFilter {
-  resourceTypeFilter: number
-  resourceNameFilter?: NullableString
-  patternTypeFilter: number
-  principalFilter?: NullableString
-  hostFilter?: NullableString
-  operation: number
-  permissionType: number
-}
 export type DeleteAclsRequest = Parameters<typeof createRequest>
 
-export interface DeleteAclsResponseMatchingAcl {
+export interface DeleteAclsResponseMatchingAcl extends Acl {
   errorCode: number
   errorMessage: NullableString
-  resourceType: number
-  resourceName: string
-  patternType: number
-  principal: string
-  host: string
-  operation: number
-  permissionType: number
 }
 
 export interface DeleteAclsResponseFilterResults {
@@ -48,14 +39,14 @@ export interface DeleteAclsResponse {
       operation => INT8
       permission_type => INT8
 */
-export function createRequest (filters: DeleteAclsRequestFilter[]): Writer {
+export function createRequest (filters: AclFilter[]): Writer {
   return Writer.create()
     .appendArray(filters, (w, f) => {
-      w.appendInt8(f.resourceTypeFilter)
-        .appendString(f.resourceNameFilter)
-        .appendInt8(f.patternTypeFilter)
-        .appendString(f.principalFilter)
-        .appendString(f.hostFilter)
+      w.appendInt8(f.resourceType)
+        .appendString(f.resourceName)
+        .appendInt8(f.resourcePatternType)
+        .appendString(f.principal)
+        .appendString(f.host)
         .appendInt8(f.operation)
         .appendInt8(f.permissionType)
     })
@@ -111,13 +102,13 @@ export function parseResponse (
           return {
             errorCode,
             errorMessage,
-            resourceType: r.readInt8(),
+            resourceType: r.readInt8() as ResourceTypeValue,
             resourceName: r.readString(),
-            patternType: r.readInt8(),
+            resourcePatternType: r.readInt8() as ResourcePatternTypeValue,
             principal: r.readString(),
             host: r.readString(),
-            operation: r.readInt8(),
-            permissionType: r.readInt8()
+            operation: r.readInt8() as AclOperationValue,
+            permissionType: r.readInt8() as AclPermissionTypeValue
           }
         })
       }

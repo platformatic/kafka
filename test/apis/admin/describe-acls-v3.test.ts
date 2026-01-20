@@ -1,69 +1,36 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { describeAclsV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import {
+  AclOperations,
+  AclPermissionTypes,
+  describeAclsV3,
+  ResourcePatternTypes,
+  Reader,
+  ResourceTypes,
+  ResponseError,
+  Writer
+} from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = describeAclsV3
 
-// Constants for ACL resource types, pattern types, operations, and permission types
-const RESOURCE_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  TOPIC: 2,
-  GROUP: 3,
-  CLUSTER: 4,
-  TRANSACTIONAL_ID: 5,
-  DELEGATION_TOKEN: 6
-}
-
-const PATTERN_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  MATCH: 2,
-  LITERAL: 3,
-  PREFIXED: 4
-}
-
-const OPERATION = {
-  UNKNOWN: 0,
-  ANY: 1,
-  ALL: 2,
-  READ: 3,
-  WRITE: 4,
-  CREATE: 5,
-  DELETE: 6,
-  ALTER: 7,
-  DESCRIBE: 8,
-  CLUSTER_ACTION: 9,
-  DESCRIBE_CONFIGS: 10,
-  ALTER_CONFIGS: 11,
-  IDEMPOTENT_WRITE: 12
-}
-
-const PERMISSION_TYPE = {
-  UNKNOWN: 0,
-  ANY: 1,
-  DENY: 2,
-  ALLOW: 3
-}
-
 test('createRequest serializes all filters correctly', () => {
-  const resourceTypeFilter = RESOURCE_TYPE.TOPIC
-  const resourceNameFilter = 'test-topic'
-  const patternTypeFilter = PATTERN_TYPE.LITERAL
-  const principalFilter = 'User:test-user'
-  const hostFilter = '*'
-  const operation = OPERATION.READ
-  const permissionType = PERMISSION_TYPE.ALLOW
+  const resourceType = ResourceTypes.TOPIC
+  const resourceName = 'test-topic'
+  const resourcePatternType = ResourcePatternTypes.LITERAL
+  const principal = 'User:test-user'
+  const host = '*'
+  const operation = AclOperations.READ
+  const permissionType = AclPermissionTypes.ALLOW
 
-  const writer = createRequest(
-    resourceTypeFilter,
-    resourceNameFilter,
-    patternTypeFilter,
-    principalFilter,
-    hostFilter,
+  const writer = createRequest({
+    resourceType,
+    resourceName,
+    resourcePatternType,
+    principal,
+    host,
     operation,
     permissionType
-  )
+  })
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -72,79 +39,79 @@ test('createRequest serializes all filters correctly', () => {
   const reader = Reader.from(writer)
 
   // Read all filter parameters
-  const serializedResourceTypeFilter = reader.readInt8()
-  const serializedResourceNameFilter = reader.readNullableString()
-  const serializedPatternTypeFilter = reader.readInt8()
-  const serializedPrincipalFilter = reader.readNullableString()
-  const serializedHostFilter = reader.readNullableString()
+  const serializedResourceType = reader.readInt8()
+  const serializedResourceName = reader.readNullableString()
+  const serializedResourcePatternType = reader.readInt8()
+  const serializedPrincipal = reader.readNullableString()
+  const serializedHost = reader.readNullableString()
   const serializedOperation = reader.readInt8()
   const serializedPermissionType = reader.readInt8()
 
   // Verify serialized data
   deepStrictEqual(
     {
-      resourceTypeFilter: serializedResourceTypeFilter,
-      resourceNameFilter: serializedResourceNameFilter,
-      patternTypeFilter: serializedPatternTypeFilter,
-      principalFilter: serializedPrincipalFilter,
-      hostFilter: serializedHostFilter,
+      resourceType: serializedResourceType,
+      resourceName: serializedResourceName,
+      resourcePatternType: serializedResourcePatternType,
+      principal: serializedPrincipal,
+      host: serializedHost,
       operation: serializedOperation,
       permissionType: serializedPermissionType
     },
     {
-      resourceTypeFilter: RESOURCE_TYPE.TOPIC,
-      resourceNameFilter: 'test-topic',
-      patternTypeFilter: PATTERN_TYPE.LITERAL,
-      principalFilter: 'User:test-user',
-      hostFilter: '*',
-      operation: OPERATION.READ,
-      permissionType: PERMISSION_TYPE.ALLOW
+      resourceType: ResourceTypes.TOPIC,
+      resourceName: 'test-topic',
+      resourcePatternType: ResourcePatternTypes.LITERAL,
+      principal: 'User:test-user',
+      host: '*',
+      operation: AclOperations.READ,
+      permissionType: AclPermissionTypes.ALLOW
     },
     'Serialized data should match expected values'
   )
 })
 
 test('createRequest serializes null filters correctly', () => {
-  const resourceTypeFilter = RESOURCE_TYPE.ANY
-  const resourceNameFilter = null
-  const patternTypeFilter = PATTERN_TYPE.ANY
-  const principalFilter = null
-  const hostFilter = null
-  const operation = OPERATION.ANY
-  const permissionType = PERMISSION_TYPE.ANY
+  const resourceType = ResourceTypes.ANY
+  const resourceName = null
+  const resourcePatternType = ResourcePatternTypes.ANY
+  const principal = null
+  const host = null
+  const operation = AclOperations.ANY
+  const permissionType = AclPermissionTypes.ANY
 
-  const writer = createRequest(
-    resourceTypeFilter,
-    resourceNameFilter,
-    patternTypeFilter,
-    principalFilter,
-    hostFilter,
+  const writer = createRequest({
+    resourceType,
+    resourceName,
+    resourcePatternType,
+    principal,
+    host,
     operation,
     permissionType
-  )
+  })
 
   const reader = Reader.from(writer)
 
   // Read all filter parameters
-  const serializedResourceTypeFilter = reader.readInt8()
-  const serializedResourceNameFilter = reader.readNullableString()
-  const serializedPatternTypeFilter = reader.readInt8()
-  const serializedPrincipalFilter = reader.readNullableString()
-  const serializedHostFilter = reader.readNullableString()
+  const serializedResourceType = reader.readInt8()
+  const serializedResourceName = reader.readNullableString()
+  const serializedResourcePatternType = reader.readInt8()
+  const serializedPrincipal = reader.readNullableString()
+  const serializedHost = reader.readNullableString()
   const serializedOperation = reader.readInt8()
   const serializedPermissionType = reader.readInt8()
 
   // Verify null values are serialized correctly
   deepStrictEqual(
     {
-      resourceNameFilter: serializedResourceNameFilter,
-      principalFilter: serializedPrincipalFilter,
-      hostFilter: serializedHostFilter
+      resourceName: serializedResourceName,
+      principal: serializedPrincipal,
+      host: serializedHost
     },
     {
-      resourceNameFilter: null,
-      principalFilter: null,
-      hostFilter: null
+      resourceName: null,
+      principal: null,
+      host: null
     },
     'Null filter values should be serialized correctly'
   )
@@ -152,16 +119,16 @@ test('createRequest serializes null filters correctly', () => {
   // Verify ANY values are serialized correctly
   deepStrictEqual(
     {
-      resourceTypeFilter: serializedResourceTypeFilter,
-      patternTypeFilter: serializedPatternTypeFilter,
+      resourceType: serializedResourceType,
+      resourcePatternType: serializedResourcePatternType,
       operation: serializedOperation,
       permissionType: serializedPermissionType
     },
     {
-      resourceTypeFilter: RESOURCE_TYPE.ANY,
-      patternTypeFilter: PATTERN_TYPE.ANY,
-      operation: OPERATION.ANY,
-      permissionType: PERMISSION_TYPE.ANY
+      resourceType: ResourceTypes.ANY,
+      resourcePatternType: ResourcePatternTypes.ANY,
+      operation: AclOperations.ANY,
+      permissionType: AclPermissionTypes.ANY
     },
     'ANY filter values should be serialized correctly'
   )
@@ -200,15 +167,15 @@ test('parseResponse correctly processes a successful response with resources', (
     .appendArray(
       [
         {
-          resourceType: RESOURCE_TYPE.TOPIC,
+          resourceType: ResourceTypes.TOPIC,
           resourceName: 'test-topic',
-          patternType: PATTERN_TYPE.LITERAL,
+          resourcePatternType: ResourcePatternTypes.LITERAL,
           acls: [
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.READ,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.READ,
+              permissionType: AclPermissionTypes.ALLOW
             }
           ]
         }
@@ -216,7 +183,7 @@ test('parseResponse correctly processes a successful response with resources', (
       (w, resource) => {
         w.appendInt8(resource.resourceType)
           .appendString(resource.resourceName)
-          .appendInt8(resource.patternType)
+          .appendInt8(resource.resourcePatternType)
           .appendArray(resource.acls, (w, acl) => {
             w.appendString(acl.principal)
               .appendString(acl.host)
@@ -238,15 +205,15 @@ test('parseResponse correctly processes a successful response with resources', (
       errorMessage: null,
       resources: [
         {
-          resourceType: RESOURCE_TYPE.TOPIC,
+          resourceType: ResourceTypes.TOPIC,
           resourceName: 'test-topic',
-          patternType: PATTERN_TYPE.LITERAL,
+          resourcePatternType: ResourcePatternTypes.LITERAL,
           acls: [
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.READ,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.READ,
+              permissionType: AclPermissionTypes.ALLOW
             }
           ]
         }
@@ -265,28 +232,28 @@ test('parseResponse correctly processes multiple resources', () => {
     .appendArray(
       [
         {
-          resourceType: RESOURCE_TYPE.TOPIC,
+          resourceType: ResourceTypes.TOPIC,
           resourceName: 'test-topic',
-          patternType: PATTERN_TYPE.LITERAL,
+          resourcePatternType: ResourcePatternTypes.LITERAL,
           acls: [
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.READ,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.READ,
+              permissionType: AclPermissionTypes.ALLOW
             }
           ]
         },
         {
-          resourceType: RESOURCE_TYPE.GROUP,
+          resourceType: ResourceTypes.GROUP,
           resourceName: 'test-group',
-          patternType: PATTERN_TYPE.LITERAL,
+          resourcePatternType: ResourcePatternTypes.LITERAL,
           acls: [
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.READ,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.READ,
+              permissionType: AclPermissionTypes.ALLOW
             }
           ]
         }
@@ -294,7 +261,7 @@ test('parseResponse correctly processes multiple resources', () => {
       (w, resource) => {
         w.appendInt8(resource.resourceType)
           .appendString(resource.resourceName)
-          .appendInt8(resource.patternType)
+          .appendInt8(resource.resourcePatternType)
           .appendArray(resource.acls, (w, acl) => {
             w.appendString(acl.principal)
               .appendString(acl.host)
@@ -310,9 +277,9 @@ test('parseResponse correctly processes multiple resources', () => {
   // Verify multiple resources
   deepStrictEqual(response.resources.length, 2, 'Response should contain 2 resources')
 
-  deepStrictEqual(response.resources[0].resourceType, RESOURCE_TYPE.TOPIC, 'First resource should be a TOPIC')
+  deepStrictEqual(response.resources[0].resourceType, ResourceTypes.TOPIC, 'First resource should be a TOPIC')
 
-  deepStrictEqual(response.resources[1].resourceType, RESOURCE_TYPE.GROUP, 'Second resource should be a GROUP')
+  deepStrictEqual(response.resources[1].resourceType, ResourceTypes.GROUP, 'Second resource should be a GROUP')
 })
 
 test('parseResponse correctly processes multiple ACLs per resource', () => {
@@ -324,21 +291,21 @@ test('parseResponse correctly processes multiple ACLs per resource', () => {
     .appendArray(
       [
         {
-          resourceType: RESOURCE_TYPE.TOPIC,
+          resourceType: ResourceTypes.TOPIC,
           resourceName: 'test-topic',
-          patternType: PATTERN_TYPE.LITERAL,
+          resourcePatternType: ResourcePatternTypes.LITERAL,
           acls: [
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.READ,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.READ,
+              permissionType: AclPermissionTypes.ALLOW
             },
             {
               principal: 'User:test-user',
               host: '*',
-              operation: OPERATION.WRITE,
-              permissionType: PERMISSION_TYPE.ALLOW
+              operation: AclOperations.WRITE,
+              permissionType: AclPermissionTypes.ALLOW
             }
           ]
         }
@@ -346,7 +313,7 @@ test('parseResponse correctly processes multiple ACLs per resource', () => {
       (w, resource) => {
         w.appendInt8(resource.resourceType)
           .appendString(resource.resourceName)
-          .appendInt8(resource.patternType)
+          .appendInt8(resource.resourcePatternType)
           .appendArray(resource.acls, (w, acl) => {
             w.appendString(acl.principal)
               .appendString(acl.host)
@@ -362,9 +329,13 @@ test('parseResponse correctly processes multiple ACLs per resource', () => {
   // Verify multiple ACLs
   deepStrictEqual(response.resources[0].acls.length, 2, 'Resource should have 2 ACLs')
 
-  deepStrictEqual(response.resources[0].acls[0].operation, OPERATION.READ, 'First ACL should have READ operation')
+  deepStrictEqual(response.resources[0].acls[0].operation, AclOperations.READ, 'First ACL should have READ operation')
 
-  deepStrictEqual(response.resources[0].acls[1].operation, OPERATION.WRITE, 'Second ACL should have WRITE operation')
+  deepStrictEqual(
+    response.resources[0].acls[1].operation,
+    AclOperations.WRITE,
+    'Second ACL should have WRITE operation'
+  )
 })
 
 test('parseResponse handles error response correctly', () => {

@@ -27,37 +27,35 @@ await performAPICallWithRetry('CreateAcls', () =>
   ]))
 
 await performAPICallWithRetry('DescribeAcls', () =>
-  describeAclsV3.async(
-    connection,
-    ResourceTypes.TOPIC,
-    'temp',
-    ResourcePatternTypes.LITERAL,
-    null,
-    null,
-    AclOperations.READ,
-    AclPermissionTypes.DENY
-  ))
+  describeAclsV3.async(connection, {
+    resourceType: ResourceTypes.TOPIC,
+    resourceName: 'temp',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: null,
+    host: null,
+    operation: AclOperations.READ,
+    permissionType: AclPermissionTypes.DENY
+  }))
 
 await performAPICallWithRetry('DescribeAcls', () =>
-  describeAclsV3.async(
-    connection,
-    ResourceTypes.TOPIC,
-    'temp',
-    ResourcePatternTypes.LITERAL,
-    null,
-    null,
-    AclOperations.READ,
-    AclPermissionTypes.ALLOW
-  ))
+  describeAclsV3.async(connection, {
+    resourceType: ResourceTypes.TOPIC,
+    resourceName: 'temp',
+    resourcePatternType: ResourcePatternTypes.LITERAL,
+    principal: null,
+    host: null,
+    operation: AclOperations.READ,
+    permissionType: AclPermissionTypes.ALLOW
+  }))
 
 await performAPICallWithRetry('DeleteAcls', () =>
   deleteAclsV3.async(connection, [
     {
-      resourceTypeFilter: ResourceTypes.TOPIC,
-      resourceNameFilter: 'temp',
-      patternTypeFilter: ResourcePatternTypes.LITERAL,
-      principalFilter: null,
-      hostFilter: null,
+      resourceType: ResourceTypes.TOPIC,
+      resourceName: 'temp',
+      resourcePatternType: ResourcePatternTypes.LITERAL,
+      principal: null,
+      host: null,
       operation: AclOperations.READ,
       permissionType: AclPermissionTypes.DENY
     }

@@ -2412,7 +2412,7 @@ test('startLagMonitoring should handle errors', async t => {
   consumer.startLagMonitoring({ topics: ['invalid'] }, 1000)
 
   consumer.on('consumer:lag:error', error => {
-    resolve(error)
+    resolve(error as MultipleErrors)
   })
 
   await consumer.consume({

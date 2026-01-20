@@ -140,3 +140,32 @@ export interface ListOffsetsOptions {
 }
 
 export type GetLagOptions = Omit<ListOffsetsOptions, 'timestamp' | 'isolationLevel'>
+
+// Consumer Event Payloads
+export interface ConsumerGroupJoinPayload {
+  groupId: string
+  memberId: string
+  generationId?: number
+  isLeader?: boolean
+  assignments?: GroupAssignment[]
+}
+
+export interface ConsumerGroupLeavePayload {
+  groupId: string
+  memberId: string | null
+  generationId?: number
+}
+
+export interface ConsumerGroupRebalancePayload {
+  groupId: string
+}
+
+export interface ConsumerHeartbeatPayload {
+  groupId?: string
+  memberId?: string | null
+  generationId?: number
+}
+
+export interface ConsumerHeartbeatErrorPayload extends ConsumerHeartbeatPayload {
+  error: Error
+}

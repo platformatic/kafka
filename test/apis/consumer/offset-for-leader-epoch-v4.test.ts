@@ -148,7 +148,10 @@ test('createRequest serializes multiple topics and partitions', () => {
 
 test('createRequest handles empty topics array', () => {
   const replicaId = -1
-  const topics: Array<{ name: string, partitions: Array<{ partitionIndex: number, currentLeaderEpoch: number, leaderEpoch: number }> }> = []
+  const topics: Array<{
+    name: string
+    partitions: Array<{ partitionIndex: number; currentLeaderEpoch: number; leaderEpoch: number }>
+  }> = []
 
   const writer = createRequest(replicaId, topics)
 
@@ -491,13 +494,12 @@ test('parseResponse handles throttleTimeMs value', () => {
         }
       ],
       (w, topic) => {
-        w.appendString(topic.topic)
-          .appendArray(topic.partitions, (w, partition) => {
-            w.appendInt32(partition.partition)
-              .appendInt16(partition.errorCode)
-              .appendInt32(partition.leaderEpoch)
-              .appendInt64(partition.endOffset)
-          })
+        w.appendString(topic.topic).appendArray(topic.partitions, (w, partition) => {
+          w.appendInt32(partition.partition)
+            .appendInt16(partition.errorCode)
+            .appendInt32(partition.leaderEpoch)
+            .appendInt64(partition.endOffset)
+        })
       }
     )
     .appendInt8(0) // Root tagged fields

@@ -150,7 +150,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#consumer.on('consumer:group:join', () => {
       this.#offsetsCommitted.clear()
 
-      this.#refreshOffsets((error: Error | null) => {
+      this.#refreshOffsets(error => {
         /* c8 ignore next 4 - Hard to test */
         if (error) {
           this.destroy(error)
@@ -232,7 +232,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     /* c8 ignore next 3 - Hard to test */
-    this.once('error', (error: Error) => {
+    this.once('error', error => {
       callback(error)
     })
 

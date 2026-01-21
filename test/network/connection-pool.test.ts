@@ -371,7 +371,7 @@ test('getFirstAvailable with callback parameter', async t => {
 
   // Mock get method to simulate failure
   mock.method(connectionPool, 'get', (_: Broker, callback: CallbackWithPromise<Connection>) => {
-    if (callback) callback(new Error('Connection failed'), undefined as unknown as Connection)
+    if (callback) callback(new Error('Connection failed'))
     return undefined
   })
 

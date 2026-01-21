@@ -55,7 +55,7 @@ export async function performAPICallWithRetry<ReturnType> (
     attempts,
     maxAttempts,
     undefined,
-    (error: Error) => {
+    error => {
       console.log(
         operationId,
         `Retrying in 1000ms after retriable error: [${(error as ProtocolError).apiId}] ${error.message}`

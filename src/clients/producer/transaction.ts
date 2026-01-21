@@ -52,7 +52,7 @@ export class Transaction<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   ): void {
     this.#producer[kTransactionFindCoordinator](error => {
       if (error) {
-        callback(error, null as unknown as Transaction<Key, Value, HeaderKey, HeaderValue>)
+        callback(error)
         return
       }
 
@@ -64,7 +64,7 @@ export class Transaction<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
 
       this.#producer.initIdempotentProducer(options, error => {
         if (error) {
-          callback(error, null as unknown as Transaction<Key, Value, HeaderKey, HeaderValue>)
+          callback(error)
           return
         }
 
@@ -84,10 +84,7 @@ export class Transaction<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
     }
 
     if (this.#completed) {
-      callback(
-        new UserError('Cannot produce to an already completed transaction.'),
-        undefined as unknown as ProduceResult
-      )
+      callback(new UserError('Cannot produce to an already completed transaction.'))
       return callback[kCallbackPromise]
     }
 

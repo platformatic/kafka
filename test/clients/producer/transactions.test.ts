@@ -78,7 +78,7 @@ test('beginTransaction should initialize a transaction', async t => {
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'There is already an active transaction.')
       return true
@@ -97,7 +97,7 @@ test('beginTransaction should validate options in strict mode', async t => {
         producerId: 'not-a-bigint'
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       ok(error.message.includes('producerId'), 'Error should mention producerId')
       return true
@@ -114,7 +114,7 @@ test('beginTransaction should fail when the producer is not idempotent', async t
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'Cannot begin a transaction on a non-idempotent producer.')
       return true
@@ -134,7 +134,7 @@ test('beginTransaction should handle unavailable API errors', async t => {
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
       strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
       return true
@@ -154,7 +154,7 @@ test('beginTransaction should handle errors from findCoordinator', async t => {
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -174,7 +174,7 @@ test('beginTransaction should handle errors from initIdempotentProducer', async 
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -268,7 +268,7 @@ test('commit should fail if committed twice', async t => {
     async () => {
       await transaction.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'Cannot commit an already completed transaction.')
       return true
@@ -290,7 +290,7 @@ test('commit should reject requests from another transaction', async t => {
     async () => {
       await t2.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -324,7 +324,7 @@ test('commit should handle errors from ConnectionPool.get', async t => {
     async () => {
       await transaction.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -358,7 +358,7 @@ test('commit should handle unavailable API errors', async t => {
     async () => {
       await transaction.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
       strictEqual(error.message.includes('Unsupported API EndTxn.'), true)
       return true
@@ -392,7 +392,7 @@ test('commit should handle errors from the API', async t => {
     async () => {
       await transaction.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -428,7 +428,7 @@ test('commit should handle fencing errors from the API', async t => {
     async () => {
       await transaction.commit()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof ProtocolError, true)
       return true
     }
@@ -510,7 +510,7 @@ test('abort should fail if aborted twice', async t => {
     async () => {
       await transaction.abort()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'Cannot abort an already completed transaction.')
       return true
@@ -532,7 +532,7 @@ test('abort should reject requests from another transaction', async t => {
     async () => {
       await t2.abort()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -556,7 +556,7 @@ test('cancel should reject requests from another transaction', async t => {
     async () => {
       await t2.cancel()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -582,7 +582,7 @@ test('send should reject out-of transaction requests', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       deepStrictEqual(error.message, 'The producer is in use by a transaction.')
       return true
@@ -617,7 +617,7 @@ test('send should reject requests from another transaction', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       deepStrictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -659,7 +659,7 @@ test('send should reject requests from a completed transaction', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       deepStrictEqual(error.message, 'Cannot produce to an already completed transaction.')
       return true
@@ -687,7 +687,7 @@ test('send should handle errors from Base.metadata during a transaction (produce
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -715,7 +715,7 @@ test('send should handle unavailable API errors during transaction', async t => 
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
       strictEqual(error.message.includes('Unsupported API AddPartitionsToTxn.'), true)
       return true
@@ -743,7 +743,7 @@ test('send should handle errors from ConnectionPool.get during transaction', asy
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -771,7 +771,7 @@ test('send should handle errors from the transaction API', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -800,7 +800,7 @@ test('addPartitions should reject requests from another transaction', async t =>
         }
       ])
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       deepStrictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -847,7 +847,7 @@ test('addPartitions should reject requests from a completed transaction', async 
         }
       ])
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       deepStrictEqual(error.message, 'Cannot add partitions to an already completed transaction.')
       return true
@@ -889,7 +889,7 @@ test('addConsumer should reject requests from another transaction', async t => {
     async () => {
       await t2.addConsumer(consumer)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -921,7 +921,7 @@ test('addConsumer should reject requests from a completed transaction', async t 
     async () => {
       await transaction.addConsumer(consumer)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'Cannot add a consumer to an already completed transaction.')
       return true
@@ -946,7 +946,7 @@ test('addConsumer should handle unavailable API errors', async t => {
     async () => {
       await transaction.addConsumer(consumer)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
       strictEqual(error.message.includes('Unsupported API AddOffsetsToTxn.'), true)
       return true
@@ -971,7 +971,7 @@ test('addConsumer should handle errors from the API', async t => {
     async () => {
       await transaction.addConsumer(consumer)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -996,7 +996,7 @@ test('addConsumer should handle errors from ConnectionPool.get', async t => {
     async () => {
       await transaction.addConsumer(consumer)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -1017,7 +1017,7 @@ test('addOffset should fail when the message consumer group is not linked', asyn
     async () => {
       await transaction.addOffset({} as unknown as Message<string, string, string, string>)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(
         error.message,
@@ -1054,7 +1054,7 @@ test('addOffset should reject requests from another transaction', async t => {
     async () => {
       await t2.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'The producer is in use by another transaction.')
       return true
@@ -1088,7 +1088,7 @@ test('addOffset should reject requests from another transaction', async t => {
     async () => {
       await transaction.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message, 'Cannot add an offset to an already completed transaction.')
       return true
@@ -1118,7 +1118,7 @@ test('addOffset should handle errors from Base.metadata', async t => {
     async () => {
       await transaction.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -1148,7 +1148,7 @@ test('addOffset should handle errors from ConnectionPool.get', async t => {
     async () => {
       await transaction.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true
@@ -1178,7 +1178,7 @@ test('addOffset should handle unavailable API errors', async t => {
     async () => {
       await transaction.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
       strictEqual(error.message.includes('Unsupported API TxnOffsetCommit.'), true)
       return true
@@ -1208,7 +1208,7 @@ test('addOffset should handle errors from the API', async t => {
     async () => {
       await transaction.addOffset(message)
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(error.message.includes(mockedErrorMessage), true)
       return true

@@ -14,16 +14,13 @@ export function jwtValidateAuthenticationBytes (authBytes: Buffer, callback: Cal
 
     /* c8 ignore next 8  - Hard to test */
   } catch (e) {
-    callback(
-      new AuthenticationError('Invalid authBytes in SASL/OAUTHBEARER response', { authBytes }),
-      undefined as unknown as Buffer
-    )
+    callback(new AuthenticationError('Invalid authBytes in SASL/OAUTHBEARER response', { authBytes }))
 
     return
   }
 
   if (authData.status === 'invalid_token') {
-    callback(new AuthenticationError('Invalid SASL/OAUTHBEARER token.', { authData }), undefined as unknown as Buffer)
+    callback(new AuthenticationError('Invalid SASL/OAUTHBEARER token.', { authData }))
   }
 
   callback(null, authBytes)
@@ -55,13 +52,13 @@ export function authenticate (
 
   getCredential('SASL/OAUTHBEARER token', tokenOrProvider, (error, token) => {
     if (error) {
-      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error)
       return
     }
 
     getCredential('SASL/OAUTHBEARER extensions', extensionsOrProvider ?? {}, (error, extensionsMap) => {
       if (error) {
-        return callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        return callback!(error)
       }
 
       let extensions = ''

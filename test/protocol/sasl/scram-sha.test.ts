@@ -241,7 +241,7 @@ test('authenticate should include username in initial message', async () => {
     firstMessage = payload!.toString()
 
     // Throw error to stop the authentication process
-    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
+    callback(new Error('Stop the test early'))
   }
 
   const mockConnection = {}
@@ -272,7 +272,7 @@ test('authenticate should escape special characters in username', async () => {
     firstMessage = payload!.toString()
 
     // Throw error to stop the authentication process
-    callback(new Error('Stop the test early'), undefined as unknown as SaslAuthenticateResponse)
+    callback(new Error('Stop the test early'))
   }
 
   const mockConnection = {}
@@ -404,7 +404,7 @@ test('authenticate should handle server failures', async () => {
       })
     } else {
       // Second call - return error
-      callback(new Error('Authentication failed'), undefined as unknown as SaslAuthenticateResponse)
+      callback(new Error('Authentication failed'))
     }
   }
 

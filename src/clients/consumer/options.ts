@@ -1,4 +1,4 @@
-import { allowedFetchIsolationLevels, allowedGroupProtocols } from '../../apis/enumerations.ts'
+import { allowedFetchIsolationLevels, allowedGroupProtocols, FetchIsolationLevels } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
@@ -61,7 +61,7 @@ export const consumeOptionsProperties = {
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
   maxWaitTime: { type: 'number', minimum: 0 },
-  isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
+  isolationLevel: { type: 'number', enum: allowedFetchIsolationLevels },
   deserializers: serdeProperties,
   highWaterMark: { type: 'number', minimum: 1 }
 }
@@ -255,6 +255,6 @@ export const defaultConsumerOptions = {
   minBytes: 1,
   maxBytes: 1_048_576 * 10, // 10 MB
   maxWaitTime: 5_000,
-  isolationLevel: 'READ_COMMITTED',
+  isolationLevel: FetchIsolationLevels.READ_COMMITTED,
   highWaterMark: 1024
 } satisfies Partial<ConsumerOptions<Buffer, Buffer, Buffer, Buffer>>

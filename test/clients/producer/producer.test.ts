@@ -189,6 +189,17 @@ test('all operations should fail when producer is closed', async t => {
       return true
     }
   )
+
+  await rejects(
+    async () => {
+      await producer.beginTransaction()
+    },
+    (error: any) => {
+      strictEqual(error instanceof NetworkError, true)
+      strictEqual(error.message, 'Client is closed.')
+      return true
+    }
+  )
 })
 
 test('initIdempotentProducer should set idempotent options correctly and support diagnostic channels', async t => {

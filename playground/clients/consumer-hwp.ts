@@ -1,13 +1,14 @@
 import { forEach } from 'hwp'
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
-// const consumer = new Consumer({ groupId: 'id7', clientId: 'id', bootstrapBrokers: ['localhost:9092'], strict: true })
 const consumer = new Consumer({
-  groupId: 'id9',
+  groupId: randomUUID(),
   clientId: 'id',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   strict: true,
   deserializers: stringDeserializers
 })

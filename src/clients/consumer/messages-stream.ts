@@ -15,7 +15,7 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
-import { type Message } from '../../protocol/records.ts'
+import { IS_CONTROL, type Message } from '../../protocol/records.ts'
 import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
@@ -58,6 +58,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
+  #partitionsEpochs: Map<string, number>
   #inflightNodes: Set<number>
   #keyDeserializer: DeserializerWithHeaders<Key>
   #valueDeserializer: DeserializerWithHeaders<Value>
@@ -109,6 +110,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
     this.#offsetsCommitted = new Map()
+    this.#partitionsEpochs = new Map()
     this.#paused = false
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
@@ -169,6 +171,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     notifyCreation('messages-stream', this)
+  }
+
+  /* c8 ignore next 3 - Simple getter */
+  get consumer (): Consumer<Key, Value, HeaderKey, HeaderValue> {
+    return this.#consumer
   }
 
   /* c8 ignore next 3 - Simple getter */
@@ -459,6 +466,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const fetchOffset = this.#offsetsToFetch.get(`${topic}:${partition}`)!
           requestedOffsets.set(`${topic}:${partition}`, fetchOffset)
 
+          const leaderEpoch = this.#partitionsEpochs.get(`${topic}:${partition}`) ?? -1
           leaderRequests.push({
             topicId,
             partitions: [
@@ -466,8 +474,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 partition,
                 fetchOffset,
                 partitionMaxBytes: this.#options.maxBytes!,
-                currentLeaderEpoch: -1,
-                lastFetchedEpoch: -1
+                currentLeaderEpoch: leaderEpoch,
+                lastFetchedEpoch: leaderEpoch
               }
             ]
           })
@@ -528,6 +536,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     let diagnosticContext: DiagnosticContext<unknown>
 
+    const messageMetadata = {
+      consumer: {
+        groupId: this.#consumer.groupId,
+        memberId: this.#consumer.memberId,
+        generationId: this.#consumer.generationId,
+        coordinatorId: this.#consumer.coordinatorId
+      }
+    }
+
     // Parse results
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)!
@@ -542,6 +559,31 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const firstOffset = batch.firstOffset
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
+          this.#partitionsEpochs.set(`${topic}:${partition}`, batch.partitionLeaderEpoch)
+
+          // Track offsets
+          if (batch === recordsBatches[recordsBatches.length - 1]) {
+            // Track the last read offset
+            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
+            this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
+
+            // Autocommit if needed
+            if (autocommit) {
+              this.#offsetsToCommit.set(`${topic}:${partition}`, {
+                topic,
+                partition,
+                offset: lastOffset + 1n,
+                leaderEpoch
+              })
+            }
+          }
+
+          // Filter control markers
+          if (batch.attributes & IS_CONTROL) {
+            continue
+          }
+
+          // Process messages
           for (const record of batch.records) {
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
@@ -559,7 +601,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             consumerReceivesChannel.start.publish(diagnosticContext)
 
-            const commit = autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
+            const commit = autocommit
+              ? noopCallback
+              : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
 
             try {
               const headers = new Map()
@@ -579,7 +623,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 partition,
                 timestamp: firstTimestamp + record.timestampDelta,
                 offset,
-                commit
+                commit,
+                metadata: messageMetadata
               } as Message
 
               diagnosticContext.result = message
@@ -608,16 +653,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               }
             } finally {
               consumerReceivesChannel.end.publish(diagnosticContext)
-            }
-          }
-          if (batch === recordsBatches[recordsBatches.length - 1]) {
-            // Track the last read offset
-            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
-            this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
-
-            // Autocommit if needed
-            if (autocommit) {
-              this.#offsetsToCommit.set(`${topic}:${partition}`, { topic, partition, offset: lastOffset + 1n, leaderEpoch })
             }
           }
         }

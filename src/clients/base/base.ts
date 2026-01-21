@@ -92,12 +92,12 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
 
+    this[kValidateOptions](this[kOptions], baseOptionsValidator, '/options')
+    this[kClientId] = options.clientId
+
     if (typeof this[kOptions].retries === 'boolean') {
       this[kOptions].retries = this[kOptions].retries ? Number.POSITIVE_INFINITY : 0
     }
-
-    this[kValidateOptions](this[kOptions], baseOptionsValidator, '/options')
-    this[kClientId] = options.clientId
 
     // Initialize bootstrap brokers
     this[kBootstrapBrokers] = []
@@ -522,11 +522,12 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
     let topicsToFetch: string[] = []
 
+    const topics = options.topics ?? []
     // Determine which topics we need to fetch
     if (!this.#metadata || options.forceUpdate) {
-      topicsToFetch = options.topics
+      topicsToFetch = topics
     } else {
-      for (const topic of options.topics) {
+      for (const topic of topics) {
         const existingTopic = this.#metadata.topics.get(topic)
 
         if (!existingTopic || existingTopic.lastUpdate < expiralDate) {
@@ -539,7 +540,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     if (this.#metadata && !topicsToFetch.length && !options.forceUpdate) {
       callback(null, {
         ...this.#metadata!,
-        topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
+        topics: new Map(topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
       })
 
       return
@@ -549,7 +550,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
     this[kPerformDeduplicated](
       // Unique key to avoid mixing callbacks
-      `metadata-${options.topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}`,
+      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}`,
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
@@ -577,7 +578,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
               // Stale metadata, we need to fetch everything again
               if (hasStaleMetadata) {
                 this.clearMetadata()
-                topicsToFetch = options.topics
+                topicsToFetch = topics
               }
 
               deduplicateCallback(error, undefined as unknown as ClusterMetadata)
@@ -633,7 +634,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
             // Now build the object to return
             const updatedMetadata = {
               ...this.#metadata,
-              topics: new Map(options.topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
+              topics: new Map(topics.map(topic => [topic, this.#metadata!.topics.get(topic)!]))
             }
 
             this.emitWithDebug('client', 'metadata', updatedMetadata)

@@ -8,6 +8,7 @@ export const produceOptionsProperties = {
   producerId: { bigint: true },
   producerEpoch: { type: 'number' },
   idempotent: { type: 'boolean' },
+  transactionalId: { type: 'string' },
   acks: {
     type: 'number',
     enumeration: {

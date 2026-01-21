@@ -1,10 +1,10 @@
 import { Base } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
 async function main () {
   const client = new Base({
     clientId: 'clientId',
-    groupId: 'groupId',
-    bootstrapBrokers: ['localhost:9098'],
+    bootstrapBrokers: kafkaSingleBootstrapServers,
     tls: {
       rejectUnauthorized: false
     },

@@ -1,44 +1,18 @@
-import { type CreateAclsRequest, type CreateAclsResponse } from '../../apis/admin/create-acls-v3.ts'
-import { type DeleteAclsRequest, type DeleteAclsResponse } from '../../apis/admin/delete-acls-v3.ts'
-import {
-  type DescribeAclsResponseResource,
-  type DescribeAclsRequest,
-  type DescribeAclsResponse
-} from '../../apis/admin/describe-acls-v3.ts'
 import {
   type AlterClientQuotasRequest,
   type AlterClientQuotasResponse,
   type AlterClientQuotasResponseEntries
 } from '../../apis/admin/alter-client-quotas-v1.ts'
-import { type CreatePartitionsRequest, type CreatePartitionsResponse } from '../../apis/admin/create-partitions-v3.ts'
-import { type OffsetDeleteRequest, type OffsetDeleteResponse } from '../../apis/admin/offset-delete-v0.ts'
-import {
-  type OffsetFetchRequest,
-  type OffsetFetchResponse,
-  type OffsetFetchRequestGroup
-} from '../../apis/consumer/offset-fetch-v9.ts'
-import {
-  type OffsetCommitRequest,
-  type OffsetCommitRequestTopic,
-  type OffsetCommitResponse
-} from '../../apis/consumer/offset-commit-v9.ts'
 import { type AlterConfigsRequest, type AlterConfigsResponse } from '../../apis/admin/alter-configs-v2.ts'
+import { type CreateAclsRequest, type CreateAclsResponse } from '../../apis/admin/create-acls-v3.ts'
+import { type CreatePartitionsRequest, type CreatePartitionsResponse } from '../../apis/admin/create-partitions-v3.ts'
 import {
   type CreateTopicsRequest,
   type CreateTopicsRequestTopic,
   type CreateTopicsRequestTopicAssignment,
   type CreateTopicsResponse
 } from '../../apis/admin/create-topics-v7.ts'
-import { type DescribeConfigsRequest, type DescribeConfigsResponse } from '../../apis/admin/describe-configs-v4.ts'
-import {
-  type IncrementalAlterConfigsRequest,
-  type IncrementalAlterConfigsResponse
-} from '../../apis/admin/incremental-alter-configs-v1.ts'
-import {
-  type ListOffsetsRequest,
-  type ListOffsetsRequestTopic,
-  type ListOffsetsResponse
-} from '../../apis/consumer/list-offsets-v9.ts'
+import { type DeleteAclsRequest, type DeleteAclsResponse } from '../../apis/admin/delete-acls-v3.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
   type DeleteTopicsRequest,
@@ -46,43 +20,70 @@ import {
   type DeleteTopicsResponse
 } from '../../apis/admin/delete-topics-v6.ts'
 import {
+  type DescribeAclsRequest,
+  type DescribeAclsResponse,
+  type DescribeAclsResponseResource
+} from '../../apis/admin/describe-acls-v3.ts'
+import {
   type DescribeClientQuotasRequest,
   type DescribeClientQuotasResponse,
   type DescribeClientQuotasResponseEntry
 } from '../../apis/admin/describe-client-quotas-v0.ts'
+import { type DescribeConfigsRequest, type DescribeConfigsResponse } from '../../apis/admin/describe-configs-v4.ts'
 import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../apis/admin/describe-groups-v5.ts'
 import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
-import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
-  type LeaveGroupRequest,
-  type LeaveGroupRequestMember,
-  type LeaveGroupResponse
-} from '../../apis/consumer/leave-group-v5.ts'
+  type IncrementalAlterConfigsRequest,
+  type IncrementalAlterConfigsResponse
+} from '../../apis/admin/incremental-alter-configs-v1.ts'
+import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
   type ListGroupsRequest as ListGroupsRequestV5,
   type ListGroupsResponse
 } from '../../apis/admin/list-groups-v5.ts'
+import { type OffsetDeleteRequest, type OffsetDeleteResponse } from '../../apis/admin/offset-delete-v0.ts'
 import {
   createPromisifiedCallback,
   kCallbackPromise,
   runConcurrentCallbacks,
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
+import {
+  type LeaveGroupRequest,
+  type LeaveGroupRequestMember,
+  type LeaveGroupResponse
+} from '../../apis/consumer/leave-group-v5.ts'
+import {
+  type ListOffsetsRequest,
+  type ListOffsetsRequestTopic,
+  type ListOffsetsResponse
+} from '../../apis/consumer/list-offsets-v9.ts'
+import {
+  type OffsetCommitRequest,
+  type OffsetCommitRequestTopic,
+  type OffsetCommitResponse
+} from '../../apis/consumer/offset-commit-v9.ts'
+import {
+  type OffsetFetchRequest,
+  type OffsetFetchRequestGroup,
+  type OffsetFetchResponse
+} from '../../apis/consumer/offset-fetch-v9.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import {
-  type ConfigResourceTypeValue,
   ConfigResourceTypes,
+  FetchIsolationLevels,
   FindCoordinatorKeyTypes,
-  type ConsumerGroupStateValue,
-  FetchIsolationLevels
+  type ConfigResourceTypeValue,
+  type ConsumerGroupStateValue
 } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
+import { type Acl } from '../../apis/types.ts'
 import {
   adminAclsChannel,
   adminClientQuotasChannel,
-  adminConsumerGroupOffsetsChannel,
   adminConfigsChannel,
+  adminConsumerGroupOffsetsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminOffsetsChannel,
@@ -110,43 +111,44 @@ import { type BaseOptions } from '../base/types.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
   alterClientQuotasOptionsValidator,
-  createPartitionsOptionsValidator,
   alterConfigsOptionsValidator,
+  alterConsumerGroupOffsetsOptionsValidator,
+  createAclsOptionsValidator,
+  createPartitionsOptionsValidator,
   createTopicsOptionsValidator,
+  deleteAclsOptionsValidator,
+  deleteConsumerGroupOffsetsOptionsValidator,
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
+  describeAclsOptionsValidator,
   describeClientQuotasOptionsValidator,
   describeConfigsOptionsValidator,
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
   incrementalAlterConfigsOptionsValidator,
-  listGroupsOptionsValidator,
-  listTopicsOptionsValidator,
-  removeMembersFromConsumerGroupOptionsValidator,
-  alterConsumerGroupOffsetsOptionsValidator,
-  deleteConsumerGroupOffsetsOptionsValidator,
   listConsumerGroupOffsetsOptionsValidator,
-  deleteAclsOptionsValidator,
-  describeAclsOptionsValidator,
-  createAclsOptionsValidator,
-  listOffsetsOptionsValidator
+  listGroupsOptionsValidator,
+  listOffsetsOptionsValidator,
+  listTopicsOptionsValidator,
+  removeMembersFromConsumerGroupOptionsValidator
 } from './options.ts'
 import {
-  type ListedOffsetsTopic,
-  type ListOffsetsOptions,
   type AdminOptions,
   type AlterClientQuotasOptions,
   type AlterConfigsOptions,
+  type AlterConsumerGroupOffsetsOptions,
   type BrokerLogDirDescription,
+  type ConfigDescription,
+  type CreateAclsOptions,
   type CreatedTopic,
   type CreatePartitionsOptions,
   type CreateTopicsOptions,
+  type DeleteAclsOptions,
+  type DeleteConsumerGroupOffsetsOptions,
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
+  type DescribeAclsOptions,
   type DescribeClientQuotasOptions,
-  type DeleteConsumerGroupOffsetsOptions,
-  type ListConsumerGroupOffsetsOptions,
-  type AlterConsumerGroupOffsetsOptions,
   type DescribeConfigsOptions,
   type DescribeGroupsOptions,
   type DescribeLogDirsOptions,
@@ -154,16 +156,14 @@ import {
   type GroupBase,
   type GroupMember,
   type IncrementalAlterConfigsOptions,
-  type ListGroupsOptions,
-  type ListTopicsOptions,
-  type RemoveMembersFromConsumerGroupOptions,
   type ListConsumerGroupOffsetsGroup,
-  type ConfigDescription,
-  type DescribeAclsOptions,
-  type CreateAclsOptions,
-  type DeleteAclsOptions
+  type ListConsumerGroupOffsetsOptions,
+  type ListedOffsetsTopic,
+  type ListGroupsOptions,
+  type ListOffsetsOptions,
+  type ListTopicsOptions,
+  type RemoveMembersFromConsumerGroupOptions
 } from './types.ts'
-import { type Acl } from '../../apis/types.ts'
 
 export class Admin extends Base<AdminOptions> {
   #controller: Broker | null = null
@@ -878,10 +878,13 @@ export class Admin extends Base<AdminOptions> {
   #handleNotControllerError<T> (error: Error | null, value: T, callback: Callback<T>): void {
     if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
       this.metadata({ topics: [] }, (metadataError, metadata) => {
+        /* c8 ignore next 4 - Hard to test */
         if (metadataError) {
           callback(metadataError, undefined as unknown as T)
+          return
         }
-        this.#controller = metadata.brokers.get(metadata.controllerId) || null
+
+        this.#controller = metadata.brokers.get(metadata.controllerId)!
         callback(error, undefined as unknown as T)
       })
     } else {
@@ -1356,12 +1359,14 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const group = groupsMap.get(options.groupId)
+        /* c8 ignore next 4 - Hard to test */
         if (!group) {
           callback(new MultipleErrors('Removing members from consumer group failed.', []))
           return
         }
 
         const allMemberIds = Array.from(group.members.keys())
+        /* c8 ignore next 4 - Hard to test */
         if (allMemberIds.length === 0) {
           callback(null)
           return
@@ -1388,6 +1393,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        /* c8 ignore next 8 - Hard to test */
         if (!coordinator) {
           callback(
             new MultipleErrors('Removing members from consumer group failed.', [
@@ -1398,6 +1404,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const broker = metadata.brokers.get(coordinator.nodeId)
+        /* c8 ignore next 8 - Hard to test */
         if (!broker) {
           callback(
             new MultipleErrors('Removing members from consumer group failed.', [
@@ -1422,6 +1429,7 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
+                /* c8 ignore next 5 - Hard to test */
                 const members: LeaveGroupRequestMember[] = options.members!.map(member => ({
                   memberId: typeof member === 'string' ? member : member.memberId,
                   groupInstanceId: null,
@@ -1633,6 +1641,7 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
+      /* c8 ignore next - Hard to test */
       const groupIds = options.groups.map(group => (typeof group === 'string' ? group : group.groupId))
 
       this.#findGroupCoordinator(groupIds, (error, response) => {
@@ -1687,6 +1696,7 @@ export class Admin extends Base<AdminOptions> {
                       return
                     }
 
+                    /* c8 ignore next - Hard to test */
                     api(connection, groups, options.requireStable ?? false, retryCallback)
                   })
                 },
@@ -1737,6 +1747,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        /* c8 ignore next 9 - Hard to test */
         if (!coordinator) {
           callback(
             new MultipleErrors('Altering consumer group offsets failed.', [
@@ -1747,6 +1758,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const broker = metadata.brokers.get(coordinator.nodeId)
+        /* c8 ignore next 9 - Hard to test */
         if (!broker) {
           callback(
             new MultipleErrors('Altering consumer group offsets failed.', [
@@ -1828,6 +1840,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const coordinator = response.coordinators.find(c => c.key === options.groupId)
+        /* c8 ignore next 9 - Hard to test */
         if (!coordinator) {
           callback(
             new MultipleErrors('Deleting consumer group offsets failed.', [
@@ -1839,6 +1852,7 @@ export class Admin extends Base<AdminOptions> {
         }
 
         const broker = metadata.brokers.get(coordinator.nodeId)
+        /* c8 ignore next 9 - Hard to test */
         if (!broker) {
           callback(
             new MultipleErrors('Deleting consumer group offsets failed.', [
@@ -1932,12 +1946,14 @@ export class Admin extends Base<AdminOptions> {
     }
 
     this[kMetadata]({ topics: [] }, (error, metadata) => {
+      /* c8 ignore next 4 - Hard to test */
       if (error) {
         callback(error, undefined as unknown as Connection)
         return
       }
 
       const brokerInstance = metadata.brokers.get(brokerId)
+      /* c8 ignore next 4 - Hard to test */
       if (!brokerInstance) {
         callback(new Error(`Broker with id ${brokerId} not found in cluster.`), undefined as unknown as Connection)
         return
@@ -1974,10 +1990,12 @@ export class Admin extends Base<AdminOptions> {
   ): void {
     if (typeof broker === 'number') {
       this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        /* c8 ignore next 4 - Hard to test */
         if (error) {
           callback(error, undefined as unknown as ConfigDescription[])
           return
         }
+
         this.#describeConfigsOnBroker(options, connection, callback)
       })
       return
@@ -2038,10 +2056,12 @@ export class Admin extends Base<AdminOptions> {
   ): void {
     if (typeof broker === 'number') {
       this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        /* c8 ignore next 4 - Hard to test */
         if (error) {
           callback(error)
           return
         }
+
         this.#alterConfigsOnBroker(options, connection, callback)
       })
       return
@@ -2089,10 +2109,12 @@ export class Admin extends Base<AdminOptions> {
   ): void {
     if (typeof broker === 'number') {
       this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
+        /* c8 ignore next 4 - Hard to test */
         if (error) {
           callback(error)
           return
         }
+
         this.#incrementalAlterConfigsOnBroker(options, connection, callback)
       })
       return
@@ -2263,6 +2285,7 @@ export class Admin extends Base<AdminOptions> {
           topicRequest.partitions.push({
             partitionIndex: partition.partitionIndex,
             currentLeaderEpoch: leaderEpoch,
+            /* c8 ignore next - Hard to test */
             timestamp: partition.timestamp ?? -1n
           })
         }

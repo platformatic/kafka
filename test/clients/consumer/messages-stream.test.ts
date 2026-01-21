@@ -44,6 +44,8 @@ import {
   mockMetadata
 } from '../../helpers.ts'
 
+const defaultRetryDelay = 500
+
 interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
   messages: Message<K, V, HK, HV>[]
   stream: MessagesStream<K, V, HK, HV>
@@ -71,6 +73,7 @@ function createProducer<K = string, V = string, HK = string, HV = string> (
     bootstrapBrokers: kafkaBootstrapServers,
     serializers: stringSerializers as Serializers<K, V, HK, HV>,
     autocreateTopics: false,
+    retryDelay: defaultRetryDelay,
     ...options
   })
 
@@ -97,6 +100,7 @@ function createConsumer<K = string, V = string, HK = string, HV = string> (
     rebalanceTimeout: 6000,
     heartbeatInterval: 1000,
     retries: 1,
+    retryDelay: defaultRetryDelay,
     ...options
   })
 
@@ -141,7 +145,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
 ): Promise<ConsumeResult<K, V, HK, HV>> {
   const consumer = createConsumer<K, V, HK, HV>(t, groupId, options)
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   options.metrics = undefined
   const { groupProtocol, ...consumeOptions } = options
 
@@ -279,6 +283,7 @@ test('should support diagnostic channels', async t => {
         partition: 0,
         timestamp: 0n,
         offset: 0n,
+        metadata: message.metadata,
         commit: noopCallback
       })
     },
@@ -517,7 +522,7 @@ test('should consume messages with MANUAL mode', async t => {
   })
 
   await secondConsumer.topics.trackAll(topic)
-  await secondConsumer.joinGroup({})
+  await secondConsumer.joinGroup()
 
   const stream = await secondConsumer.consume({
     topics: [topic],
@@ -582,6 +587,154 @@ test('should support different fallback modes', async t => {
   strictEqual(earliestMessages.length, 3, 'With EARLIEST fallback, should consume all messages')
 })
 
+test('should consume messages from committed transaction, filtering out control markers', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+  let i = 0
+  const { promise, resolve } = promiseWithResolvers<void>()
+
+  // Create a consumer
+  const producer = createProducer(t, {
+    idempotent: true,
+    transactionalId: randomUUID(),
+    retryDelay: defaultRetryDelay
+  })
+  const consumer = createConsumer(t, groupId)
+
+  const messages: Message<string, string, string, string>[] = []
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.LATEST,
+    maxWaitTime: 4000,
+    autocommit: false
+  })
+
+  stream.on('data', message => {
+    messages.push(message)
+
+    if (message.key === 'key-end') {
+      resolve()
+    }
+  })
+
+  // Create a first transaction and commit it
+  const t1 = await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await t1.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await t1.commit()
+
+  // Create a second transaction and abort it
+  const t2 = await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await t2.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await t2.abort()
+
+  // Create a third transaction and commit it
+  const t3 = await producer.beginTransaction()
+  for (let j = 0; j < 3; j++) {
+    i++
+    await t3.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] })
+  }
+  await t3.commit()
+
+  // Send a final message wihtout a transaction to end consumption
+  await producer.send({ messages: [{ topic, key: 'key-end', value: 'value-end' }] })
+
+  await promise
+
+  deepStrictEqual(
+    messages.map(m => ({ key: m.key, value: m.value })),
+    [
+      {
+        key: 'key-1',
+        value: 'value-1'
+      },
+      {
+        key: 'key-2',
+        value: 'value-2'
+      },
+      {
+        key: 'key-3',
+        value: 'value-3'
+      },
+      {
+        key: 'key-7',
+        value: 'value-7'
+      },
+      {
+        key: 'key-8',
+        value: 'value-8'
+      },
+      {
+        key: 'key-9',
+        value: 'value-9'
+      },
+      {
+        key: 'key-end',
+        value: 'value-end'
+      }
+    ]
+  )
+})
+
+test('should support consume-transform-produce patterns', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce 10 messages which will be fed to the consumer
+  await produceTestMessages(t, topic, 10)
+
+  // Create a consumer and a producer
+  const consumer = createConsumer(t, groupId, { autocommit: false })
+  const producer = createProducer(t, {
+    idempotent: true,
+    transactionalId: randomUUID(),
+    retries: 1
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.COMMITTED,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 4000
+  })
+
+  const transaction = await producer.beginTransaction()
+  await transaction.addConsumer(consumer)
+
+  // Consumer and immediately commit each message
+  let i = 0
+  for await (const message of stream) {
+    await transaction.addOffset(message)
+
+    if (++i === 10) {
+      break
+    }
+  }
+
+  await transaction.commit()
+  await consumer.close(true)
+
+  // Now consume again to verify all messages were committed
+  const { promise, resolve } = promiseWithResolvers<string>()
+  const consumer2 = createConsumer(t, groupId, { autocommit: false })
+  const stream2 = await consumer2.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.COMMITTED,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 4000
+  })
+
+  stream2.on('data', message => resolve(message.key))
+
+  // This will return immediately if there are messages
+  deepStrictEqual(await executeWithTimeout(promise, 1000, 'timeout'), 'timeout')
+})
+
 test('should support maxFetches option', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)
@@ -592,7 +745,7 @@ test('should support maxFetches option', async t => {
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
 
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const stream1 = await consumer.consume({
     topics: [topic],
@@ -685,7 +838,7 @@ test('should support asyncIterator interface', async t => {
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
 
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const stream = await consumer.consume({
     topics: [topic],
@@ -864,7 +1017,7 @@ test('should properly handle close', async t => {
   const consumer = createConsumer(t, groupId)
 
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const stream = await consumer.consume({
     topics: [topic],
@@ -918,10 +1071,10 @@ test('should properly handle going back and forth to empty assignments', async t
   const secondConsumer = createConsumer(t, groupId)
 
   await firstConsumer.topics.trackAll(topic)
-  await firstConsumer.joinGroup({})
+  await firstConsumer.joinGroup()
   const rejoinPromise = once(firstConsumer, 'consumer:group:join')
   await secondConsumer.topics.trackAll(topic)
-  await secondConsumer.joinGroup({})
+  await secondConsumer.joinGroup()
   await rejoinPromise
 
   let consumerWithAssignments = firstConsumer
@@ -965,7 +1118,7 @@ test('should handle errors from Base.metadata', async t => {
 
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const stream = await consumer.consume({
     topics: [topic],
@@ -991,7 +1144,7 @@ test('should handle errors from Consumer.fetch', async t => {
 
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Override the fetch method to simulate a connection error
   consumer.fetch = function (_options: any, callback: CallbackWithPromise<any>) {
@@ -1022,7 +1175,7 @@ test('should handle errors from Consumer.commit', async t => {
 
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Override the fetch method to simulate a connection error
   consumer.commit = function (_options: any, callback: CallbackWithPromise<any>) {
@@ -1054,7 +1207,7 @@ test('should handle errors from Consumer.listOffsets', async t => {
 
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Override the fetch method to simulate a connection error
   consumer.listOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
@@ -1085,7 +1238,7 @@ test('should handle errors from Consumer.listCommittedOffsets', async t => {
 
   const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
   await consumer.topics.trackAll(topic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Override the fetch method to simulate a connection error
   consumer.listCommittedOffsets = function (_options: any, callback: CallbackWithPromise<any>) {
@@ -1165,7 +1318,7 @@ test('should properly handle deleting topics in between', async t => {
   const topic2 = await createTopic(t)
   const topic3 = await createTopic(t)
 
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, undefined, { retries: 5 })
   await admin.createTopics({ topics: [topic1, topic2, topic3] })
 
   const stream1 = await consumer.consume({

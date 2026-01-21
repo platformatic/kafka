@@ -22,6 +22,7 @@ import {
   consumerOffsetsChannel,
   defaultConsumerOptions,
   type ExtendedGroupProtocolSubscription,
+  FetchIsolationLevels,
   fetchV17,
   findCoordinatorV6,
   type GroupPartitionsAssignments,
@@ -164,7 +165,7 @@ test('constructor should initialize with custom options', t => {
     minBytes: 100,
     maxBytes: 5242880, // 5MB
     maxWaitTime: 3000,
-    isolationLevel: 'READ_UNCOMMITTED',
+    isolationLevel: FetchIsolationLevels.READ_UNCOMMITTED,
     highWaterMark: 512
   })
 
@@ -385,10 +386,10 @@ test('close should support both promise and callback API', t => {
 })
 
 test('close should leave consumer group if currently joined', async t => {
-  const consumer = createConsumer(t, { retries: true })
+  const consumer = createConsumer(t)
 
   // Join a group first
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Verify we're in a group
   strictEqual(typeof consumer.memberId, 'string')
@@ -424,7 +425,7 @@ test('close should handle errors from leaveGroup', async t => {
   const consumer = createConsumer(t)
 
   // Join a group first
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockAPI(consumer[kConnections], leaveGroupV5.api.key)
 
@@ -439,10 +440,10 @@ test('close should handle errors from leaveGroup', async t => {
 })
 
 test('close should handle errors from ConnectionPool.close', async t => {
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, { retries: 0 })
 
   // Join a group first
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Mock the connection to fail
   mockMethod(
@@ -466,7 +467,7 @@ test('close should handle errors from Base.close', async t => {
   const consumer = createConsumer(t)
 
   // Join a group first
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Mock the super.close method to fail
   mockMethod(consumer[kConnections], 'close')
@@ -519,7 +520,7 @@ test('isActive should return false when consumer is not in group', async t => {
 test('isActive should return true when consumer is in active membership', async t => {
   const consumer = await createConsumer(t)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   strictEqual(consumer.isActive(), true)
 })
@@ -527,7 +528,7 @@ test('isActive should return true when consumer is in active membership', async 
 test('isActive should return false after the consumer leaves the group', async t => {
   const consumer = await createConsumer(t)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   strictEqual(consumer.isActive(), true)
 
@@ -541,11 +542,11 @@ test('isActive should return false during rebalance', async t => {
   const consumer = await createConsumer(t, { groupId })
   const otherConsumer = await createConsumer(t, { groupId })
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   strictEqual(consumer.isActive(), true)
 
-  const otherJoin = otherConsumer.joinGroup({})
+  const otherJoin = otherConsumer.joinGroup()
 
   await once(consumer, 'consumer:group:rebalance')
   strictEqual(consumer.isActive(), false)
@@ -731,7 +732,7 @@ test('consume should join group if needed due to new topic', async t => {
   const testTopic2 = await createTopic(t, true)
 
   // First join with one topic
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Spy on joinGroup to see if it's called again
   let called = false
@@ -1375,7 +1376,7 @@ test('commit should commit offsets to Kafka and support diagnostic channels', as
   }
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const verifyTracingChannel = createTracingChannelVerifier(consumerCommitsChannel, 'client', {
     start (context: ClientDiagnosticEvent) {
@@ -1407,7 +1408,7 @@ test('commit should support both promise and callback API', async t => {
     const consumer = createConsumer(t)
 
     consumer
-      .joinGroup({})
+      .joinGroup()
       .then(() => {
         const commitOptions = {
           offsets: [{ topic, partition: 0, offset: 100n, leaderEpoch: 0 }]
@@ -1503,7 +1504,7 @@ test('commit should handle errors from Base.metadata', async t => {
   const consumer = createConsumer(t)
 
   // First join the group to set memberId
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockMetadata(consumer)
 
@@ -1524,7 +1525,7 @@ test('commit should handle errors from the API (offsetCommit)', async t => {
   const topic = await createTopic(t, true)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockAPI(consumer[kConnections], offsetCommitV9.api.key)
 
@@ -1545,7 +1546,7 @@ test('commit should handle unavailable API errors', async t => {
   const topic = await createTopic(t, true)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockUnavailableAPI(consumer, 'OffsetCommit')
 
@@ -1777,8 +1778,7 @@ test('listOffsets should use custom isolation level when provided', async t => {
   const topic = await createTopic(t, true)
 
   // Use a specific isolation level
-  const isolationLevel = 'READ_COMMITTED'
-  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel })
+  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel: FetchIsolationLevels.READ_COMMITTED })
 
   // Verification is implicit - if the call doesn't throw, it succeeded
   strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
@@ -1918,7 +1918,7 @@ test('listCommittedOffsets should return committed offset values for topics and 
   const topic = await createTopic(t, true, 2)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Commit some offsets
   await consumer.commit({
@@ -1972,7 +1972,7 @@ test('listCommittedOffsets should support both promise and callback API', async 
   const topic = await createTopic(t, true)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Commit an offset
   await consumer.commit({
@@ -2009,7 +2009,7 @@ test('listCommittedOffsets should fail when consumer is closed', async t => {
   const topic = await createTopic(t, true)
 
   // First join the group and commit an offset
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.commit({
     offsets: [{ topic, partition: 0, offset: 100n, leaderEpoch: 0 }]
   })
@@ -2029,7 +2029,7 @@ test('listCommittedOffsets should fail when consumer is closed', async t => {
 
 test('listCommittedOffsets should validate the supplied options', async t => {
   const consumer = createConsumer(t, { strict: true })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Test with missing topics
   try {
@@ -2078,7 +2078,7 @@ test('listCommittedOffsets should handle errors from the API', async t => {
   mockAPI(consumer[kConnections], offsetFetchV9.api.key)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Commit some offsets
   await consumer.commit({
@@ -2104,7 +2104,7 @@ test('listCommittedOffsets should handle unavailable API errors', async t => {
   const topic = await createTopic(t, true, 2)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockUnavailableAPI(consumer, 'OffsetFetch')
 
@@ -2139,7 +2139,7 @@ test('getLag should return the consumer lag', async t => {
   const consumer2 = createConsumer(t, { groupId })
   const consumer3 = createConsumer(t, { groupId })
 
-  await Promise.all([consumer1, consumer2, consumer3].map(consumer => consumer.joinGroup({})))
+  await Promise.all([consumer1, consumer2, consumer3].map(consumer => consumer.joinGroup()))
 
   async function setup (consumer: Consumer, maxFetches: number) {
     const stream = await consumer.consume({
@@ -2350,7 +2350,7 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
   consumer.on('consumer:lag', lag => {
     lagsViaEvent.push(lag)
 
-    if (lagsViaEvent.length === 3) {
+    if (lagsViaEvent.length === 2) {
       resolve(lagsViaEvent)
     }
   })
@@ -2366,11 +2366,7 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
   await promise
   unsubscribe(consumerLagChannel.name, onLag as ChannelListener)
 
-  deepStrictEqual(lagsViaEvent, [
-    new Map([[topic, [-1n, -1n, -1n]]]), // Still joining and not assigned to any partition
-    new Map([[topic, [0n, 0n, 0n]]]),
-    new Map([[topic, [0n, 0n, 0n]]])
-  ])
+  deepStrictEqual(lagsViaEvent, [new Map([[topic, [0n, 0n, 0n]]]), new Map([[topic, [0n, 0n, 0n]]])])
 
   consumer.stopLagMonitoring()
 })
@@ -2602,7 +2598,7 @@ test('joinGroup should join the consumer group and return memberId and support d
   )
 
   // Join the group
-  const memberId = await consumer.joinGroup({})
+  const memberId = await consumer.joinGroup()
 
   // Verify memberId is a non-empty string
   strictEqual(typeof memberId, 'string')
@@ -2623,7 +2619,7 @@ test('joinGroup should setup assignment for a topic', async t => {
 
   await consumer.topics.trackAll(topic)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   deepStrictEqual(consumer.assignments, [{ topic, partitions: [0, 1, 2] }])
 })
@@ -2631,7 +2627,7 @@ test('joinGroup should setup assignment for a topic', async t => {
 test('joinGroup should be no-op in new consumer protocol', async t => {
   await createTopic(t, true, 3)
   const consumer = createConsumer(t, { groupProtocol: 'consumer' })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   deepStrictEqual(consumer.assignments, null)
 })
 
@@ -2770,9 +2766,9 @@ test('joinGroup might receive no assignment', async t => {
   await consumer1.topics.trackAll(topic)
   await consumer2.topics.trackAll(topic)
 
-  await consumer1.joinGroup({})
+  await consumer1.joinGroup()
   const rejoinPromise = once(consumer1, 'consumer:group:join')
-  await consumer2.joinGroup({})
+  await consumer2.joinGroup()
   await rejoinPromise
 
   ok(consumer1.assignments!.length === 0 || consumer2.assignments!.length === 0)
@@ -2795,7 +2791,7 @@ test('joinGroup should support both promise and callback API', t => {
 
       // Now try with Promise API to verify both work
       consumer
-        .joinGroup({})
+        .joinGroup()
         .then(promiseMemberId => {
           // Should be the same member ID
           strictEqual(promiseMemberId, memberId)
@@ -2814,7 +2810,7 @@ test('joinGroup should fail when consumer is closed', async t => {
 
   // Attempt to join group on a closed consumer
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof NetworkError, true)
@@ -2894,7 +2890,7 @@ test('joinGroup should handle errors from Connection.get', async t => {
 
   // Attempt to join group with the mocked error
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
@@ -2910,7 +2906,7 @@ test('joinGroup should handle errors from the API (joinGroup)', async t => {
 
   // Attempt to join group with the mocked error
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
@@ -2926,7 +2922,7 @@ test('joinGroup should handle errors from the API (syncGroup)', async t => {
 
   // Attempt to join group with the mocked error
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
@@ -2942,7 +2938,7 @@ test('joinGroup should handle errors from the API (findCoordinator)', async t =>
 
   // Attempt to join group with the mocked error
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
@@ -2957,7 +2953,7 @@ test('joinGroup should handle unavailable API errors (JoinGroup)', async t => {
   mockUnavailableAPI(consumer, 'JoinGroup')
 
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof UnsupportedApiError, true)
@@ -2971,7 +2967,7 @@ test('joinGroup should handle unavailable API errors (SyncGroup)', async t => {
   mockUnavailableAPI(consumer, 'SyncGroup')
 
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof UnsupportedApiError, true)
@@ -2986,7 +2982,7 @@ test('joinGroup should handle errors from Base.metadata', async t => {
 
   // Attempt to join group with the mocked error
   try {
-    await consumer.joinGroup({})
+    await consumer.joinGroup()
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
@@ -3005,13 +3001,13 @@ test('joinGroup should handle errors from Base.metadata during sync', async t =>
   await consumer1.topics.trackAll(topic)
   await consumer2.topics.trackAll(topic)
 
-  await consumer1.joinGroup({})
+  await consumer1.joinGroup()
   consumer1.on('consumer:group:rebalance', () => {
     mockMetadata(consumer1, 2)
   })
 
   const errorPromise = once(consumer1, 'error')
-  await consumer2.joinGroup({})
+  await consumer2.joinGroup()
 
   const [error] = await errorPromise
   // Error should contain our mock error message
@@ -3022,7 +3018,7 @@ test('joinGroup should handle errors from Base.metadata during sync', async t =>
 test('joinGroup should cancel when membership has been cancelled during join', async t => {
   const consumer = createConsumer(t)
 
-  const promise = consumer.joinGroup({})
+  const promise = consumer.joinGroup()
   consumer.leaveGroup()
   deepStrictEqual(await promise, undefined)
 })
@@ -3035,7 +3031,7 @@ test('joinGroup should cancel when membership has been cancelled during sync', a
     original(...args)
   })
 
-  deepStrictEqual(await consumer.joinGroup({}), undefined)
+  deepStrictEqual(await consumer.joinGroup(), undefined)
 })
 
 test('joinGroup should cancel when membership has been cancelled during metadata-insync', async t => {
@@ -3048,7 +3044,7 @@ test('joinGroup should cancel when membership has been cancelled during metadata
   await consumer1.topics.trackAll(topic)
   await consumer2.topics.trackAll(topic)
 
-  await consumer1.joinGroup({})
+  await consumer1.joinGroup()
   consumer1.on('consumer:group:rebalance', () => {
     mockMetadata(consumer1, 2, null, null, (original, ...args) => {
       consumer1.leaveGroup()
@@ -3056,7 +3052,7 @@ test('joinGroup should cancel when membership has been cancelled during metadata
     })
   })
 
-  await consumer2.joinGroup({})
+  await consumer2.joinGroup()
 
   deepStrictEqual(consumer1.assignments, null)
   deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 1, 2] }])
@@ -3071,7 +3067,7 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
     new ProtocolError('REBALANCE_IN_PROGRESS', null, { cancelMembership: true })
   )
 
-  deepStrictEqual(await consumer.joinGroup({}), undefined)
+  deepStrictEqual(await consumer.joinGroup(), undefined)
 })
 
 test('joinGroup should cancel when membership has been cancelled during rejoin (membership expired)', async t => {
@@ -3083,13 +3079,13 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
     new ProtocolError('UNKNOWN_MEMBER_ID', null, { cancelMembership: true })
   )
 
-  deepStrictEqual(await consumer.joinGroup({}), undefined)
+  deepStrictEqual(await consumer.joinGroup(), undefined)
 })
 
 test('leaveGroup should reset group state and leave the consumer group and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const verifyTracingChannel = createTracingChannelVerifier(
     consumerGroupChannel,
@@ -3149,7 +3145,7 @@ test('leaveGroup should support both promise and callback API', t => {
 
         // Now test the promise API
         consumer
-          .joinGroup({})
+          .joinGroup()
           .then(() => {
             return consumer.leaveGroup()
           })
@@ -3167,7 +3163,7 @@ test('leaveGroup should support both promise and callback API', t => {
 
 test('leaveGroup should be no-op in new consumer protocol', async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer' })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.leaveGroup()
 })
 
@@ -3175,7 +3171,7 @@ test('leaveGroup should fail when consumer is closed', async t => {
   const consumer = createConsumer(t)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Now close the consumer
   await consumer.close()
@@ -3208,7 +3204,7 @@ test('leaveGroup should handle errors from Connection.get', async t => {
   const consumer = createConsumer(t)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockConnectionPoolGet(consumer[kConnections], 1)
 
@@ -3226,7 +3222,7 @@ test('leaveGroup should handle errors from the API', async t => {
   const consumer = createConsumer(t)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockAPI(consumer[kConnections], leaveGroupV5.api.key)
 
@@ -3245,7 +3241,7 @@ test('leaveGroup should handle unavailable API errors', async t => {
 
   mockUnavailableAPI(consumer, 'LeaveGroup')
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   try {
     await consumer.leaveGroup()
@@ -3260,7 +3256,7 @@ test('leaveGroup should handle unknown member errors gracefully', async t => {
   const consumer = createConsumer(t)
 
   // First join the group
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   mockAPI(consumer[kConnections], leaveGroupV5.api.key, new ProtocolError('UNKNOWN_MEMBER_ID'))
 
@@ -3334,7 +3330,7 @@ test('#heartbeat should regularly trigger events and support diagnostic channels
     }
   })
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:end')
@@ -3348,7 +3344,7 @@ test('#heartbeat should handle errors from the API', async t => {
 
   mockAPI(consumer[kConnections], heartbeatV4.api.key)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const [{ error }] = await once(consumer, 'consumer:heartbeat:error')
 
@@ -3362,7 +3358,7 @@ test('#heartbeat should handle unavailable API errors', async t => {
 
   mockUnavailableAPI(consumer, 'Heartbeat')
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const [{ error }] = await once(consumer, 'consumer:heartbeat:error')
 
@@ -3380,7 +3376,7 @@ test('#heartbeat should emit events when it was cancelled while waiting for API 
     })
   })
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:cancel')
 })
@@ -3393,7 +3389,7 @@ test('#heartbeat should emit events when it was cancelled while waiting for Hear
     original(...args)
   })
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:cancel')
 })

@@ -28,8 +28,8 @@ import {
   type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
 import {
-  type OffsetFetchRequestTopic,
   type OffsetFetchRequest,
+  type OffsetFetchRequestTopic,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
 import {
@@ -54,6 +54,7 @@ import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
+import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import {
@@ -228,6 +229,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get lastHeartbeat (): Date | null {
     return this.#lastHeartbeat
+  }
+
+  get coordinatorId (): number | null {
+    return this.#coordinatorId
   }
 
   addListener (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
@@ -698,10 +703,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   joinGroup (options: GroupOptions, callback: CallbackWithPromise<string>): void
-  joinGroup (options: GroupOptions): Promise<string>
-  joinGroup (options: GroupOptions, callback?: CallbackWithPromise<string>): void | Promise<string> {
+  joinGroup (options?: GroupOptions): Promise<string>
+  joinGroup (options?: GroupOptions, callback?: CallbackWithPromise<string>): void | Promise<string> {
     if (!callback) {
       callback = createPromisifiedCallback<string>()
+    }
+
+    if (!options) {
+      options = {}
     }
 
     if (this[kCheckNotClosed](callback)) {
@@ -787,6 +796,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: FetchOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<FetchResponse>
   ): void {
+    const isolationLevel = options.isolationLevel ?? this[kOptions].isolationLevel!
+
     this[kPerformWithRetry]<FetchResponse>(
       'fetch',
       retryCallback => {
@@ -823,7 +834,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
                 options.minBytes ?? this[kOptions].minBytes!,
                 options.maxBytes ?? this[kOptions].maxBytes!,
-                FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                isolationLevel,
                 0,
                 0,
                 options.topics,
@@ -835,7 +846,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           })
         })
       },
-      callback,
+      (error: Error | null, response: FetchResponse) => {
+        if (error) {
+          callback(error, undefined as unknown as FetchResponse)
+          return
+        }
+
+        if (isolationLevel === FetchIsolationLevels.READ_COMMITTED) {
+          // Filter out aborted messages
+          this.#filterUncommittedMessages(response)
+        }
+
+        callback(error, response!)
+      },
       0
     )
   }
@@ -962,7 +985,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   api(
                     connection,
                     -1,
-                    FetchIsolationLevels[options.isolationLevel ?? this[kOptions].isolationLevel!],
+                    options.isolationLevel ?? this[kOptions].isolationLevel!,
                     Array.from(requests.values()),
                     retryCallback
                   )
@@ -1970,6 +1993,43 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return encodedAssignments
+  }
+
+  #filterUncommittedMessages (response: FetchResponse) {
+    for (const topic of response.responses) {
+      for (const partition of topic.partitions) {
+        if (!partition.records) {
+          continue
+        }
+
+        if (partition.abortedTransactions.length) {
+          const abortedRanges = new Map<bigint, [bigint, bigint]>()
+
+          // Find first offsets
+          // For last offsets we set -1n as special value. It allows us to detect open ranges, whichs means
+          // that Kafka has not sent the control marker. In that case we ignore the range for safety.
+          for (const aborted of partition.abortedTransactions) {
+            abortedRanges.set(aborted.producerId, [aborted.firstOffset, -1n])
+          }
+
+          // Now find last offsets
+          for (const batch of partition.records!) {
+            if (batch.attributes & IS_CONTROL && batch.records[0].key.readInt16BE(2) === 0) {
+              abortedRanges.get(batch.producerId)![1] = batch.firstOffset
+            }
+          }
+
+          // Filter all records in the aborted ranges
+          partition.records = partition.records!.filter(r => {
+            const toSkip = abortedRanges.get(r.producerId)
+            return !toSkip || !(toSkip[1] !== -1n && r.firstOffset >= toSkip[0] && r.firstOffset < toSkip[1])
+          })
+        }
+
+        // Important: The control records are not filtered here but in the MessagesStream to allow proper offset tracking
+        // otherwise the message stream would never advance consuming.
+      }
+    }
   }
 
   #getRejoinError (error: Error): ProtocolError | null {

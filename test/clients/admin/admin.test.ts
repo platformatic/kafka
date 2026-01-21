@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { scheduler } from 'node:timers/promises'
+import { type ListOffsetsResponse } from '../../../src/apis/consumer/list-offsets-v9.ts'
 import {
   ClientQuotaEntityTypes,
   ClientQuotaKeys,
@@ -11,21 +12,30 @@ import {
   IncrementalAlterConfigOperationTypes,
   ListOffsetTimestamps
 } from '../../../src/apis/enumerations.ts'
+import {
+  Admin,
+  type BrokerLogDirDescription,
+  type ConfigDescription,
+  type CreatedTopic,
+  type DescribeClientQuotasOptions,
+  type GroupBase,
+  type ListConsumerGroupOffsetsGroup
+} from '../../../src/clients/admin/index.ts'
 import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   AclOperations,
   AclPermissionTypes,
   adminAclsChannel,
   adminClientQuotasChannel,
-  adminConsumerGroupOffsetsChannel,
   adminConfigsChannel,
+  adminConsumerGroupOffsetsChannel,
   adminGroupsChannel,
   adminLogDirsChannel,
   adminOffsetsChannel,
   adminTopicsChannel,
   alterClientQuotasV1,
-  type Broker,
   alterConfigsV2,
+  type Broker,
   type Callback,
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
@@ -47,14 +57,14 @@ import {
   listGroupsV5,
   listOffsetsV9,
   MultipleErrors,
-  ResponseError,
-  type ResponseParser,
   ResourcePatternTypes,
   ResourceTypes,
+  ResponseError,
+  type ResponseParser,
   sleep,
+  stringSerializers,
   UnsupportedApiError,
-  type Writer,
-  stringSerializers
+  type Writer
 } from '../../../src/index.ts'
 import {
   createAdmin,
@@ -73,16 +83,6 @@ import {
   mockUnavailableAPI,
   retry
 } from '../../helpers.ts'
-import { type ListOffsetsResponse } from '../../../src/apis/consumer/list-offsets-v9.ts'
-import {
-  Admin,
-  type GroupBase,
-  type BrokerLogDirDescription,
-  type ConfigDescription,
-  type CreatedTopic,
-  type DescribeClientQuotasOptions,
-  type ListConsumerGroupOffsetsGroup
-} from '../../../src/clients/admin/index.ts'
 
 test('constructor should initialize properly', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -138,6 +138,25 @@ test('all operations should fail when admin is closed', async t => {
   // Attempt to call listTopics on closed admin
   try {
     await admin.listTopics()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about admin being closed
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call createPartitions on closed admin
+  try {
+    await admin.createPartitions({
+      topics: [
+        {
+          name: 'test-topic',
+          count: 2,
+          assignments: null
+        }
+      ],
+      validateOnly: false
+    })
+
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should be about admin being closed
@@ -1345,7 +1364,7 @@ test('listGroups should return consumer groups and support diagnostic channels',
   const listGroupsApi = apiVersion.find(a => a.apiKey === listGroupsV5.api.key)!
   const groupType = listGroupsApi.maxVersion === 5 ? 'classic' : undefined
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const verifyTracingChannel = createTracingChannelVerifier(
     adminGroupsChannel,
@@ -1396,7 +1415,7 @@ test('listGroups should support filtering by types and states', async t => {
 
   const admin = createAdmin(t)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Test with explicit types parameter - include consumer groups
   const groups1 = await admin.listGroups({
@@ -1550,7 +1569,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
   await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
 
   await consumer.topics.trackAll(testTopic)
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   const options = {
     groups: [consumer.groupId, 'non-existent-group'],
@@ -1637,7 +1656,7 @@ test('describeGroups should handle includeAuthorizedOperations option', async t 
 
   const admin = createAdmin(t)
 
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   // Test with includeAuthorizedOperations: true
   const groupsWithAuth = await admin.describeGroups({
@@ -1836,7 +1855,7 @@ test('deleteGroups should delete groups and support diagnostic channels', async 
     groupId,
     bootstrapBrokers: kafkaBootstrapServers
   })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.leaveGroup()
   await consumer.close()
 
@@ -2016,7 +2035,7 @@ test('removeMembersFromConsumerGroup should remove specific members', async t =>
   const groupId = `test-group-${randomUUID()}`
   const clientId = `test-client-${randomUUID()}`
   const consumer = createConsumer(t, { clientId, groupId })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   ok(consumer.memberId)
 
@@ -2033,7 +2052,7 @@ test('removeMembersFromConsumerGroup should remove specific members with custom 
   const groupId = `test-group-${randomUUID()}`
   const clientId = `test-client-${randomUUID()}`
   const consumer = createConsumer(t, { clientId, groupId })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   ok(consumer.memberId)
 
@@ -2054,7 +2073,7 @@ test('removeMembersFromConsumerGroup should remove all members', async t => {
   const groupId = `test-group-${randomUUID()}`
   const clientId = `test-client-${randomUUID()}`
   const consumer = createConsumer(t, { clientId, groupId })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   ok(consumer.memberId)
 
@@ -2072,7 +2091,7 @@ test('removeMembersFromConsumerGroup should support diagnostic channels', async 
   const groupId = `test-group-${randomUUID()}`
   const clientId = `test-client-${randomUUID()}`
   const consumer = createConsumer(t, { clientId, groupId })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
 
   ok(consumer.memberId)
 
@@ -3357,7 +3376,7 @@ test('listConsumerGroupOffsets should list selected offsets', async t => {
   const admin = createAdmin(t)
   const consumer = createConsumer(t, { groupId })
   await admin.createTopics({ topics: [topicName], partitions: 3 })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
   await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
   await consumer.commit({ offsets: [{ topic: topicName, partition: 2, leaderEpoch: 1002, offset: BigInt(3) }] })
@@ -3413,7 +3432,7 @@ test('listConsumerGroupOffsets should list all offsets', async t => {
   const admin = createAdmin(t)
   const consumer = createConsumer(t, { groupId })
   await admin.createTopics({ topics: [topicName], partitions: 3 })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
   await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
   await consumer.commit({ offsets: [{ topic: topicName, partition: 2, leaderEpoch: 1002, offset: BigInt(3) }] })
@@ -3535,7 +3554,7 @@ test('deleteConsumerGroupOffsets should delete offsets', async t => {
   const admin = createAdmin(t)
   const consumer = createConsumer(t, { groupId })
   await admin.createTopics({ topics: [topicName], partitions: 2 })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
   await consumer.commit({ offsets: [{ topic: topicName, partition: 1, leaderEpoch: 1001, offset: BigInt(2) }] })
 
@@ -3725,7 +3744,7 @@ test('deleteConsumerGroupOffsets should support diagnostic channels', async t =>
   const admin = createAdmin(t)
   const consumer = createConsumer(t, { groupId })
   await admin.createTopics({ topics: [topicName], partitions: 2 })
-  await consumer.joinGroup({})
+  await consumer.joinGroup()
   await consumer.commit({ offsets: [{ topic: topicName, partition: 0, leaderEpoch: 1000, offset: BigInt(1) }] })
 
   const verifyDeleteTracingChannel = createTracingChannelVerifier(

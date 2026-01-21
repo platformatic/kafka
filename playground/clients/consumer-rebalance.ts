@@ -1,18 +1,22 @@
+import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Consumer, debugDump, stringDeserializers } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
+
+const groupId = randomUUID()
 
 const consumer1 = new Consumer({
-  groupId: 'id9',
+  groupId,
   clientId: 'id',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   strict: true,
   deserializers: stringDeserializers
 })
 
 const consumer2 = new Consumer({
-  groupId: 'id9',
+  groupId,
   clientId: 'id',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   strict: true,
   deserializers: stringDeserializers
 })

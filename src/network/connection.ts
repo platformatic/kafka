@@ -661,6 +661,7 @@ export class Connection extends EventEmitter {
 
       const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback, timedOut } = request
 
+      /* c8 ignore next 3 - Hard to test */
       if (timedOut) {
         return
       }

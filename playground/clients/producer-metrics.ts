@@ -1,12 +1,13 @@
 import * as client from 'prom-client'
 import { Producer, stringSerializers } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
 const registry = new client.Registry()
 
 // Create a producer with string serialisers
 const producer1 = new Producer({
   clientId: 'my-producer',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   serializers: stringSerializers,
   metrics: { client, registry, labels: { a: 1, b: 2 } },
   autocreateTopics: true
@@ -30,7 +31,7 @@ await producer1.close()
 // Create another producer with string serialisers but different labels
 const producer2 = new Producer({
   clientId: 'my-producer',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   serializers: stringSerializers,
   metrics: { client, registry, labels: { b: 3, c: 4 } },
   autocreateTopics: true

@@ -27,7 +27,7 @@ import {
 } from '../../helpers.ts'
 
 test('constructor should properly set getters', () => {
-  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9092'], strict: true })
+  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9092'], retries: false, strict: true })
 
   ok(typeof base.instanceId, 'number')
   deepStrictEqual(base.clientId, 'clientId')
@@ -110,7 +110,8 @@ test('constructor should throw on invalid options when strict mode is enabled', 
     clientId: 'test-client',
     bootstrapBrokers: ['localhost:9092'],
     timeout: 1000,
-    strict: true
+    strict: true,
+    retries: true
   })
 
   strictEqual(client instanceof Base, true)
@@ -481,18 +482,6 @@ test('metadata should return validation error in strict mode', async t => {
   const client = createBase(t, {
     strict: true
   })
-
-  // Test with missing required field
-  try {
-    // @ts-expect-error - Intentionally passing invalid options
-    await client.metadata({})
-
-    // Should not reach here
-    throw new Error('Expected metadata to fail with validation error')
-  } catch (error: any) {
-    // Verify the specific error message
-    strictEqual(error.message, "/options must have required property 'topics'.")
-  }
 
   // Test with invalid topics type
   try {

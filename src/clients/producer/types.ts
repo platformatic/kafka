@@ -6,6 +6,7 @@ import { type Serializers } from '../serde.ts'
 export interface ProducerInfo {
   producerId: bigint
   producerEpoch: number
+  transactionalId?: string
 }
 
 export interface ProduceResult {
@@ -32,6 +33,7 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
 
 export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
   ProduceOptions<Key, Value, HeaderKey, HeaderValue> & {
+    transactionalId?: string
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
   }
 

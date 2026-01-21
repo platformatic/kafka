@@ -1,8 +1,9 @@
 import { Admin } from '../../src/clients/admin/index.ts'
 import { debugDump, sleep } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
 const retries = 0
-const admin = new Admin({ clientId: 'id', bootstrapBrokers: ['localhost:9092'], retries, strict: true })
+const admin = new Admin({ clientId: 'id', bootstrapBrokers: kafkaSingleBootstrapServers, retries, strict: true })
 const metadataDelay = retries === 0 ? 500 : 0
 
 try {

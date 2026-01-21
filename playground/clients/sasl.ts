@@ -1,10 +1,10 @@
 import { Base } from '../../src/index.ts'
+import { kafkaSaslBootstrapServers } from '../../test/helpers.ts'
 
 async function main () {
   const client = new Base({
     clientId: 'clientId',
-    groupId: 'groupId',
-    bootstrapBrokers: ['localhost:9095'],
+    bootstrapBrokers: kafkaSaslBootstrapServers,
     sasl: {
       mechanism: 'SCRAM-SHA-256',
       username: 'admin',

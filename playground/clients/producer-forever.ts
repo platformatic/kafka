@@ -1,8 +1,9 @@
 import { Producer, debugDump, sleep, stringSerializers } from '../../src/index.ts'
+import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
 const producer = new Producer({
   clientId: 'id',
-  bootstrapBrokers: ['localhost:9092'],
+  bootstrapBrokers: kafkaSingleBootstrapServers,
   serializers: stringSerializers,
   strict: true
 })

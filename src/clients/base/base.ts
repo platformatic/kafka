@@ -223,10 +223,10 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
         nodes = Array.from(metadata.brokers.keys())
       }
 
-      runConcurrentCallbacks<[number, Connection]>(
+      runConcurrentCallbacks(
         'Connecting to brokers failed.',
         nodes,
-        (nodeId: number, concurrentCallback) => {
+        (nodeId, concurrentCallback: Callback<[number, Connection]>) => {
           this[kGetConnection](metadata.brokers.get(nodeId)!, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as [number, Connection])

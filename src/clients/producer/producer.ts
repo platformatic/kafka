@@ -4,6 +4,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { ProduceAcks } from '../../apis/enumerations.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
 import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
@@ -405,10 +406,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       // Track nodes so that we can get their ID for delayed write reporting
       const nodes: number[] = []
 
-      runConcurrentCallbacks<ProduceResponse | boolean>(
+      runConcurrentCallbacks(
         'Producing messages failed.',
         messagesByDestination,
-        ([destination, destinationMessages], concurrentCallback) => {
+        ([destination, destinationMessages], concurrentCallback: Callback<ProduceResponse | boolean>) => {
           nodes.push(destination)
 
           this.#performSingleDestinationSend(

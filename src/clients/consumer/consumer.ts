@@ -114,6 +114,7 @@ import {
   type Offsets,
   type OffsetsWithTimestamps
 } from './types.ts'
+import { type Callback } from '../../apis/definitions.ts'
 
 interface TopicPartition {
   topicId: string
@@ -939,10 +940,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
       }
 
-      runConcurrentCallbacks<ListOffsetsResponse>(
+      runConcurrentCallbacks(
         'Listing offsets failed.',
         requests,
-        ([leader, requests], concurrentCallback) => {
+        ([leader, requests], concurrentCallback: Callback<ListOffsetsResponse>) => {
           this[kPerformWithRetry]<ListOffsetsResponse>(
             'listOffsets',
             retryCallback => {
@@ -1667,10 +1668,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      runConcurrentCallbacks<void>(
+      runConcurrentCallbacks(
         'Closing streams failed.',
         this.#streams,
-        (stream, concurrentCallback) => {
+        (stream, concurrentCallback: Callback<void>) => {
           stream.close(concurrentCallback)
         },
         error => {

@@ -29,9 +29,21 @@ export function createPromisifiedCallback<ReturnType> (): CallbackWithPromise<Re
   return callback
 }
 
+export function runConcurrentCallbacks<ReturnType, K, V> (
+  errorMessage: string,
+  collection: Map<K, V>,
+  operation: (item: [K, V], cb: Callback<ReturnType>) => void,
+  callback: Callback<ReturnType[]>
+): void
+export function runConcurrentCallbacks<ReturnType, V> (
+  errorMessage: string,
+  collection: Set<V> | V[],
+  operation: (item: V, cb: Callback<ReturnType>) => void,
+  callback: Callback<ReturnType[]>
+): void
 export function runConcurrentCallbacks<ReturnType> (
   errorMessage: string,
-  collection: unknown[] | Set<unknown> | Map<unknown, unknown>,
+  collection: Map<any, any> | Set<any> | any[],
   operation: (item: any, cb: Callback<ReturnType>) => void,
   callback: Callback<ReturnType[]>
 ): void {

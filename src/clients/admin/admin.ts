@@ -1107,10 +1107,10 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      runConcurrentCallbacks<ListGroupsResponse>(
+      runConcurrentCallbacks(
         'Listing groups failed.',
         metadata.brokers,
-        ([, broker], concurrentCallback) => {
+        ([, broker], concurrentCallback: Callback<ListGroupsResponse>) => {
           this[kGetConnection](broker, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as ListGroupsResponse)
@@ -1191,10 +1191,10 @@ export class Admin extends Base<AdminOptions> {
           coordinator.push(group)
         }
 
-        runConcurrentCallbacks<DescribeGroupsResponse>(
+        runConcurrentCallbacks(
           'Describing groups failed.',
           coordinators,
-          ([node, groups], concurrentCallback) => {
+          ([node, groups], concurrentCallback: Callback<DescribeGroupsResponse>) => {
             this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined as unknown as DescribeGroupsResponse)
@@ -1314,19 +1314,19 @@ export class Admin extends Base<AdminOptions> {
         runConcurrentCallbacks(
           'Deleting groups failed.',
           coordinators,
-          ([node, groups], concurrentCallback) => {
+          ([node, groups], concurrentCallback: Callback<DeleteGroupsResponse>) => {
             this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
-                concurrentCallback(error, undefined)
+                concurrentCallback(error, undefined as unknown as DeleteGroupsResponse)
                 return
               }
 
-              this[kPerformWithRetry](
+              this[kPerformWithRetry]<DeleteGroupsResponse>(
                 'deleteGroups',
                 retryCallback => {
                   this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (error, api) => {
                     if (error) {
-                      retryCallback(error, undefined as unknown as CreateTopicsResponse)
+                      retryCallback(error, undefined as unknown as DeleteGroupsResponse)
                       return
                     }
 
@@ -1575,10 +1575,10 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      runConcurrentCallbacks<BrokerLogDirDescription>(
+      runConcurrentCallbacks(
         'Describing log dirs failed.',
         metadata.brokers,
-        ([id, broker], concurrentCallback) => {
+        ([id, broker], concurrentCallback: Callback<BrokerLogDirDescription>) => {
           this[kGetConnection](broker, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as BrokerLogDirDescription)
@@ -1594,7 +1594,7 @@ export class Admin extends Base<AdminOptions> {
                     return
                   }
 
-                  api(connection, options.topics, retryCallback as unknown as Callback<DescribeLogDirsResponse>)
+                  api(connection, options.topics, retryCallback)
                 })
               },
               (error, response) => {
@@ -1668,10 +1668,10 @@ export class Admin extends Base<AdminOptions> {
           coordinator.push(groupRequest)
         }
 
-        runConcurrentCallbacks<OffsetFetchResponse>(
+        runConcurrentCallbacks(
           'Listing consumer group offsets failed.',
           coordinators,
-          ([node, groups], concurrentCallback) => {
+          ([node, groups], concurrentCallback: Callback<OffsetFetchResponse>) => {
             this[kGetConnection](metadata.brokers.get(node)!, (error, connection) => {
               if (error) {
                 concurrentCallback(error, undefined as unknown as OffsetFetchResponse)
@@ -1948,10 +1948,10 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #describeConfigs (options: DescribeConfigsOptions, callback: CallbackWithPromise<ConfigDescription[]>): void {
-    runConcurrentCallbacks<ConfigDescription[]>(
+    runConcurrentCallbacks(
       'Describing configs failed.',
       this.#getConfigRequestsDistributedToBrokers(options.resources),
-      ([brokerId, resources], concurrentCallback) => {
+      ([brokerId, resources], concurrentCallback: Callback<ConfigDescription[]>) => {
         this.#describeConfigsOnBroker({ ...options, resources }, brokerId, (error, response) => {
           if (error) {
             concurrentCallback(error, undefined as unknown as ConfigDescription[])
@@ -2018,11 +2018,11 @@ export class Admin extends Base<AdminOptions> {
     )
   }
 
-  #alterConfigs (options: DescribeConfigsOptions, callback: CallbackWithPromise<void>): void {
-    runConcurrentCallbacks<void>(
+  #alterConfigs (options: AlterConfigsOptions, callback: CallbackWithPromise<void>): void {
+    runConcurrentCallbacks(
       'Altering configs failed.',
       this.#getConfigRequestsDistributedToBrokers(options.resources),
-      ([brokerId, resources], concurrentCallback) => {
+      ([brokerId, resources], concurrentCallback: Callback<void>) => {
         this.#alterConfigsOnBroker({ ...options, resources }, brokerId, concurrentCallback)
       },
       error => {
@@ -2070,10 +2070,10 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #incrementalAlterConfigs (options: IncrementalAlterConfigsOptions, callback: CallbackWithPromise<void>): void {
-    runConcurrentCallbacks<void>(
+    runConcurrentCallbacks(
       'Incrementally altering configs failed.',
       this.#getConfigRequestsDistributedToBrokers(options.resources),
-      ([brokerId, resources], concurrentCallback) => {
+      ([brokerId, resources], concurrentCallback: Callback<void>) => {
         this.#incrementalAlterConfigsOnBroker({ ...options, resources }, brokerId, concurrentCallback)
       },
       error => {
@@ -2268,10 +2268,10 @@ export class Admin extends Base<AdminOptions> {
         }
       }
 
-      runConcurrentCallbacks<ListOffsetsResponse>(
+      runConcurrentCallbacks(
         'Listing offsets failed.',
         requests,
-        ([leader, requests], concurrentCallback) => {
+        ([leader, requests], concurrentCallback: Callback<ListOffsetsResponse>) => {
           this[kGetConnection](metadata.brokers.get(leader)!, (error, connection) => {
             if (error) {
               concurrentCallback(error, undefined as unknown as ListOffsetsResponse)

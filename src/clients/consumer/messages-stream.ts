@@ -448,7 +448,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const partitions = assignment.partitions
 
         for (const partition of partitions) {
-          const leader = metadata.topics.get(topic)!.partitions[partition].leader
+          const leader = metadata!.topics.get(topic)!.partitions[partition].leader
 
           if (this.#inflightNodes.has(leader)) {
             continue
@@ -460,7 +460,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             requests.set(leader, leaderRequests)
           }
 
-          const topicId = metadata.topics.get(topic)!.id
+          const topicId = metadata!.topics.get(topic)!.id
           topicIds.set(topicId, topic)
 
           const fetchOffset = this.#offsetsToFetch.get(`${topic}:${partition}`)!
@@ -510,7 +510,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+          this.#pushRecords(metadata!, topicIds, response!, requestedOffsets)
 
           if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
             this.push(null)
@@ -761,7 +761,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
 
         if (this.#mode !== MessagesStreamModes.COMMITTED) {
-          this.#assignOffsets(offsets, new Map(), callback)
+          this.#assignOffsets(offsets!, new Map(), callback)
           return
         }
 
@@ -778,7 +778,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
 
         if (!topics.length) {
-          this.#assignOffsets(offsets, new Map(), callback)
+          this.#assignOffsets(offsets!, new Map(), callback)
           return
         }
 
@@ -794,7 +794,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          this.#assignOffsets(offsets, commits, callback)
+          this.#assignOffsets(offsets!, commits!, callback)
         })
       }
     )

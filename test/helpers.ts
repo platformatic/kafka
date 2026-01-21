@@ -14,8 +14,6 @@ import { type TestContext } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
 import {
-  Admin,
-  type AdminOptions,
   Base,
   type BaseOptions,
   type Broker,
@@ -33,6 +31,7 @@ import {
   UnsupportedApiError,
   type Writer
 } from '../src/index.ts'
+import { Admin, type AdminOptions } from '../src/clients/admin/index.ts'
 
 export const kafkaBootstrapServers = ['localhost:9011']
 export const kafkaSaslBootstrapServers = ['localhost:9002']

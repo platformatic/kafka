@@ -13,7 +13,11 @@ import {
   type DescribeLogDirsResponseResult
 } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type IncrementalAlterConfigsRequestResource } from '../../apis/admin/incremental-alter-configs-v1.ts'
-import { type ConfigResourceTypeValue, type ConsumerGroupStateValue } from '../../apis/enumerations.ts'
+import {
+  type FetchIsolationLevelValue,
+  type ConfigResourceTypeValue,
+  type ConsumerGroupStateValue
+} from '../../apis/enumerations.ts'
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
@@ -201,4 +205,31 @@ export interface DescribeAclsOptions {
 
 export interface DeleteAclsOptions {
   filters: AclFilter[]
+}
+
+export interface PartitionTimestamp {
+  partitionIndex: number
+  timestamp: bigint
+}
+
+export interface TopicOffsetRequest {
+  name: string
+  partitions: PartitionTimestamp[]
+}
+
+export interface ListOffsetsOptions {
+  topics: TopicOffsetRequest[]
+  isolationLevel?: Nullable<FetchIsolationLevelValue>
+}
+
+export interface ListedOffsetsPartition {
+  partitionIndex: number
+  timestamp: bigint
+  offset: bigint
+  leaderEpoch: number
+}
+
+export interface ListedOffsetsTopic {
+  name: string
+  partitions: ListedOffsetsPartition[]
 }

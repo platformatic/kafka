@@ -271,6 +271,19 @@ Options:
 | resources    | `IncrementalAlterConfigsRequestResource[]` | Array of resources specifying the resource type, name, and incremental configurations. |
 | validateOnly | `boolean`                                  | Whether to only validate the request without applying changes. Defaults to `false`.    |
 
+### `listOffsets(options[, callback])`
+
+Lists offsets for specified topic partitions.
+
+The return value is an array of topics, each containing partition offset information including the offset, timestamp, partition index, and leader epoch.
+
+Options:
+
+| Property       | Type                            | Description                                                                                                                                                                     |
+| -------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| topics         | `TopicOffsetRequest[]`          | Array of topics with their partitions to query offsets for. Each topic has `name` and `partitions` (array of `{ partitionIndex, timestamp }`).                                  |
+| isolationLevel | `FetchIsolationLevel` \| `null` | Isolation level for reading offsets. Valid values are `FetchIsolationLevels.READ_UNCOMMITTED` (0) or `FetchIsolationLevels.READ_COMMITTED` (1). Defaults to `READ_UNCOMMITTED`. |
+
 ### `close([callback])`
 
 Closes the admin and all its connections.

@@ -1,4 +1,5 @@
-import { Admin, debugDump, sleep } from '../../src/index.ts'
+import { Admin } from '../../src/clients/admin/index.ts'
+import { debugDump, sleep } from '../../src/index.ts'
 
 const retries = 0
 const admin = new Admin({ clientId: 'id', bootstrapBrokers: ['localhost:9092'], retries, strict: true })

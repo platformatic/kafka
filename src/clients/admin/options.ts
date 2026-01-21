@@ -6,7 +6,8 @@ import {
   IncrementalAlterConfigOperationTypes,
   allowedAclOperations,
   allowedAclPermissionTypes,
-  allowedResourcePatternTypes
+  allowedResourcePatternTypes,
+  allowedFetchIsolationLevels
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
@@ -557,6 +558,40 @@ export const deleteAclsOptionsSchema = {
   additionalProperties: false
 }
 
+export const listOffsetsOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                partitionIndex: { type: 'number', minimum: 0 },
+                timestamp: { bigint: true }
+              },
+              required: ['partitionIndex', 'timestamp'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitions'],
+        additionalProperties: false
+      },
+      minItems: 1
+    },
+    isolationLevel: { type: ['number', 'null'], enum: [null, ...allowedFetchIsolationLevels] }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
@@ -577,3 +612,4 @@ export const incrementalAlterConfigsOptionsValidator = ajv.compile(incrementalAl
 export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
 export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
 export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)
+export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)

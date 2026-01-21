@@ -76,6 +76,7 @@ Each tracing channel publishes events with the following common properties:
 | `plt:kafka:admin:consumerGroupOffsets` | `Admin`          | Traces a `Admin.listConsumerGroupOffsets` or `Admin.deleteConsumerGroupOffsets` request.                                     |
 | `plt:kafka:admin:configs`              | `Admin`          | Traces a `Admin.describeConfigs`, `Admin.alterConfigs`, or `Admin.incrementalAlterConfigs` request.                          |
 | `plt:kafka:admin:acls`                 | `Admin`          | Traces a `Admin.createAcls`, `Admin.describeAcls` or `Admin.deleteAcls` request.                                             |
+| `plt:kafka:admin:offsets`              | `Admin`          | Traces a `Admin.listOffsets` request.                                                                                        |
 | `plt:kafka:producer:initIdempotent`    | `Producer`       | Traces a `Producer.initIdempotentProducer` request.                                                                          |
 | `plt:kafka:producer:sends`             | `Producer`       | Traces a `Producer.send` request.                                                                                            |
 | `plt:kafka:consumer:group`             | `Consumer`       | Traces a `Consumer.findGroupCoordinator`, `Consumer.joinGroup` or `Consumer.leaveGroup` requests.                            |

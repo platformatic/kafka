@@ -1,13 +1,13 @@
 import {
   allowedIncrementalAlterConfigOperationTypes,
   allowedResourceTypes,
-  ClientQuotaMatchTypes,
   ConsumerGroupStates,
   IncrementalAlterConfigOperationTypes,
   allowedAclOperations,
   allowedAclPermissionTypes,
   allowedResourcePatternTypes,
-  allowedFetchIsolationLevels
+  allowedFetchIsolationLevels,
+  allowedClientQuotaMatchTypes
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
@@ -165,7 +165,7 @@ export const describeClientQuotasOptionsSchema = {
         type: 'object',
         properties: {
           entityType: { type: 'string', minLength: 1 },
-          matchType: { type: 'number', enum: Object.values(ClientQuotaMatchTypes) },
+          matchType: { type: 'number', enum: allowedClientQuotaMatchTypes },
           match: { type: 'string' }
         },
         required: ['entityType', 'matchType'],

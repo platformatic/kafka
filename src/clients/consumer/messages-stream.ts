@@ -15,12 +15,18 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
-import { IS_CONTROL, type Message } from '../../protocol/records.ts'
+import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
+import { runAsyncSeries } from '../../registries/abstract.ts'
 import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
-import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
+import {
+  type BeforeDeserializationHook,
+  type BeforeHookPayloadType,
+  type Deserializer,
+  type DeserializerWithHeaders
+} from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
@@ -60,8 +66,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsCommitted: Map<string, bigint>
   #partitionsEpochs: Map<string, number>
   #inflightNodes: Set<number>
-  #keyDeserializer: DeserializerWithHeaders<Key>
-  #valueDeserializer: DeserializerWithHeaders<Value>
+  #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
+  #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeyDeserializer: Deserializer<HeaderKey>
   #headerValueDeserializer: Deserializer<HeaderValue>
   #autocommitEnabled: boolean
@@ -70,7 +76,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
-  #corruptedMessageHandler: CorruptedMessageHandler;
+  #corruptedMessageHandler: CorruptedMessageHandler
+  #pushRecordsOperation: (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>
+  ) => void;
 
   [kInstance]: number
 
@@ -86,6 +98,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       offsets,
       deserializers,
       onCorruptedMessage,
+      registry,
+      beforeDeserialization,
       // The options below are only destructured to avoid being part of structuredClone below
       partitionAssigner: _partitionAssigner,
       ...otherOptions
@@ -116,8 +130,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
     this.#inflightNodes = new Set()
-    this.#keyDeserializer = deserializers?.key ?? (noopDeserializer as Deserializer<Key>)
-    this.#valueDeserializer = deserializers?.value ?? (noopDeserializer as Deserializer<Value>)
+    this.#keyDeserializer =
+      deserializers?.key ?? (noopDeserializer as DeserializerWithHeaders<Key, HeaderKey, HeaderValue>)
+    this.#valueDeserializer =
+      deserializers?.value ?? (noopDeserializer as DeserializerWithHeaders<Value, HeaderKey, HeaderValue>)
     this.#headerKeyDeserializer = deserializers?.headerKey ?? (noopDeserializer as Deserializer<HeaderKey>)
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
     this.#autocommitEnabled = !!options.autocommit
@@ -125,6 +141,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#shouldClose = false
     this.#closeCallbacks = []
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
+
+    if (registry) {
+      this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, registry.getBeforeDeserializationHook())
+    } else if (beforeDeserialization) {
+      this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, beforeDeserialization)
+    } else {
+      this.#pushRecordsOperation = this.#pushRecords.bind(this)
+    }
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
@@ -510,11 +534,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          this.#pushRecords(metadata!, topicIds, response!, requestedOffsets)
-
-          if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
-            this.push(null)
-          }
+          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
         })
       }
     })
@@ -585,6 +605,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
           // Process messages
           for (const record of batch.records) {
+            const messageToConsume: MessageToConsume = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
             if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
@@ -608,10 +629,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             try {
               const headers = new Map()
               for (const [headerKey, headerValue] of record.headers) {
-                headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+                headers.set(
+                  headerKeyDeserializer(headerKey, messageToConsume),
+                  headerValueDeserializer(headerValue, messageToConsume)
+                )
               }
-              const key = keyDeserializer(record.key, headers)
-              const value = valueDeserializer(record.value, headers)
+              const key = keyDeserializer(record.key, headers, messageToConsume)
+              const value = valueDeserializer(record.value, headers, messageToConsume)
 
               this.#metricsConsumedMessages?.inc()
 
@@ -667,6 +691,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       process.nextTick(() => {
         this.#fetch()
       })
+    }
+
+    if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
+      this.push(null)
     }
   }
 
@@ -869,5 +897,68 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   /* c8 ignore next 3 - This is a private API used to debug during development */
   [kInspect] (...args: unknown[]): void {
     this.#consumer[kInspect](...args)
+  }
+
+  #beforeDeserialization (
+    hook: BeforeDeserializationHook,
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>
+  ) {
+    const requests: [Buffer, BeforeHookPayloadType, MessageToConsume][] = []
+
+    // Create the pre-deserialization requests
+    for (const topicResponse of response.responses) {
+      for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+        /* c8 ignore next 3 - Hard to test */
+        if (!recordsBatches) {
+          continue
+        }
+
+        for (const batch of recordsBatches) {
+          // Filter control markers
+          /* c8 ignore next 3 - Hard to test */
+          if (batch.attributes & IS_CONTROL) {
+            continue
+          }
+
+          for (const message of batch.records as MessageToConsume[]) {
+            message.topic = topicIds.get(topicResponse.topicId)!
+            message.partition = partition
+
+            requests.push([message.key, 'key', message])
+            requests.push([message.value, 'value', message])
+
+            for (const [headerKey, headerValue] of message.headers) {
+              requests.push([headerKey, 'headerKey', message])
+              requests.push([headerValue, 'headerValue', message])
+            }
+          }
+        }
+      }
+    }
+
+    runAsyncSeries(
+      (request, cb) => {
+        const [data, type, message] = request
+
+        const result = hook(data, type, message, cb) as Promise<void>
+
+        if (typeof result?.then === 'function') {
+          result.then(() => cb(null), cb)
+        }
+      },
+      requests,
+      0,
+      error => {
+        if (error) {
+          this.destroy(error)
+          return
+        }
+
+        this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+      }
+    )
   }
 }

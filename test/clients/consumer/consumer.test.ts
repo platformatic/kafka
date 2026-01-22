@@ -12,6 +12,7 @@ import {
   type ClientDiagnosticEvent,
   type ClusterMetadata,
   CompressionAlgorithms,
+  ConfluentSchemaRegistry,
   Consumer,
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -329,6 +330,36 @@ test('constructor should validate necessary options even not in strict mode', ()
     )
   }
 
+  try {
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092'],
+      groupId: 'test-group',
+      deserializers: registry.getDeserializers(),
+      registry
+    })
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
+  }
+
+  try {
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092'],
+      groupId: 'test-group',
+      beforeDeserialization: registry.getBeforeDeserializationHook(),
+      registry
+    })
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, '/options/beforeDeserialization cannot be provided when /options/registry is provided.')
+  }
+
   // Valid relationship between options
   const consumer = new Consumer({
     clientId: 'test-consumer',
@@ -568,6 +599,8 @@ test('consume should return a MessagesStream instance and support diagnostic cha
         client: consumer,
         operation: 'consume',
         options: {
+          beforeDeserialization: undefined,
+          registry: undefined,
           topics: [],
           autocommit: true,
           deserializers: {},
@@ -701,6 +734,32 @@ test('consume should validate the supplied options', async t => {
   } catch (error) {
     strictEqual(error instanceof UserError, true)
     strictEqual(error.message.includes('maxBytes'), true)
+  }
+
+  try {
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+
+    await consumer.consume({
+      topics: [],
+      deserializers: registry.getDeserializers(),
+      registry
+    })
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
+  }
+
+  try {
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+
+    await consumer.consume({
+      topics: [],
+      beforeDeserialization: registry.getBeforeDeserializationHook(),
+      registry
+    })
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, '/options/beforeDeserialization cannot be provided when /options/registry is provided.')
   }
 })
 

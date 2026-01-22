@@ -651,6 +651,11 @@ test('createTopics should retarget controller when needed', async t => {
   // @ts-ignore
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
       // Define the next broker in sequence as the correct controller
       if (correctControllerId === null) {
         correctControllerId = (connection!.port! - 9010 + 1) % 3
@@ -895,6 +900,11 @@ test('deleteTopics should retarget controller when needed', async t => {
   // @ts-ignore
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
       // Define the next broker in sequence as the correct controller
       if (correctControllerId === null) {
         correctControllerId = (connection!.port! - 9010 + 1) % 3

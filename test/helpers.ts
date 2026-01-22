@@ -279,6 +279,11 @@ export function mockAPI (
 
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
       if (mocked.has(connection!.instanceId)) {
         callback(null, connection)
         return

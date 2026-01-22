@@ -449,7 +449,7 @@ test('metadata should support both callback and promise API', (t, done) => {
   // Use callback API
   client.metadata({ topics: [testTopic], autocreateTopics: true }, (err, metadata) => {
     strictEqual(err, null)
-    strictEqual(metadata.topics.has(testTopic), true)
+    strictEqual(metadata!.topics.has(testTopic), true)
 
     client
       .close()

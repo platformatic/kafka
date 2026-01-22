@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { before, type TestContext } from 'node:test'
+import { scheduler } from 'node:timers/promises'
 import { createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
   type SaslAuthenticateResponse,
@@ -45,7 +46,6 @@ import {
   mockedErrorMessage,
   mockedOperationId
 } from '../helpers.ts'
-import { scheduler } from 'node:timers/promises'
 
 // Create passwords as Confluent Kafka images don't support it via environment
 const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
@@ -459,7 +459,7 @@ test('Connection.send should handle requests with response', async t => {
         if (err) {
           reject(err)
         } else {
-          resolve(returnValue)
+          resolve(returnValue!)
         }
       }
     )
@@ -504,7 +504,7 @@ test('Connection.send should time out eventually (custom timeout)', async t => {
           if (err) {
             reject(err)
           } else {
-            resolve(returnValue)
+            resolve(returnValue!)
           }
         }
       )

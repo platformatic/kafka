@@ -958,8 +958,8 @@ test('fetch should support both promise and callback API', async t => {
           return
         }
 
-        strictEqual(result.errorCode, 0)
-        strictEqual(Array.isArray(result.responses), true)
+        strictEqual(result!.errorCode, 0)
+        strictEqual(Array.isArray(result!.responses), true)
 
         // Now test Promise API
         consumer
@@ -1654,7 +1654,7 @@ test('listOffsets should support both promise and callback API', async t => {
 
       // Verify structure
       strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
-      strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+      strictEqual(offsets!.has(topic), true, 'Should contain the requested topic')
 
       // Now test the promise API
       consumer
@@ -1989,7 +1989,7 @@ test('listCommittedOffsets should support both promise and callback API', async 
 
       // Verify structure
       strictEqual(committed instanceof Map, true, 'Should return a Map of offsets')
-      strictEqual(committed.has(topic), true, 'Should contain the requested topic')
+      strictEqual(committed!.has(topic), true, 'Should contain the requested topic')
 
       // Now test the promise API
       consumer
@@ -2226,7 +2226,7 @@ test('getLag should support both promise and callback API', async t => {
 
       // Verify structure
       strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
-      strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+      strictEqual(offsets!.has(topic), true, 'Should contain the requested topic')
 
       // Now test the promise API
       consumer
@@ -2472,7 +2472,7 @@ test('findGroupCoordinator should support both promise and callback API', t => {
 
       // Verify the result is a positive number
       strictEqual(typeof coordinatorId, 'number')
-      ok(coordinatorId >= 0, 'Coordinator ID should be a non-negative number')
+      ok(coordinatorId! >= 0, 'Coordinator ID should be a non-negative number')
 
       // Now try with Promise API to verify both work
       consumer
@@ -2787,7 +2787,7 @@ test('joinGroup should support both promise and callback API', t => {
 
       // Verify the result is a non-empty string
       strictEqual(typeof memberId, 'string')
-      ok(memberId.length > 0, 'Member ID should be a non-empty string')
+      ok(memberId!.length > 0, 'Member ID should be a non-empty string')
 
       // Now try with Promise API to verify both work
       consumer

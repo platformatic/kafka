@@ -194,6 +194,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
+    if (options.beforeDeserialization && options.registry) {
+      throw new UserError('Cannot specify registry when using beforeDeserialization hook.')
+    }
+
     // Initialize connection pool
     this[kFetchConnections] = this[kCreateConnectionPool]()
 

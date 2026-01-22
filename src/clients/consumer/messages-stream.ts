@@ -16,11 +16,17 @@ import {
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
 import { IS_CONTROL, type Message } from '../../protocol/records.ts'
+import { runAsyncSeries } from '../../registries/abstract.ts'
 import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
-import { kInspect, kPrometheus } from '../base/base.ts'
+import { kInspect, kOptions, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
-import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
+import {
+  type BeforeDeserializationHook,
+  type BeforeHookPayloadType,
+  type Deserializer,
+  type DeserializerWithHeaders
+} from '../serde.ts'
 import { type Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
@@ -28,6 +34,7 @@ import {
   MessagesStreamModes,
   type CommitOptionsPartition,
   type ConsumeOptions,
+  type ConsumerOptions,
   type CorruptedMessageHandler,
   type GroupAssignment,
   type Offsets
@@ -70,7 +77,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #shouldClose: boolean
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
-  #corruptedMessageHandler: CorruptedMessageHandler;
+  #corruptedMessageHandler: CorruptedMessageHandler
+  #pushRecordsOperation: (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>
+  ) => void;
 
   [kInstance]: number
 
@@ -125,6 +138,20 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#shouldClose = false
     this.#closeCallbacks = []
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
+
+    const { registry, beforeDeserialization } = this.#consumer[kOptions] as ConsumerOptions<
+      Key,
+      Value,
+      HeaderKey,
+      HeaderValue
+    >
+    if (registry) {
+      this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, registry.getBeforeDeserializationHook())
+    } else if (beforeDeserialization) {
+      this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, beforeDeserialization)
+    } else {
+      this.#pushRecordsOperation = this.#pushRecords.bind(this)
+    }
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
@@ -510,11 +537,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          this.#pushRecords(metadata!, topicIds, response!, requestedOffsets)
-
-          if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
-            this.push(null)
-          }
+          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
         })
       }
     })
@@ -667,6 +690,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       process.nextTick(() => {
         this.#fetch()
       })
+    }
+
+    if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
+      this.push(null)
     }
   }
 
@@ -869,5 +896,66 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   /* c8 ignore next 3 - This is a private API used to debug during development */
   [kInspect] (...args: unknown[]): void {
     this.#consumer[kInspect](...args)
+  }
+
+  #beforeDeserialization (
+    hook: BeforeDeserializationHook,
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>
+  ) {
+    const requests: [Buffer, BeforeHookPayloadType][] = []
+
+    // Create the pre-deserialization requests
+    for (const topicResponse of response.responses) {
+      for (const { records: recordsBatches } of topicResponse.partitions) {
+        if (!recordsBatches) {
+          continue
+        }
+
+        for (const batch of recordsBatches) {
+          // Filter control markers
+          if (batch.attributes & IS_CONTROL) {
+            continue
+          }
+
+          for (const message of batch.records) {
+            requests.push([message.key, 'key'])
+            requests.push([message.value, 'value'])
+
+            for (const [headerKey, headerValue] of message.headers) {
+              requests.push([headerKey, 'headerKey'])
+              requests.push([headerValue, 'headerValue'])
+            }
+          }
+        }
+      }
+    }
+
+    runAsyncSeries(
+      (request, cb) => {
+        const [data, type] = request
+
+        const result = hook(data, type, cb) as Promise<void>
+
+        if (typeof result?.then === 'function') {
+          result.then(
+            () => cb(null),
+            err => process.nextTick(() => cb(err))
+          )
+        }
+      },
+      requests,
+      0,
+      error => {
+        if (error) {
+          this.destroy(error)
+          return
+        }
+
+        this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+      }
+    )
   }
 }

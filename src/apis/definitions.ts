@@ -1,10 +1,10 @@
 import { promisify } from 'node:util'
 import { type Connection } from '../network/connection.ts'
+import { type NullableString } from '../protocol/definitions.ts'
 import { type Reader } from '../protocol/reader.ts'
 import { type Writer } from '../protocol/writer.ts'
-import { type NullableString } from '../protocol/definitions.ts'
 
-export type Callback<ReturnType> = (error: Error | null, payload: ReturnType) => void
+export type Callback<ReturnType> = (error: Error | null, payload?: ReturnType) => void
 
 export type CallbackArguments<ReturnType> = [cb: Callback<ReturnType>]
 

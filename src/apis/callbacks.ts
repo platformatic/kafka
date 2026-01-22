@@ -37,7 +37,13 @@ export function runConcurrentCallbacks<ReturnType, K, V> (
 ): void
 export function runConcurrentCallbacks<ReturnType, V> (
   errorMessage: string,
-  collection: Set<V> | V[],
+  collection: Set<V>,
+  operation: (item: V, cb: Callback<ReturnType>) => void,
+  callback: Callback<ReturnType[]>
+): void
+export function runConcurrentCallbacks<ReturnType, V> (
+  errorMessage: string,
+  collection: V[],
   operation: (item: V, cb: Callback<ReturnType>) => void,
   callback: Callback<ReturnType[]>
 ): void
@@ -54,12 +60,12 @@ export function runConcurrentCallbacks<ReturnType> (
 
   let i = 0
 
-  function operationCallback (index: number, e: Error | null, result: ReturnType): void {
+  function operationCallback (index: number, e: Error | null, result?: ReturnType): void {
     if (e) {
       hasErrors = true
       errors[index] = e
     } else {
-      results[index] = result
+      results[index] = result!
     }
 
     remaining--

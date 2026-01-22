@@ -55,9 +55,9 @@ test('constructor should validate options in strict mode', t => {
       acks: 123 // Not a valid ProduceAcks enum value
     })
     throw new Error('Should have thrown for invalid acks value')
-  } catch (error: any) {
-    ok(error.message.includes('acks'), 'Error message should mention acks')
-    ok(error.message.includes('/options/acks should be one of'), 'Error should indicate invalid enum value')
+  } catch (error) {
+    ok((error as Error).message.includes('acks'), 'Error message should mention acks')
+    ok((error as Error).message.includes('/options/acks should be one of'), 'Error should indicate invalid enum value')
   }
 
   // Test with invalid compression
@@ -68,8 +68,11 @@ test('constructor should validate options in strict mode', t => {
       compression: 'invalid-compression' // Not a valid compression algorithm
     })
     throw new Error('Should have thrown for invalid compression')
-  } catch (error: any) {
-    ok(error.message.includes('/options/compression should be one of'), 'Error message should mention compression')
+  } catch (error) {
+    ok(
+      (error as Error).message.includes('/options/compression should be one of'),
+      'Error message should mention compression'
+    )
   }
 
   // Test with invalid serializers type
@@ -80,8 +83,8 @@ test('constructor should validate options in strict mode', t => {
       serializers: 'not-an-object'
     })
     throw new Error('Should have thrown for invalid serializers')
-  } catch (error: any) {
-    ok(error.message.includes('serializers'), 'Error message should mention serializers')
+  } catch (error) {
+    ok((error as Error).message.includes('serializers'), 'Error message should mention serializers')
   }
 
   // Valid options should work without throwing
@@ -128,7 +131,7 @@ test('close should handle errors from Base.close', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    strictEqual((error as Error).message.includes(mockedErrorMessage), true)
   }
 })
 
@@ -145,10 +148,10 @@ test('should support both promise and callback API', async t => {
       },
       (err, result) => {
         strictEqual(err, null)
-        ok(Array.isArray(result.offsets), 'Should have offsets array')
-        strictEqual(result.offsets?.length, 1)
-        strictEqual(result.offsets?.[0].topic, testTopic)
-        strictEqual(typeof result.offsets?.[0].offset, 'bigint')
+        ok(Array.isArray(result!.offsets), 'Should have offsets array')
+        strictEqual(result!.offsets?.length, 1)
+        strictEqual(result!.offsets?.[0].topic, testTopic)
+        strictEqual(typeof result!.offsets?.[0].offset, 'bigint')
 
         // Clean up and close
         producer.close().then(resolve).catch(reject)
@@ -171,9 +174,9 @@ test('all operations should fail when producer is closed', async t => {
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof NetworkError, true)
-      strictEqual(error.message, 'Client is closed.')
+      strictEqual((error as Error).message, 'Client is closed.')
       return true
     }
   )
@@ -183,9 +186,9 @@ test('all operations should fail when producer is closed', async t => {
     async () => {
       await producer.initIdempotentProducer({})
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof NetworkError, true)
-      strictEqual(error.message, 'Client is closed.')
+      strictEqual((error as Error).message, 'Client is closed.')
       return true
     }
   )
@@ -194,9 +197,9 @@ test('all operations should fail when producer is closed', async t => {
     async () => {
       await producer.beginTransaction()
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof NetworkError, true)
-      strictEqual(error.message, 'Client is closed.')
+      strictEqual((error as Error).message, 'Client is closed.')
       return true
     }
   )
@@ -254,9 +257,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         producerId: 'not-a-bigint'
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('producerId'), 'Error should mention producerId')
+      ok((error as Error).message.includes('producerId'), 'Error should mention producerId')
       return true
     }
   )
@@ -269,9 +272,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         producerEpoch: 'not-a-number'
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('producerEpoch'), 'Error should mention producerEpoch')
+      ok((error as Error).message.includes('producerEpoch'), 'Error should mention producerEpoch')
       return true
     }
   )
@@ -283,9 +286,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         acks: 123 // Not a valid ProduceAcks enum value
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('acks'), 'Error should mention acks')
+      ok((error as Error).message.includes('acks'), 'Error should mention acks')
       return true
     }
   )
@@ -298,9 +301,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         compression: 'invalid-compression'
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('compression'), 'Error should mention compression')
+      ok((error as Error).message.includes('compression'), 'Error should mention compression')
       return true
     }
   )
@@ -313,9 +316,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         partitioner: 'not-a-function'
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('partitioner'), 'Error should mention partitioner')
+      ok((error as Error).message.includes('partitioner'), 'Error should mention partitioner')
       return true
     }
   )
@@ -328,9 +331,9 @@ test('initIdempotentProducer should validate options in strict mode', async t =>
         invalidProperty: true
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('additional properties'), 'Error should mention invalid property')
+      ok((error as Error).message.includes('additional properties'), 'Error should mention invalid property')
       return true
     }
   )
@@ -359,9 +362,9 @@ test('initIdempotentProducer should handle errors from getFirstAvailable', async
     async () => {
       await producer.initIdempotentProducer({})
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes(mockedErrorMessage), true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -377,9 +380,9 @@ test('initIdempotentProducer should handle errors from the API', async t => {
     async () => {
       await producer.initIdempotentProducer({})
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes(mockedErrorMessage), true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -395,9 +398,9 @@ test('initIdempotentProducer should handle unavailable API errors', async t => {
     async () => {
       await producer.initIdempotentProducer({})
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UnsupportedApiError, true)
-      strictEqual(error.message.includes('Unsupported API InitProducerId.'), true)
+      strictEqual((error as Error).message.includes('Unsupported API InitProducerId.'), true)
       return true
     }
   )
@@ -738,9 +741,9 @@ test('send should handle synchronuous error during payload creation', async t =>
         compression
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof AggregateError, true)
-      strictEqual(error.errors[0], expectedError)
+      strictEqual((error as AggregateError).errors[0], expectedError)
       return true
     }
   )
@@ -756,9 +759,9 @@ test('send should validate options in strict mode', async t => {
       // @ts-expect-error - Intentionally passing invalid options
       await producer.send({})
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('messages'), 'Error should mention missing messages')
+      ok((error as Error).message.includes('messages'), 'Error should mention missing messages')
       return true
     }
   )
@@ -769,9 +772,9 @@ test('send should validate options in strict mode', async t => {
       // @ts-expect-error - Intentionally passing invalid options
       await producer.send({ messages: 'not-an-array' })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('messages'), 'Error should mention invalid messages type')
+      ok((error as Error).message.includes('messages'), 'Error should mention invalid messages type')
       return true
     }
   )
@@ -784,9 +787,9 @@ test('send should validate options in strict mode', async t => {
         acks: 123 // Not a valid ProduceAcks enum value
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('acks'), 'Error should mention invalid acks')
+      ok((error as Error).message.includes('acks'), 'Error should mention invalid acks')
       return true
     }
   )
@@ -799,9 +802,9 @@ test('send should validate options in strict mode', async t => {
         messages: [{ value: Buffer.from('test-message') }]
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('topic'), 'Error should mention missing topic')
+      ok((error as Error).message.includes('topic'), 'Error should mention missing topic')
       return true
     }
   )
@@ -815,9 +818,9 @@ test('send should validate options in strict mode', async t => {
         invalidProperty: true
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      ok(error.message.includes('additional properties'), 'Error should mention invalid property')
+      ok((error as Error).message.includes('additional properties'), 'Error should mention invalid property')
       return true
     }
   )
@@ -836,9 +839,12 @@ test('send should reject conflicting idempotent producer options', async t => {
         producerId: 123n
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      strictEqual(error.message, 'Cannot specify producerId or producerEpoch when using idempotent producer.')
+      strictEqual(
+        (error as Error).message,
+        'Cannot specify producerId or producerEpoch when using idempotent producer.'
+      )
       return true
     }
   )
@@ -852,9 +858,12 @@ test('send should reject conflicting idempotent producer options', async t => {
         producerEpoch: 1
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      strictEqual(error.message, 'Cannot specify producerId or producerEpoch when using idempotent producer.')
+      strictEqual(
+        (error as Error).message,
+        'Cannot specify producerId or producerEpoch when using idempotent producer.'
+      )
       return true
     }
   )
@@ -868,9 +877,9 @@ test('send should reject conflicting idempotent producer options', async t => {
         acks: ProduceAcks.LEADER
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof UserError, true)
-      strictEqual(error.message, 'Idempotent producer requires acks to be ALL (-1).')
+      strictEqual((error as Error).message, 'Idempotent producer requires acks to be ALL (-1).')
       return true
     }
   )
@@ -901,9 +910,9 @@ test('send should handle unavailable API errors', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.errors[0].message.includes('Unsupported API Produce.'), true)
+      strictEqual((error as MultipleErrors).errors[0].message.includes('Unsupported API Produce.'), true)
       return true
     }
   )
@@ -924,9 +933,9 @@ test('send should handle errors from initIdempotentProducer', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes(mockedErrorMessage), true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -947,9 +956,9 @@ test('send should handle errors from Base.metadata', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes(mockedErrorMessage), true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
       return true
     }
   )
@@ -970,9 +979,9 @@ test('send should handle errors from Base.metadata in internal calls', async t =
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Producing messages failed.'), true)
+      strictEqual((error as Error).message.includes('Producing messages failed.'), true)
       return true
     }
   )
@@ -993,9 +1002,9 @@ test('send should handle errors from ConnectionPool.get', async t => {
         acks: ProduceAcks.ALL
       })
     },
-    (error: any) => {
+    error => {
       strictEqual(error instanceof MultipleErrors, true)
-      strictEqual(error.message.includes('Producing messages failed.'), true)
+      strictEqual((error as Error).message.includes('Producing messages failed.'), true)
       return true
     }
   )

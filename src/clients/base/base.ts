@@ -186,7 +186,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
     const validationError = this[kValidateOptions](options, metadataOptionsValidator, '/options', false)
     if (validationError) {
-      callback(validationError, undefined as unknown as ClusterMetadata)
+      callback(validationError)
       return callback[kCallbackPromise]
     }
 
@@ -205,9 +205,9 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     }
 
     // Fetch the metadata
-    this[kMetadata]({ topics: [] }, (error: Error | null, metadata: ClusterMetadata) => {
+    this[kMetadata]({ topics: [] }, (error, metadata) => {
       if (error) {
-        callback(error, undefined as unknown as Map<number, Connection>)
+        callback(error)
         return
       }
 
@@ -215,30 +215,30 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
       if (nodeIds?.length) {
         for (const node of nodeIds) {
-          if (metadata.brokers.has(node)) {
+          if (metadata!.brokers.has(node)) {
             nodes.push(node)
           }
         }
       } else {
-        nodes = Array.from(metadata.brokers.keys())
+        nodes = Array.from(metadata!.brokers.keys())
       }
 
-      runConcurrentCallbacks(
+      runConcurrentCallbacks<[number, Connection], number>(
         'Connecting to brokers failed.',
         nodes,
-        (nodeId, concurrentCallback: Callback<[number, Connection]>) => {
-          this[kGetConnection](metadata.brokers.get(nodeId)!, (error, connection) => {
+        (nodeId, concurrentCallback) => {
+          this[kGetConnection](metadata!.brokers.get(nodeId)!, (error, connection) => {
             if (error) {
-              concurrentCallback(error, undefined as unknown as [number, Connection])
+              concurrentCallback(error)
               return
             }
 
-            concurrentCallback(null, [nodeId, connection])
+            concurrentCallback(null, [nodeId, connection!])
           })
         },
         (error, connections) => {
           if (error) {
-            callback(error, undefined as unknown as Map<number, Connection>)
+            callback(error)
             return
           }
 
@@ -294,21 +294,21 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
           retryCallback => {
             this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
-                retryCallback(error, undefined as unknown as ApiVersionsResponse)
+                retryCallback(error)
                 return
               }
 
               // We use V3 to be able to get APIS from Kafka 2.4.0+
-              apiVersionsV3(connection, clientSoftwareName, clientSoftwareVersion, retryCallback)
+              apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
             })
           },
-          (error: Error | null, metadata) => {
+          (error, metadata) => {
             if (error) {
-              deduplicateCallback(error, undefined as unknown as ApiVersionsResponseApi[])
+              deduplicateCallback(error)
               return
             }
 
-            deduplicateCallback(null, metadata.apiKeys)
+            deduplicateCallback(null, metadata!.apiKeys)
           },
           0
         )
@@ -366,7 +366,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
           function onClose () {
             clearTimeout(timeout)
             errors.push(new UserError(`Client closed while retrying ${operationId}.`))
-            callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors), undefined as ReturnType)
+            callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
           }
 
           const timeout = setTimeout(() => {
@@ -377,11 +377,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
           this.once('client:close', onClose)
         } else {
           if (attempt === 0) {
-            callback(error, undefined as ReturnType)
+            callback(error)
             return
           }
 
-          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors), undefined as ReturnType)
+          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
         }
 
         return
@@ -431,11 +431,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     if (!this[kApis].length) {
       this[kListApis]((error, apis) => {
         if (error) {
-          callback(error, undefined as unknown as API<RequestArguments, ResponseType>)
+          callback(error)
           return
         }
 
-        this[kApis] = apis
+        this[kApis] = apis!
         this[kGetApi](name, callback)
       })
 
@@ -445,10 +445,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
     const api = this[kApis].find(api => api.name === name)
 
     if (!api) {
-      callback(
-        new UnsupportedApiError(`Unsupported API ${name}.`),
-        undefined as unknown as API<RequestArguments, ResponseType>
-      )
+      callback(new UnsupportedApiError(`Unsupported API ${name}.`))
       return
     }
 
@@ -465,10 +462,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
       }
     }
 
-    callback(
-      new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }),
-      undefined as unknown as API<RequestArguments, ResponseType>
-    )
+    callback(new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }))
   }
 
   [kGetConnection] (broker: Broker, callback: Callback<Connection>): void {
@@ -557,21 +551,21 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
           retryCallback => {
             this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
-                retryCallback(error, undefined as unknown as MetadataResponse)
+                retryCallback(error)
                 return
               }
 
               this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
                 if (error) {
-                  retryCallback(error, undefined as unknown as MetadataResponse)
+                  retryCallback(error)
                   return
                 }
 
-                api(connection, topicsToFetch, autocreateTopics, true, retryCallback)
+                api!(connection!, topicsToFetch, autocreateTopics, true, retryCallback)
               })
             })
           },
-          (error: Error | null, metadata: MetadataResponse) => {
+          (error, metadata) => {
             if (error) {
               const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
 
@@ -581,7 +575,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
                 topicsToFetch = topics
               }
 
-              deduplicateCallback(error, undefined as unknown as ClusterMetadata)
+              deduplicateCallback(error)
               return
             }
 
@@ -589,11 +583,11 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
 
             if (!this.#metadata) {
               this.#metadata = {
-                id: metadata.clusterId!,
+                id: metadata!.clusterId!,
                 brokers: new Map(),
                 topics: new Map(),
                 lastUpdate,
-                controllerId: metadata.controllerId
+                controllerId: metadata!.controllerId
               }
             } else {
               this.#metadata.lastUpdate = lastUpdate
@@ -602,7 +596,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
             const brokers: ClusterMetadata['brokers'] = new Map()
 
             // This should never change, but we act defensively here
-            for (const broker of metadata.brokers) {
+            for (const broker of metadata!.brokers) {
               const { host, port, rack } = broker
               brokers.set(broker.nodeId, { host, port, rack })
             }
@@ -610,7 +604,7 @@ export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEm
             this.#metadata.brokers = brokers
 
             // Update all the topics in the cache
-            for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata.topics) {
+            for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata!.topics) {
               /* c8 ignore next 3 - Sometimes internal topics might be returned by Kafka */
               if (isInternal) {
                 continue

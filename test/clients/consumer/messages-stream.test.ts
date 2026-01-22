@@ -221,7 +221,7 @@ test('should throw error when specifying offsets with non-MANUAL mode', async t 
         offsets: [{ topic: 'test', partition: 0, offset: 0n }]
       })
     },
-    (error: any) => {
+    error => {
       ok(error instanceof UserError)
       strictEqual(error.message, 'Cannot specify offsets when the stream mode is not MANUAL.')
       return true
@@ -239,7 +239,7 @@ test('should throw error when not specifying offsets with MANUAL mode', async t 
         mode: MessagesStreamModes.MANUAL
       })
     },
-    (error: any) => {
+    error => {
       ok(error instanceof UserError)
       strictEqual(error.message, 'Must specify offsets when the stream mode is MANUAL.')
       return true
@@ -561,7 +561,7 @@ test('should support different fallback modes', async t => {
         fallbackMode: MessagesStreamFallbackModes.FAIL
       })
     },
-    (error: any) => {
+    error => {
       ok(error instanceof UserError)
       ok(error.message.includes('has no committed offset'), 'Error message should mention no committed offset')
       return true

@@ -18,7 +18,7 @@ export function getCredential<T> (
   }
 
   if (typeof credentialOrProvider === 'undefined') {
-    callback(new AuthenticationError(`The ${label} should be a value or a function.`), undefined as unknown as T)
+    callback(new AuthenticationError(`The ${label} should be a value or a function.`))
     return callback[kCallbackPromise]
   } else if (typeof credentialOrProvider !== 'function') {
     callback(null, credentialOrProvider)
@@ -30,8 +30,7 @@ export function getCredential<T> (
 
     if (credential == null) {
       callback(
-        new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a value.`),
-        undefined as unknown as T
+        new AuthenticationError(`The ${label} provider should return a string or a promise that resolves to a value.`)
       )
       return callback[kCallbackPromise]
     } else if (typeof (credential as Promise<string>)?.then !== 'function') {
@@ -42,25 +41,18 @@ export function getCredential<T> (
     ;(credential as Promise<T>)
       .then((result: T) => {
         if (result == null) {
-          process.nextTick(
-            callback,
-            new AuthenticationError(`The ${label} provider should resolve to a value.`),
-            undefined as unknown as string
-          )
+          process.nextTick(callback, new AuthenticationError(`The ${label} provider should resolve to a value.`))
 
           return
         }
 
         process.nextTick(callback, null, result)
       })
-      .catch((error: Error) => {
+      .catch(error => {
         process.nextTick(callback, new AuthenticationError(`The ${label} provider threw an error.`, { cause: error }))
       })
   } catch (error) {
-    callback(
-      new AuthenticationError(`The ${label} provider threw an error.`, { cause: error as Error }),
-      undefined as unknown as T
-    )
+    callback(new AuthenticationError(`The ${label} provider threw an error.`, { cause: error as Error }))
   }
 
   return callback[kCallbackPromise]

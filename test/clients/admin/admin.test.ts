@@ -650,10 +650,15 @@ test('createTopics should retarget controller when needed', async t => {
   const originalGet = pool.get.bind(pool)
   // @ts-ignore
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    originalGet(broker, (error: Error | null, connection: Connection) => {
+    originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
       // Define the next broker in sequence as the correct controller
       if (correctControllerId === null) {
-        correctControllerId = (connection.port! - 9010 + 1) % 3
+        correctControllerId = (connection!.port! - 9010 + 1) % 3
         mockMetadata(admin, 1, null, {
           brokers: new Map([
             [1, { host: 'localhost', port: 9011 }],
@@ -664,9 +669,9 @@ test('createTopics should retarget controller when needed', async t => {
         })
       }
 
-      const originalSend = connection.send.bind(connection)
+      const originalSend = connection!.send.bind(connection)
 
-      connection.send = function <ReturnType>(
+      connection!.send = function <ReturnType>(
         apiKey: number,
         apiVersion: number,
         payload: () => Writer,
@@ -676,8 +681,8 @@ test('createTopics should retarget controller when needed', async t => {
         callback: Callback<ReturnType>
       ) {
         if (apiKey === 19) {
-          if (connection.port! - 9010 !== correctControllerId) {
-            callback(new ResponseError(19, 7, { '/': [41, 'Kaboom!'] }, {}), undefined as unknown as ReturnType)
+          if (connection!.port! - 9010 !== correctControllerId) {
+            callback(new ResponseError(19, 7, { '/': [41, 'Kaboom!'] }, {}))
             return
           }
         }
@@ -894,10 +899,15 @@ test('deleteTopics should retarget controller when needed', async t => {
   const originalGet = pool.get.bind(pool)
   // @ts-ignore
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    originalGet(broker, (error: Error | null, connection: Connection) => {
+    originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
       // Define the next broker in sequence as the correct controller
       if (correctControllerId === null) {
-        correctControllerId = (connection.port! - 9010 + 1) % 3
+        correctControllerId = (connection!.port! - 9010 + 1) % 3
         mockMetadata(admin, 1, null, {
           brokers: new Map([
             [1, { host: 'localhost', port: 9011 }],
@@ -908,9 +918,9 @@ test('deleteTopics should retarget controller when needed', async t => {
         })
       }
 
-      const originalSend = connection.send.bind(connection)
+      const originalSend = connection!.send.bind(connection)
 
-      connection.send = function <ReturnType>(
+      connection!.send = function <ReturnType>(
         apiKey: number,
         apiVersion: number,
         payload: () => Writer,
@@ -920,8 +930,8 @@ test('deleteTopics should retarget controller when needed', async t => {
         callback: Callback<ReturnType>
       ) {
         if (apiKey === 20) {
-          if (connection.port! - 9010 !== correctControllerId) {
-            callback(new ResponseError(20, 6, { '/': [41, 'Kaboom!'] }, {}), undefined as unknown as ReturnType)
+          if (connection!.port! - 9010 !== correctControllerId) {
+            callback(new ResponseError(20, 6, { '/': [41, 'Kaboom!'] }, {}))
             return
           }
         }

@@ -12,6 +12,7 @@ import {
 } from 'node:diagnostics_channel'
 import { type TestContext } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { Admin, type AdminOptions } from '../src/clients/admin/index.ts'
 import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
 import {
   Base,
@@ -31,7 +32,6 @@ import {
   UnsupportedApiError,
   type Writer
 } from '../src/index.ts'
-import { Admin, type AdminOptions } from '../src/clients/admin/index.ts'
 
 export const kafkaSingleBootstrapServers = ['localhost:9001']
 export const kafkaSaslBootstrapServers = ['localhost:9002']
@@ -278,21 +278,21 @@ export function mockAPI (
   const mocked = new Set<number>()
 
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
-    originalGet(broker, (error: Error | null, connection: Connection) => {
-      if (mocked.has(connection.instanceId)) {
+    originalGet(broker, (error, connection) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      if (mocked.has(connection!.instanceId)) {
         callback(null, connection)
         return
       }
-      mocked.add(connection.instanceId)
+      mocked.add(connection!.instanceId)
 
-      if (error) {
-        callback(error, undefined as unknown as Connection)
-        return
-      }
+      const originalSend = connection!.send.bind(connection)
 
-      const originalSend = connection.send.bind(connection)
-
-      connection.send = function <ReturnType>(
+      connection!.send = function <ReturnType>(
         apiKey: number,
         apiVersion: number,
         payload: () => Writer,
@@ -317,11 +317,11 @@ export function mockAPI (
             )
 
             if (!shouldKeepMock) {
-              connection.send = originalSend
+              connection!.send = originalSend
               pool.get = originalGet
             }
           } else {
-            connection.send = originalSend
+            connection!.send = originalSend
             pool.get = originalGet
 
             callback(errorToMock, returnValue as ReturnType)

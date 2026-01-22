@@ -129,7 +129,7 @@ export class ConnectionPool extends EventEmitter {
 
   #get (broker: Broker, callback: Callback<Connection>): void {
     if (this.#closed) {
-      callback(new Error('Connection pool is closed.'), undefined as unknown as Connection)
+      callback(new Error('Connection pool is closed.'))
       return
     }
 
@@ -140,7 +140,7 @@ export class ConnectionPool extends EventEmitter {
       if (existing.status !== ConnectionStatuses.CONNECTED) {
         existing.ready(error => {
           if (error) {
-            callback(error, undefined as unknown as Connection)
+            callback(error)
             return
           }
 
@@ -165,7 +165,7 @@ export class ConnectionPool extends EventEmitter {
         this.#connections.delete(key)
         this.emit('failed', eventPayload)
 
-        callback(error, undefined as unknown as Connection)
+        callback(error)
         return
       }
 
@@ -211,7 +211,7 @@ export class ConnectionPool extends EventEmitter {
         errors.push(error)
 
         if (current === brokers.length - 1) {
-          callback(new MultipleErrors('Cannot connect to any broker.', errors), undefined as unknown as Connection)
+          callback(new MultipleErrors('Cannot connect to any broker.', errors))
           return
         }
 

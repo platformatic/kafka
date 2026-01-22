@@ -30,12 +30,9 @@ function performChallenge (
   step: string,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void {
-  client.step(step, async (error: string | null, challenge: string) => {
+  client.step(step, async (error, challenge) => {
     if (error) {
-      callback(
-        createKerberosAuthenticationError('Cannot continue Kerberos step challenge.', error),
-        undefined as unknown as SaslAuthenticateResponse
-      )
+      callback(createKerberosAuthenticationError('Cannot continue Kerberos step challenge.', error))
       return
     }
 
@@ -43,44 +40,32 @@ function performChallenge (
 
     authenticate(connection, challengeBuffer, (error, response) => {
       if (error) {
-        callback(
-          new AuthenticationError('SASL authentication failed.', { cause: error }),
-          undefined as unknown as SaslAuthenticateResponse
-        )
+        callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
         return
       }
 
-      if (response.authBytes.length === 0) {
+      if (response!.authBytes.length === 0) {
         callback(null, response)
         return
       }
 
       if (client.contextComplete) {
-        client.unwrap(response.authBytes.toString('base64'), (error: string | null) => {
+        client.unwrap(response!.authBytes.toString('base64'), error => {
           if (error) {
-            callback(
-              createKerberosAuthenticationError('Cannot unwrap Kerberose response', error),
-              undefined as unknown as SaslAuthenticateResponse
-            )
+            callback(createKerberosAuthenticationError('Cannot unwrap Kerberose response', error))
             return
           }
 
           // Byte 0: No security layer; Byte 1-3: max message size - 0=none
-          client.wrap(Buffer.from([1, 0, 0, 0]).toString('base64'), {}, (error: string | null, wrapped: string) => {
+          client.wrap(Buffer.from([1, 0, 0, 0]).toString('base64'), {}, (error, wrapped) => {
             if (error) {
-              callback(
-                createKerberosAuthenticationError('Cannot wrap Kerberos response.', error),
-                undefined as unknown as SaslAuthenticateResponse
-              )
+              callback(createKerberosAuthenticationError('Cannot wrap Kerberos response.', error))
               return
             }
 
             authenticate(connection, Buffer.from(wrapped, 'base64'), (error, response) => {
               if (error) {
-                callback(
-                  new AuthenticationError('SASL authentication failed.', { cause: error }),
-                  undefined as unknown as SaslAuthenticateResponse
-                )
+                callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
                 return
               }
 
@@ -92,7 +77,7 @@ function performChallenge (
         return
       }
 
-      performChallenge(connection, authenticate, client, response.authBytes.toString('base64'), callback)
+      performChallenge(connection, authenticate, client, response!.authBytes.toString('base64'), callback)
     })
   })
 }
@@ -103,7 +88,7 @@ async function restoreEnvironment (
   originalKrb5Config: string | undefined,
   originalKrbCCName: string | undefined,
   error: Error | null,
-  response: SaslAuthenticateResponse
+  response?: SaslAuthenticateResponse
 ): Promise<void> {
   if (typeof originalKrb5Config !== 'undefined') {
     process.env.KRB5_CONFIG = originalKrb5Config
@@ -173,19 +158,16 @@ async function authenticate (
     // Import the password via kinit
     execSync(`kinit ${args} ${username}`, { stdio: 'pipe', env: process.env })
 
-    krb.initializeClient(service, {}, (error: string | null, client: KerberosClient) => {
+    krb.initializeClient(service, {}, (error, client) => {
       if (error) {
-        callback(
-          createKerberosAuthenticationError('Cannot initialize Kerberos client.', error),
-          undefined as unknown as SaslAuthenticateResponse
-        )
+        callback(createKerberosAuthenticationError('Cannot initialize Kerberos client.', error))
         return
       }
 
       performChallenge(connection, authenticate, client, '', afterRestoreCallback)
     })
   } catch (error) {
-    await afterRestoreCallback(error, undefined as unknown as SaslAuthenticateResponse)
+    await afterRestoreCallback(error)
   }
 }
 

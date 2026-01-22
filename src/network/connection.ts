@@ -368,7 +368,7 @@ export class Connection extends EventEmitter {
     } catch (err) {
       diagnostic.error = err as Error
       connectionsApiChannel.error.publish(diagnostic)
-      return callback(err, undefined as unknown as ReturnType)
+      return callback(err)
     }
 
     writer.appendFrom(payload).prependLength()
@@ -405,7 +405,7 @@ export class Connection extends EventEmitter {
     )
   }
 
-  #onResponse (request: Request, callback: Callback<any>, error: Error | null, payload: any): void {
+  #onResponse (request: Request, callback: Callback<any>, error: Error | null, payload?: any): void {
     clearTimeout(request.timeoutHandle!)
     request.timeoutHandle = null
     callback(error, payload)
@@ -445,7 +445,7 @@ export class Connection extends EventEmitter {
         return
       }
 
-      this.emit('sasl:handshake', response.mechanisms)
+      this.emit('sasl:handshake', response!.mechanisms)
       const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
 
       if (authenticate) {
@@ -455,10 +455,7 @@ export class Connection extends EventEmitter {
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
         saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, oauthBearerExtensions!, callback)
       } else if (mechanism === SASLMechanisms.GSSAPI) {
-        callback(
-          new UserError('No custom SASL/GSSAPI authenticator provided.'),
-          undefined as unknown as SaslAuthenticateResponse
-        )
+        callback(new UserError('No custom SASL/GSSAPI authenticator provided.'))
       } else {
         saslScramSha.authenticate(
           saslAuthenticateV2.api,
@@ -552,7 +549,7 @@ export class Connection extends EventEmitter {
     port: number,
     diagnosticContext: DiagnosticContext,
     error: Error | null,
-    response: SaslAuthenticateResponse
+    response?: SaslAuthenticateResponse
   ): void {
     if (error) {
       const protocolError = (error as MultipleErrors).errors?.[0] as ProtocolError
@@ -567,17 +564,17 @@ export class Connection extends EventEmitter {
 
     if (this.#options.sasl!.authBytesValidator) {
       this.#options.sasl!.authBytesValidator(
-        response.authBytes,
-        this.#onSaslAuthenticationValidation.bind(this, host, port, diagnosticContext, response.sessionLifetimeMs)
+        response!.authBytes,
+        this.#onSaslAuthenticationValidation.bind(this, host, port, diagnosticContext, response!.sessionLifetimeMs)
       )
     } else {
       this.#onSaslAuthenticationValidation(
         host,
         port,
         diagnosticContext,
-        response.sessionLifetimeMs,
+        response!.sessionLifetimeMs,
         null,
-        response.authBytes
+        response!.authBytes
       )
     }
   }

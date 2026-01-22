@@ -34,7 +34,7 @@ test('createPromisifiedCallback rejects promise on error', async () => {
 
   // Schedule error callback call for later
   setTimeout(() => {
-    callback(new Error('test-error'), undefined as unknown as string)
+    callback(new Error('test-error'))
   }, 10)
 
   // Ensure promise rejects with the right error
@@ -128,9 +128,9 @@ test('runConcurrentCallbacks handles errors correctly', async () => {
       strictEqual(error instanceof MultipleErrors, true)
       // Even with errors, all results should be populated
       strictEqual(Array.isArray(results), true)
-      strictEqual(results.length, 3)
-      strictEqual(results[0], 'ITEM1')
-      strictEqual(results[2], 'ITEM3')
+      strictEqual(results!.length, 3)
+      strictEqual(results![0], 'ITEM1')
+      strictEqual(results![2], 'ITEM3')
 
       if (error instanceof MultipleErrors) {
         strictEqual(error.message, 'Test error message')
@@ -180,8 +180,8 @@ test('runConcurrentCallbacks with multiple errors', async () => {
     runConcurrentCallbacks('Multiple errors occurred', testArray, operation, (error, results) => {
       strictEqual(error instanceof MultipleErrors, true)
       strictEqual(Array.isArray(results), true)
-      strictEqual(results.length, 3)
-      strictEqual(results[1], 'ITEM2')
+      strictEqual(results!.length, 3)
+      strictEqual(results![1], 'ITEM2')
 
       if (error instanceof MultipleErrors) {
         strictEqual(error.message, 'Multiple errors occurred')

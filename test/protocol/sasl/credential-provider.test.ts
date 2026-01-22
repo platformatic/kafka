@@ -6,7 +6,7 @@ import { getCredential } from '../../../src/protocol/sasl/utils.ts'
 test('getCredential with string credential', (_, done) => {
   const credential = 'test-credential'
 
-  getCredential('username', credential, (error: Error | null, result?: string) => {
+  getCredential('username', credential, (error, result) => {
     deepStrictEqual(error, null)
     deepStrictEqual(result, credential)
     done()
@@ -29,7 +29,7 @@ test('getCredential with function provider returning string', (_, done) => {
   const credential = 'test-credential'
   const provider = () => credential
 
-  getCredential('password', provider, (error: Error | null, result?: string) => {
+  getCredential('password', provider, (error, result) => {
     deepStrictEqual(error, null)
     deepStrictEqual(result, credential)
     done()
@@ -40,7 +40,7 @@ test('getCredential with function provider returning promise', (_, done) => {
   const credential = 'test-credential'
   const provider = () => Promise.resolve(credential)
 
-  getCredential('token', provider, (error: Error | null, result?: string) => {
+  getCredential('token', provider, (error, result) => {
     deepStrictEqual(error, null)
     deepStrictEqual(result, credential)
     done()
@@ -50,7 +50,7 @@ test('getCredential with function provider returning promise', (_, done) => {
 test('getCredential with function provider returning non-value', (_, done) => {
   const provider = () => undefined
 
-  getCredential('username', provider, (error: Error | null) => {
+  getCredential('username', provider, error => {
     const authenticationError = error as AuthenticationError
 
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -66,7 +66,7 @@ test('getCredential with function provider returning non-value', (_, done) => {
 test('getCredential with promise provider resolving to non-value', (_, done) => {
   const provider = () => Promise.resolve(null as any)
 
-  getCredential('password', provider, (error: Error | null) => {
+  getCredential('password', provider, error => {
     const authenticationError = error as AuthenticationError
 
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)
@@ -80,7 +80,7 @@ test('getCredential with promise provider rejecting', (_, done) => {
   const originalError = new Error('Provider failed')
   const provider = () => Promise.reject(originalError)
 
-  getCredential('token', provider, (error: Error | null) => {
+  getCredential('token', provider, error => {
     const authenticationError = error as AuthenticationError
 
     deepStrictEqual(error instanceof AuthenticationError, true)
@@ -97,7 +97,7 @@ test('getCredential with function provider throwing synchronously', (_, done) =>
     throw originalError
   }
 
-  getCredential('username', provider, (error: Error | null) => {
+  getCredential('username', provider, error => {
     const authenticationError = error as AuthenticationError
 
     deepStrictEqual(authenticationError instanceof AuthenticationError, true)

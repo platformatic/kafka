@@ -45,7 +45,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
       strict: true
     })
     throw new Error('Should have thrown for missing clientId')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message.includes('clientId'), true)
   }
 
@@ -58,7 +58,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
       strict: true
     })
     throw new Error('Should have thrown for missing bootstrapBrokers')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message.includes('bootstrapBrokers'), true)
   }
 
@@ -73,7 +73,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
       strict: true
     })
     throw new Error('Should have thrown for invalid timeout type')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message.includes('timeout'), true)
   }
 
@@ -87,7 +87,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
       strict: true
     })
     throw new Error('Should have thrown for negative timeout')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message.includes('timeout'), true)
   }
 
@@ -101,7 +101,7 @@ test('constructor should throw on invalid options when strict mode is enabled', 
       strict: true
     })
     throw new Error('Should have thrown for invalid broker format')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message.includes('bootstrapBrokers'), true)
   }
 
@@ -449,7 +449,7 @@ test('metadata should support both callback and promise API', (t, done) => {
   // Use callback API
   client.metadata({ topics: [testTopic], autocreateTopics: true }, (err, metadata) => {
     strictEqual(err, null)
-    strictEqual(metadata.topics.has(testTopic), true)
+    strictEqual(metadata!.topics.has(testTopic), true)
 
     client
       .close()
@@ -490,7 +490,7 @@ test('metadata should return validation error in strict mode', async t => {
 
     // Should not reach here
     throw new Error('Expected metadata to fail with validation error')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error instanceof Error, true)
     strictEqual(error.message, '/options/topics must be array.')
   }
@@ -502,7 +502,7 @@ test('metadata should return validation error in strict mode', async t => {
 
     // Should not reach here
     throw new Error('Expected metadata to fail with validation error')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error instanceof Error, true)
     strictEqual(error.message, '/options must NOT have additional properties.')
   }
@@ -526,7 +526,7 @@ test('metadata should handle connection failures to non-existent broker', async 
 
     // If we get here, the call unexpectedly succeeded
     throw new Error('Expected metadata call to fail with connection error')
-  } catch (error: any) {
+  } catch (error) {
     // Should be a MultipleErrors or AggregateError instance since we use performWithRetry
     strictEqual(['MultipleErrors', 'AggregateError'].includes(error.name), true)
 
@@ -674,7 +674,7 @@ test('operations can be aborted without a retry', async t => {
 
     // If we get here, the call unexpectedly succeeded
     throw new Error('Expected metadata call to fail with connection error')
-  } catch (error: any) {
+  } catch (error) {
     strictEqual(error.message, mockedErrorMessage)
   }
 })

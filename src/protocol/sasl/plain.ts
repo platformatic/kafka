@@ -29,13 +29,13 @@ export function authenticate (
 
   getCredential('SASL/PLAIN username', usernameProvider, (error, username) => {
     if (error) {
-      callback!(error, undefined as unknown as SaslAuthenticateResponse)
+      callback!(error)
       return
     }
 
     getCredential('SASL/PLAIN password', passwordProvider, (error, password) => {
       if (error) {
-        callback!(error, undefined as unknown as SaslAuthenticateResponse)
+        callback!(error)
         return
       }
 

@@ -1,16 +1,16 @@
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/index.ts'
 import { AuthenticationError } from '../../errors.ts'
-import { type SASLCredentialProvider } from '../../network/connection.ts'
+import { type CredentialProvider } from '../../network/connection.ts'
 
 export function getCredential<T> (
   label: string,
-  credentialOrProvider: T | SASLCredentialProvider<T>,
+  credentialOrProvider: T | CredentialProvider<T>,
   callback: CallbackWithPromise<T>
 ): void
-export function getCredential<T> (label: string, credentialOrProvider: T | SASLCredentialProvider<T>): Promise<T>
+export function getCredential<T> (label: string, credentialOrProvider: T | CredentialProvider<T>): Promise<T>
 export function getCredential<T> (
   label: string,
-  credentialOrProvider: T | SASLCredentialProvider<T>,
+  credentialOrProvider: T | CredentialProvider<T>,
   callback?: CallbackWithPromise<T>
 ): void | Promise<T> {
   if (!callback) {
@@ -26,7 +26,7 @@ export function getCredential<T> (
   }
 
   try {
-    const credential = (credentialOrProvider as SASLCredentialProvider<T>)()
+    const credential = (credentialOrProvider as CredentialProvider<T>)()
 
     if (credential == null) {
       callback(

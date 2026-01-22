@@ -20,6 +20,7 @@ export const errorCodes = [
   'PLT_KFK_UNFINISHED_WRITE_BUFFER',
   'PLT_KFK_UNSUPPORTED_API',
   'PLT_KFK_UNSUPPORTED_COMPRESSION',
+  'PLT_KFK_UNSUPPORTED_FORMAT',
   'PLT_KFK_UNSUPPORTED',
   'PLT_KFK_USER'
 ] as const
@@ -235,6 +236,15 @@ export class UnsupportedCompressionError extends GenericError {
 
   constructor (message: string, properties: ErrorProperties = {}) {
     super(UnsupportedCompressionError.code, message, { canRetry: false, ...properties })
+  }
+}
+
+/* c8 ignore next 7 - Format libraries are always available in tests */
+export class UnsupportedFormatError extends GenericError {
+  static code: ErrorCode = 'PLT_KFK_UNSUPPORTED_FORMAT'
+
+  constructor (message: string, properties: ErrorProperties = {}) {
+    super(UnsupportedFormatError.code, message, { canRetry: false, ...properties })
   }
 }
 

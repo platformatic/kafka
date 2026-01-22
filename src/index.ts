@@ -13,3 +13,6 @@ export * from './apis/index.ts'
 
 // Clients
 export * from './clients/index.ts'
+
+// Registries
+export * from './registries/index.ts'

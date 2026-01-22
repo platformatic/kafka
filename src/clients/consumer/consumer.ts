@@ -167,6 +167,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     super({ ...defaultConsumerOptions, ...options })
     this[kValidateOptions](options, consumerOptionsValidator, '/options')
 
+    if (options.registry) {
+      if (options.beforeDeserialization) {
+        throw new UserError('/options/beforeDeserialization cannot be provided when /options/registry is provided.')
+      } else if (options.deserializers) {
+        throw new UserError('/options/deserializers cannot be provided when /options/registry is provided.')
+      }
+
+      options.registry.getDeserializers()
+    }
+
     this.groupId = options.groupId
     this.groupInstanceId = options.groupInstanceId ?? null
     this.generationId = 0
@@ -326,8 +336,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     options.autocommit ??= this[kOptions].autocommit! ?? true
     options.maxBytes ??= this[kOptions].maxBytes!
-    options.deserializers = Object.assign({}, options.deserializers, this[kOptions].deserializers)
     options.highWaterMark ??= this[kOptions].highWaterMark!
+    options.registry ??= this[kOptions].registry
+    options.beforeDeserialization ??= this[kOptions].beforeDeserialization
+
+    if (options.registry) {
+      if (options.beforeDeserialization) {
+        throw new UserError('/options/beforeDeserialization cannot be provided when /options/registry is provided.')
+        /* c8 ignore next - Hard to test */
+      } else if (options.deserializers || this[kOptions].deserializers) {
+        throw new UserError('/options/deserializers cannot be provided when /options/registry is provided.')
+      }
+
+      options.deserializers = options.registry.getDeserializers()
+    } else {
+      options.deserializers = Object.assign({}, options.deserializers, this[kOptions].deserializers)
+    }
 
     this.#consume(options, callback)
 

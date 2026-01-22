@@ -1,7 +1,7 @@
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
-import { type Connection, type SASLCredentialProvider } from '../../network/connection.ts'
+import { type Connection, type CredentialProvider } from '../../network/connection.ts'
 import { getCredential } from './utils.ts'
 
 export function jwtValidateAuthenticationBytes (authBytes: Buffer, callback: CallbackWithPromise<Buffer>): void {
@@ -29,21 +29,21 @@ export function jwtValidateAuthenticationBytes (authBytes: Buffer, callback: Cal
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  tokenOrProvider: string | SASLCredentialProvider,
-  extensions: Record<string, string> | SASLCredentialProvider<Record<string, string>>,
+  tokenOrProvider: string | CredentialProvider,
+  extensions: Record<string, string> | CredentialProvider<Record<string, string>>,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  tokenOrProvider: string | SASLCredentialProvider,
-  extensions: Record<string, string> | SASLCredentialProvider<Record<string, string>>
+  tokenOrProvider: string | CredentialProvider,
+  extensions: Record<string, string> | CredentialProvider<Record<string, string>>
 ): Promise<SaslAuthenticateResponse>
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
-  tokenOrProvider: string | SASLCredentialProvider,
-  extensionsOrProvider: Record<string, string> | SASLCredentialProvider<Record<string, string>>,
+  tokenOrProvider: string | CredentialProvider,
+  extensionsOrProvider: Record<string, string> | CredentialProvider<Record<string, string>>,
   callback?: CallbackWithPromise<SaslAuthenticateResponse>
 ): void | Promise<SaslAuthenticateResponse> {
   if (!callback) {

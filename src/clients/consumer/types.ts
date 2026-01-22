@@ -2,8 +2,9 @@ import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
 import { type GroupProtocols } from '../../apis/enumerations.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
+import { type SchemaRegistry } from '../../registries/abstract.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
-import { type Deserializers } from '../serde.ts'
+import { type BeforeDeserializationHook, type Deserializers } from '../serde.ts'
 
 export interface GroupProtocolSubscription {
   name: string
@@ -95,6 +96,8 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   isolationLevel?: number
   deserializers?: Partial<Deserializers<Key, Value, HeaderKey, HeaderValue>>
   highWaterMark?: number
+  beforeDeserialization?: BeforeDeserializationHook
+  registry?: SchemaRegistry<unknown, unknown, Key, Value, HeaderKey, HeaderValue>
 }
 
 export interface StreamOptions {

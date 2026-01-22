@@ -12,7 +12,7 @@ export const EMPTY_UUID = Buffer.alloc(UUID_SIZE)
 // Since it is serialized at either 0 (for nullable) or 1 (since length is stored as length + 1), it always uses a single byte
 export const EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE = INT8_SIZE
 
-// TODO(ShogunPanda): Tagged fields are not supported yet
+// TODO: Tagged fields are not supported yet
 export const EMPTY_TAGGED_FIELDS_BUFFER = Buffer.from([0])
 
 export type Collection = string | Buffer | DynamicBuffer | Array<unknown> | Map<unknown, unknown> | Set<unknown>

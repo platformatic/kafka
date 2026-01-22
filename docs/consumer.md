@@ -25,6 +25,29 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.
 
+Options:
+
+| Property              | Type                                                         | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| groupId               | `string`                                                     |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
+| groupInstanceId       | `string`                                                     |                           | Consumer group instance ID.                                                                                                                                                                                                                                                                                                                                                                          |
+| autocommit            | `boolean \| number`                                          | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
+| minBytes              | `number`                                                     | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
+| maxBytes              | `number`                                                     | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
+| maxWaitTime           | `number`                                                     | 5 seconds                 | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                                                                                                                                                                                                                            |
+| isolationLevel        | `number`                                                     | `1`                       | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration.                                                                                                                                                                                                             |
+| deserializers         | `Deserializers<Key, Value, HeaderKey, HeaderValue>`          |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                                            |
+| beforeDeserialization | `BeforeDeserializationHook`                                  |                           | Hook function called before deserialization of each message component (key, value, headers).<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                                                                                                                      |
+| registry              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>` |                           | Schema registry instance for automatic deserialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Note:** When provided, do not use `deserializers` or `beforeDeserialization`.                                                                                                                                       |
+| highWaterMark         | `number`                                                     | `1024`                    | The maximum amount of messages to store in memory before delaying fetch requests. Note that this severely impacts both performance at the cost of memory use.                                                                                                                                                                                                                                        |
+| sessionTimeout        | `number`                                                     | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with broker configuration property `group.consumer.session.timeout.ms`.                                                                              |
+| rebalanceTimeout      | `number`                                                     | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.                                                                                                                                                                                                                         |
+| heartbeatInterval     | `number`                                                     | 3 seconds                 | Interval in milliseconds between heartbeats.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with the broker configuration property `group.consumer.heartbeat.interval`.                                                                                                                                                                                                     |
+| groupProtocol         | `'classic' \| 'consumer'`                                    | `'classic'`               | Group protocol to use. Use `'classic'` for the original consumer group protocol and `'consumer'` for the new protocol introduced in [KIP-848](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol).<br/><br/> The `'consumer'` protocol provides server-side partition assignment and incremental rebalancing behavior.              |
+| groupRemoteAssignor   | `string`                                                     | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`.                                                                                                                                                                                                                   |
+| protocols             | `GroupProtocolSubscription[]`                                | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`.                                                                                                                                                                                       |
+| partitionAssigner     | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                                                                                                  |
+
 It also supports all the constructor options of `Base`.
 
 In other words, consumer configuration is composed of:
@@ -109,6 +132,60 @@ If `force` is not `true`, then the method will throw an error if any `MessagesSt
 If `force` is `true`, then the method will close all `MessagesStream` created from this consumer.
 
 The return value is `void`.
+
+## Using Schema Registries
+
+The consumer supports automatic deserialization through schema registries like [Confluent Schema Registry](./confluent-schema-registry.md). When using a schema registry, messages are automatically deserialized according to their schemas that are fetched based on schema IDs embedded in the message.
+
+Example with Confluent Schema Registry:
+
+```typescript
+import { Consumer } from '@platformatic/kafka'
+import { ConfluentSchemaRegistry } from '@platformatic/kafka/registries'
+
+// Create a schema registry instance
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  auth: {
+    username: 'user',
+    password: 'password'
+  }
+})
+
+// Create a consumer with the registry
+const consumer = new Consumer({
+  groupId: 'my-consumer-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  registry // Registry handles deserialization automatically
+})
+
+// Create a consumer stream
+const stream = await consumer.consume({
+  topics: ['events'],
+  autocommit: true
+})
+
+// Messages are automatically deserialized according to their schemas
+for await (const message of stream) {
+  console.log('Key:', message.key) // Deserialized key object
+  console.log('Value:', message.value) // Deserialized value object
+}
+
+await consumer.close()
+```
+
+When using a schema registry:
+
+- **Do not provide** the `deserializers` option - the registry provides its own deserializers
+- **Do not provide** the `beforeDeserialization` hook - the registry provides its own hook
+- Messages are automatically deserialized according to their schemas
+- Schema IDs are extracted from the Confluent wire format (5-byte header)
+- The registry fetches and caches schemas as needed
+- JSON schemas are validated on receive (and optionally on send)
+- Supports AVRO, Protocol Buffers, and JSON Schema formats
+
+For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
 ## Advanced Methods
 

@@ -37,11 +37,22 @@ export const kafkaSingleBootstrapServers = ['localhost:9001']
 export const kafkaSaslBootstrapServers = ['localhost:9002']
 export const kafkaSaslKerberosBootstrapServers = ['localhost:9003']
 export const kafkaBootstrapServers = ['localhost:9011']
+export const confluentSchemaRegistryUrl = 'http://localhost:8004'
+export const confluentSchemaRegistryAuthBasicUrl = 'http://localhost:8005'
+export const confluentSchemaRegistryBearerUrl = 'http://localhost:8006'
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION
 let topicCounter = 0
 const defaultRetryDelay = 1000
+
+export function createTestGroupId () {
+  return `test-consumer-group-${randomUUID()}`
+}
+
+export function createTestTopic () {
+  return `test-topic-${randomUUID()}`
+}
 
 export function createBase (t: TestContext, overrideOptions: Partial<BaseOptions> = {}) {
   const options: BaseOptions = {

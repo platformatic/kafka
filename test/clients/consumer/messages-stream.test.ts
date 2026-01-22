@@ -38,6 +38,8 @@ import {
 import {
   createAdmin,
   createCreationChannelVerifier,
+  createTestGroupId,
+  createTestTopic,
   createTopic,
   createTracingChannelVerifier,
   executeWithTimeout,
@@ -59,14 +61,6 @@ interface ConsumeResult<K = string, V = string, HK = string, HV = string> {
 }
 
 // Helper functions
-function createTestGroupId () {
-  return `test-consumer-group-${randomUUID()}`
-}
-
-function createTestTopic () {
-  return `test-topic-${randomUUID()}`
-}
-
 function createProducer<K = string, V = string, HK = string, HV = string> (
   t: TestContext,
   options?: Partial<ProducerOptions<K, V, HK, HV>>
@@ -99,7 +93,7 @@ function createConsumer<K = string, V = string, HK = string, HV = string> (
     clientId: `test-consumer-${randomUUID()}`,
     bootstrapBrokers: kafkaBootstrapServers,
     groupId: groupId ?? createTestGroupId(),
-    deserializers: stringDeserializers as Deserializers<K, V, HK, HV>,
+    deserializers: stringDeserializers as unknown as Deserializers<K, V, HK, HV>,
     timeout: 1000,
     sessionTimeout: 6000,
     rebalanceTimeout: 6000,
@@ -218,7 +212,7 @@ test('should be an instance of Readable', async t => {
 test('should throw error when specifying offsets with non-MANUAL mode', async t => {
   const consumer = createConsumer(t)
 
-  await throws(
+  throws(
     () => {
       return new MessagesStream(consumer, {
         topics: [createTestTopic()],
@@ -1554,5 +1548,143 @@ test('should handle close errors from ConnectionPool.close', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes('Cannot close the pool.'), true)
+  }
+})
+
+test('should support sync beforeDeserialization hooks', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  // Consume messages with autocommit
+  const consumer = await createConsumer(t, groupId, {
+    deserializers: stringDeserializers,
+    beforeDeserialization (_, type, message, callback) {
+      if (type === 'key') {
+        message.key = message.key.reverse()
+        message.value = message.value.reverse()
+      }
+
+      callback(null)
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  strictEqual(messages.length, 1)
+  deepStrictEqual(messages[0].key, '0-yek')
+  deepStrictEqual(messages[0].value, '0-eulav')
+})
+
+test('should handle sync beforeDeserialization errors', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  // Consume messages with autocommit
+  const consumer = await createConsumer(t, groupId, {
+    deserializers: stringDeserializers,
+    beforeDeserialization (_u1, _u2, _u3, callback) {
+      callback(new MultipleErrors(mockedErrorMessage, []))
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  try {
+    const messages = []
+    for await (const message of stream) {
+      messages.push(message)
+    }
+
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('should support async beforeDeserialization hooks', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  // Consume messages with autocommit
+  const consumer = await createConsumer(t, groupId, {
+    deserializers: stringDeserializers,
+    async beforeDeserialization (_, type, message) {
+      if (type === 'key') {
+        message.key = message.key.reverse()
+        message.value = message.value.reverse()
+      }
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  strictEqual(messages.length, 1)
+  deepStrictEqual(messages[0].key, '0-yek')
+  deepStrictEqual(messages[0].value, '0-eulav')
+})
+
+test('should handle async beforeDeserialization hooks errors', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  // Consume messages with autocommit
+  const consumer = await createConsumer(t, groupId, {
+    deserializers: stringDeserializers,
+    async beforeDeserialization () {
+      throw new MultipleErrors(mockedErrorMessage, [])
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  try {
+    const messages = []
+    for await (const message of stream) {
+      messages.push(message)
+    }
+
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
   }
 })

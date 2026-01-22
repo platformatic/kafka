@@ -2015,7 +2015,7 @@ export class Admin extends Base<AdminOptions> {
   #alterConfigsOnBroker (
     options: AlterConfigsOptions,
     broker: number | Connection,
-    callback: CallbackWithPromise<AlterConfigsResponse>
+    callback: CallbackWithPromise<void>
   ): void {
     if (typeof broker === 'number') {
       this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
@@ -2039,7 +2039,12 @@ export class Admin extends Base<AdminOptions> {
             return
           }
 
-          api!(broker, options.resources, options.validateOnly ?? false, retryCallback)
+          api!(
+            broker,
+            options.resources,
+            options.validateOnly ?? false,
+            retryCallback as CallbackWithPromise<AlterConfigsResponse>
+          )
         })
       },
       callback,
@@ -2063,7 +2068,7 @@ export class Admin extends Base<AdminOptions> {
   #incrementalAlterConfigsOnBroker (
     options: IncrementalAlterConfigsOptions,
     broker: number | Connection,
-    callback: CallbackWithPromise<IncrementalAlterConfigsResponse>
+    callback: CallbackWithPromise<void>
   ): void {
     if (typeof broker === 'number') {
       this.#getAnyOrSpecificBrokerConnection(broker, (error, connection) => {
@@ -2090,7 +2095,12 @@ export class Admin extends Base<AdminOptions> {
             return
           }
 
-          api!(broker, options.resources, options.validateOnly ?? false, retryCallback)
+          api!(
+            broker,
+            options.resources,
+            options.validateOnly ?? false,
+            retryCallback as CallbackWithPromise<IncrementalAlterConfigsResponse>
+          )
         })
       },
       callback,

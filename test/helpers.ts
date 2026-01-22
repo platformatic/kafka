@@ -290,11 +290,6 @@ export function mockAPI (
       }
       mocked.add(connection!.instanceId)
 
-      if (error) {
-        callback(error)
-        return
-      }
-
       const originalSend = connection!.send.bind(connection)
 
       connection!.send = function <ReturnType>(

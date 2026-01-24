@@ -1,10 +1,14 @@
-export type Serializer<InputType = unknown> = (data?: InputType) => Buffer | undefined
-export type Deserializer<OutputType = unknown> = (data?: Buffer) => OutputType | undefined
+import { type Callback } from '../apis/definitions.ts'
+import { type MessageToProduce } from '../protocol/records.ts'
 
+export type Serializer<InputType = unknown> = (data?: InputType, metadata?: unknown) => Buffer | undefined
 export type SerializerWithHeaders<InputType = unknown, HeaderKey = unknown, HeaderValue = unknown> = (
   data?: InputType,
-  headers?: Map<HeaderKey, HeaderValue>
+  headers?: Map<HeaderKey, HeaderValue>,
+  metadata?: unknown
 ) => Buffer | undefined
+
+export type Deserializer<OutputType = unknown> = (data?: Buffer) => OutputType | undefined
 export type DeserializerWithHeaders<OutputType = unknown, HeaderKey = unknown, HeaderValue = unknown> = (
   data?: Buffer,
   headers?: Map<HeaderKey, HeaderValue>
@@ -23,6 +27,21 @@ export interface Deserializers<Key, Value, HeaderKey, HeaderValue> {
   headerKey: Deserializer<HeaderKey>
   headerValue: Deserializer<HeaderValue>
 }
+
+export type BeforeHookPayloadType = 'key' | 'value' | 'headerKey' | 'headerValue'
+
+export type BeforeDeserializationHook = (
+  payload: Buffer,
+  type: BeforeHookPayloadType,
+  callback: Callback<void>
+) => void | Promise<void>
+
+export type BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue> = (
+  payload: unknown,
+  type: BeforeHookPayloadType,
+  message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
+  callback: Callback<void>
+) => void | Promise<void>
 
 export function stringSerializer (data?: string): Buffer | undefined {
   if (typeof data !== 'string') {

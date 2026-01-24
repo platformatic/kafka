@@ -39,7 +39,9 @@ export const producerOptionsValidator = ajv.compile({
   type: 'object',
   properties: {
     ...produceOptionsProperties,
-    serializers: serdeProperties
+    serializers: serdeProperties,
+    beforeSerialization: { function: true },
+    registry: { type: 'object' }
   },
   additionalProperties: true
 })

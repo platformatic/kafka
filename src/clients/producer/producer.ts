@@ -29,8 +29,10 @@ import {
   type CreateRecordsBatchOptions,
   type Message,
   type MessageConsumerMetadata,
-  type MessageRecord
+  type MessageRecord,
+  type MessageToProduce
 } from '../../protocol/records.ts'
+import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
   kInstance,
   kTransaction,
@@ -59,7 +61,12 @@ import {
   kValidateOptions
 } from '../base/base.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
-import { type Serializer, type SerializerWithHeaders } from '../serde.ts'
+import {
+  type BeforeHookPayloadType,
+  type BeforeSerializationHook,
+  type Serializer,
+  type SerializerWithHeaders
+} from '../serde.ts'
 import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
 import { Transaction } from './transaction.ts'
 import {
@@ -91,6 +98,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #metricsProducedMessages: Counter | undefined
   #coordinatorId!: number
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
+  #sendOperation: (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<ProduceResult>
+  ) => void
 
   constructor (options: ProducerOptions<Key, Value, HeaderKey, HeaderValue>) {
     if (options.idempotent) {
@@ -114,6 +125,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kValidateOptions](options, producerOptionsValidator, '/options')
 
+    if (options.beforeSerialization && options.registry) {
+      throw new UserError('Cannot specify registry when using beforeSerialization hook.')
+    }
+
     if (this[kPrometheus]) {
       ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_producers', 'Number of active Kafka producers').inc()
 
@@ -123,6 +138,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         'kafka_produced_messages',
         'Number of produced Kafka messages'
       )
+    }
+
+    if (options.registry) {
+      this.#sendOperation = this.#beforeSerialization.bind(this, options.registry.getBeforeSerializationHook())
+    } else if (options.beforeSerialization) {
+      this.#sendOperation = this.#beforeSerialization.bind(this, options.beforeSerialization)
+    } else {
+      this.#sendOperation = this.#send.bind(this)
     }
 
     this[kAfterCreate]('producer')
@@ -264,7 +287,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.acks ??= idempotent ? ProduceAcks.ALL : ProduceAcks.LEADER
 
     producerSendsChannel.traceCallback(
-      this.#send,
+      this.#sendOperation,
       1,
       createDiagnosticContext({ client: this, operation: 'send', options }),
       this,
@@ -751,6 +774,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       let headers = new Map<HeaderKey, HeaderValue>()
       const serializedHeaders = new Map<Buffer, Buffer>()
 
+      const metadata = message.metadata
       if (message.headers) {
         headers =
           message.headers instanceof Map
@@ -758,12 +782,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
 
         for (const [key, value] of headers) {
-          serializedHeaders.set(this.#headerKeySerializer(key as HeaderKey)!, this.#headerValueSerializer(value)!)
+          serializedHeaders.set(
+            this.#headerKeySerializer(key as HeaderKey, metadata)!,
+            this.#headerValueSerializer(value, metadata)!
+          )
         }
       }
 
-      const key = this.#keySerializer(message.key, headers)
-      const value = this.#valueSerializer(message.value, headers)!
+      const key = this.#keySerializer(message.key, headers, metadata)
+      const value = this.#valueSerializer(message.value, headers, metadata)!
 
       let partition: number = 0
 
@@ -1034,5 +1061,56 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.#producerInfo = undefined
       this.#transaction = undefined
     }
+  }
+
+  #beforeSerialization (
+    hook: BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>,
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<ProduceResult>
+  ): void {
+    // Create the pre-serialization requests
+    const requests: [unknown, BeforeHookPayloadType, MessageToProduce<Key, Value, HeaderKey, HeaderValue>][] = []
+
+    for (const message of options.messages) {
+      requests.push([message.key, 'key', message])
+      requests.push([message.value, 'value', message])
+
+      if (typeof message.headers !== 'undefined') {
+        const headers =
+          message.headers instanceof Map
+            ? (message.headers as Map<HeaderKey, HeaderValue>)
+            : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
+
+        for (const [headerKey, headerValue] of headers) {
+          requests.push([headerKey, 'headerKey', message])
+          requests.push([headerValue, 'headerValue', message])
+        }
+      }
+    }
+
+    runAsyncSeries(
+      (request, cb) => {
+        const [data, type, message] = request
+
+        const result = hook(data, type, message, cb) as Promise<void>
+
+        if (typeof result?.then === 'function') {
+          result.then(
+            () => cb(null),
+            err => process.nextTick(() => cb(err))
+          )
+        }
+      },
+      requests,
+      0,
+      error => {
+        if (error) {
+          callback(error)
+          return
+        }
+
+        this.#send(options, callback)
+      }
+    )
   }
 }

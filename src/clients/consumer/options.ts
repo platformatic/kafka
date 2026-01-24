@@ -101,7 +101,9 @@ export const consumerOptionsSchema = {
   properties: {
     groupId: idProperty,
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...consumeOptionsProperties,
+    beforeDeserialization: { function: true },
+    registry: { type: 'object' }
   },
   required: ['groupId'],
   additionalProperties: true

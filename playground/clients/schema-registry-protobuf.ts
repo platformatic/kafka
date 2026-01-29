@@ -1,7 +1,5 @@
 import { randomUUID } from 'crypto'
 import { once } from 'node:events'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { ConfluentSchemaRegistry, Consumer, debugDump, Producer, UserError } from '../../src/index.ts'
 import { kafkaSingleBootstrapServers } from '../../test/helpers.ts'
 
@@ -28,10 +26,7 @@ async function prepareRegistry () {
     headers: { 'Content-Type': 'application/vnd.schemaregistry.v1+json' },
     body: JSON.stringify({
       schemaType: 'PROTOBUF',
-      schema: await readFile(
-        resolve(import.meta.dirname, '../../test/fixtures/confluent-schema-registry.proto'),
-        'utf-8'
-      )
+      schema: 'syntax = "proto3"; message Datum { int32 id = 1;  string name = 2; }'
     })
   })
 

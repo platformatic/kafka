@@ -1,7 +1,5 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import test from 'node:test'
 import { UserError } from '../../src/errors.ts'
 import { MessagesStreamModes, noopDeserializer, stringDeserializer, stringSerializer } from '../../src/index.ts'
@@ -138,7 +136,7 @@ test('supports producing and consuming messages using Confluent Schema Registry 
     confluentSchemaRegistryUrl,
     subject,
     'PROTOBUF',
-    await readFile(resolve(import.meta.dirname, '../fixtures/confluent-schema-registry.proto'), 'utf-8')
+    'syntax = "proto3"; message Datum { int32 id = 1;  string name = 2; }'
   )
 
   const producer = await createProducer(t, { registry: producerRegistry })

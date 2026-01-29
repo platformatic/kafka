@@ -1,7 +1,8 @@
 import { type CompressionAlgorithmValue } from '../../protocol/compression.ts'
 import { type MessageToProduce } from '../../protocol/records.ts'
+import { type SchemaRegistry } from '../../registries/abstract.ts'
 import { type BaseOptions, type TopicWithPartitionAndOffset } from '../base/types.ts'
-import { type Serializers } from '../serde.ts'
+import { type BeforeSerializationHook, type Serializers } from '../serde.ts'
 
 export interface ProducerInfo {
   producerId: bigint
@@ -35,6 +36,8 @@ export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
   ProduceOptions<Key, Value, HeaderKey, HeaderValue> & {
     transactionalId?: string
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
+    beforeSerialization?: BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>
+    registry?: SchemaRegistry<unknown, unknown, Key, Value, HeaderKey, HeaderValue>
   }
 
 export type SendOptions<Key, Value, HeaderKey, HeaderValue> = {

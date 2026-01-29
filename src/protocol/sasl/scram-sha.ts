@@ -2,7 +2,7 @@ import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
-import { type Connection, type SASLCredentialProvider } from '../../network/connection.ts'
+import { type Connection, type CredentialProvider } from '../../network/connection.ts'
 import { getCredential } from './utils.ts'
 
 const GS2_HEADER = 'n,,'
@@ -183,8 +183,8 @@ export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
-  usernameProvider: string | SASLCredentialProvider,
-  passwordProvider: string | SASLCredentialProvider,
+  usernameProvider: string | CredentialProvider,
+  passwordProvider: string | CredentialProvider,
   crypto: ScramCryptoModule,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void
@@ -192,16 +192,16 @@ export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
-  usernameProvider: string | SASLCredentialProvider,
-  passwordProvider: string | SASLCredentialProvider,
+  usernameProvider: string | CredentialProvider,
+  passwordProvider: string | CredentialProvider,
   crypto?: ScramCryptoModule
 ): Promise<SaslAuthenticateResponse>
 export function authenticate (
   authenticateAPI: SASLAuthenticationAPI,
   connection: Connection,
   algorithm: ScramAlgorithm,
-  usernameProvider: string | SASLCredentialProvider,
-  passwordProvider: string | SASLCredentialProvider,
+  usernameProvider: string | CredentialProvider,
+  passwordProvider: string | CredentialProvider,
   crypto: ScramCryptoModule = defaultCrypto,
   callback?: CallbackWithPromise<SaslAuthenticateResponse>
 ): void | Promise<SaslAuthenticateResponse> {

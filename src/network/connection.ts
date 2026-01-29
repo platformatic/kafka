@@ -32,7 +32,11 @@ import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.t
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
 
-export type SASLCredentialProvider<T = string> = () => T | Promise<T>
+export type CredentialProvider<T = string> = () => T | Promise<T>
+
+// @deprecated Use CredentialProvider instead
+export type SASLCredentialProvider<T> = CredentialProvider<T>
+
 export interface Broker {
   host: string
   port: number
@@ -42,18 +46,18 @@ export type SASLCustomAuthenticator = (
   mechanism: SASLMechanismValue,
   connection: Connection,
   authenticate: SASLAuthenticationAPI,
-  usernameProvider: string | SASLCredentialProvider | undefined,
-  passwordProvider: string | SASLCredentialProvider | undefined,
-  tokenProvider: string | SASLCredentialProvider | undefined,
+  usernameProvider: string | CredentialProvider | undefined,
+  passwordProvider: string | CredentialProvider | undefined,
+  tokenProvider: string | CredentialProvider | undefined,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ) => void
 
 export interface SASLOptions {
   mechanism: SASLMechanismValue
-  username?: string | SASLCredentialProvider
-  password?: string | SASLCredentialProvider
-  token?: string | SASLCredentialProvider
-  oauthBearerExtensions?: Record<string, string> | SASLCredentialProvider<Record<string, string>>
+  username?: string | CredentialProvider
+  password?: string | CredentialProvider
+  token?: string | CredentialProvider
+  oauthBearerExtensions?: Record<string, string> | CredentialProvider<Record<string, string>>
   authenticate?: SASLCustomAuthenticator
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
 }

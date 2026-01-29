@@ -17,13 +17,13 @@ import {
   connectionsApiChannel,
   connectionsConnectsChannel,
   ConnectionStatuses,
+  type CredentialProvider,
   instancesChannel,
   metadataV12,
   NetworkError,
   parseBroker,
   promiseWithResolvers,
   type Reader,
-  type SASLCredentialProvider,
   saslHandshakeV1,
   SASLMechanisms,
   type SASLMechanismValue,
@@ -178,7 +178,7 @@ test('Connection.connect should support diagnostic channels when erroring', asyn
     }
   })
 
-  await throws(() => connection.connect('localhost', 100000) as Promise<unknown>)
+  throws(() => connection.connect('localhost', 100000) as Promise<unknown>)
 
   deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
 
@@ -1122,9 +1122,9 @@ for (const mechanism of allowedSASLMechanisms) {
     mechanism: SASLMechanismValue,
     connection: Connection,
     authenticate: SASLAuthenticationAPI,
-    usernameProvider: string | SASLCredentialProvider | undefined,
-    passwordProvider: string | SASLCredentialProvider | undefined,
-    tokenProvider: string | SASLCredentialProvider | undefined,
+    usernameProvider: string | CredentialProvider | undefined,
+    passwordProvider: string | CredentialProvider | undefined,
+    tokenProvider: string | CredentialProvider | undefined,
     callback: CallbackWithPromise<SaslAuthenticateResponse>
   ) {
     switch (mechanism) {

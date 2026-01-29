@@ -10,8 +10,8 @@ import {
   type Callback,
   type CallbackWithPromise,
   type Connection,
+  type CredentialProvider,
   type saslAuthenticateV2,
-  type SASLCredentialProvider,
   type SASLCustomAuthenticator,
   type SASLMechanismValue
 } from '../../src/index.ts'
@@ -112,9 +112,9 @@ async function authenticate (
   _m: SASLMechanismValue,
   connection: Connection,
   authenticate: saslAuthenticateV2.SASLAuthenticationAPI,
-  usernameProvider: string | SASLCredentialProvider | undefined,
-  passwordProvider: string | SASLCredentialProvider | undefined,
-  _t: string | SASLCredentialProvider | undefined,
+  usernameProvider: string | CredentialProvider | undefined,
+  passwordProvider: string | CredentialProvider | undefined,
+  _t: string | CredentialProvider | undefined,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): Promise<void> {
   const afterRestoreCallback = restoreEnvironment.bind(

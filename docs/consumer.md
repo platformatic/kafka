@@ -35,7 +35,9 @@ Options:
 | maxBytes            | `number`                                            | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxWaitTime         | `number`                                            | 5 seconds                 | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                                                                                                                                                                                                                            |
 | isolationLevel      | `number`                                            | `1`                       | Kind of isolation applied to fetch requests. It can be used to only read producers-committed messages.<br/><br/> The valid values are defined in the `FetchIsolationLevels` enumeration.                                                                                                                                                                                                             |
-| deserializers       | `Deserializers<Key, Value, HeaderKey, HeaderValue>` |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.                                                                                                                                                                                                                               |
+| deserializers       | `Deserializers<Key, Value, HeaderKey, HeaderValue>` |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                                          |
+| beforeDeserialization | `BeforeDeserializationHook`                       |                           | Hook function called before deserialization of each message component (key, value, headers).<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                                                                                                                       |
+| registry            | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>` |                | Schema registry instance for automatic deserialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Note:** When provided, do not use `deserializers` or `beforeDeserialization`.                                                                                                                                       |
 | highWaterMark       | `number`                                            | `1024`                    | The maximum amount of messages to store in memory before delaying fetch requests. Note that this severely impacts both performance at the cost of memory use.                                                                                                                                                                                                                                        |
 | sessionTimeout      | `number`                                            | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with broker configuration property `group.consumer.session.timeout.ms`.                                                                              |
 | rebalanceTimeout    | `number`                                            | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.                                                                                                                                                                                                                         |
@@ -100,6 +102,59 @@ If `force` is not `true`, then the method will throw an error if any `MessagesSt
 If `force` is `true`, then the method will close all `MessagesStream` created from this consumer.
 
 The return value is `void`.
+
+## Using Schema Registries
+
+The consumer supports automatic deserialization through schema registries like [Confluent Schema Registry](./confluent-schema-registry.md). When using a schema registry, messages are automatically deserialized according to their schemas that are fetched based on schema IDs embedded in the message.
+
+Example with Confluent Schema Registry:
+
+```typescript
+import { Consumer } from '@platformatic/kafka'
+import { ConfluentSchemaRegistry } from '@platformatic/kafka/registries'
+
+// Create a schema registry instance
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  auth: {
+    username: 'user',
+    password: 'password'
+  }
+})
+
+// Create a consumer with the registry
+const consumer = new Consumer({
+  groupId: 'my-consumer-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  registry // Registry handles deserialization automatically
+})
+
+// Create a consumer stream
+const stream = await consumer.consume({
+  topics: ['events'],
+  autocommit: true
+})
+
+// Messages are automatically deserialized according to their schemas
+for await (const message of stream) {
+  console.log('Key:', message.key)     // Deserialized key object
+  console.log('Value:', message.value) // Deserialized value object
+}
+
+await consumer.close()
+```
+
+When using a schema registry:
+- **Do not provide** the `deserializers` option - the registry provides its own deserializers
+- **Do not provide** the `beforeDeserialization` hook - the registry provides its own hook
+- Messages are automatically deserialized according to their schemas
+- Schema IDs are extracted from the Confluent wire format (5-byte header)
+- The registry fetches and caches schemas as needed
+- JSON schemas are validated on receive (and optionally on send)
+- Supports AVRO, Protocol Buffers, and JSON Schema formats
+
+For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
 ## Advanced Methods
 

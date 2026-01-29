@@ -104,7 +104,7 @@ test('constructor should validate options in strict mode', t => {
   producer.close()
 })
 
-test('constructor should validat other options even when not in strict mode', t => {
+test('constructor should validat other options even when not in strict mode', () => {
   try {
     const registry = new ConfluentSchemaRegistry({ url: '' })
 

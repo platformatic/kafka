@@ -291,7 +291,12 @@ test('fails on JSON schema validation when producing', async t => {
     const producer = await createProducer(t, { registry: producerRegistry })
     await producer.send({
       messages: [
-        { topic, key: 'key-1', value: { id: 1, name: 'Alice', foo: 'bar' }, metadata: { schemas: { value: schemaId } } }
+        {
+          topic,
+          key: 'key-1',
+          value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
+          metadata: { schemas: { value: schemaId } }
+        }
       ]
     })
 
@@ -378,7 +383,12 @@ test('fails on missing schema on the registry when producing', async t => {
     const producer = await createProducer(t, { registry: producerRegistry })
     await producer.send({
       messages: [
-        { topic, key: 'key-1', value: { id: 1, name: 'Alice', foo: 'bar' }, metadata: { schemas: { value: 100 } } }
+        {
+          topic,
+          key: 'key-1',
+          value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
+          metadata: { schemas: { value: 100 } }
+        }
       ]
     })
 
@@ -407,7 +417,12 @@ test('fails on missing schema on the registry when consuming', async t => {
 
   await producer.send({
     messages: [
-      { topic, key: 'key-1', value: { id: 1, name: 'Alice', foo: 'bar' }, metadata: { schemas: { value: 100 } } }
+      {
+        topic,
+        key: 'key-1',
+        value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
+        metadata: { schemas: { value: 100 } }
+      }
     ]
   })
 
@@ -444,7 +459,12 @@ test('fails on missing schema locally when producing', async t => {
     const producer = await createProducer(t, { registry: producerRegistry })
     await producer.send({
       messages: [
-        { topic, key: 'key-1', value: { id: 1, name: 'Alice', foo: 'bar' }, metadata: { schemas: { value: 100 } } }
+        {
+          topic,
+          key: 'key-1',
+          value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
+          metadata: { schemas: { value: 100 } }
+        }
       ]
     })
 
@@ -478,7 +498,12 @@ test('fails on missing schema locally when consuming', async t => {
 
   await producer.send({
     messages: [
-      { topic, key: 'key-1', value: { id: 1, name: 'Alice', foo: 'bar' }, metadata: { schemas: { value: 100 } } }
+      {
+        topic,
+        key: 'key-1',
+        value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
+        metadata: { schemas: { value: 100 } }
+      }
     ]
   })
 

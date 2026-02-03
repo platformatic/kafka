@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { type AddressInfo, connect, createServer, type Socket } from 'node:net'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
 import * as Prometheus from 'prom-client'
@@ -21,6 +22,7 @@ import {
   MessagesStreamModes,
   MultipleErrors,
   noopCallback,
+  parseBroker,
   ProduceAcks,
   Producer,
   type ProducerOptions,
@@ -39,6 +41,7 @@ import {
   createTracingChannelVerifier,
   executeWithTimeout,
   kafkaBootstrapServers,
+  kafkaSingleBootstrapServers,
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata
@@ -1415,4 +1418,83 @@ test('should report correct isConnected status', async t => {
 
   // Stream should not be live after close
   strictEqual(stream.isConnected(), false)
+})
+
+test('should automatically reconnect and resume operations when retries=true', async t => {
+  const disconnectPromise = promiseWithResolvers<void>()
+  const endPromise = promiseWithResolvers<void>()
+  const reconnectionPromise = promiseWithResolvers<void>()
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true, 1, kafkaSingleBootstrapServers)
+
+  // Create a sample server that forwards data to the Kafka broker
+  const broker = parseBroker(kafkaSingleBootstrapServers[0])
+
+  let server: Socket
+  const proxy = createServer(client => {
+    server = connect(broker.port, broker.host, () => {
+      client.pipe(server)
+      server.pipe(client)
+    })
+
+    client.on('error', () => server.end())
+    server.on('error', () => client.end())
+  }).listen(0)
+  t.after(() => {
+    proxy.close()
+    server.end()
+  })
+
+  // Produce data every 100ms
+  const producer = createProducer(t, { bootstrapBrokers: kafkaSingleBootstrapServers })
+  const interval = setInterval(async () => {
+    producer.send({
+      messages: [{ topic, key: randomUUID(), value: randomUUID() }],
+      acks: ProduceAcks.NO_RESPONSE
+    })
+  }, 100)
+  const port = (proxy.address() as AddressInfo).port
+
+  // Create the consumer to the proxy
+  const consumer = createConsumer(t, groupId, { bootstrapBrokers: [`localhost:${port}`], retries: true })
+  consumer.on('client:broker:disconnect', () => disconnectPromise.resolve())
+
+  // Continously consume messages
+  const messages: Message<string, string, string, string>[] = []
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 100,
+    maxBytes: 10
+  })
+
+  stream.on('data', message => {
+    messages.push(message)
+
+    if (message.value === 'end') {
+      clearInterval(interval)
+      endPromise.resolve()
+      stream.removeAllListeners('data')
+    }
+  })
+
+  // Close the proxy, simulating a network failure
+  proxy.close()
+  server!.end()
+  await disconnectPromise.promise
+
+  // Wait a bit for the consumer to attempt reconnection, then reopen the proxy
+  await sleep(1000)
+  consumer.on('client:broker:connect', reconnectionPromise.resolve)
+  proxy.listen(port)
+  await reconnectionPromise.promise
+
+  // End the production and wait for all messages to be consumed
+  producer.send({ messages: [{ topic, key: randomUUID(), value: 'end' }], acks: ProduceAcks.NO_RESPONSE })
+  await endPromise.promise
+
+  // Verify that no messages were lost
+  for (let i = 1; i < messages.length; i++) {
+    deepStrictEqual(messages[i].offset - messages[i - 1].offset, 1n)
+  }
 })

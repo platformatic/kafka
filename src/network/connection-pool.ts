@@ -1,4 +1,3 @@
-import EventEmitter from 'node:events'
 import {
   createPromisifiedCallback,
   kCallbackPromise,
@@ -7,12 +6,29 @@ import {
 } from '../apis/callbacks.ts'
 import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
+import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { MultipleErrors } from '../errors.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
 
+export interface ConnectionPoolEventPayload {
+  broker: Broker
+  connection: Connection
+}
+
+export interface ConnectionPoolEvents extends TypedEvents {
+  connecting: (payload: ConnectionPoolEventPayload) => void
+  failed: (payload: ConnectionPoolEventPayload) => void
+  connect: (payload: ConnectionPoolEventPayload) => void
+  'sasl:handshake': (payload: ConnectionPoolEventPayload & { mechanisms: string[] }) => void
+  'sasl:authentication': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
+  'sasl:authentication:extended': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
+  disconnect: (payload: ConnectionPoolEventPayload) => void
+  drain: (payload: ConnectionPoolEventPayload) => void
+}
+
 let currentInstance = 0
 
-export class ConnectionPool extends EventEmitter {
+export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
   #instanceId: number
   #clientId: string
   #closed: boolean

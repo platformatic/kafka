@@ -170,6 +170,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       )
     }
 
+    // Whenever the consumer loses a connection, reset all the partitions epochs
+    consumer.on('client:broker:disconnect', () => {
+      this.#partitionsEpochs.clear()
+    })
+
     notifyCreation('messages-stream', this)
   }
 

@@ -1,5 +1,5 @@
 import { type ValidateFunction } from 'ajv'
-import { EventEmitter } from 'node:events'
+import { type EventEmitter } from 'node:events'
 import {
   createPromisifiedCallback,
   kCallbackPromise,
@@ -23,7 +23,8 @@ import {
 } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
 import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
-import { ConnectionPool } from '../../network/connection-pool.ts'
+import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
+import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import { parseBroker } from '../../network/utils.ts'
 import { kInstance } from '../../symbols.ts'
@@ -64,7 +65,24 @@ export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 
 let currentInstance = 0
 
-export class Base<OptionsType extends BaseOptions = BaseOptions> extends EventEmitter {
+export interface BaseEvents extends TypedEvents {
+  'client:broker:connect': (payload: ConnectionPoolEventPayload) => void
+  'client:broker:disconnect': (payload: ConnectionPoolEventPayload) => void
+  'client:broker:failed': (payload: ConnectionPoolEventPayload) => void
+  'client:broker:drain': (payload: ConnectionPoolEventPayload) => void
+  'client:broker:sasl:handshake': (payload: ConnectionPoolEventPayload & { mechanisms: string[] }) => void
+  'client:broker:sasl:authentication': (payload: ConnectionPoolEventPayload & { authentication: Buffer }) => void
+  'client:broker:sasl:authentication:extended': (
+    payload: ConnectionPoolEventPayload & { authentication: Buffer }
+  ) => void
+  'client:metadata': (metadata: ClusterMetadata) => void
+  'client:close': () => void
+}
+
+export class Base<
+  OptionsType extends BaseOptions = BaseOptions,
+  EventsType extends BaseEvents = BaseEvents
+> extends TypedEventEmitter<EventsType> {
   // This is declared using a symbol (a.k.a protected/friend) to make it available in ConnectionPool and MessagesStream
   [kInstance]: number;
 

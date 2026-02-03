@@ -1,13 +1,13 @@
 import {
-  allowedIncrementalAlterConfigOperationTypes,
-  allowedResourceTypes,
-  ConsumerGroupStates,
-  IncrementalAlterConfigOperationTypes,
   allowedAclOperations,
   allowedAclPermissionTypes,
-  allowedResourcePatternTypes,
+  allowedClientQuotaMatchTypes,
   allowedFetchIsolationLevels,
-  allowedClientQuotaMatchTypes
+  allowedIncrementalAlterConfigOperationTypes,
+  allowedResourcePatternTypes,
+  allowedResourceTypes,
+  ConsumerGroupStates,
+  IncrementalAlterConfigOperationTypes
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
@@ -558,7 +558,7 @@ export const deleteAclsOptionsSchema = {
   additionalProperties: false
 }
 
-export const listOffsetsOptionsSchema = {
+export const adminListOffsetsOptionsSchema = {
   type: 'object',
   properties: {
     topics: {
@@ -612,4 +612,4 @@ export const incrementalAlterConfigsOptionsValidator = ajv.compile(incrementalAl
 export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
 export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
 export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)
-export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
+export const adminListOffsetsOptionsValidator = ajv.compile(adminListOffsetsOptionsSchema)

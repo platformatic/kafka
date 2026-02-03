@@ -1,12 +1,12 @@
 import { type AlterClientQuotasRequestEntry } from '../../apis/admin/alter-client-quotas-v1.ts'
+import { type AlterConfigsRequestResource } from '../../apis/admin/alter-configs-v2.ts'
 import { type CreatePartitionsRequestTopic } from '../../apis/admin/create-partitions-v3.ts'
 import { type CreateTopicsRequestTopicConfig } from '../../apis/admin/create-topics-v7.ts'
-import { type AlterConfigsRequestResource } from '../../apis/admin/alter-configs-v2.ts'
+import { type DescribeClientQuotasRequestComponent } from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type DescribeConfigsRequestResource,
   type DescribeConfigsResponseConfig
 } from '../../apis/admin/describe-configs-v4.ts'
-import { type DescribeClientQuotasRequestComponent } from '../../apis/admin/describe-client-quotas-v0.ts'
 import {
   type DescribeLogDirsRequestTopic,
   type DescribeLogDirsResponse,
@@ -14,14 +14,14 @@ import {
 } from '../../apis/admin/describe-log-dirs-v4.ts'
 import { type IncrementalAlterConfigsRequestResource } from '../../apis/admin/incremental-alter-configs-v1.ts'
 import {
-  type FetchIsolationLevelValue,
   type ConfigResourceTypeValue,
-  type ConsumerGroupStateValue
+  type ConsumerGroupStateValue,
+  type FetchIsolationLevelValue
 } from '../../apis/enumerations.ts'
+import { type Acl, type AclFilter } from '../../apis/types.ts'
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type ExtendedGroupProtocolSubscription, type GroupAssignment } from '../consumer/types.ts'
-import { type Acl, type AclFilter } from '../../apis/types.ts'
 
 export interface BrokerAssignment {
   partition: number
@@ -217,7 +217,7 @@ export interface TopicOffsetRequest {
   partitions: PartitionTimestamp[]
 }
 
-export interface ListOffsetsOptions {
+export interface AdminListOffsetsOptions {
   topics: TopicOffsetRequest[]
   isolationLevel?: Nullable<FetchIsolationLevelValue>
 }

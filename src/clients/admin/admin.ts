@@ -1,168 +1,168 @@
 import {
-    type AlterClientQuotasRequest,
-    type AlterClientQuotasResponse,
-    type AlterClientQuotasResponseEntries
+  type AlterClientQuotasRequest,
+  type AlterClientQuotasResponse,
+  type AlterClientQuotasResponseEntries
 } from '../../apis/admin/alter-client-quotas-v1.ts'
 import { type AlterConfigsRequest, type AlterConfigsResponse } from '../../apis/admin/alter-configs-v2.ts'
 import { type CreateAclsRequest, type CreateAclsResponse } from '../../apis/admin/create-acls-v3.ts'
 import { type CreatePartitionsRequest, type CreatePartitionsResponse } from '../../apis/admin/create-partitions-v3.ts'
 import {
-    type CreateTopicsRequest,
-    type CreateTopicsRequestTopic,
-    type CreateTopicsRequestTopicAssignment,
-    type CreateTopicsResponse
+  type CreateTopicsRequest,
+  type CreateTopicsRequestTopic,
+  type CreateTopicsRequestTopicAssignment,
+  type CreateTopicsResponse
 } from '../../apis/admin/create-topics-v7.ts'
 import { type DeleteAclsRequest, type DeleteAclsResponse } from '../../apis/admin/delete-acls-v3.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
-    type DeleteTopicsRequest,
-    type DeleteTopicsRequestTopic,
-    type DeleteTopicsResponse
+  type DeleteTopicsRequest,
+  type DeleteTopicsRequestTopic,
+  type DeleteTopicsResponse
 } from '../../apis/admin/delete-topics-v6.ts'
 import {
-    type DescribeAclsRequest,
-    type DescribeAclsResponse,
-    type DescribeAclsResponseResource
+  type DescribeAclsRequest,
+  type DescribeAclsResponse,
+  type DescribeAclsResponseResource
 } from '../../apis/admin/describe-acls-v3.ts'
 import {
-    type DescribeClientQuotasRequest,
-    type DescribeClientQuotasResponse,
-    type DescribeClientQuotasResponseEntry
+  type DescribeClientQuotasRequest,
+  type DescribeClientQuotasResponse,
+  type DescribeClientQuotasResponseEntry
 } from '../../apis/admin/describe-client-quotas-v0.ts'
 import { type DescribeConfigsRequest, type DescribeConfigsResponse } from '../../apis/admin/describe-configs-v4.ts'
 import { type DescribeGroupsRequest, type DescribeGroupsResponse } from '../../apis/admin/describe-groups-v5.ts'
 import { type DescribeLogDirsRequest, type DescribeLogDirsResponse } from '../../apis/admin/describe-log-dirs-v4.ts'
 import {
-    type IncrementalAlterConfigsRequest,
-    type IncrementalAlterConfigsResponse
+  type IncrementalAlterConfigsRequest,
+  type IncrementalAlterConfigsResponse
 } from '../../apis/admin/incremental-alter-configs-v1.ts'
 import { type ListGroupsRequest as ListGroupsRequestV4 } from '../../apis/admin/list-groups-v4.ts'
 import {
-    type ListGroupsRequest as ListGroupsRequestV5,
-    type ListGroupsResponse
+  type ListGroupsRequest as ListGroupsRequestV5,
+  type ListGroupsResponse
 } from '../../apis/admin/list-groups-v5.ts'
 import { type OffsetDeleteRequest, type OffsetDeleteResponse } from '../../apis/admin/offset-delete-v0.ts'
 import {
-    createPromisifiedCallback,
-    kCallbackPromise,
-    runConcurrentCallbacks,
-    type CallbackWithPromise
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks,
+  type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import {
-    type LeaveGroupRequest,
-    type LeaveGroupRequestMember,
-    type LeaveGroupResponse
+  type LeaveGroupRequest,
+  type LeaveGroupRequestMember,
+  type LeaveGroupResponse
 } from '../../apis/consumer/leave-group-v5.ts'
 import {
-    type ListOffsetsRequest,
-    type ListOffsetsRequestTopic,
-    type ListOffsetsResponse
+  type ListOffsetsRequest,
+  type ListOffsetsRequestTopic,
+  type ListOffsetsResponse
 } from '../../apis/consumer/list-offsets-v9.ts'
 import {
-    type OffsetCommitRequest,
-    type OffsetCommitRequestTopic,
-    type OffsetCommitResponse
+  type OffsetCommitRequest,
+  type OffsetCommitRequestTopic,
+  type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
 import {
-    type OffsetFetchRequest,
-    type OffsetFetchRequestGroup,
-    type OffsetFetchResponse
+  type OffsetFetchRequest,
+  type OffsetFetchRequestGroup,
+  type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import {
-    ConfigResourceTypes,
-    FetchIsolationLevels,
-    FindCoordinatorKeyTypes,
-    type ConfigResourceTypeValue,
-    type ConsumerGroupStateValue
+  ConfigResourceTypes,
+  FetchIsolationLevels,
+  FindCoordinatorKeyTypes,
+  type ConfigResourceTypeValue,
+  type ConsumerGroupStateValue
 } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import { type Acl } from '../../apis/types.ts'
 import {
-    adminAclsChannel,
-    adminClientQuotasChannel,
-    adminConfigsChannel,
-    adminConsumerGroupOffsetsChannel,
-    adminGroupsChannel,
-    adminLogDirsChannel,
-    adminOffsetsChannel,
-    adminTopicsChannel,
-    createDiagnosticContext
+  adminAclsChannel,
+  adminClientQuotasChannel,
+  adminConfigsChannel,
+  adminConsumerGroupOffsetsChannel,
+  adminGroupsChannel,
+  adminLogDirsChannel,
+  adminOffsetsChannel,
+  adminTopicsChannel,
+  createDiagnosticContext
 } from '../../diagnostic.ts'
 import { MultipleErrors } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
-    Base,
-    kAfterCreate,
-    kCheckNotClosed,
-    kConnections,
-    kGetApi,
-    kGetBootstrapConnection,
-    kGetConnection,
-    kMetadata,
-    kOptions,
-    kPerformDeduplicated,
-    kPerformWithRetry,
-    kValidateOptions
+  Base,
+  kAfterCreate,
+  kCheckNotClosed,
+  kConnections,
+  kGetApi,
+  kGetBootstrapConnection,
+  kGetConnection,
+  kMetadata,
+  kOptions,
+  kPerformDeduplicated,
+  kPerformWithRetry,
+  kValidateOptions
 } from '../base/base.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
-    adminListOffsetsOptionsValidator,
-    alterClientQuotasOptionsValidator,
-    alterConfigsOptionsValidator,
-    alterConsumerGroupOffsetsOptionsValidator,
-    createAclsOptionsValidator,
-    createPartitionsOptionsValidator,
-    createTopicsOptionsValidator,
-    deleteAclsOptionsValidator,
-    deleteConsumerGroupOffsetsOptionsValidator,
-    deleteGroupsOptionsValidator,
-    deleteTopicsOptionsValidator,
-    describeAclsOptionsValidator,
-    describeClientQuotasOptionsValidator,
-    describeConfigsOptionsValidator,
-    describeGroupsOptionsValidator,
-    describeLogDirsOptionsValidator,
-    incrementalAlterConfigsOptionsValidator,
-    listConsumerGroupOffsetsOptionsValidator,
-    listGroupsOptionsValidator,
-    listTopicsOptionsValidator,
-    removeMembersFromConsumerGroupOptionsValidator
+  adminListOffsetsOptionsValidator,
+  alterClientQuotasOptionsValidator,
+  alterConfigsOptionsValidator,
+  alterConsumerGroupOffsetsOptionsValidator,
+  createAclsOptionsValidator,
+  createPartitionsOptionsValidator,
+  createTopicsOptionsValidator,
+  deleteAclsOptionsValidator,
+  deleteConsumerGroupOffsetsOptionsValidator,
+  deleteGroupsOptionsValidator,
+  deleteTopicsOptionsValidator,
+  describeAclsOptionsValidator,
+  describeClientQuotasOptionsValidator,
+  describeConfigsOptionsValidator,
+  describeGroupsOptionsValidator,
+  describeLogDirsOptionsValidator,
+  incrementalAlterConfigsOptionsValidator,
+  listConsumerGroupOffsetsOptionsValidator,
+  listGroupsOptionsValidator,
+  listTopicsOptionsValidator,
+  removeMembersFromConsumerGroupOptionsValidator
 } from './options.ts'
 import {
-    type AdminListOffsetsOptions,
-    type AdminOptions,
-    type AlterClientQuotasOptions,
-    type AlterConfigsOptions,
-    type AlterConsumerGroupOffsetsOptions,
-    type BrokerLogDirDescription,
-    type ConfigDescription,
-    type CreateAclsOptions,
-    type CreatedTopic,
-    type CreatePartitionsOptions,
-    type CreateTopicsOptions,
-    type DeleteAclsOptions,
-    type DeleteConsumerGroupOffsetsOptions,
-    type DeleteGroupsOptions,
-    type DeleteTopicsOptions,
-    type DescribeAclsOptions,
-    type DescribeClientQuotasOptions,
-    type DescribeConfigsOptions,
-    type DescribeGroupsOptions,
-    type DescribeLogDirsOptions,
-    type Group,
-    type GroupBase,
-    type GroupMember,
-    type IncrementalAlterConfigsOptions,
-    type ListConsumerGroupOffsetsGroup,
-    type ListConsumerGroupOffsetsOptions,
-    type ListedOffsetsTopic,
-    type ListGroupsOptions,
-    type ListTopicsOptions,
-    type RemoveMembersFromConsumerGroupOptions
+  type AdminListOffsetsOptions,
+  type AdminOptions,
+  type AlterClientQuotasOptions,
+  type AlterConfigsOptions,
+  type AlterConsumerGroupOffsetsOptions,
+  type BrokerLogDirDescription,
+  type ConfigDescription,
+  type CreateAclsOptions,
+  type CreatedTopic,
+  type CreatePartitionsOptions,
+  type CreateTopicsOptions,
+  type DeleteAclsOptions,
+  type DeleteConsumerGroupOffsetsOptions,
+  type DeleteGroupsOptions,
+  type DeleteTopicsOptions,
+  type DescribeAclsOptions,
+  type DescribeClientQuotasOptions,
+  type DescribeConfigsOptions,
+  type DescribeGroupsOptions,
+  type DescribeLogDirsOptions,
+  type Group,
+  type GroupBase,
+  type GroupMember,
+  type IncrementalAlterConfigsOptions,
+  type ListConsumerGroupOffsetsGroup,
+  type ListConsumerGroupOffsetsOptions,
+  type ListedOffsetsTopic,
+  type ListGroupsOptions,
+  type ListTopicsOptions,
+  type RemoveMembersFromConsumerGroupOptions
 } from './types.ts'
 
 export class Admin extends Base<AdminOptions> {

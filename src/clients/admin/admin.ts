@@ -110,6 +110,7 @@ import {
 import { type BaseOptions } from '../base/types.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
+  adminListOffsetsOptionsValidator,
   alterClientQuotasOptionsValidator,
   alterConfigsOptionsValidator,
   alterConsumerGroupOffsetsOptionsValidator,
@@ -128,11 +129,11 @@ import {
   incrementalAlterConfigsOptionsValidator,
   listConsumerGroupOffsetsOptionsValidator,
   listGroupsOptionsValidator,
-  listOffsetsOptionsValidator,
   listTopicsOptionsValidator,
   removeMembersFromConsumerGroupOptionsValidator
 } from './options.ts'
 import {
+  type AdminListOffsetsOptions,
   type AdminOptions,
   type AlterClientQuotasOptions,
   type AlterConfigsOptions,
@@ -160,7 +161,6 @@ import {
   type ListConsumerGroupOffsetsOptions,
   type ListedOffsetsTopic,
   type ListGroupsOptions,
-  type ListOffsetsOptions,
   type ListTopicsOptions,
   type RemoveMembersFromConsumerGroupOptions
 } from './types.ts'
@@ -835,10 +835,10 @@ export class Admin extends Base<AdminOptions> {
     return callback[kCallbackPromise]
   }
 
-  listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void
-  listOffsets (options: ListOffsetsOptions): Promise<ListedOffsetsTopic[]>
+  listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void
+  listOffsets (options: AdminListOffsetsOptions): Promise<ListedOffsetsTopic[]>
   listOffsets (
-    options: ListOffsetsOptions,
+    options: AdminListOffsetsOptions,
     callback?: CallbackWithPromise<ListedOffsetsTopic[]>
   ): void | Promise<ListedOffsetsTopic[]> {
     if (!callback) {
@@ -849,7 +849,7 @@ export class Admin extends Base<AdminOptions> {
       return callback[kCallbackPromise]
     }
 
-    const validationError = this[kValidateOptions](options, listOffsetsOptionsValidator, '/options', false)
+    const validationError = this[kValidateOptions](options, adminListOffsetsOptionsValidator, '/options', false)
     if (validationError) {
       callback(validationError)
       return callback[kCallbackPromise]
@@ -2218,7 +2218,7 @@ export class Admin extends Base<AdminOptions> {
     )
   }
 
-  #listOffsets (options: ListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void {
+  #listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void {
     this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
       if (error) {
         callback(error)

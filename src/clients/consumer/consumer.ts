@@ -59,6 +59,7 @@ import { Writer } from '../../protocol/writer.ts'
 import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import {
   Base,
+  type BaseEvents,
   kAfterCreate,
   kCheckNotClosed,
   kClosed,
@@ -75,7 +76,6 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
-import { defaultBaseOptions } from '../base/options.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Gauge, type Histogram } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
@@ -121,8 +121,22 @@ interface TopicPartition {
   partitions: number[]
 }
 
+export interface ConsumerEvents extends BaseEvents {
+  'consumer:group:join': (payload: ConsumerGroupJoinPayload) => void
+  'consumer:group:leave': (payload: ConsumerGroupLeavePayload) => void
+  'consumer:group:rejoin': () => void
+  'consumer:group:rebalance': (payload: ConsumerGroupRebalancePayload) => void
+  'consumer:heartbeat:start': (payload?: ConsumerHeartbeatPayload) => void
+  'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
+  'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
+  'consumer:heartbeat:error': (payload: ConsumerHeartbeatErrorPayload) => void
+  'consumer:lag': (lag: Offsets) => void
+  'consumer:lag:error': (error: Error) => void
+}
+
 export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
-  ConsumerOptions<Key, Value, HeaderKey, HeaderValue>
+  ConsumerOptions<Key, Value, HeaderKey, HeaderValue>,
+  ConsumerEvents
 > {
   groupId: string
   generationId: number
@@ -166,9 +180,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #metricLags: Histogram | undefined
 
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
-    super(options)
-
-    this[kOptions] = Object.assign({}, defaultBaseOptions, defaultConsumerOptions, options)
+    super({ ...defaultConsumerOptions, ...options })
     this[kValidateOptions](options, consumerOptionsValidator, '/options')
 
     this.groupId = options.groupId
@@ -232,92 +244,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get coordinatorId (): number | null {
     return this.#coordinatorId
-  }
-
-  addListener (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
-  addListener (event: 'consumer:group:leave', listener: (payload: ConsumerGroupLeavePayload) => void): this
-  addListener (event: 'consumer:group:rejoin', listener: () => void): this
-  addListener (event: 'consumer:group:rebalance', listener: (payload: ConsumerGroupRebalancePayload) => void): this
-  addListener (event: 'consumer:heartbeat:start', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  addListener (event: 'consumer:heartbeat:cancel', listener: (payload: ConsumerHeartbeatPayload) => void): this
-  addListener (event: 'consumer:heartbeat:end', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  addListener (event: 'consumer:heartbeat:error', listener: (payload: ConsumerHeartbeatErrorPayload) => void): this
-  addListener (event: 'consumer:lag', listener: (lag: Offsets) => void): this
-  addListener (event: 'consumer:lag:error', listener: (error: Error) => void): this
-  addListener (event: 'error', listener: (error: Error) => void): this
-  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
-  addListener (event: string | symbol, listener: (...args: any[]) => void): this {
-    return super.addListener(event, listener)
-  }
-
-  on (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
-  on (event: 'consumer:group:leave', listener: (payload: ConsumerGroupLeavePayload) => void): this
-  on (event: 'consumer:group:rejoin', listener: () => void): this
-  on (event: 'consumer:group:rebalance', listener: (payload: ConsumerGroupRebalancePayload) => void): this
-  on (event: 'consumer:heartbeat:start', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  on (event: 'consumer:heartbeat:cancel', listener: (payload: ConsumerHeartbeatPayload) => void): this
-  on (event: 'consumer:heartbeat:end', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  on (event: 'consumer:heartbeat:error', listener: (payload: ConsumerHeartbeatErrorPayload) => void): this
-  on (event: 'consumer:lag', listener: (lag: Offsets) => void): this
-  on (event: 'consumer:lag:error', listener: (error: Error) => void): this
-  on (event: 'error', listener: (error: Error) => void): this
-  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
-  on (event: string | symbol, listener: (...args: any[]) => void): this {
-    return super.on(event, listener)
-  }
-
-  once (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
-  once (event: 'consumer:group:leave', listener: (payload: ConsumerGroupLeavePayload) => void): this
-  once (event: 'consumer:group:rejoin', listener: () => void): this
-  once (event: 'consumer:group:rebalance', listener: (payload: ConsumerGroupRebalancePayload) => void): this
-  once (event: 'consumer:heartbeat:start', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  once (event: 'consumer:heartbeat:cancel', listener: (payload: ConsumerHeartbeatPayload) => void): this
-  once (event: 'consumer:heartbeat:end', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  once (event: 'consumer:heartbeat:error', listener: (payload: ConsumerHeartbeatErrorPayload) => void): this
-  once (event: 'consumer:lag', listener: (lag: Offsets) => void): this
-  once (event: 'consumer:lag:error', listener: (error: Error) => void): this
-  once (event: 'error', listener: (error: Error) => void): this
-  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
-  once (event: string | symbol, listener: (...args: any[]) => void): this {
-    return super.once(event, listener)
-  }
-
-  prependListener (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
-  prependListener (event: 'consumer:group:leave', listener: (payload: ConsumerGroupLeavePayload) => void): this
-  prependListener (event: 'consumer:group:rejoin', listener: () => void): this
-  prependListener (event: 'consumer:group:rebalance', listener: (payload: ConsumerGroupRebalancePayload) => void): this
-  prependListener (event: 'consumer:heartbeat:start', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  prependListener (event: 'consumer:heartbeat:cancel', listener: (payload: ConsumerHeartbeatPayload) => void): this
-  prependListener (event: 'consumer:heartbeat:end', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  prependListener (event: 'consumer:heartbeat:error', listener: (payload: ConsumerHeartbeatErrorPayload) => void): this
-  prependListener (event: 'consumer:lag', listener: (lag: Offsets) => void): this
-  prependListener (event: 'consumer:lag:error', listener: (error: Error) => void): this
-  prependListener (event: 'error', listener: (error: Error) => void): this
-  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
-  prependListener (event: string | symbol, listener: (...args: any[]) => void): this {
-    return super.prependListener(event, listener)
-  }
-
-  prependOnceListener (event: 'consumer:group:join', listener: (payload: ConsumerGroupJoinPayload) => void): this
-  prependOnceListener (event: 'consumer:group:leave', listener: (payload: ConsumerGroupLeavePayload) => void): this
-  prependOnceListener (event: 'consumer:group:rejoin', listener: () => void): this
-  prependOnceListener (
-    event: 'consumer:group:rebalance',
-    listener: (payload: ConsumerGroupRebalancePayload) => void
-  ): this
-  prependOnceListener (event: 'consumer:heartbeat:start', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  prependOnceListener (event: 'consumer:heartbeat:cancel', listener: (payload: ConsumerHeartbeatPayload) => void): this
-  prependOnceListener (event: 'consumer:heartbeat:end', listener: (payload?: ConsumerHeartbeatPayload) => void): this
-  prependOnceListener (
-    event: 'consumer:heartbeat:error',
-    listener: (payload: ConsumerHeartbeatErrorPayload) => void
-  ): this
-  prependOnceListener (event: 'consumer:lag', listener: (lag: Offsets) => void): this
-  prependOnceListener (event: 'consumer:lag:error', listener: (error: Error) => void): this
-  prependOnceListener (event: 'error', listener: (error: Error) => void): this
-  /* c8 ignore next 3 - Only forwards to Node.js implementation - Inserted here to please Typescript */
-  prependOnceListener (event: string | symbol, listener: (...args: any[]) => void): this {
-    return super.prependOnceListener(event, listener)
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -815,6 +741,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           this[kFetchConnections].get(broker, (error, connection) => {
             if (error) {
+              // When a connection was not available (either interrupted or not available) we
+              // reset the leader epoch in the options so that when connection is re-established again we can continue
+              for (const topic of options.topics) {
+                for (const partition of topic.partitions) {
+                  partition.currentLeaderEpoch = -1
+                  partition.lastFetchedEpoch = -1
+                }
+              }
+
               retryCallback(error)
               return
             }

@@ -1,5 +1,4 @@
 import fastq from 'fastq'
-import EventEmitter from 'node:events'
 import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
@@ -14,6 +13,7 @@ import {
   type DiagnosticContext,
   notifyCreation
 } from '../diagnostic.ts'
+import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import {
   AuthenticationError,
   type MultipleErrors,
@@ -31,6 +31,20 @@ import { Reader } from '../protocol/reader.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'
 import { Writer } from '../protocol/writer.ts'
 import { loggers } from '../utils.ts'
+
+export interface ConnectionEvents extends TypedEvents {
+  connecting: () => void
+  timeout: (error: TimeoutError) => void
+  error: (error: Error) => void
+  connect: () => void
+  ready: () => void
+  close: () => void
+  closing: () => void
+  'sasl:handshake': (mechanisms: string[]) => void
+  'sasl:authentication': (authBytes?: Buffer) => void
+  'sasl:authentication:extended': (authBytes?: Buffer) => void
+  drain: () => void
+}
 
 export type SASLCredentialProvider<T = string> = () => T | Promise<T>
 export interface Broker {
@@ -104,7 +118,7 @@ export const defaultOptions = {
 
 let currentInstance = 0
 
-export class Connection extends EventEmitter {
+export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #host: string | undefined
   #port: number | undefined
   #options: ConnectionOptions

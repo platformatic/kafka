@@ -115,11 +115,16 @@ export function createGroupId () {
   return `test-consumer-group-${randomUUID()}`
 }
 
-export async function createTopic (t: TestContext, create: boolean = false, partitions: number = 1) {
+export async function createTopic (
+  t: TestContext,
+  create: boolean = false,
+  partitions: number = 1,
+  bootstrapBrokers = kafkaBootstrapServers
+) {
   const topic = `test-topic-${randomUUID()}-${++topicCounter}`
 
   if (create) {
-    const admin = createAdmin(t)
+    const admin = createAdmin(t, { bootstrapBrokers })
     await admin.createTopics({ topics: [topic], partitions })
     // Wait for the topic to be fully created across all brokers
     await sleep(500)

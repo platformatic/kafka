@@ -8,18 +8,18 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 ## Events
 
-| Name                        | Payload Type                     | Description                                                                                |
-| --------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------ |
-| `consumer:group:join`       | `ConsumerGroupJoinPayload`       | Emitted when joining a group.                                                              |
-| `consumer:group:leave`      | `ConsumerGroupLeavePayload`      | Emitted when leaving a group.                                                              |
-| `consumer:group:rejoin`     | (none)                           | Emitted when re-joining a group after a rebalance.                                         |
-| `consumer:group:rebalance`  | `ConsumerGroupRebalancePayload`  | Emitted when group rebalancing occurs.                                                     |
-| `consumer:heartbeat:start`  | `ConsumerHeartbeatPayload?`      | Emitted when starting new heartbeats.                                                      |
-| `consumer:heartbeat:cancel` | `ConsumerHeartbeatPayload`       | Emitted if a scheduled heartbeat has been canceled.                                        |
-| `consumer:heartbeat:end`    | `ConsumerHeartbeatPayload?`      | Emitted during successful heartbeats.                                                      |
-| `consumer:heartbeat:error`  | `ConsumerHeartbeatErrorPayload`  | Emitted during failed heartbeats.                                                          |
-| `consumer:lag`              | `Offsets`                        | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
-| `consumer:lag:error`        | `Error`                          | Emitted when lag calculation fails during monitoring operations.                           |
+| Name                        | Payload Type                    | Description                                                                                |
+| --------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `consumer:group:join`       | `ConsumerGroupJoinPayload`      | Emitted when joining a group.                                                              |
+| `consumer:group:leave`      | `ConsumerGroupLeavePayload`     | Emitted when leaving a group.                                                              |
+| `consumer:group:rejoin`     | (none)                          | Emitted when re-joining a group after a rebalance.                                         |
+| `consumer:group:rebalance`  | `ConsumerGroupRebalancePayload` | Emitted when group rebalancing occurs.                                                     |
+| `consumer:heartbeat:start`  | `ConsumerHeartbeatPayload?`     | Emitted when starting new heartbeats.                                                      |
+| `consumer:heartbeat:cancel` | `ConsumerHeartbeatPayload`      | Emitted if a scheduled heartbeat has been canceled.                                        |
+| `consumer:heartbeat:end`    | `ConsumerHeartbeatPayload?`     | Emitted during successful heartbeats.                                                      |
+| `consumer:heartbeat:error`  | `ConsumerHeartbeatErrorPayload` | Emitted during failed heartbeats.                                                          |
+| `consumer:lag`              | `Offsets`                       | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
+| `consumer:lag:error`        | `Error`                         | Emitted when lag calculation fails during monitoring operations.                           |
 
 ## Constructor
 
@@ -28,8 +28,8 @@ Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.
 Options:
 
 | Property            | Type                                                | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------- | --------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| groupId             | `string`                                            |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------- | --------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | -------- | --- | --------------------------- |
+| groupId             | `string`                                            |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   | groupInstanceId | `string` |     | Consumer group instance ID. |
 | autocommit          | `boolean \| number`                                 | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
 | minBytes            | `number`                                            | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytes            | `number`                                            | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |

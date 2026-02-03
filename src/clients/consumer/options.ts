@@ -5,6 +5,7 @@ import { serdeProperties } from '../serde.ts'
 import { allowedMessagesStreamFallbackModes, allowedMessagesStreamModes, type ConsumerOptions } from './types.ts'
 
 export const groupOptionsProperties = {
+  groupInstanceId: { type: 'string', pattern: '^\\S+$' },
   sessionTimeout: { type: 'number', minimum: 0 },
   rebalanceTimeout: { type: 'number', minimum: 0 },
   heartbeatInterval: { type: 'number', minimum: 0 },

@@ -139,6 +139,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ConsumerEvents
 > {
   groupId: string
+  groupInstanceId: string | null
   generationId: number
   memberId: string | null
   topics: TopicsMap
@@ -184,6 +185,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kValidateOptions](options, consumerOptionsValidator, '/options')
 
     this.groupId = options.groupId
+    this.groupInstanceId = options.groupInstanceId ?? null
     this.generationId = 0
     this.memberId = null
     this.topics = new TopicsMap()
@@ -1109,7 +1111,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          api!(connection, this.groupId, this.generationId, this.memberId!, null, groupCallback)
+          api!(connection, this.groupId, this.generationId, this.memberId!, this.groupInstanceId, groupCallback)
         })
       },
       error => {
@@ -1191,7 +1193,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.groupId,
             this.memberId || '',
             this.#memberEpoch,
-            null, // instanceId
+            this.groupInstanceId,
             null, // rackId
             options.rebalanceTimeout,
             this.topics.current,
@@ -1375,7 +1377,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.groupId,
             this.memberId!,
             -1, // memberEpoch = -1 signals leave
-            null, // instanceId
+            this.groupInstanceId,
             null, // rackId
             0, // rebalanceTimeout
             [], // subscribedTopicNames
@@ -1527,7 +1529,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             options.sessionTimeout,
             options.rebalanceTimeout,
             this.memberId ?? '',
-            null,
+            this.groupInstanceId,
             'consumer',
             protocols,
             '',
@@ -1740,7 +1742,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.groupId,
             this.generationId,
             this.memberId!,
-            null,
+            this.groupInstanceId,
             'consumer',
             this.#protocol!,
             assignments!,

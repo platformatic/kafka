@@ -148,6 +148,7 @@ test('constructor should initialize properly with default options', t => {
 
   // Verify group properties
   strictEqual(typeof consumer.groupId, 'string')
+  strictEqual(consumer.groupInstanceId, null)
   strictEqual(consumer.generationId, 0)
   strictEqual(consumer.memberId, null)
   deepStrictEqual(consumer.assignments, null)
@@ -171,10 +172,29 @@ test('constructor should initialize with custom options', t => {
 
   // Verify instance properties
   strictEqual(consumer.groupId, groupId)
+  strictEqual(consumer.groupInstanceId, null)
   strictEqual(consumer.generationId, 0)
   strictEqual(consumer.memberId, null)
   deepStrictEqual(consumer.assignments, null)
   strictEqual(consumer.topics instanceof TopicsMap, true)
+
+  // Clean up
+  consumer.close()
+})
+
+test('constructor should initialize with groupInstanceId for static membership (KIP-345)', t => {
+  const groupId = `static-group-${randomUUID()}`
+  const groupInstanceId = `static-instance-${randomUUID()}`
+  const consumer = createConsumer(t, {
+    groupId,
+    groupInstanceId
+  })
+
+  // Verify instance properties
+  strictEqual(consumer.groupId, groupId)
+  strictEqual(consumer.groupInstanceId, groupInstanceId)
+  strictEqual(consumer.generationId, 0)
+  strictEqual(consumer.memberId, null)
 
   // Clean up
   consumer.close()
@@ -244,6 +264,22 @@ test('constructor should throw on invalid options when strict mode is enabled', 
   } catch (error) {
     strictEqual(error instanceof UserError, true)
     strictEqual(error.message.includes('protocols'), true)
+  }
+
+  // Test with invalid groupInstanceId containing whitespace
+  try {
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092'],
+      groupId: 'test-group',
+      groupInstanceId: 'invalid instance id',
+      strict: true
+    })
+    throw new Error('Should have thrown for invalid groupInstanceId')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message.includes('groupInstanceId'), true)
   }
 
   // Valid options should not throw

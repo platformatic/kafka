@@ -71,6 +71,7 @@ export type MessagesStreamFallbackModeValue =
 
 export interface GroupOptions {
   groupProtocol?: typeof GroupProtocols.CLASSIC
+  groupInstanceId?: string
   sessionTimeout?: number
   rebalanceTimeout?: number
   heartbeatInterval?: number
@@ -80,6 +81,7 @@ export interface GroupOptions {
 
 export interface ConsumerGroupOptions {
   groupProtocol: typeof GroupProtocols.CONSUMER
+  groupInstanceId?: string
   groupRemoteAssignor?: string
   rebalanceTimeout?: number
 }

@@ -1293,6 +1293,59 @@ test('Connection.connect should connect to a TLS host without using a custom hos
   deepStrictEqual(await hostPromise.promise, 'anotherhost')
 })
 
+test('Connection.connect should support ssl as an alias for tls', async t => {
+  const { server, port } = await createTLSServer(t)
+
+  const hostPromise = promiseWithResolvers()
+  server.on('secureConnection', socket => {
+    hostPromise.resolve(socket.servername)
+  })
+
+  const connection = new Connection('test-client', {
+    ssl: {
+      rejectUnauthorized: false
+    },
+    tlsServerName: true
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
+  ok(connection.socket instanceof TLSSocket)
+  deepStrictEqual(await hostPromise.promise, 'localhost')
+})
+
+test('Connection.connect should prefer tls over ssl when both are provided', async t => {
+  const { server, port } = await createTLSServer(t)
+
+  const hostPromise = promiseWithResolvers()
+  server.on('secureConnection', socket => {
+    hostPromise.resolve(socket.servername)
+  })
+
+  const connection = new Connection('test-client', {
+    tls: {
+      rejectUnauthorized: false
+    },
+    ssl: {
+      rejectUnauthorized: true // This should be ignored since tls takes precedence
+    },
+    tlsServerName: true
+  })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  deepStrictEqual(connection.host, 'localhost')
+  deepStrictEqual(connection.port, port)
+  ok(connection.socket instanceof TLSSocket)
+  deepStrictEqual(await hostPromise.promise, 'localhost')
+})
+
 test('Connection.isConnected should return false when connection is not connected', () => {
   const connection = new Connection('test-client')
 

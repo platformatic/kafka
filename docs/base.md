@@ -37,6 +37,7 @@ Creates a new base client.
 | `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
+| `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
 | `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
 
@@ -148,15 +149,19 @@ const producer = new Producer({
   serializers: stringSerializers,
   sasl: {
     mechanism: 'PLAIN',
-    authenticate: async (mechanism, connection, authenticate, usernameProvider, passwordProvider, tokenProvider, callback) => {
+    authenticate: async (
+      mechanism,
+      connection,
+      authenticate,
+      usernameProvider,
+      passwordProvider,
+      tokenProvider,
+      callback
+    ) => {
       try {
         // Custom logic to retrieve or generate credentials
-        const username = typeof usernameProvider === 'function'
-          ? await usernameProvider()
-          : usernameProvider
-        const password = typeof passwordProvider === 'function'
-          ? await passwordProvider()
-          : passwordProvider
+        const username = typeof usernameProvider === 'function' ? await usernameProvider() : usernameProvider
+        const password = typeof passwordProvider === 'function' ? await passwordProvider() : passwordProvider
 
         // Perform the SASL authentication
         const authData = Buffer.from(`\u0000${username}\u0000${password}`)

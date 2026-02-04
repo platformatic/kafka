@@ -13,7 +13,6 @@ import {
   type DiagnosticContext,
   notifyCreation
 } from '../diagnostic.ts'
-import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import {
   AuthenticationError,
   type MultipleErrors,
@@ -23,6 +22,7 @@ import {
   UnexpectedCorrelationIdError,
   UserError
 } from '../errors.ts'
+import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
 import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
@@ -101,6 +101,7 @@ export const ConnectionStatuses = {
   NONE: 'none',
   CONNECTING: 'connecting',
   AUTHENTICATING: 'authenticating',
+  REAUTHENTICATING: 'reauthenticating',
   CONNECTED: 'connected',
   CLOSED: 'closed',
   CLOSING: 'closing',
@@ -419,6 +420,20 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     )
   }
 
+  reauthenticate (): void {
+    if (!this.#options.sasl) {
+      return
+    }
+
+    const host = this.#host!
+    const port = this.#port!
+    const diagnosticContext = createDiagnosticContext({ connection: this, operation: 'reauthenticate', host, port })
+
+    this.#status = ConnectionStatuses.REAUTHENTICATING
+    clearTimeout(this.#reauthenticationTimeout)
+    this.#authenticate(host, port, diagnosticContext)
+  }
+
   #onResponse (request: Request, callback: Callback<any>, error: Error | null, payload?: any): void {
     clearTimeout(request.timeoutHandle!)
     request.timeoutHandle = null
@@ -496,7 +511,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     connectionsApiChannel.start.publish(request.diagnostic)
 
     try {
-      if (this.#status !== ConnectionStatuses.CONNECTED && this.#status !== ConnectionStatuses.AUTHENTICATING) {
+      if (
+        this.#status !== ConnectionStatuses.CONNECTED &&
+        this.#status !== ConnectionStatuses.AUTHENTICATING &&
+        this.#status !== ConnectionStatuses.REAUTHENTICATING
+      ) {
         request.callback(new NetworkError('Connection closed'), undefined)
         return false
       }
@@ -612,22 +631,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
 
     if (sessionLifetimeMs > 0) {
-      this.#reauthenticationTimeout = setTimeout(
-        () => {
-          const diagnosticContext = createDiagnosticContext({
-            connection: this,
-            operation: 'reauthenticate',
-            host,
-            port
-          })
-
-          this.#authenticate(host, port, diagnosticContext)
-        },
-        Number(sessionLifetimeMs) * 0.8
-      )
+      this.#reauthenticationTimeout = setTimeout(this.reauthenticate.bind(this), Number(sessionLifetimeMs) * 0.8)
     }
 
-    if (this.#status === ConnectionStatuses.CONNECTED) {
+    if (this.#status === ConnectionStatuses.CONNECTED || this.#status === ConnectionStatuses.REAUTHENTICATING) {
+      this.#status = ConnectionStatuses.CONNECTED
       this.emit('sasl:authentication:extended', authBytes)
     } else {
       this.emit('sasl:authentication', authBytes)

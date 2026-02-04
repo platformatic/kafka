@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
+import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { type AddressInfo, createServer as createNetworkServer, type Server, Socket } from 'node:net'
 import test, { before, type TestContext } from 'node:test'
@@ -1358,4 +1359,42 @@ test('Connection.isConnected should return false when connection is connecting',
   // Complete the connection
   await connectPromise
   strictEqual(connection.isConnected(), true)
+})
+
+test('Connection.reauthenticate should trigger reauthentication', async t => {
+  const connection = new Connection('test-client', {
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+
+  const initialStatus = connection.status
+  strictEqual(initialStatus, ConnectionStatuses.CONNECTED)
+
+  // Call reauthenticate without SASL configuration
+  connection.reauthenticate()
+
+  // Status should remain unchanged
+  strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
+
+  await once(connection, 'sasl:authentication:extended')
+})
+
+test('Connection.reauthenticate should do nothing when SASL is not configured', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  const initialStatus = connection.status
+  strictEqual(initialStatus, ConnectionStatuses.CONNECTED)
+
+  // Call reauthenticate without SASL configuration
+  connection.reauthenticate()
+
+  // Status should remain unchanged
+  strictEqual(connection.status, ConnectionStatuses.CONNECTED)
 })

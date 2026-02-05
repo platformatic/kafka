@@ -1,5 +1,6 @@
 // Based on the work from: https://github.com/tulios/kafkajs/blob/master/src/protocol/recordBatch/crc32C/crc32C.js
 import { createRequire } from 'node:module'
+import { crc32c as wasmCRC32C } from './native.ts'
 import { DynamicBuffer } from './dynamic-buffer.ts'
 
 /* prettier-ignore */
@@ -103,4 +104,4 @@ export function jsCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
 }
 
 /* c8 ignore next - Hard to test */
-export const crc32c = loadNativeCRC32C() ?? jsCRC32C
+export const crc32c = loadNativeCRC32C() ?? wasmCRC32C

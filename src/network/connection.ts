@@ -77,6 +77,7 @@ export interface ConnectionOptions {
   requestTimeout?: number
   maxInflights?: number
   tls?: TLSConnectionOptions
+  ssl?: TLSConnectionOptions // Alias for tls
   tlsServerName?: string | boolean
   sasl?: SASLOptions
   ownerId?: number
@@ -146,6 +147,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     this.#instanceId = currentInstance++
     this.#options = Object.assign({}, defaultOptions, options)
+    this.#options.tls ??= this.#options.ssl
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId
     this.#ownerId = options.ownerId

@@ -6,7 +6,7 @@ import { test, type TestContext } from 'node:test'
 import zlib from 'node:zlib'
 import * as Prometheus from 'prom-client'
 import { type FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import { kConnections, kFetchConnections, kOptions } from '../../../src/clients/base/base.ts'
+import { kConnections, kCreateConnectionPool, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
   type ClientDiagnosticEvent,
@@ -472,30 +472,6 @@ test('close should handle errors from leaveGroup', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('close should handle errors from ConnectionPool.close', async t => {
-  const consumer = createConsumer(t, { retries: 0 })
-
-  // Join a group first
-  await consumer.joinGroup()
-
-  // Mock the connection to fail
-  mockMethod(
-    consumer[kFetchConnections],
-    'close',
-    1,
-    new MultipleErrors('Cannot close the pool.', [new Error('Cannot close the pool.')])
-  )
-
-  // Attempt to find coordinator with the mocked connection
-  try {
-    await consumer.close()
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Cannot close the pool.'), true)
   }
 })
 
@@ -1116,11 +1092,15 @@ test('fetch should handle errors from Connection.get', async t => {
     brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
-  mockConnectionPoolGet(consumer[kFetchConnections], 1)
+  const pool = consumer[kCreateConnectionPool]()
+  t.after(() => pool.close())
+
+  mockConnectionPoolGet(pool, 1)
 
   // Attempt to fetch with the mocked connection
   try {
     await consumer.fetch({
+      connectionPool: pool,
       node: 0,
       topics: [
         {
@@ -1216,11 +1196,14 @@ test('fetch should handle errors from the API', async t => {
     brokers: new Map([[0, { nodeId: 0, ...broker }]])
   })
 
-  mockAPI(consumer[kFetchConnections], fetchV17.api.key)
+  const pool = consumer[kCreateConnectionPool]()
+  mockAPI(pool, fetchV17.api.key)
+  t.after(() => pool.close())
 
   // Attempt to fetch with the mocked API
   try {
     await consumer.fetch({
+      connectionPool: pool,
       node: 0,
       topics: [
         {

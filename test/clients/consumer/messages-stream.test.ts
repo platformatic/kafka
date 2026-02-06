@@ -5,6 +5,7 @@ import { type AddressInfo, connect, createServer, type Socket } from 'node:net'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
 import * as Prometheus from 'prom-client'
+import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
@@ -44,7 +45,8 @@ import {
   kafkaSingleBootstrapServers,
   mockedErrorMessage,
   mockedOperationId,
-  mockMetadata
+  mockMetadata,
+  mockMethod
 } from '../../helpers.ts'
 
 const defaultRetryDelay = 500
@@ -1518,5 +1520,39 @@ test('should automatically reconnect and resume operations when retries=true', a
   // Verify that no messages were lost
   for (let i = 1; i < messages.length; i++) {
     deepStrictEqual(messages[i].offset - messages[i - 1].offset, 1n)
+  }
+})
+
+test('should handle close errors from ConnectionPool.close', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 1)
+
+  const consumer = createConsumer(t, groupId)
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 1000
+  })
+
+  // Mock the connection to fail
+  mockMethod(
+    stream[kConnections],
+    'close',
+    1,
+    new MultipleErrors('Cannot close the pool.', [new Error('Cannot close the pool.')])
+  )
+
+  // Attempt to find coordinator with the mocked connection
+  try {
+    await stream.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Cannot close the pool.'), true)
   }
 })

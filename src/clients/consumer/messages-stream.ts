@@ -15,9 +15,10 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
+import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message } from '../../protocol/records.ts'
 import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
-import { kInspect, kPrometheus } from '../base/base.ts'
+import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
 import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
@@ -80,12 +81,29 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #autocommitEnabled: boolean
   #autocommitInterval: NodeJS.Timeout | null
   #autocommitInflight: boolean
-  #shouldClose: boolean
+  #closed: boolean
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
   #corruptedMessageHandler: CorruptedMessageHandler;
 
-  [kInstance]: number
+  [kInstance]: number;
+
+  /*
+    The following requests are blocking in Kafka:
+
+    FetchRequest (soprattutto con maxWaitMs)
+    JoinGroupRequest
+    SyncGroupRequest
+    OffsetCommitRequest
+    ProduceRequest
+    ListOffsetsRequest
+    ListGroupsRequest
+    DescribeGroupsRequest
+
+    In order to avoid consumer group problems, we separate FetchRequest only on a separate connection.
+    Also, to avoid head-of-line blocking between streams, we use a pool of connections for each stream.
+  */
+  [kConnections]: ConnectionPool
 
   constructor (
     consumer: Consumer<Key, Value, HeaderKey, HeaderValue>,
@@ -118,6 +136,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       highWaterMark: maxFetches ?? options.highWaterMark ?? defaultConsumerOptions.highWaterMark
     })
     this[kInstance] = currentInstance++
+    this[kConnections] = consumer[kCreateConnectionPool]()
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
@@ -135,7 +154,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
     this.#autocommitEnabled = !!options.autocommit
     this.#autocommitInflight = false
-    this.#shouldClose = false
+    this.#closed = false
     this.#closeCallbacks = []
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
 
@@ -231,12 +250,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#closeCallbacks.push(callback)
 
-    if (this.#shouldClose) {
-      this.#invokeCloseCallbacks(null)
+    if (this.#closed) {
+      this.#afterClose(null)
       return callback[kCallbackPromise]
     }
 
-    this.#shouldClose = true
+    this.#closed = true
     this.push(null)
 
     if (this.#autocommitInterval) {
@@ -251,11 +270,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     /* c8 ignore next 3 - Hard to test */
     this.once('error', error => {
-      callback(error)
+      this.#afterClose(error)
     })
 
     this.once('close', () => {
       // We have offsets that were enqueued to be committed. Perform the operation
+      /* c8 ignore next 3 - Hard to test */
       if (this.#offsetsToCommit.size > 0) {
         this[kAutocommit]()
       }
@@ -263,20 +283,20 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       // We have offsets that are being committed. These are awaited despite of the force parameters
       if (this.#autocommitInflight) {
         this.once('autocommit', error => {
-          this.#invokeCloseCallbacks(error)
+          this.#afterClose(error)
         })
 
         return
       }
 
-      this.#invokeCloseCallbacks(null)
+      this.#afterClose(null)
     })
 
     return callback[kCallbackPromise]
   }
 
   isActive (): boolean {
-    if (this.#shouldClose || this.closed || this.destroyed) {
+    if (this.#closed || this.closed || this.destroyed) {
       return false
     }
 
@@ -284,7 +304,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   isConnected (): boolean {
-    if (this.#shouldClose || this.closed || this.destroyed) {
+    if (this.#closed || this.closed || this.destroyed) {
       return false
     }
 
@@ -418,7 +438,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   #fetch () {
     /* c8 ignore next 4 - Hard to test */
-    if (this.#shouldClose || this.closed || this.destroyed) {
+    if (this.#closed || this.closed || this.destroyed) {
       this.push(null)
       return
     }
@@ -434,7 +454,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
         // The stream has been closed, ignore any error
         /* c8 ignore next 4 - Hard to test */
-        if (this.#shouldClose || this.closed || this.destroyed) {
+        if (this.#closed || this.closed || this.destroyed) {
           this.push(null)
           return
         }
@@ -444,7 +464,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       /* c8 ignore next 5 - Hard to test */
-      if (this.#shouldClose || this.closed || this.destroyed) {
+      if (this.#closed || this.closed || this.destroyed) {
         this.emit('fetch')
         this.push(null)
         return
@@ -509,7 +529,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           if (error) {
             // The stream has been closed, ignore the error
             /* c8 ignore next 4 - Hard to test */
-            if (this.#shouldClose || this.closed || this.destroyed) {
+            if (this.#closed || this.closed || this.destroyed) {
               this.push(null)
               return
             }
@@ -518,7 +538,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
-          if (this.#shouldClose || this.closed || this.destroyed) {
+          if (this.#closed || this.closed || this.destroyed) {
             // When it's the last inflight, we finally close the stream.
             // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
             if (this.#inflightNodes.size === 0) {
@@ -770,7 +790,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       (error, offsets) => {
         if (error) {
           /* c8 ignore next 4 - Hard to test */
-          if (this.#shouldClose || this.closed || this.destroyed) {
+          if (this.#closed || this.closed || this.destroyed) {
             callback(null)
             return
           }
@@ -804,7 +824,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.#consumer.listCommittedOffsets({ topics }, (error, commits) => {
           if (error) {
             /* c8 ignore next 4 - Hard to test */
-            if (this.#shouldClose || this.closed || this.destroyed) {
+            if (this.#closed || this.closed || this.destroyed) {
               callback(null)
               return
             }
@@ -877,12 +897,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return this.#consumer.assignments?.find(assignment => assignment.topic === topic)
   }
 
-  #invokeCloseCallbacks (error: Error | null) {
-    for (const callback of this.#closeCallbacks) {
-      callback(error)
-    }
+  #afterClose (error: Error | null) {
+    this[kConnections].close(closeError => {
+      for (const callback of this.#closeCallbacks) {
+        callback(error ?? closeError)
+      }
 
-    this.#closeCallbacks = []
+      this.#closeCallbacks = []
+    })
   }
 
   /* c8 ignore next 3 - This is a private API used to debug during development */

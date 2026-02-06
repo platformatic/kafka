@@ -25,12 +25,19 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 
 Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.
 
+It also supports all the constructor options of `Base`.
+
+In other words, consumer configuration is composed of:
+
+- [`Base` constructor options](./base.md#constructor), including `tls` and `sasl`
+- consumer options in the table below
+
 Options:
 
 | Property            | Type                                                | Default                   | Description                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------- | --------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | -------- | --- | --------------------------- |
 | groupId             | `string`                                            |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   | groupInstanceId | `string` |     | Consumer group instance ID. |
-| autocommit          | `boolean \| number`                                 | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
+| autocommit          | `boolean \| number`                                 | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets.<br/><br/>For high-throughput production workloads, a numeric interval (for example `1000`) is usually preferred over `true`. |
 | minBytes            | `number`                                            | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytes            | `number`                                            | 10MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxWaitTime         | `number`                                            | 5 seconds                 | Maximum amount of time in milliseconds the broker will wait before sending a response to a fetch request.                                                                                                                                                                                                                                                                                            |
@@ -44,8 +51,6 @@ Options:
 | groupRemoteAssignor | `string`                                            | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`.                                                                                                                                                                                                                   |
 | protocols           | `GroupProtocolSubscription[]`                       | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`.                                                                                                                                                                                       |
 | partitionAssigner   | `GroupPartitionsAssigner`                           |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                                                                                                  |
-
-It also supports all the constructor options of `Base`.
 
 ## Basic Methods
 
@@ -61,6 +66,8 @@ Creates a stream to consume messages from topics.
 
 The return value is a stream of type `MessagesStreamKey, Value, HeaderKey, HeaderValue>`.
 
+Creating `new Consumer(...)` does not start consuming yet. Group join/rejoin and actual fetch/start happen when `consume()` is called and a stream is created.
+
 Options:
 
 | Property             | Type                            | Default  | Description                                                                                                                                                                                                                                                                                                                                    |
@@ -70,7 +77,7 @@ Options:
 | `fallbackMode`       | `string`                        | `LATEST` | Where to start fetching new messages when offset information is lacking for the consumer group.<br/><br/> The valid values are defined in the `MessagesStreamFallbackModes` enumeration (see below).                                                                                                                                           |
 | `maxFetches`         | `number`                        | `0`      | The maximum number of fetches to perform on each partition before automatically closing the stream. Setting to zero will disable automating closing. <br/><br/>Note that [`Array.fromAsync`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync) can be used to create an array out of a stream. |
 | `offsets`            | `TopicWithPartitionAndOffset[]` |          | When manual offset mode is specified, a list of topic-partition-offset triplets.                                                                                                                                                                                                                                                               |
-| `onCorruptedMessage` | `CorruptedMessageHandler`       |          | A callback that will be invoked if a deserialiser throws an error. If the function returns `true`, then the strem will throw an error and thus it will be destroyed. Note that the stream will not wait for the `commit` function to finish so make sure you handle callbacks and promises accordingly.                                        |
+| `onCorruptedMessage` | `CorruptedMessageHandler`       |          | A callback that will be invoked if a deserialiser throws an error. If the function returns `true`, then the stream will throw an error and thus it will be destroyed. Note that the stream will not wait for the `commit` function to finish so make sure you handle callbacks and promises accordingly.                                        |
 
 It also accepts all options of the constructor except `deserializers` and `groupId`.
 

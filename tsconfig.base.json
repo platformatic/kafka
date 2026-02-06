@@ -3,7 +3,7 @@
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ESNext", "ESNext.Promise"],
+    "lib": ["ESNext", "ESNext.Promise", "DOM"],
     "jsx": "preserve",
     "declaration": true,
     "outDir": "dist",

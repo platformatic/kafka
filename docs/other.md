@@ -19,6 +19,8 @@ The types of the `key`, `value` and `headers` fields are determined by the curre
 | `offset`    | `bigint`                      | The message offset                                                                                  |
 | `commit`    | () => Promise<void>           | A function to commit the offset. This is a no-op if consumer's `autocommit` option was not `false`. |
 
+`Message` also provides a `.toJSON()` method for debugging and logging.
+
 ### `MessageToProduce<Key, Value, HeaderKey, HeaderValue>`
 
 Represents a message that is being produced to Kafka via using a [`Producer`](./producer.md).
@@ -53,6 +55,18 @@ Metadata about the Kafka cluster. It is returned by the [`Base`](./base.md) clie
 | `topics`     | `Map<string, ClusterTopicMetadata>` | Map of topics. The keys are the topics, while the values contain partition information.                |
 | `lastUpdate` | `number`                            | Timestamp of the metadata                                                                              |
 
+## Utilities
+
+### `debugDump(...values)`
+
+Debug/logger utility to inspect any object.
+
+```typescript
+import { debugDump } from '@platformatic/kafka'
+
+debugDump('received-message', message)
+```
+
 ## Serialisation and Deserialisation
 
 ### stringSerializer and stringDeserializer
@@ -76,7 +90,7 @@ For instance, the following two snippets are equivalent:
 ```typescript
 import { Producer } from '@platformatic/kafka'
 
-function serialize(source: YourType): Buffer {
+function serialize (source: YourType): Buffer {
   return Buffer.from(JSON.stringify(source))
 }
 
@@ -95,7 +109,7 @@ const producer = new Producer({
 ```typescript
 import { Producer, serializersFrom } from '@platformatic/kafka'
 
-function serialize(source: YourType): Buffer {
+function serialize (source: YourType): Buffer {
   return Buffer.from(JSON.stringify(source))
 }
 

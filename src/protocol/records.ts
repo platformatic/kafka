@@ -28,8 +28,12 @@ export interface MessageBase<Key = Buffer, Value = Buffer> {
 }
 
 // This is used in produce
-export interface MessageToProduce<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer>
-  extends MessageBase<Key, Value> {
+export interface MessageToProduce<
+  Key = Buffer,
+  Value = Buffer,
+  HeaderKey = Buffer,
+  HeaderValue = Buffer
+> extends MessageBase<Key, Value> {
   headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
 }
 
@@ -41,13 +45,26 @@ export interface MessageConsumerMetadata {
   memberId: string
 }
 
+export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown, HeaderValue = unknown> {
+  key: Key
+  value: Value
+  headers: Array<[HeaderKey, HeaderValue]> // We can't use Map or objects here since HeaderKey might not be a string
+  topic: string
+  partition: number
+  timestamp: string
+  offset: string
+  metadata: Record<string, unknown>
+}
+
 // This is used in consume
-export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer>
-  extends Required<MessageBase<Key, Value>> {
+export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Required<
+  MessageBase<Key, Value>
+> {
   headers: Map<HeaderKey, HeaderValue>
   offset: bigint
   metadata: Record<string, unknown>
   commit (callback?: (error?: Error) => void): void | Promise<void>
+  toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue>
 }
 
 export interface MessageRecord {

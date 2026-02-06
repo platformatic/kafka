@@ -44,6 +44,19 @@ export function defaultCorruptedMessageHandler (): boolean {
   return true
 }
 
+function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, Value, HeaderKey, HeaderValue>) {
+  return {
+    key: this.key,
+    value: this.value,
+    headers: Array.from(this.headers.entries()),
+    topic: this.topic,
+    partition: this.partition,
+    timestamp: this.timestamp.toString(),
+    offset: this.offset.toString(),
+    metadata: this.metadata
+  }
+}
+
 let currentInstance = 0
 
 export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
@@ -629,7 +642,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 timestamp: firstTimestamp + record.timestampDelta,
                 offset,
                 commit,
-                metadata: messageMetadata
+                metadata: messageMetadata,
+                toJSON: messageToJSON
               } as Message
 
               diagnosticContext.result = message

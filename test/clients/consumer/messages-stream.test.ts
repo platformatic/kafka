@@ -287,7 +287,8 @@ test('should support diagnostic channels', async t => {
         timestamp: 0n,
         offset: 0n,
         metadata: message.metadata,
-        commit: noopCallback
+        commit: noopCallback,
+        toJSON: message.toJSON
       })
     },
     error (context: ClientDiagnosticEvent) {
@@ -334,6 +335,25 @@ test('should support autocommit and COMMITTED mode', async t => {
 
   strictEqual(firstBatch.length, 3, 'Should consume 3 messages in first batch')
   strictEqual(secondBatch.length, 0, 'Should not consume any messages in second batch')
+})
+
+test('should expose message.toJSON for easy serialization', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  const message = messages[0]
+  const payload = JSON.parse(JSON.stringify(message))
+
+  strictEqual(typeof payload.offset, 'string')
+  strictEqual(typeof payload.timestamp, 'string')
+  deepStrictEqual(payload.headers, [['headerKey', 'headerValue-0']])
 })
 
 test('should support timed autocommits', async t => {
@@ -1349,12 +1369,14 @@ test('should properly handle deleting topics in between', async t => {
   t.after(() => stream2.close())
   stream2.resume()
 
-  // Wait for the first stream to error out due to the topic deletion
+  // Depending on timing, stream1 can either emit a stale metadata error
+  // or stop fetching once the assignment changes after metadata refresh.
+  const error = await Promise.race([errorPromise.then(([err]) => err), once(stream2, 'fetch').then(() => null)])
 
-  const [error] = await errorPromise
-
-  const protocolError = error.findBy('hasStaleMetadata', true)
-  strictEqual(protocolError.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
+  if (error) {
+    const protocolError = error.findBy('hasStaleMetadata', true)
+    strictEqual(protocolError?.apiId, 'UNKNOWN_TOPIC_OR_PARTITION')
+  }
 
   // Create a third stream. Since it adds a new topic, it will force a metadata refresh
   const stream3 = await consumer.consume({

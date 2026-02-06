@@ -1,5 +1,6 @@
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
 import { type GroupProtocols } from '../../apis/enumerations.ts'
+import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type Deserializers } from '../serde.ts'
@@ -120,6 +121,7 @@ export type FetchOptions<Key, Value, HeaderKey, HeaderValue> = Pick<
 > & {
   node: number
   topics: FetchRequestTopic[]
+  connectionPool?: ConnectionPool
 }
 
 export interface CommitOptionsPartition extends TopicWithPartitionAndOffset {

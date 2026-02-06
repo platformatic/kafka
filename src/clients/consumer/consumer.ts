@@ -63,8 +63,7 @@ import {
   kAfterCreate,
   kCheckNotClosed,
   kClosed,
-  kCreateConnectionPool,
-  kFetchConnections,
+  kConnections,
   kFormatValidationErrors,
   kGetApi,
   kGetBootstrapConnection,
@@ -158,23 +157,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #memberEpoch: number
   #groupRemoteAssignor: string | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
-  #lagMonitoring: NodeJS.Timeout | null;
-
-  /*
-    The following requests are blocking in Kafka:
-
-    FetchRequest (soprattutto con maxWaitMs)
-    JoinGroupRequest
-    SyncGroupRequest
-    OffsetCommitRequest
-    ProduceRequest
-    ListOffsetsRequest
-    ListGroupsRequest
-    DescribeGroupsRequest
-
-    In order to avoid consumer group problems, we separate FetchRequest only on a separate connection.
-  */
-  [kFetchConnections]: ConnectionPool
+  #lagMonitoring: NodeJS.Timeout | null
 
   // Metrics
   #metricActiveStreams: Gauge | undefined
@@ -207,9 +190,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
-
-    // Initialize connection pool
-    this[kFetchConnections] = this[kCreateConnectionPool]()
 
     if (this[kPrometheus]) {
       ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').inc()
@@ -286,28 +266,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      this[kFetchConnections].close(error => {
+      super.close(error => {
         if (error) {
           this[kClosed] = false
           callback(error)
           return
         }
 
-        super.close(error => {
-          if (error) {
-            this[kClosed] = false
-            callback(error)
-            return
-          }
+        this.topics.clear()
 
-          this.topics.clear()
+        if (this[kPrometheus]) {
+          ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
+        }
 
-          if (this[kPrometheus]) {
-            ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
-          }
-
-          callback(null)
-        })
+        callback(null)
       })
     })
 
@@ -741,7 +713,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this[kFetchConnections].get(broker, (error, connection) => {
+          const pool: ConnectionPool = options.connectionPool ?? this[kConnections]
+
+          pool.get(broker, (error, connection) => {
             if (error) {
               // When a connection was not available (either interrupted or not available) we
               // reset the leader epoch in the options so that when connection is re-established again we can continue

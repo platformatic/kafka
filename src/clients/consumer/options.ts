@@ -136,6 +136,7 @@ export const fetchOptionsSchema = {
         required: ['topicId', 'partitions']
       }
     },
+    connectionPool: { type: 'object' },
     ...groupOptionsProperties,
     ...consumeOptionsProperties
   },

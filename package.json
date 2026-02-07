@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/kafka",
-  "version": "1.25.0",
+  "version": "1.26.0",
   "description": "Modern and performant client for Apache Kafka",
   "homepage": "https://github.com/platformatic/kafka",
   "author": "Platformatic Inc. <oss@platformatic.dev> (https://platformatic.dev)",

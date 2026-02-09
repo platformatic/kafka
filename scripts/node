@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# This script and the weird wildcards in package.json can be removed once we drop support for Node 20.
+
+set -e
+ARGS=""
+
+if [ "$(node -e "console.log(process.versions.node.slice(0,2))")" = "20" ]; then
+  ARGS="--import @swc-node/register/esm-register"
+fi
+
+$(which node) $ARGS $@

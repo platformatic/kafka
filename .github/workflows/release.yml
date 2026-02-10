@@ -29,7 +29,6 @@ jobs:
           version: latest
       - name: Setup Rust
         run: |
-          rustup override set nightly
           rustup target add wasm32-unknown-unknown
           cargo install cargo-make
           wget https://github.com/WebAssembly/binaryen/releases/download/version_125/binaryen-version_125-x86_64-linux.tar.gz

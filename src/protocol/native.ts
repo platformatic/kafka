@@ -31,7 +31,7 @@ let currentBufferOffset: number = alloc(currentBufferLength)
 let currentBuffer = new Uint8Array(memory.buffer, currentBufferOffset, currentBufferLength)
 
 export function prepareInput (data: Buffer | Uint8Array | DynamicBuffer): void {
-  const input = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
+  const input = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
 
   if (currentBuffer.length < data.length) {
     dealloc(currentBufferOffset, currentBufferLength)
@@ -47,7 +47,7 @@ export function prepareOutput (combined: bigint): Buffer {
   const len = Number(BigInt.asUintN(32, combined))
   const ptr = Number(combined >> 32n)
 
-  const output = Buffer.from(new Uint8Array(memory.buffer, ptr, len))
+  const output = Buffer.from(memory.buffer, ptr, len)
   dealloc(ptr, len)
 
   return output

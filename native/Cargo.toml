@@ -13,8 +13,8 @@
   snap     = "1.1.1"
 
 [profile.release]
-  opt-level     = 'z'
-  lto           = true
+  opt-level     = 3
+  lto           = "fat"
   codegen-units = 1
-  panic         = 'abort'
+  panic         = "abort"
   strip         = true

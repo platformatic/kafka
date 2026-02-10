@@ -71,9 +71,7 @@ const CRC: number[] = [
 ]
 
 export function jsCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
-  const bytes: Uint8Array = DynamicBuffer.isDynamicBuffer(data)
-    ? ((data as DynamicBuffer).buffer as Uint8Array)
-    : new Uint8Array(data as Uint8Array)
+  const bytes = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
 
   let crc = 0xffffffff
 

@@ -4,7 +4,7 @@ import kafkaJsMurmur2 from 'kafkajs/src/producer/partitioners/default/murmur2.js
 import { randomBytes } from 'node:crypto'
 import { murmur2 } from '../src/index.ts'
 
-await cronometro(
+cronometro(
   {
     kafkajs () {
       const value = randomBytes(16)

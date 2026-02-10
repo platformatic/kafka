@@ -5,7 +5,7 @@ import { lz4Compress as wasmCompress, lz4Decompress as wasmDecompress } from '..
 
 const size = 1024
 
-await cronometro(
+cronometro(
   {
     native () {
       const value = randomBytes(size)

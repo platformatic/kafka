@@ -12,6 +12,8 @@ interface WasmExports {
   snappy_decompress: (ptr: number, len: number) => bigint
 }
 
+// @ts-expect-error - Buffer[Symbol.species] is not typed in Node.js types
+const FastBuffer = Buffer[Symbol.species]
 const wasm = readFileSync(new URL('../../dist/native.wasm', import.meta.url))
 const wasmModule = new WebAssembly.Module(wasm)
 const instance = new WebAssembly.Instance(wasmModule)
@@ -47,7 +49,7 @@ export function prepareOutput (combined: bigint): Buffer {
   const len = Number(BigInt.asUintN(32, combined))
   const ptr = Number(combined >> 32n)
 
-  const output = Buffer.from(memory.buffer, ptr, len)
+  const output = Buffer.from(new FastBuffer(memory.buffer, ptr, len))
   dealloc(ptr, len)
 
   return output

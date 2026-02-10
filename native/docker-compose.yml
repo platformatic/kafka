@@ -1,0 +1,8 @@
+services:
+  plt-kafka-native-build:
+    image: rust:1.93-bookworm
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ../dist:/dist
+    entrypoint: ['/bin/bash', './entrypoint.sh']

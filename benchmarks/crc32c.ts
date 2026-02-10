@@ -8,7 +8,7 @@ import { crc32c as wasmCRC32C } from '../src/protocol/native.ts'
 const size = 1024
 
 function nativeCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
-  const input = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
+  const input = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
 
   return nodeRsCRC32C(input)
 }

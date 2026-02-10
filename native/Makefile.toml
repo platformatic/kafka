@@ -8,7 +8,7 @@
   script = [
     "mkdir -p ../dist",
     "rm -rf ../dist/native.wasm",
-    "carbo build --target wasm32-unknown-unknown",
+    "cargo build --target wasm32-unknown-unknown",
     "cp -a target/wasm32-unknown-unknown/debug/platformatic_kafka.wasm target/native-debug.wasm",
     "cp -a target/native-debug.wasm ../dist/native.wasm",
   ]
@@ -20,13 +20,12 @@
     "cargo build --release --target wasm32-unknown-unknown",
     "cp -a target/wasm32-unknown-unknown/release/platformatic_kafka.wasm target/native-release.wasm",
     "cp -a target/native-release.wasm ../dist/native.wasm",
-    "wasm-opt --enable-bulk-memory-opt -O3 -o ../dist/native.wasm ../dist/native.wasm",
+    "wasm-opt --enable-bulk-memory-opt -O4 --converge -o ../dist/native.wasm ../dist/native.wasm",
   ]
 
 [tasks.lint]
   command = "cargo"
   args    = ["clippy"]
-
 
 [tasks.format]
   command = "cargo"
@@ -34,7 +33,6 @@
 
 [tasks.clean]
   run_task = { name = ["cargo-clean", "dist-clean"] }
-
 
 [tasks.cargo-clean]
   command = "cargo"

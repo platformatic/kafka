@@ -23,13 +23,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Setup Rust
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install cargo-make
-          wget https://github.com/WebAssembly/binaryen/releases/download/version_125/binaryen-version_125-x86_64-linux.tar.gz
-          tar -xzf binaryen-version_125-x86_64-linux.tar.gz
-          sudo cp binaryen-version_125/bin/wasm-opt /usr/local/bin/
       - name: Restore cached dependencies
         uses: actions/cache@v3
         with:

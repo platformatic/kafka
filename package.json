@@ -26,7 +26,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",
-    "postbuild": "./scripts/node scripts/postbuild.ts && cd native && makers release",
+    "build:native": "cd native && docker-compose up",
+    "postbuild": "./scripts/node scripts/postbuild.ts && npm run build:native",
     "lint": "eslint --cache",
     "typecheck": "tsc -p . --noEmit",
     "format": "prettier -w benchmarks playground src test",

@@ -31,7 +31,7 @@ export type CompressionAlgorithm = keyof typeof CompressionAlgorithms
 export type CompressionAlgorithmValue = (typeof CompressionAlgorithms)[keyof typeof CompressionAlgorithms]
 
 function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
-  return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
+  return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
 }
 
 const snappyCompressSync: CompressionOperation = snappyCompress
@@ -63,20 +63,20 @@ export const compressionsAlgorithms = {
   },
   snappy: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      return snappyCompressSync!(ensureBuffer(data))
+      return snappyCompressSync(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      return snappyDecompressSync!(ensureBuffer(data)) as Buffer
+      return snappyDecompressSync(ensureBuffer(data)) as Buffer
     },
     bitmask: 2,
     available: true
   },
   lz4: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      return lz4CompressFrameSync!(ensureBuffer(data))
+      return lz4CompressFrameSync(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      return lz4DecompressFrameSync!(ensureBuffer(data))
+      return lz4DecompressFrameSync(ensureBuffer(data))
     },
     bitmask: 3,
     available: true

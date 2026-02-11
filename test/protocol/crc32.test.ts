@@ -1,6 +1,6 @@
 import { deepStrictEqual } from 'node:assert'
 import test from 'node:test'
-import { DynamicBuffer, jsCRC32C } from '../../src/index.ts'
+import { DynamicBuffer, jsCRC32C, loadNativeCRC32C } from '../../src/index.ts'
 import { crc32c as wasmCRC32C } from '../../src/protocol/native.ts'
 
 // Samples copied from https://github.com/tulios/kafkajs/blob/55b0b416308b9e597a5a6b97b0a6fd6b846255dc/src/protocol/recordBatch/crc32c/fixtures/samples.js
@@ -70,8 +70,9 @@ const java = Buffer.from([
 ])
 
 const implementations = {
-  Javascript: jsCRC32C,
-  WebAssembly: wasmCRC32C
+  Native: loadNativeCRC32C()!,
+  WebAssembly: wasmCRC32C,
+  Javascript: jsCRC32C
 }
 
 for (const [name, implementation] of Object.entries(implementations)) {

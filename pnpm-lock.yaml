@@ -39,9 +39,6 @@ importers:
       '@confluentinc/kafka-javascript':
         specifier: ^1.5.0
         version: 1.8.0
-      '@node-rs/crc32':
-        specifier: ^1.10.6
-        version: 1.10.6
       '@opentelemetry/instrumentation':
         specifier: ^0.210.0
         version: 0.210.0(@opentelemetry/api@1.9.0)
@@ -135,6 +132,10 @@ importers:
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
+    optionalDependencies:
+      '@node-rs/crc32':
+        specifier: ^1.10.6
+        version: 1.10.6
 
 packages:
 
@@ -2848,6 +2849,7 @@ snapshots:
       '@node-rs/crc32-win32-arm64-msvc': 1.10.6
       '@node-rs/crc32-win32-ia32-msvc': 1.10.6
       '@node-rs/crc32-win32-x64-msvc': 1.10.6
+    optional: true
 
   '@node-rs/helper@1.6.0':
     dependencies:

@@ -732,6 +732,30 @@ test('kPerformWithRetry should not leak timers', async t => {
   ok(error.errors[1].message.startsWith('Client closed while retrying'))
 })
 
+test('kPerformWithRetry should accept a custom function', async t => {
+  const client = createBase(t, {
+    retries: 2,
+    retryDelay: (_c, _o, attempt, _r, _e) => {
+      return attempt * 1000
+    }
+  })
+
+  const promise = client.metadata({ topics: [`test-topic-${randomUUID()}`] }).catch(e => e)
+
+  // Wait for the first two attempts to fail
+  const [, , , first] = await once(client, 'client:performWithRetry:retry')
+  const [, , , second] = await once(client, 'client:performWithRetry:retry')
+
+  // If the timeout was already resolved, the test runner would complain
+  await promise
+
+  // Forcefully close the client to ensure all operations are aborted
+  await client.close()
+
+  deepStrictEqual(first, 1000)
+  deepStrictEqual(second, 2000)
+})
+
 test('initialization should not fail when maxInflights is specifically set to undefined', async t => {
   const client = createBase(t, { maxInflights: undefined })
 

@@ -378,18 +378,22 @@ export class Base<
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
-          this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries)
-
           function onClose () {
             clearTimeout(timeout)
             errors.push(new UserError(`Client closed while retrying ${operationId}.`))
             callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
           }
 
+          let delay = this[kOptions].retryDelay
+          if (typeof delay === 'function') {
+            delay = delay(this, operationId, attempt + 1, retries, error)
+          }
+
+          this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
-          }, this[kOptions].retryDelay)
+          }, delay)
 
           this.once('client:close', onClose)
         } else {

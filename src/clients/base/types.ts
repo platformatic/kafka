@@ -35,12 +35,20 @@ export interface ClusterMetadata {
   lastUpdate: number
 }
 
+export type RetryDelayGetter<Owner = object> = (
+  client: Owner,
+  operationId: string,
+  attempt: number,
+  retries: number,
+  error: Error
+) => number
+
 export interface BaseOptions extends ConnectionOptions {
   clientId: string
   bootstrapBrokers: Broker[] | string[]
   timeout?: number
   retries?: number | boolean
-  retryDelay?: number
+  retryDelay?: number | RetryDelayGetter
   metadataMaxAge?: number
   autocreateTopics?: boolean
   strict?: boolean

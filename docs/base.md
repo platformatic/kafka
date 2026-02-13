@@ -28,7 +28,7 @@ Creates a new base client.
 | `bootstrapBrokers`   | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.                         |
 | `timeout`            | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`            | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
-| `retryDelay`         | `number`               | `250`     | Amount of time in milliseconds to wait between retries.                                                                                                            |
+| `retryDelay`         | `number` \| `function` | `1000`    | Amount of time in milliseconds to wait between retries, or a function to calculate custom delays. See section below.                                               |
 | `metadataMaxAge`     | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                                              |
 | `autocreateTopics`   | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                                    |
 | `strict`             | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production.                   |
@@ -83,6 +83,22 @@ Returns `true` if all client's connections are currently connected and the clien
 ### `clearMetadata`
 
 Clear the current metadata.
+
+## Custom Retry Delay Function
+
+The `retryDelay` option can accept either a number (for fixed delay) or a function for dynamic retry delays. This allows you to implement custom retry strategies such as exponential backoff, jitter, or any other retry pattern.
+
+When using a function, it receives the following parameters:
+
+| Parameter     | Type     | Description                                               |
+| ------------- | -------- | --------------------------------------------------------- |
+| `client`      | `object` | The client instance performing the retry                 |
+| `operationId` | `string` | A unique identifier for the operation being retried      |
+| `attempt`     | `number` | The current attempt number (starts from 1)               |
+| `retries`     | `number` | The maximum number of retries configured                 |
+| `error`       | `Error`  | The error that caused the retry                          |
+
+The function must return a number representing the delay in milliseconds before the next retry attempt.
 
 ## Connecting to Kafka via TLS connection
 

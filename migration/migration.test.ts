@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
@@ -256,6 +256,7 @@ test('migration: consumer manual commit with message.commit()', async t => {
     autocommit: false
   })
 
+  // eslint-disable-next-line no-unreachable-loop
   for await (const message of stream) {
     // Each message has a commit() method - replaces consumer.commitOffsets()
     await message.commit()

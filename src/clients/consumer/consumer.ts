@@ -1921,7 +1921,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           // Now find last offsets
           for (const batch of partition.records!) {
-            if (batch.attributes & IS_CONTROL && batch.records[0].key.readInt16BE(2) === 0) {
+            if (batch.attributes & IS_CONTROL && batch.records[0].key?.readInt16BE(2) === 0) {
               abortedRanges.get(batch.producerId)![1] = batch.firstOffset
             }
           }

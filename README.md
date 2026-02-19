@@ -278,6 +278,7 @@ Many of the methods accept the same options as the client's constructors. The co
 - [Metrics](./docs/metrics.md)
 - [Diagnostic and Instrumentation](./docs/diagnostic.md)
 - [Other APIs and Types](./docs/other.md)
+- [Migrating from KafkaJS](./migration/README.md)
 
 ## Requirements
 

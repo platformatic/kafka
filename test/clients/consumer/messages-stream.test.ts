@@ -262,10 +262,10 @@ test('should support diagnostic channels', async t => {
   const verifyTracingChannel = createTracingChannelVerifier(consumerReceivesChannel, ['client', 'stream', 'result'], {
     start (context: ClientDiagnosticEvent) {
       const raw = context.raw as KafkaRecord
-      deepStrictEqual(Buffer.from(raw.key).toString(), 'key-0')
-      deepStrictEqual(Buffer.from(raw.value).toString(), 'value-0')
-      deepStrictEqual(Buffer.from(raw.headers[0][0]).toString(), 'headerKey')
-      deepStrictEqual(Buffer.from(raw.headers[0][1]).toString(), 'headerValue-0')
+      deepStrictEqual(Buffer.from(raw.key!).toString(), 'key-0')
+      deepStrictEqual(Buffer.from(raw.value!).toString(), 'value-0')
+      deepStrictEqual(Buffer.from(raw.headers[0][0]!).toString(), 'headerKey')
+      deepStrictEqual(Buffer.from(raw.headers[0][1]!).toString(), 'headerValue-0')
       delete context.raw
 
       deepStrictEqual(context, {
@@ -965,7 +965,7 @@ test('should allow resuming deserialization errors', async t => {
       }
     },
     onCorruptedMessage (record) {
-      corruptedKey = record.key.toString('utf-8')
+      corruptedKey = record.key!.toString('utf-8')
       return false
     }
   })

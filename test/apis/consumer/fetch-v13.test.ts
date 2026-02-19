@@ -819,7 +819,7 @@ test('parseResponse parses record data', () => {
       firstOffset: batch.firstOffset,
       recordsLength: batch.records.length,
       offsetDelta: record.offsetDelta,
-      valueString: record.value.toString()
+      valueString: record.value!.toString()
     },
     {
       firstOffset: 0n,
@@ -922,7 +922,7 @@ test('parseResponse handles truncated records', () => {
       firstOffset: batch.firstOffset,
       recordsLength: batch.records.length,
       offsetDelta: record.offsetDelta,
-      valueString: record.value.toString()
+      valueString: record.value!.toString()
     },
     {
       firstOffset: 0n,

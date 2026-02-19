@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { ok, strictEqual } from 'node:assert'
 import test from 'node:test'
 import {
   compressionsAlgorithms,
@@ -55,10 +55,10 @@ test('createRecord should create a buffer with the correct format', () => {
 
   const headers = reader.readVarIntArray(r => [r.readVarIntBytes(), r.readVarIntBytes()])
   strictEqual(headers.length, 2, 'Should have two headers')
-  strictEqual(headers[0][0].toString(), 'header1', 'First header key should match')
-  strictEqual(headers[0][1].toString(), 'value1', 'First header value should match')
-  strictEqual(headers[1][0].toString(), 'header2', 'Second header key should match')
-  strictEqual(headers[1][1].toString(), 'value2', 'Second header value should match')
+  strictEqual(headers[0][0]!.toString(), 'header1', 'First header key should match')
+  strictEqual(headers[0][1]!.toString(), 'value1', 'First header value should match')
+  strictEqual(headers[1][0]!.toString(), 'header2', 'Second header key should match')
+  strictEqual(headers[1][1]!.toString(), 'value2', 'Second header value should match')
 })
 
 test('createRecord should handle null/undefined values', () => {
@@ -86,8 +86,8 @@ test('createRecord should handle null/undefined values', () => {
   reader.readVarInt() // Skip offset delta
 
   const key = reader.readVarIntBytes()
-  // The implementation uses an empty buffer for null keys, not null
-  deepStrictEqual(key, Buffer.alloc(0), 'Key should be an empty buffer')
+  // When key is not provided, appendVarIntBytes(undefined) writes null
+  strictEqual(key, null, 'Key should be null')
 
   const value = reader.readVarIntBytes()
   ok(Buffer.isBuffer(value), 'Value should be a buffer')
@@ -119,13 +119,13 @@ test('readRecord should correctly parse a record buffer', () => {
   strictEqual(record.attributes, 0, 'Attributes should match')
   strictEqual(record.timestampDelta, 10n, 'Timestamp delta should match')
   strictEqual(record.offsetDelta, 5, 'Offset delta should match')
-  strictEqual(record.key.toString(), 'key', 'Key should match')
-  strictEqual(record.value.toString(), 'value', 'Value should match')
+  strictEqual(record.key!.toString(), 'key', 'Key should match')
+  strictEqual(record.value!.toString(), 'value', 'Value should match')
   strictEqual(record.headers.length, 2, 'Should have two headers')
-  strictEqual(record.headers[0][0].toString(), 'header1', 'First header key should match')
-  strictEqual(record.headers[0][1].toString(), 'value1', 'First header value should match')
-  strictEqual(record.headers[1][0].toString(), 'header2', 'Second header key should match')
-  strictEqual(record.headers[1][1].toString(), 'value2', 'Second header value should match')
+  strictEqual(record.headers[0][0]!.toString(), 'header1', 'First header key should match')
+  strictEqual(record.headers[0][1]!.toString(), 'value1', 'First header value should match')
+  strictEqual(record.headers[1][0]!.toString(), 'header2', 'Second header key should match')
+  strictEqual(record.headers[1][1]!.toString(), 'value2', 'Second header value should match')
 })
 
 test('createRecordsBatch should create a batch with the correct format', () => {
@@ -200,13 +200,13 @@ test('createRecordsBatch should create a batch with the correct format', () => {
   // Verify each record
   const record1 = readRecord(reader)
   strictEqual(record1.offsetDelta, 0, 'First record offset delta should be 0')
-  strictEqual(record1.key.toString(), 'key1', 'First record key should match')
-  strictEqual(record1.value.toString(), 'value1', 'First record value should match')
+  strictEqual(record1.key!.toString(), 'key1', 'First record key should match')
+  strictEqual(record1.value!.toString(), 'value1', 'First record value should match')
 
   const record2 = readRecord(reader)
   strictEqual(record2.offsetDelta, 1, 'Second record offset delta should be 1')
-  strictEqual(record2.key.toString(), 'key2', 'Second record key should match')
-  strictEqual(record2.value.toString(), 'value2', 'Second record value should match')
+  strictEqual(record2.key!.toString(), 'key2', 'Second record key should match')
+  strictEqual(record2.value!.toString(), 'value2', 'Second record value should match')
 })
 
 test('createRecordsBatch should handle minimal options', () => {
@@ -230,7 +230,7 @@ test('createRecordsBatch should handle minimal options', () => {
   const batch = readRecordsBatch(reader)
 
   strictEqual(batch.records.length, 1, 'Should have one record')
-  strictEqual(batch.records[0].value.toString(), 'value', 'Record value should match')
+  strictEqual(batch.records[0].value!.toString(), 'value', 'Record value should match')
 })
 
 test('createRecordsBatch with compression should compress the records', () => {
@@ -259,8 +259,8 @@ test('createRecordsBatch with compression should compress the records', () => {
 
   strictEqual(batch.attributes & 0b111, 1, 'Attributes should have gzip compression bit set')
   strictEqual(batch.records.length, 2, 'Should have two records after decompression')
-  strictEqual(batch.records[0].value.toString(), 'value1'.repeat(100), 'First record value should match')
-  strictEqual(batch.records[1].value.toString(), 'value2'.repeat(100), 'Second record value should match')
+  strictEqual(batch.records[0].value!.toString(), 'value1'.repeat(100), 'First record value should match')
+  strictEqual(batch.records[1].value!.toString(), 'value2'.repeat(100), 'Second record value should match')
 })
 
 test('createRecordsBatch should throw on unsupported compression', () => {
@@ -381,8 +381,8 @@ test('readRecordsBatch should handle records with compression', () => {
 
   strictEqual(batch.attributes & 0b111, 1, 'Attributes should have gzip compression bit set')
   strictEqual(batch.records.length, 2, 'Should have two records')
-  strictEqual(batch.records[0].value.toString(), 'compressed1', 'First record value should match')
-  strictEqual(batch.records[1].value.toString(), 'compressed2', 'Second record value should match')
+  strictEqual(batch.records[0].value!.toString(), 'compressed1', 'First record value should match')
+  strictEqual(batch.records[1].value!.toString(), 'compressed2', 'Second record value should match')
 })
 
 test('readRecordsBatch should throw on unsupported compression bitmask', () => {
@@ -471,19 +471,19 @@ test('createRecordsBatch and readRecordsBatch should be symmetrical', () => {
 
   // First record
   strictEqual(batch.records[0].offsetDelta, 0, 'First record offset delta should be 0')
-  strictEqual(batch.records[0].key.toString(), 'roundtrip-key-1', 'First record key should match')
-  strictEqual(batch.records[0].value.toString(), 'roundtrip-value-1', 'First record value should match')
+  strictEqual(batch.records[0].key!.toString(), 'roundtrip-key-1', 'First record key should match')
+  strictEqual(batch.records[0].value!.toString(), 'roundtrip-value-1', 'First record value should match')
   strictEqual(batch.records[0].headers.length, 1, 'First record should have one header')
-  strictEqual(batch.records[0].headers[0][0].toString(), 'header1', 'First record header key should match')
-  strictEqual(batch.records[0].headers[0][1].toString(), 'header-value-1', 'First record header value should match')
+  strictEqual(batch.records[0].headers[0][0]!.toString(), 'header1', 'First record header key should match')
+  strictEqual(batch.records[0].headers[0][1]!.toString(), 'header-value-1', 'First record header value should match')
 
   // Second record
   strictEqual(batch.records[1].offsetDelta, 1, 'Second record offset delta should be 1')
-  strictEqual(batch.records[1].key.toString(), 'roundtrip-key-2', 'Second record key should match')
-  strictEqual(batch.records[1].value.toString(), 'roundtrip-value-2', 'Second record value should match')
+  strictEqual(batch.records[1].key!.toString(), 'roundtrip-key-2', 'Second record key should match')
+  strictEqual(batch.records[1].value!.toString(), 'roundtrip-value-2', 'Second record value should match')
   strictEqual(batch.records[1].headers.length, 1, 'Second record should have one header')
-  strictEqual(batch.records[1].headers[0][0].toString(), 'header2', 'Second record header key should match')
-  strictEqual(batch.records[1].headers[0][1].toString(), 'header-value-2', 'Second record header value should match')
+  strictEqual(batch.records[1].headers[0][0]!.toString(), 'header2', 'Second record header key should match')
+  strictEqual(batch.records[1].headers[0][1]!.toString(), 'header-value-2', 'Second record header value should match')
 })
 
 // Tests with various compression algorithms
@@ -520,8 +520,8 @@ for (const [compression, algorithm] of Object.entries<CompressionAlgorithmSpecif
         `Attributes should have ${compression} compression bit set`
       )
       strictEqual(batch.records.length, 1, 'Should have one record')
-      strictEqual(batch.records[0].key.toString(), 'compress-key', 'Record key should match')
-      strictEqual(batch.records[0].value.toString(), 'compress-value'.repeat(10), 'Record value should match')
+      strictEqual(batch.records[0].key!.toString(), 'compress-key', 'Record key should match')
+      strictEqual(batch.records[0].value!.toString(), 'compress-value'.repeat(10), 'Record value should match')
     }
   )
 }

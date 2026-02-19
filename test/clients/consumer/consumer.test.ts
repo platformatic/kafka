@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import zlib from 'node:zlib'
 import * as Prometheus from 'prom-client'
-import { type FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
+import type { FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kCreateConnectionPool, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
@@ -1323,10 +1323,10 @@ test('fetch should retrieve messages from multiple batches', async t => {
       strictEqual(record.offsetDelta, i, 'Should have correct offset delta for each record')
       return {
         topic,
-        key: record.key.toString('utf-8'),
-        value: record.value.toString('utf-8'),
+        key: record.key!.toString('utf-8'),
+        value: record.value!.toString('utf-8'),
         headers: Object.fromEntries(
-          record.headers.map(([key, value]) => [key.toString('utf-8'), value.toString('utf-8')])
+          record.headers.map(([key, value]) => [key!.toString('utf-8'), value!.toString('utf-8')])
         )
       }
     })

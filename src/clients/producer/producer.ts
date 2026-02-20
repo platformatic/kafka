@@ -67,13 +67,20 @@ import {
   type Serializer,
   type SerializerWithHeaders
 } from '../serde.ts'
-import { produceOptionsValidator, producerOptionsValidator, sendOptionsValidator } from './options.ts'
+import {
+  produceOptionsValidator,
+  producerOptionsValidator,
+  producerStreamOptionsValidator,
+  sendOptionsValidator
+} from './options.ts'
+import { ProducerStream } from './producer-stream.ts'
 import { Transaction } from './transaction.ts'
 import {
   type ProduceOptions,
   type ProduceResult,
   type ProducerInfo,
   type ProducerOptions,
+  type ProducerStreamOptions,
   type SendOptions
 } from './types.ts'
 
@@ -98,6 +105,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #metricsProducedMessages: Counter | undefined
   #coordinatorId!: number
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
+  #streams: Set<ProducerStream<Key, Value, HeaderKey, HeaderValue>>
   #sendOperation: (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProduceResult>
@@ -143,6 +151,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#valueSerializer = serializers?.value ?? (noopSerializer as Serializer<Value>)
     this.#headerKeySerializer = serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
+    this.#streams = new Set()
     this[kOptions].transactionalId ??= randomUUID()
 
     if (this[kPrometheus]) {
@@ -183,9 +192,18 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return this.#coordinatorId
   }
 
-  close (callback: CallbackWithPromise<void>): void
-  close (): Promise<void>
-  close (callback?: CallbackWithPromise<void>): void | Promise<void> {
+  get streamsCount (): number {
+    return this.#streams.size
+  }
+
+  close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
+  close (force?: boolean): Promise<void>
+  close (force?: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (typeof force === 'function') {
+      callback = force
+      force = false
+    }
+
     if (!callback) {
       callback = createPromisifiedCallback<void>()
     }
@@ -196,6 +214,48 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this[kClosed] = true
+
+    this.#performClose(force as boolean, callback)
+
+    return callback[kCallbackPromise]
+  }
+
+  #performClose (force: boolean, callback: CallbackWithPromise<void>): void {
+    for (const stream of this.#streams) {
+      /* c8 ignore next 3 - Hard to test */
+      if (stream.closed || stream.destroyed) {
+        this.#streams.delete(stream)
+      }
+    }
+
+    if (this.#streams.size) {
+      if (!force) {
+        this[kClosed] = false
+        callback(new UserError('Cannot close producer while producing messages.'))
+        return
+      }
+
+      runConcurrentCallbacks(
+        'Closing streams failed.',
+        this.#streams,
+        (stream, concurrentCallback) => {
+          stream.close(concurrentCallback)
+        },
+        error => {
+          /* c8 ignore next 5 - Hard to test */
+          if (error) {
+            this[kClosed] = false
+            callback(error)
+            return
+          }
+
+          this.#streams.clear()
+          this.#performClose(false, callback)
+        }
+      )
+
+      return
+    }
 
     super.close(error => {
       if (error) {
@@ -210,8 +270,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       callback(null)
     })
-
-    return callback[kCallbackPromise]
   }
 
   initIdempotentProducer (
@@ -312,6 +370,26 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
 
     return callback[kCallbackPromise]
+  }
+
+  asStream (
+    options?: ProducerStreamOptions<Key, Value, HeaderKey, HeaderValue>
+  ): ProducerStream<Key, Value, HeaderKey, HeaderValue> {
+    options ??= {}
+
+    const validationError = this[kValidateOptions](options, producerStreamOptionsValidator, '/options', false)
+    if (validationError) {
+      throw validationError
+    }
+
+    const stream = new ProducerStream(this, options)
+    this.#streams.add(stream)
+
+    stream.once('close', () => {
+      this.#streams.delete(stream)
+    })
+
+    return stream
   }
 
   beginTransaction (

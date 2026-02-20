@@ -150,7 +150,7 @@ test('constructor should emit warnings for experimental APIs', () => {
       clientId: 'test-producer',
       bootstrapBrokers: kafkaBootstrapServers,
       beforeSerialization (_m, _t, _d, callback) {
-        callback(null, _d)
+        callback(null)
       }
     })
 
@@ -206,6 +206,40 @@ test('close should handle errors from Base.close', async t => {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual((error as Error).message.includes(mockedErrorMessage), true)
   }
+})
+
+test('close should fail with active producer streams unless force is true', async t => {
+  const producer = createProducer(t)
+  const stream = producer.asStream({ batchTime: -1 })
+
+  strictEqual(producer.streamsCount, 1)
+
+  try {
+    await producer.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, 'Cannot close producer while producing messages.')
+  }
+
+  strictEqual(producer.closed, false)
+
+  await stream.close()
+})
+
+test('close with force=true should close all producer streams', async t => {
+  const producer = createProducer(t)
+  const stream1 = producer.asStream({ batchTime: -1 })
+  const stream2 = producer.asStream({ batchTime: -1 })
+
+  strictEqual(producer.streamsCount, 2)
+
+  await producer.close(true)
+
+  strictEqual(producer.closed, true)
+  strictEqual(stream1.closed, true)
+  strictEqual(stream2.closed, true)
+  strictEqual(producer.streamsCount, 0)
 })
 
 test('should support both promise and callback API', async t => {
@@ -817,6 +851,30 @@ test('send should handle synchronuous error during payload creation', async t =>
     error => {
       strictEqual(error instanceof AggregateError, true)
       strictEqual((error as AggregateError).errors[0], expectedError)
+      return true
+    }
+  )
+})
+
+test('send should handle serializer errors', async t => {
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      ...stringSerializers,
+      value () {
+        throw new Error('boom')
+      }
+    }
+  })
+
+  const testTopic = await createTopic(t)
+
+  await rejects(
+    async () => {
+      await producer.send({ messages: [{ topic: testTopic, key: 'k', value: 'v' }] })
+    },
+    error => {
+      strictEqual(error instanceof UserError, true)
+      strictEqual((error as Error).message, 'Failed to serialize a message.')
       return true
     }
   )
@@ -1448,5 +1506,21 @@ test('should handle async beforeSerialization hooks errors', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('asStream should validate options', t => {
+  const producer = createProducer(t, { strict: true })
+
+  try {
+    producer.asStream({
+      // @ts-expect-error - invalid option
+      batchSize: 'FOO'
+    })
+
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual((error as Error).message.includes('/options/batchSize'), true)
   }
 })

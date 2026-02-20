@@ -57,7 +57,7 @@ Each tracing channel publishes events with the following common properties:
 
 | Name                     | Description                                                                                                                                                                                        |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plt:kafka:instances`    | Notifies any creation of a `Connection`, `ConnectionPool`, `Base`, `Admin`, `Producer`, `Consumer` or `MessagesStream`. This channel will publish objects with the `type` and `instance` property. |
+| `plt:kafka:instances`    | Notifies any creation of a `Connection`, `ConnectionPool`, `Base`, `Admin`, `Producer`, `Consumer`, `MessagesStream` or `ProducerStream`. This channel will publish objects with the `type` and `instance` property. |
 | `plt:kafka:consumer:lag` | Notifies any `Consumer` lag obtained via `Consumer.getLag` (including the one triggered via `Consumer.startLagMonitoring`).                                                                          |
 
 ## Published tracing channels

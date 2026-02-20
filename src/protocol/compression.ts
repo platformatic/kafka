@@ -1,9 +1,7 @@
-import { createRequire } from 'node:module'
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
+import { lz4Compress, lz4Decompress, snappyCompress, snappyDecompress } from '@platformatic/wasm-utils'
 import zlib from 'node:zlib'
 import { UnsupportedCompressionError } from '../errors.ts'
-import { DynamicBuffer } from './dynamic-buffer.ts'
-
-const require = createRequire(import.meta.url)
 
 const { zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
 
@@ -33,39 +31,13 @@ export type CompressionAlgorithm = keyof typeof CompressionAlgorithms
 export type CompressionAlgorithmValue = (typeof CompressionAlgorithms)[keyof typeof CompressionAlgorithms]
 
 function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
-  return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).slice() : (data as Buffer)
+  return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
 }
 
-let snappyCompressSync: CompressionOperation | undefined
-let snappyDecompressSync: CompressionOperation | undefined
-let lz4CompressFrameSync: CompressionOperation | undefined
-let lz4DecompressFrameSync: CompressionOperation | undefined
-
-function loadSnappy () {
-  try {
-    const snappy = require('snappy')
-    snappyCompressSync = snappy.compressSync
-    snappyDecompressSync = snappy.uncompressSync
-    /* c8 ignore next 5 - In tests snappy is always available */
-  } catch (e) {
-    throw new UnsupportedCompressionError(
-      'Cannot load snappy module, which is an optionalDependency. Please check your local installation.'
-    )
-  }
-}
-
-function loadLZ4 () {
-  try {
-    const lz4 = require('lz4-napi')
-    lz4CompressFrameSync = lz4.compressFrameSync
-    lz4DecompressFrameSync = lz4.decompressFrameSync
-    /* c8 ignore next 5 - In tests lz4-napi is always available */
-  } catch (e) {
-    throw new UnsupportedCompressionError(
-      'Cannot load lz4-napi module, which is an optionalDependency. Please check your local installation.'
-    )
-  }
-}
+const snappyCompressSync: CompressionOperation = snappyCompress
+const snappyDecompressSync: CompressionOperation = snappyDecompress
+const lz4CompressFrameSync: CompressionOperation = lz4Compress
+const lz4DecompressFrameSync: CompressionOperation = lz4Decompress
 
 export const compressionsAlgorithms = {
   /* c8 ignore next 8 - 'none' is actually never used but this is to please Typescript */
@@ -91,40 +63,20 @@ export const compressionsAlgorithms = {
   },
   snappy: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 - In tests snappy is always available */
-      if (!snappyCompressSync) {
-        loadSnappy()
-      }
-
-      return snappyCompressSync!(ensureBuffer(data))
+      return snappyCompressSync(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 - In tests snappy is always available */
-      if (!snappyDecompressSync) {
-        loadSnappy()
-      }
-
-      return snappyDecompressSync!(ensureBuffer(data)) as Buffer
+      return snappyDecompressSync(ensureBuffer(data)) as Buffer
     },
     bitmask: 2,
     available: true
   },
   lz4: {
     compressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 - In tests lz4-napi is always available */
-      if (!lz4CompressFrameSync) {
-        loadLZ4()
-      }
-
-      return lz4CompressFrameSync!(ensureBuffer(data))
+      return lz4CompressFrameSync(ensureBuffer(data))
     },
     decompressSync (data: Buffer | DynamicBuffer): Buffer {
-      /* c8 ignore next 4 - In tests lz4-napi is always available */
-      if (!lz4DecompressFrameSync) {
-        loadLZ4()
-      }
-
-      return lz4DecompressFrameSync!(ensureBuffer(data))
+      return lz4DecompressFrameSync(ensureBuffer(data))
     },
     bitmask: 3,
     available: true

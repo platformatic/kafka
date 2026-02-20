@@ -1,6 +1,6 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { humanize } from '../utils.ts'
 import { EMPTY_TAGGED_FIELDS_BUFFER, EMPTY_UUID, type NullableString } from './definitions.ts'
-import { DynamicBuffer } from './dynamic-buffer.ts'
 
 // Note that in this class "== null" is purposely used instead of "===" to check for both null and undefined
 

@@ -172,14 +172,6 @@ export class ProtocolError extends GenericError {
   }
 }
 
-export class OutOfBoundsError extends GenericError {
-  static code: ErrorCode = 'PLT_KFK_OUT_OF_BOUNDS'
-
-  constructor (message: string, properties: ErrorProperties = {}) {
-    super(OutOfBoundsError.code, message, { isOut: true, ...properties })
-  }
-}
-
 export class ResponseError extends MultipleErrors {
   static code: ErrorCode = 'PLT_KFK_RESPONSE'
 

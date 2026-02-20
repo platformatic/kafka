@@ -1,6 +1,7 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { DynamicBuffer, Reader } from '../../src/index.ts'
+import { Reader } from '../../src/index.ts'
 
 test('static isReader', () => {
   ok(Reader.isReader(new Reader(new DynamicBuffer())))

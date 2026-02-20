@@ -1,4 +1,4 @@
-import { type DynamicBuffer } from './dynamic-buffer.ts'
+import { type DynamicBuffer } from '@platformatic/dynamic-buffer'
 
 export const INT8_SIZE = 1
 export const INT16_SIZE = 2

@@ -1,7 +1,7 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import { mock, test } from 'node:test'
 import {
-  DynamicBuffer,
   NumericMap,
   ajv,
   debugDump,

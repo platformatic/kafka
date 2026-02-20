@@ -1,6 +1,7 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { DynamicBuffer, EMPTY_UUID, Writer } from '../../src/index.ts'
+import { EMPTY_UUID, Writer } from '../../src/index.ts'
 
 test('static isWriter', () => {
   ok(Writer.isWriter(new Writer()))

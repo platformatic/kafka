@@ -1,3 +1,4 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { UnsupportedCompressionError } from '../errors.ts'
 import type { NumericMap } from '../utils.ts'
 import {
@@ -8,7 +9,6 @@ import {
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
 import { INT32_SIZE, INT64_SIZE, type NullableString } from './definitions.ts'
-import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 

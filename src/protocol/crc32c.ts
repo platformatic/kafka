@@ -1,7 +1,8 @@
-// Based on the work from: https://github.com/tulios/kafkajs/blob/master/src/protocol/recordBatch/crc32C/crc32C.js
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
+import { crc32c as wasmCRC32C } from '@platformatic/wasm-utils'
 import { createRequire } from 'node:module'
-import { DynamicBuffer } from './dynamic-buffer.ts'
 
+// Based on the work from: https://github.com/tulios/kafkajs/blob/master/src/protocol/recordBatch/crc32C/crc32C.js
 /* prettier-ignore */
 const CRC: number[] = [
   0x00000000, 0xf26b8303, 0xe13b70f7, 0x1350f3f4,
@@ -89,9 +90,7 @@ export function loadNativeCRC32C (): typeof jsCRC32C | null {
 }
 
 export function jsCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
-  const bytes: Uint8Array = DynamicBuffer.isDynamicBuffer(data)
-    ? ((data as DynamicBuffer).buffer as Uint8Array)
-    : new Uint8Array(data as Uint8Array)
+  const bytes = DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
 
   let crc = 0xffffffff
 
@@ -103,4 +102,4 @@ export function jsCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
 }
 
 /* c8 ignore next - Hard to test */
-export const crc32c = loadNativeCRC32C() ?? jsCRC32C
+export const crc32c = loadNativeCRC32C() ?? wasmCRC32C

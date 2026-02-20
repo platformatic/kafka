@@ -22,11 +22,11 @@ import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.t
 import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
-import
+import {
   type BeforeDeserializationHook,
   type BeforeHookPayloadType,
-  type { Deserializer,
-  DeserializerWithHeaders
+  type Deserializer,
+  type DeserializerWithHeaders
 } from '../serde.ts'
 import type { Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
@@ -968,12 +968,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             message.topic = topicIds.get(topicResponse.topicId)!
             message.partition = partition
 
-            requests.push([message.key, 'key', message])
-            requests.push([message.value, 'value', message])
+            requests.push([message.key!, 'key', message])
+            requests.push([message.value!, 'value', message])
 
             for (const [headerKey, headerValue] of message.headers) {
-              requests.push([headerKey, 'headerKey', message])
-              requests.push([headerValue, 'headerValue', message])
+              requests.push([headerKey!, 'headerKey', message])
+              requests.push([headerValue!, 'headerValue', message])
             }
           }
         }

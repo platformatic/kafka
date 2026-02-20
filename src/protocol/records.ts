@@ -1,5 +1,5 @@
 import { UnsupportedCompressionError } from '../errors.ts'
-import { type NumericMap } from '../utils.ts'
+import type { NumericMap } from '../utils.ts'
 import {
   type CompressionAlgorithmSpecification,
   type CompressionAlgorithmValue,
@@ -109,9 +109,9 @@ export interface KafkaRecord {
   attributes: number
   timestampDelta: bigint
   offsetDelta: number
-  key: Buffer
-  value: Buffer
-  headers: [Buffer, Buffer][]
+  key: Buffer | null
+  value: Buffer | null
+  headers: [Buffer | null, Buffer | null][]
 }
 
 /*

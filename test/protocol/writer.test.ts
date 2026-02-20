@@ -519,8 +519,8 @@ test('appendVarIntBytes', () => {
   const buffer = Buffer.concat(writer.buffers)
   let pos = 0
 
-  // VarInt null (length 0)
-  strictEqual(buffer[pos++], 0)
+  // VarInt null (length -1, zigzag encoded as 1)
+  strictEqual(buffer[pos++], 1)
 
   // VarInt buffer (length 1, using zigzag encoding which is 2)
   strictEqual(buffer[pos++], 2)
@@ -539,7 +539,7 @@ test('appendVarIntBytes - undefined', () => {
 
   // Verify the buffer content
   const buffer = writer.buffer
-  strictEqual(buffer[0], 0) // VarInt 0 indicating null/undefined
+  strictEqual(buffer[0], 1) // VarInt -1 (zigzag encoded) indicating null/undefined
 })
 
 test('appendArray', () => {

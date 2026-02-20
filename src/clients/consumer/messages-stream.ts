@@ -5,8 +5,8 @@ import {
   noopCallback,
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
-import { type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
-import { type Callback } from '../../apis/definitions.ts'
+import type { FetchRequestTopic, FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import type { Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
 import {
   consumerReceivesChannel,
@@ -15,14 +15,14 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import { UserError } from '../../errors.ts'
-import { type ConnectionPool } from '../../network/connection-pool.ts'
+import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message } from '../../protocol/records.ts'
 import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
-import { type ClusterMetadata } from '../base/types.ts'
+import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
-import { type Deserializer, type DeserializerWithHeaders } from '../serde.ts'
-import { type Consumer } from './consumer.ts'
+import type { Deserializer, DeserializerWithHeaders } from '../serde.ts'
+import type { Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
   MessagesStreamFallbackModes,
@@ -646,10 +646,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             try {
               const headers = new Map()
               for (const [headerKey, headerValue] of record.headers) {
-                headers.set(headerKeyDeserializer(headerKey), headerValueDeserializer(headerValue))
+                headers.set(headerKeyDeserializer(headerKey ?? undefined), headerValueDeserializer(headerValue ?? undefined))
               }
-              const key = keyDeserializer(record.key, headers)
-              const value = valueDeserializer(record.value, headers)
+              const key = keyDeserializer(record.key ?? undefined, headers)
+              const value = valueDeserializer(record.value ?? undefined, headers)
 
               this.#metricsConsumedMessages?.inc()
 

@@ -192,7 +192,7 @@ export class Writer {
   // Note that this does not follow the wire protocol specification and thus the length is not +1ed
   appendVarIntBytes (value: Buffer | null | undefined): this {
     if (value == null) {
-      return this.appendVarInt(0)
+      return this.appendVarInt(-1)
     }
 
     this.appendVarInt(value.length)

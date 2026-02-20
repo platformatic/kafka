@@ -115,7 +115,7 @@ for (let i = 0; i < 3; i++) {
   fetchOffset = nextOffset
   console.log(
     'Fetch',
-    records.map(r => [r.key.toString(), r.value.toString()])
+    records.map(r => [r.key?.toString(), r.value?.toString()])
   )
 
   if (!records.length) {

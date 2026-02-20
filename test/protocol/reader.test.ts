@@ -472,7 +472,7 @@ test('readVarIntBytes', () => {
 
   const reader = new Reader(new DynamicBuffer(buffer))
   deepStrictEqual(reader.readVarIntBytes(), Buffer.from([10]))
-  deepStrictEqual(reader.readVarIntBytes(), Buffer.from([]))
+  deepStrictEqual(reader.readVarIntBytes(), null)
   deepStrictEqual(reader.readVarIntBytes(), Buffer.from([]))
   deepStrictEqual(reader.readVarIntBytes(), Buffer.from([1, 2]))
 })

@@ -286,10 +286,10 @@ export class Reader {
     return this.readNullableBytes(compact) || EMPTY_BUFFER
   }
 
-  readVarIntBytes (): Buffer {
-    let length = this.readVarInt()
+  readVarIntBytes (): Buffer | null {
+    const length = this.readVarInt()
     if (length === -1) {
-      length = 0
+      return null
     }
     const value = this.buffer.slice(this.position, this.position + length)
 

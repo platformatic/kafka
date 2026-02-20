@@ -24,7 +24,9 @@ Options:
 | `compression`           | `string`                                                           | Compression algorithm to use before sending messages to the broker.<br/><br/>Valid values are: `snappy`, `lz4`, `gzip`, `zstd` |
 | `partitioner`           | `(message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and should return the partition number.         |
 | `repeatOnStaleMetadata` | `boolean`                                                          | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                       |
-| `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                  | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties. |
+| `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                  | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`. |
+| `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`      | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                             |
+| `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`       | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
 
 It also supports all the constructor options of `Base`.
 
@@ -78,6 +80,64 @@ await transaction.commit()
 Closes the producer and all its connections.
 
 The return value is `void`.
+
+## Using Schema Registries
+
+> ⚠️ **Experimental API**
+> Confluent Schema Registry support and the `registry`/`beforeSerialization` integration are experimental.
+> They **do not follow semver** and may change in minor/patch releases.
+
+The producer supports automatic serialization through schema registries like [Confluent Schema Registry](./confluent-schema-registry.md). When using a schema registry, messages are automatically serialized according to their schemas and schema IDs are included in the message headers.
+
+Example with Confluent Schema Registry:
+
+```typescript
+import { Producer } from '@platformatic/kafka'
+import { ConfluentSchemaRegistry } from '@platformatic/kafka/registries'
+
+// Create a schema registry instance
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  auth: {
+    username: 'user',
+    password: 'password'
+  }
+})
+
+// Create a producer with the registry
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  registry // Registry handles serialization automatically
+})
+
+// Send messages with schema IDs in metadata
+await producer.send({
+  messages: [{
+    topic: 'events',
+    key: { id: 123 },
+    value: { name: 'John', action: 'login' },
+    metadata: {
+      schemas: {
+        key: 1,    // Schema ID for key
+        value: 2   // Schema ID for value
+      }
+    }
+  }]
+})
+
+await producer.close()
+```
+
+When using a schema registry:
+- **Do not provide** the `serializers` option - the registry provides its own serializers
+- **Do not provide** the `beforeSerialization` hook - the registry provides its own hook
+- Messages are automatically serialized according to their schemas
+- Schema IDs must be provided in the message metadata
+- The registry fetches and caches schemas as needed
+- Supports AVRO, Protocol Buffers, and JSON Schema formats
+
+For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
 ## Advanced Methods
 

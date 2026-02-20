@@ -64,7 +64,9 @@ export const consumeOptionsProperties = {
   maxWaitTime: { type: 'number', minimum: 0 },
   isolationLevel: { type: 'number', enum: allowedFetchIsolationLevels },
   deserializers: serdeProperties,
-  highWaterMark: { type: 'number', minimum: 1 }
+  highWaterMark: { type: 'number', minimum: 1 },
+  beforeDeserialization: { function: true },
+  registry: { type: 'object' }
 }
 
 export const groupOptionsSchema = {

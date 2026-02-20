@@ -86,10 +86,19 @@ test('parseResponse correctly processes a successful response', () => {
   const writer = Writer.create()
     .appendInt32(0)
     .appendArray(
-      [{ name: 'test-topic', partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: 1617234567890n, offset: 100n, leaderEpoch: 5 }] }],
+      [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: 1617234567890n, offset: 100n, leaderEpoch: 5 }]
+        }
+      ],
       (w, topic) => {
         w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode).appendInt64(partition.timestamp).appendInt64(partition.offset).appendInt32(partition.leaderEpoch)
+          w.appendInt32(partition.partitionIndex)
+            .appendInt16(partition.errorCode)
+            .appendInt64(partition.timestamp)
+            .appendInt64(partition.offset)
+            .appendInt32(partition.leaderEpoch)
         })
       }
     )
@@ -99,7 +108,12 @@ test('parseResponse correctly processes a successful response', () => {
 
   deepStrictEqual(response, {
     throttleTimeMs: 0,
-    topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: 1617234567890n, offset: 100n, leaderEpoch: 5 }] }]
+    topics: [
+      {
+        name: 'test-topic',
+        partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: 1617234567890n, offset: 100n, leaderEpoch: 5 }]
+      }
+    ]
   })
 })
 
@@ -107,24 +121,40 @@ test('parseResponse handles partition-level error code', () => {
   const writer = Writer.create()
     .appendInt32(0)
     .appendArray(
-      [{ name: 'test-topic', partitions: [{ partitionIndex: 0, errorCode: 1, timestamp: 0n, offset: -1n, leaderEpoch: -1 }] }],
+      [
+        {
+          name: 'test-topic',
+          partitions: [{ partitionIndex: 0, errorCode: 1, timestamp: 0n, offset: -1n, leaderEpoch: -1 }]
+        }
+      ],
       (w, topic) => {
         w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode).appendInt64(partition.timestamp).appendInt64(partition.offset).appendInt32(partition.leaderEpoch)
+          w.appendInt32(partition.partitionIndex)
+            .appendInt16(partition.errorCode)
+            .appendInt64(partition.timestamp)
+            .appendInt64(partition.offset)
+            .appendInt32(partition.leaderEpoch)
         })
       }
     )
     .appendInt8(0)
 
   throws(
-    () => { parseResponse(1, 2, 7, Reader.from(writer)) },
+    () => {
+      parseResponse(1, 2, 7, Reader.from(writer))
+    },
     (err: any) => {
       ok(err instanceof ResponseError)
       ok(err.message.includes('Received response with error while executing API'))
       ok(err.errors && typeof err.errors === 'object')
       deepStrictEqual(err.response, {
         throttleTimeMs: 0,
-        topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, errorCode: 1, timestamp: 0n, offset: -1n, leaderEpoch: -1 }] }]
+        topics: [
+          {
+            name: 'test-topic',
+            partitions: [{ partitionIndex: 0, errorCode: 1, timestamp: 0n, offset: -1n, leaderEpoch: -1 }]
+          }
+        ]
       })
       return true
     }

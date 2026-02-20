@@ -292,7 +292,7 @@ export class Writer {
     return this
   }
 
-  // TODO(ShogunPanda): Tagged fields are not supported yet
+  // TODO: Tagged fields are not supported yet
   appendTaggedFields (_: any[] = []): this {
     return this.append(EMPTY_TAGGED_FIELDS_BUFFER)
   }

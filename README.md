@@ -10,6 +10,7 @@ A modern, high-performance, pure TypeScript/JavaScript type safe client for Apac
 - **Flexible API**: You can use promises or callbacks on all APIs.
 - **Streaming or Event-based Consumers**: Thanks to Node.js streams, you can choose your preferred consuming method.
 - **Flexible Serialisation**: Pluggable serialisers and deserialisers.
+- **Schema Registry Support (Experimental)**: Built-in Confluent Schema Registry integration with AVRO, Protobuf, and JSON Schema support. **This area does not follow semver and may change in minor/patch releases.**
 - **Connection Management**: Automatic connection pooling and recovery.
 - **Low Dependencies**: Minimal external dependencies.
 
@@ -140,6 +141,67 @@ await admin.deleteTopics({ topics: ['my-topic'] })
 // Close the admin client when done
 await admin.close()
 ```
+
+### Schema Registry
+
+> ⚠️ **Experimental API**
+> The Confluent Schema Registry integration and the related `registry`, `beforeSerialization`, and `beforeDeserialization` hooks are experimental.
+> They **do not follow semver** and may change in minor/patch releases.
+
+The library includes built-in support for Confluent Schema Registry with AVRO, Protocol Buffers, and JSON Schema:
+
+```typescript
+import { Producer, Consumer } from '@platformatic/kafka'
+import { ConfluentSchemaRegistry } from '@platformatic/kafka/registries'
+
+// Create a schema registry instance
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  auth: {
+    username: 'user',
+    password: 'password'
+  }
+})
+
+// Producer with schema registry
+const producer = new Producer({
+  clientId: 'schema-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  registry // Automatic serialization with schemas
+})
+
+// Send messages with schema IDs
+await producer.send({
+  messages: [{
+    topic: 'users',
+    value: { id: 1, name: 'Alice' },
+    metadata: {
+      schemas: {
+        value: 100 // Schema ID in the registry
+      }
+    }
+  }]
+})
+
+// Consumer with schema registry
+const consumer = new Consumer({
+  groupId: 'schema-consumers',
+  clientId: 'schema-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  registry // Automatic deserialization with schemas
+})
+
+const stream = await consumer.consume({
+  topics: ['users']
+})
+
+// Messages are automatically deserialized
+for await (const message of stream) {
+  console.log('User:', message.value) // Typed object
+}
+```
+
+For more details, see the [Confluent Schema Registry documentation](./docs/confluent-schema-registry.md).
 
 ## TLS and SASL
 

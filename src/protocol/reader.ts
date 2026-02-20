@@ -416,7 +416,7 @@ export class Reader {
     return reader()
   }
 
-  // TODO(ShogunPanda): Tagged fields are not supported yet
+  // TODO: Tagged fields are not supported yet
   readTaggedFields (): void {
     const length = this.readVarInt()
     if (length > 0) {

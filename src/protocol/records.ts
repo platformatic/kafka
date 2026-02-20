@@ -35,6 +35,7 @@ export interface MessageToProduce<
   HeaderValue = Buffer
 > extends MessageBase<Key, Value> {
   headers?: Map<HeaderKey, HeaderValue> | Record<string, HeaderValue>
+  metadata?: unknown // This is used by schema registry
 }
 
 // This is used by producer for consume-transform-produce flows
@@ -114,6 +115,11 @@ export interface KafkaRecord {
   headers: [Buffer | null, Buffer | null][]
 }
 
+export interface MessageToConsume extends KafkaRecord {
+  topic: string
+  partition: number
+}
+
 /*
   v0 - MessageFormat v2
     RecordBatch =>
@@ -150,12 +156,8 @@ export interface RecordsBatch {
 export const messageSchema = {
   type: 'object',
   properties: {
-    key: {
-      oneOf: [{ type: 'string' }, { buffer: true }]
-    },
-    value: {
-      oneOf: [{ type: 'string' }, { buffer: true }]
-    },
+    key: true,
+    value: true,
     headers: {
       // Note: we can't use oneOf here since a Map is also a 'object'. Thanks JS.
       anyOf: [

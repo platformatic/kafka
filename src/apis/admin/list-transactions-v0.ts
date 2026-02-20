@@ -24,10 +24,7 @@ export interface ListTransactionsResponse {
     state_filters => COMPACT_STRING
     producer_id_filters => INT64
 */
-export function createRequest (
-  stateFilters: TransactionState[],
-  producerIdFilters: bigint[]
-): Writer {
+export function createRequest (stateFilters: TransactionState[], producerIdFilters: bigint[]): Writer {
   return Writer.create()
     .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)

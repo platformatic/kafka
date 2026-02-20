@@ -57,6 +57,7 @@ import { Reader } from '../../protocol/reader.ts'
 import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
   type BaseEvents,
@@ -166,6 +167,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   constructor (options: ConsumerOptions<Key, Value, HeaderKey, HeaderValue>) {
     super({ ...defaultConsumerOptions, ...options })
     this[kValidateOptions](options, consumerOptionsValidator, '/options')
+
+    if (options.beforeDeserialization) {
+      emitExperimentalApiWarning('beforeDeserialization')
+    }
+
+    if (options.registry) {
+      emitExperimentalApiWarning('registry (Confluent Schema Registry integration)')
+    }
 
     if (options.registry) {
       if (options.beforeDeserialization) {
@@ -339,6 +348,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.highWaterMark ??= this[kOptions].highWaterMark!
     options.registry ??= this[kOptions].registry
     options.beforeDeserialization ??= this[kOptions].beforeDeserialization
+
+    if (options.beforeDeserialization) {
+      emitExperimentalApiWarning('beforeDeserialization')
+    }
+
+    if (options.registry) {
+      emitExperimentalApiWarning('registry (Confluent Schema Registry integration)')
+    }
 
     if (options.registry) {
       if (options.beforeDeserialization) {

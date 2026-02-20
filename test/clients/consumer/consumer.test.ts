@@ -410,6 +410,43 @@ test('constructor should validate necessary options even not in strict mode', ()
   consumer.close()
 })
 
+test('constructor should emit warnings for experimental APIs', () => {
+  const warnings: string[] = []
+  const originalEmitWarning = process.emitWarning
+
+  process.emitWarning = ((warning: string | Error) => {
+    warnings.push(String(warning))
+  }) as typeof process.emitWarning
+
+  try {
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092'],
+      groupId: 'test-group',
+      beforeDeserialization (_u1, _u2, _u3, callback) {
+        callback(null, _u3)
+      }
+    })
+
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+
+    // eslint-disable-next-line no-new
+    new Consumer({
+      clientId: 'test-consumer',
+      bootstrapBrokers: ['localhost:9092'],
+      groupId: 'test-group',
+      registry
+    })
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+
+  strictEqual(warnings.length, 2)
+  ok(warnings.some(warning => warning.includes('beforeDeserialization')))
+  ok(warnings.some(warning => warning.includes('registry (Confluent Schema Registry integration)')))
+})
+
 test('close should properly clean up resources and set closed state', async t => {
   const consumer = createConsumer(t)
 
@@ -773,6 +810,31 @@ test('consume should validate the supplied options', async t => {
     strictEqual(error instanceof UserError, true)
     strictEqual(error.message, '/options/beforeDeserialization cannot be provided when /options/registry is provided.')
   }
+})
+
+test('consume should emit warnings for experimental APIs', async t => {
+  const consumer = createConsumer(t)
+  const warnings: string[] = []
+  const originalEmitWarning = process.emitWarning
+
+  process.emitWarning = ((warning: string | Error) => {
+    warnings.push(String(warning))
+  }) as typeof process.emitWarning
+
+  try {
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+
+    await consumer.consume({
+      topics: [],
+      beforeDeserialization: registry.getBeforeDeserializationHook(),
+      registry
+    })
+  } catch {}
+
+  process.emitWarning = originalEmitWarning
+
+  ok(warnings.some(warning => warning.includes('beforeDeserialization')))
+  ok(warnings.some(warning => warning.includes('registry (Confluent Schema Registry integration)')))
 })
 
 test('consume should track topics in the consumer', async t => {

@@ -215,3 +215,9 @@ export function setDebugDumpLogger (logger: DebugDumpLogger) {
 export function debugDump (...values: unknown[]) {
   debugDumpLogger(new Date().toISOString(), ...values.map(v => (typeof v === 'string' ? v : inspect(v, false, 10))))
 }
+
+export function emitExperimentalApiWarning (api: string): void {
+  process.emitWarning(
+    `The ${api} API is experimental and does not follow semver. It may change in minor/patch releases.`
+  )
+}

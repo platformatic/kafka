@@ -136,6 +136,41 @@ test('constructor should validat other options even when not in strict mode', ()
   }
 })
 
+test('constructor should emit warnings for experimental APIs', () => {
+  const warnings: string[] = []
+  const originalEmitWarning = process.emitWarning
+
+  process.emitWarning = ((warning: string | Error) => {
+    warnings.push(String(warning))
+  }) as typeof process.emitWarning
+
+  try {
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test-producer',
+      bootstrapBrokers: kafkaBootstrapServers,
+      beforeSerialization (_m, _t, _d, callback) {
+        callback(null, _d)
+      }
+    })
+
+    const registry = new ConfluentSchemaRegistry({ url: '' })
+
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test-producer',
+      bootstrapBrokers: kafkaBootstrapServers,
+      registry
+    })
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+
+  strictEqual(warnings.length, 2)
+  ok(warnings.some(warning => warning.includes('beforeSerialization')))
+  ok(warnings.some(warning => warning.includes('registry (Confluent Schema Registry integration)')))
+})
+
 test('close should properly clean up resources and set closed state', t => {
   return new Promise<void>((resolve, reject) => {
     const producer = createProducer(t)

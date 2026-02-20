@@ -44,7 +44,7 @@ import {
   kTransactionFindCoordinator,
   kTransactionPrepare
 } from '../../symbols.ts'
-import { NumericMap } from '../../utils.ts'
+import { emitExperimentalApiWarning, NumericMap } from '../../utils.ts'
 import {
   Base,
   kAfterCreate,
@@ -117,6 +117,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     super(options)
 
     this[kValidateOptions](options, producerOptionsValidator, '/options')
+
+    if (options.beforeSerialization) {
+      emitExperimentalApiWarning('beforeSerialization')
+    }
+
+    if (options.registry) {
+      emitExperimentalApiWarning('registry (Confluent Schema Registry integration)')
+    }
 
     let serializers = options.serializers
     if (options.registry) {

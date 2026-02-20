@@ -13,6 +13,16 @@ import {
   createTopic
 } from '../helpers.ts'
 
+const originalEmitWarning = process.emitWarning
+
+test.before(() => {
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
+})
+
+test.after(() => {
+  process.emitWarning = originalEmitWarning
+})
+
 interface Datum {
   id: number
   name: string

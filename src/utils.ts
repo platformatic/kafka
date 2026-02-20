@@ -1,7 +1,7 @@
+import { type DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import debug from 'debug'
 import { inspect } from 'node:util'
-import { type DynamicBuffer } from './protocol/dynamic-buffer.ts'
 
 export interface EnumerationDefinition<T> {
   allowed: T[]

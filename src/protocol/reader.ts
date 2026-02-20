@@ -1,5 +1,5 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { EMPTY_BUFFER, INT16_SIZE, INT32_SIZE, INT64_SIZE, INT8_SIZE, UUID_SIZE } from './definitions.ts'
-import { DynamicBuffer } from './dynamic-buffer.ts'
 import { Writer } from './writer.ts'
 
 export type EntryReader<OutputType> = (reader: Reader, index: number) => OutputType

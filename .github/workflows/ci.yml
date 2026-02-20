@@ -13,13 +13,6 @@ jobs:
       matrix:
         node-version: [20.x, 22.x, 24.x]
         confluent-kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0]
-        include:
-          - node-version: 20.x
-            test-command: ci:v20
-          - node-version: 22.x
-            test-command: ci
-          - node-version: 24.x
-            test-command: ci
     name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -50,4 +43,4 @@ jobs:
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
-        run: 'pnpm run ${{ matrix.test-command }}'
+        run: 'pnpm run ci'

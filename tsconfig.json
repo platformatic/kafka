@@ -6,7 +6,7 @@
     "test/*.ts",
     "test/**/*.ts",
     "scripts/*.ts",
-    "benchmarks/**/*.ts",
+    "benchmarks/*.ts",
     "playground/*.ts",
     "playground/**/*.ts",
     "scripts/*.ts"

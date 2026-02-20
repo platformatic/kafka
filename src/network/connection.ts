@@ -1,3 +1,4 @@
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import fastq from 'fastq'
 import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
@@ -25,7 +26,6 @@ import {
 import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { protocolAPIsById } from '../protocol/apis.ts'
 import { EMPTY_OR_SINGLE_COMPACT_LENGTH_SIZE, INT32_SIZE } from '../protocol/definitions.ts'
-import { DynamicBuffer } from '../protocol/dynamic-buffer.ts'
 import { saslOAuthBearer, saslPlain, saslScramSha } from '../protocol/index.ts'
 import { Reader } from '../protocol/reader.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../protocol/sasl/scram-sha.ts'

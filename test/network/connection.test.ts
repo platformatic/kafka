@@ -671,6 +671,14 @@ test('Connection should handle unexpected correlation IDs', async t => {
 
   // Mock server that sends response with unexpected correlation ID
   server.on('connection', socket => {
+    socket.on('error', err => {
+      // The client may close/reset while we are writing the second response.
+      // Ignore this expected race to keep the test deterministic.
+      if ((err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
+        throw err
+      }
+    })
+
     socket.on('data', () => {
       // Create response with unexpected correlation ID
       const response = Buffer.alloc(4 + 4 + 4) // size + correlationId + result

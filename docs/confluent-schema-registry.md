@@ -1,5 +1,9 @@
 # Confluent Schema Registry
 
+> ⚠️ **Experimental API**
+> `ConfluentSchemaRegistry` and the related `registry`, `beforeSerialization`, and `beforeDeserialization` hooks are experimental.
+> They **do not follow semver** and may change in minor/patch releases.
+
 The `ConfluentSchemaRegistry` class provides integration with [Confluent Schema Registry](https://docs.confluent.io/platform/current/schema-registry/index.html) for automatic message serialization and deserialization with schema management.
 
 ## Features

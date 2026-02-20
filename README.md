@@ -10,7 +10,7 @@ A modern, high-performance, pure TypeScript/JavaScript type safe client for Apac
 - **Flexible API**: You can use promises or callbacks on all APIs.
 - **Streaming or Event-based Consumers**: Thanks to Node.js streams, you can choose your preferred consuming method.
 - **Flexible Serialisation**: Pluggable serialisers and deserialisers.
-- **Schema Registry Support**: Built-in Confluent Schema Registry integration with AVRO, Protobuf, and JSON Schema support.
+- **Schema Registry Support (Experimental)**: Built-in Confluent Schema Registry integration with AVRO, Protobuf, and JSON Schema support. **This area does not follow semver and may change in minor/patch releases.**
 - **Connection Management**: Automatic connection pooling and recovery.
 - **Low Dependencies**: Minimal external dependencies.
 
@@ -143,6 +143,10 @@ await admin.close()
 ```
 
 ### Schema Registry
+
+> ⚠️ **Experimental API**
+> The Confluent Schema Registry integration and the related `registry`, `beforeSerialization`, and `beforeDeserialization` hooks are experimental.
+> They **do not follow semver** and may change in minor/patch releases.
 
 The library includes built-in support for Confluent Schema Registry with AVRO, Protocol Buffers, and JSON Schema:
 

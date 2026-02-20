@@ -25,8 +25,8 @@ Options:
 | `partitioner`           | `(message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and should return the partition number.         |
 | `repeatOnStaleMetadata` | `boolean`                                                          | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                       |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                  | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`. |
-| `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`      | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                             |
-| `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`       | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
+| `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`      | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                             |
+| `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`       | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
 
 It also supports all the constructor options of `Base`.
 
@@ -82,6 +82,10 @@ Closes the producer and all its connections.
 The return value is `void`.
 
 ## Using Schema Registries
+
+> ⚠️ **Experimental API**
+> Confluent Schema Registry support and the `registry`/`beforeSerialization` integration are experimental.
+> They **do not follow semver** and may change in minor/patch releases.
 
 The producer supports automatic serialization through schema registries like [Confluent Schema Registry](./confluent-schema-registry.md). When using a schema registry, messages are automatically serialized according to their schemas and schema IDs are included in the message headers.
 

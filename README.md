@@ -51,6 +51,7 @@ await producer.send({
 })
 
 // Close the producer when done
+// If you created producer streams with producer.asStream(), either close them first or use producer.close(true)
 await producer.close()
 ```
 

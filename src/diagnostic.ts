@@ -6,7 +6,7 @@ import { type Connection } from './network/connection.ts'
 export type ClientType = 'base' | 'producer' | 'consumer' | 'admin'
 
 export interface CreationEvent<InstanceType> {
-  type: ClientType | 'connection' | 'connectionPool'
+  type: ClientType | 'connection' | 'connection-pool' | 'messages-stream' | 'producer-stream'
   instance: InstanceType
 }
 
@@ -38,7 +38,7 @@ export function createDiagnosticContext<BaseContext = {}> (context: BaseContext)
 }
 
 export function notifyCreation<InstanceType> (
-  type: ClientType | 'connection' | 'connection-pool' | 'messages-stream',
+  type: ClientType | 'connection' | 'connection-pool' | 'messages-stream' | 'producer-stream',
   instance: InstanceType
 ): void {
   instancesChannel.publish({ type, instance })

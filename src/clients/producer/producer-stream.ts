@@ -26,6 +26,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
   #timer: NodeJS.Timeout | null
   #flushing: boolean
   #batchId: number
+  #pendingWriteCallbacks: Array<(error?: Error | null) => void>
 
   instance: number
 
@@ -49,6 +50,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     this.#timer = null
     this.#flushing = false
     this.#batchId = 0
+    this.#pendingWriteCallbacks = []
     this.instance = currentInstance++
 
     notifyCreation('producer-stream', this)
@@ -76,15 +78,47 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     callback: (error?: Error | null) => void
   ): void {
     this.#buffer.push(message)
-    callback(null)
+
+    const finalizeAfterFlush = this.#buffer.length >= this.writableHighWaterMark
 
     if (this.#buffer.length >= this.#batchSize) {
       this.#clearTimer()
       this.#flush()
+    } else {
+      this.#scheduleFlush()
+    }
+
+    if (finalizeAfterFlush) {
+      this.#pendingWriteCallbacks.push(callback)
       return
     }
 
-    this.#scheduleFlush()
+    callback(null)
+  }
+
+  _writev (
+    chunks: Array<{ chunk: MessageToProduce<Key, Value, HeaderKey, HeaderValue> }>,
+    callback: (error?: Error | null) => void
+  ): void {
+    for (const { chunk } of chunks) {
+      this.#buffer.push(chunk)
+    }
+
+    const finalizeAfterFlush = this.#buffer.length >= this.writableHighWaterMark
+
+    if (this.#buffer.length >= this.#batchSize) {
+      this.#clearTimer()
+      this.#flush()
+    } else {
+      this.#scheduleFlush()
+    }
+
+    if (finalizeAfterFlush) {
+      this.#pendingWriteCallbacks.push(callback)
+      return
+    }
+
+    callback(null)
   }
 
   _final (callback: (error?: Error | null) => void): void {
@@ -123,6 +157,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     this.#clearTimer()
 
     this.#buffer = []
+    this.#flushWriteCallbacks(error)
 
     callback(error)
   }
@@ -166,6 +201,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
       this.#flushing = false
 
       if (error) {
+        this.#flushWriteCallbacks(error)
         this.destroy(error)
         return
       }
@@ -178,7 +214,20 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
       } else if (this.#buffer.length > 0) {
         this.#scheduleFlush()
       }
+
+      this.#flushWriteCallbacks()
     })
+  }
+
+  #flushWriteCallbacks (error?: Error | null): void {
+    if (this.#buffer.length >= this.writableHighWaterMark || this.#pendingWriteCallbacks.length === 0) {
+      return
+    }
+
+    const callbacks = this.#pendingWriteCallbacks.splice(0)
+    for (const callback of callbacks) {
+      callback(error ?? null)
+    }
   }
 
   #emitReports (

@@ -284,3 +284,171 @@ test('asStream should not schedule timer when batchTime is negative', async t =>
   strictEqual(sendCalls, 1)
   strictEqual(reports, 0)
 })
+
+test('asStream using _writev should flush immediately when buffered chunks reach batchSize', async t => {
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  const sink = producer.asStream({
+    batchSize: 2,
+    batchTime: 1000,
+    reportMode: ProducerStreamReportModes.BATCH
+  })
+
+  const sentBatches: Array<SendOptions<string, string, string, string>> = []
+  t.mock.method(producer, 'send', (
+    options: SendOptions<string, string, string, string>,
+    callback: Callback<ProduceResult>
+  ) => {
+    sentBatches.push(options)
+    setImmediate(() => callback(null, { offsets: [] }))
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    sink._writev(
+      [{ chunk: { topic: 'a', key: 'k1', value: 'v1' } }, { chunk: { topic: 'a', key: 'k2', value: 'v2' } }],
+      error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve()
+      }
+    )
+  })
+
+  await once(sink, 'flush')
+  await sink.close()
+
+  strictEqual(sentBatches.length, 1)
+  deepStrictEqual(
+    sentBatches[0].messages.map(message => message.value),
+    ['v1', 'v2']
+  )
+})
+
+test('asStream using _writev should schedule a timer-based flush when buffered chunks are below batchSize', async t => {
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  const sink = producer.asStream({
+    batchSize: 3,
+    batchTime: 10,
+    reportMode: ProducerStreamReportModes.BATCH
+  })
+
+  let sendCalls = 0
+  t.mock.method(producer, 'send', (
+    _options: SendOptions<string, string, string, string>,
+    callback: Callback<ProduceResult>
+  ) => {
+    sendCalls++
+    setImmediate(() => callback(null, { offsets: [] }))
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    sink._writev(
+      [{ chunk: { topic: 'a', key: 'k1', value: 'v1' } }, { chunk: { topic: 'a', key: 'k2', value: 'v2' } }],
+      error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve()
+      }
+    )
+  })
+
+  strictEqual(sendCalls, 0)
+
+  await once(sink, 'flush')
+  await sink.close()
+
+  strictEqual(sendCalls, 1)
+})
+
+test('asStream using _write should apply backpressure when highWaterMark is 1', async t => {
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  const sink = producer.asStream({
+    highWaterMark: 1,
+    batchSize: 1,
+    batchTime: 1000
+  })
+
+  t.mock.method(producer, 'send', (
+    _options: SendOptions<string, string, string, string>,
+    callback: Callback<ProduceResult>
+  ) => {
+    setTimeout(() => callback(null, { offsets: [] }), 20)
+  })
+
+  let flushed = false
+  sink.once('flush', () => {
+    flushed = true
+  })
+
+  let callbackCalled = false
+  const callbackCompleted = new Promise<void>((resolve, reject) => {
+    sink._write({ topic: 'a', key: 'k1', value: 'v1' }, 'utf8', error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      strictEqual(flushed, true)
+      callbackCalled = true
+      resolve()
+    })
+  })
+
+  strictEqual(callbackCalled, false)
+
+  await callbackCompleted
+  await sink.close()
+
+  strictEqual(callbackCalled, true)
+})
+
+test('asStream using _writev should apply backpressure when highWaterMark is 1', async t => {
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  const sink = producer.asStream({
+    highWaterMark: 1,
+    batchSize: 2,
+    batchTime: 1000
+  })
+
+  t.mock.method(producer, 'send', (
+    _options: SendOptions<string, string, string, string>,
+    callback: Callback<ProduceResult>
+  ) => {
+    setTimeout(() => callback(null, { offsets: [] }), 20)
+  })
+
+  let flushed = false
+  sink.once('flush', () => {
+    flushed = true
+  })
+
+  let callbackCalled = false
+  const callbackCompleted = new Promise<void>((resolve, reject) => {
+    sink._writev(
+      [{ chunk: { topic: 'a', key: 'k1', value: 'v1' } }, { chunk: { topic: 'a', key: 'k2', value: 'v2' } }],
+      error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        strictEqual(flushed, true)
+        callbackCalled = true
+        resolve()
+      }
+    )
+  })
+
+  strictEqual(callbackCalled, false)
+
+  await callbackCompleted
+  await sink.close()
+
+  strictEqual(callbackCalled, true)
+})
+

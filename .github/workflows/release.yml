@@ -12,7 +12,6 @@ on:
         required: false
         type: boolean
         default: false
-
 jobs:
   release-npm:
     runs-on: ubuntu-latest

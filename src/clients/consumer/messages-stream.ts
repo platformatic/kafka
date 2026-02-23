@@ -71,6 +71,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #mode: string
   #fallbackMode: string
   #paused: boolean
+  #refreshOffsetsInflight: boolean
+  #refreshOffsetsPending: boolean
+  #refreshOffsetsDestroyOnError: boolean
   #fetches: number
   #maxFetches: number
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
@@ -158,6 +161,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#offsetsCommitted = new Map()
     this.#partitionsEpochs = new Map()
     this.#paused = false
+    this.#refreshOffsetsInflight = false
+    this.#refreshOffsetsPending = false
+    this.#refreshOffsetsDestroyOnError = false
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
@@ -205,16 +211,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // having some.
     this.#consumer.on('consumer:group:join', () => {
       this.#offsetsCommitted.clear()
-
-      this.#refreshOffsets(error => {
-        /* c8 ignore next 4 - Hard to test */
-        if (error) {
-          this.destroy(error)
-          return
-        }
-
-        this.#fetch()
-      })
+      this.#scheduleRefreshOffsetsAndFetch()
     })
 
     if (consumer[kPrometheus]) {
@@ -468,7 +465,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     // No need to fetch if nobody is consuming the data
-    if (this.readableFlowing === null || this.#paused) {
+    if (this.readableFlowing === null || this.#paused || this.#refreshOffsetsInflight || this.#refreshOffsetsPending) {
       return
     }
 
@@ -867,10 +864,44 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     )
   }
 
-  [kRefreshOffsetsAndFetch] () {
-    this.#refreshOffsets(() => {
+  #scheduleRefreshOffsetsAndFetch (destroyOnError = true) {
+    this.#refreshOffsetsDestroyOnError ||= destroyOnError
+
+    if (this.#refreshOffsetsInflight) {
+      this.#refreshOffsetsPending = true
+      return
+    }
+
+    this.#refreshOffsetsInflight = true
+
+    this.#refreshOffsets(error => {
+      const shouldDestroyOnError = this.#refreshOffsetsDestroyOnError
+      this.#refreshOffsetsInflight = false
+      this.#refreshOffsetsDestroyOnError = false
+      this.#refreshOffsetsPending = false
+
+      /* c8 ignore next 9 - Hard to test */
+      if (error) {
+        if (shouldDestroyOnError) {
+          this.destroy(error)
+        }
+
+        return
+      }
+
+      // A new one was scheduled while the previous one was inflight, we need to run it immediately
+      /* c8 ignore next 4 - Hard to test */
+      if (this.#refreshOffsetsPending) {
+        this.#scheduleRefreshOffsetsAndFetch(shouldDestroyOnError)
+        return
+      }
+
       this.#fetch()
     })
+  }
+
+  [kRefreshOffsetsAndFetch] () {
+    this.#scheduleRefreshOffsetsAndFetch(false)
   }
 
   #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {

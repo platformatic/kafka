@@ -26,7 +26,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
   #timer: NodeJS.Timeout | null
   #flushing: boolean
   #batchId: number
-  #pendingWriteCallbacks: Array<(error?: Error | null) => void>
+  #pendingWriteCallback: ((error?: Error | null) => void) | null
 
   instance: number
 
@@ -50,7 +50,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     this.#timer = null
     this.#flushing = false
     this.#batchId = 0
-    this.#pendingWriteCallbacks = []
+    this.#pendingWriteCallback = null
     this.instance = currentInstance++
 
     notifyCreation('producer-stream', this)
@@ -89,7 +89,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     }
 
     if (finalizeAfterFlush) {
-      this.#pendingWriteCallbacks.push(callback)
+      this.#pendingWriteCallback = callback
       return
     }
 
@@ -114,7 +114,7 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
     }
 
     if (finalizeAfterFlush) {
-      this.#pendingWriteCallbacks.push(callback)
+      this.#pendingWriteCallback = callback
       return
     }
 
@@ -220,14 +220,13 @@ export class ProducerStream<Key = Buffer, Value = Buffer, HeaderKey = Buffer, He
   }
 
   #flushWriteCallbacks (error?: Error | null): void {
-    if (this.#buffer.length >= this.writableHighWaterMark || this.#pendingWriteCallbacks.length === 0) {
+    if (!this.#pendingWriteCallback || this.#buffer.length >= this.writableHighWaterMark) {
       return
     }
 
-    const callbacks = this.#pendingWriteCallbacks.splice(0)
-    for (const callback of callbacks) {
-      callback(error ?? null)
-    }
+    const callback = this.#pendingWriteCallback
+    this.#pendingWriteCallback = null
+    callback(error ?? null)
   }
 
   #emitReports (

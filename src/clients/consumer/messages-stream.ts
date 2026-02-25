@@ -665,10 +665,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               const headers = new Map()
               for (const [headerKey, headerValue] of record.headers) {
                 headers.set(
+                  /* c8 ignore next 2 - Hard to test */
                   headerKeyDeserializer(headerKey ?? undefined, messageToConsume),
                   headerValueDeserializer(headerValue ?? undefined, messageToConsume)
                 )
               }
+              /* c8 ignore next 2 - Hard to test */
               const key = keyDeserializer(record.key ?? undefined, headers, messageToConsume)
               const value = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
 

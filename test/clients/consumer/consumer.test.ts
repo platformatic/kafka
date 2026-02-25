@@ -299,115 +299,125 @@ test('constructor should throw on invalid options when strict mode is enabled', 
 })
 
 test('constructor should validate necessary options even not in strict mode', () => {
-  // Test no groupId
-  try {
-    // @ts-expect-error No group ID
-    // eslint-disable-next-line no-new
-    new Consumer({
-      clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:9092']
-    })
-    throw new Error('Should have thrown for missing groupID')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, "/options must have required property 'groupId'.")
-  }
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
 
-  // Test with rebalanceTimeout < sessionTimeout (invalid)
   try {
-    // eslint-disable-next-line no-new
-    new Consumer({
-      clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:9092'],
-      groupId: 'test-group',
-      sessionTimeout: 30000,
-      rebalanceTimeout: 20000 // Less than sessionTimeout
-    })
-    throw new Error('Should have thrown for rebalanceTimeout < sessionTimeout')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/rebalanceTimeout must be greater than or equal to /options/sessionTimeout.')
-  }
+    // Test no groupId
+    try {
+      // @ts-expect-error No group ID
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092']
+      })
+      throw new Error('Should have thrown for missing groupID')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, "/options must have required property 'groupId'.")
+    }
 
-  // Test with heartbeatInterval > sessionTimeout and heartbeatInterval > rebalanceTimeout (invalid)
-  try {
-    // eslint-disable-next-line no-new
-    new Consumer({
+    // Test with rebalanceTimeout < sessionTimeout (invalid)
+    try {
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092'],
+        groupId: 'test-group',
+        sessionTimeout: 30000,
+        rebalanceTimeout: 20000 // Less than sessionTimeout
+      })
+      throw new Error('Should have thrown for rebalanceTimeout < sessionTimeout')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/rebalanceTimeout must be greater than or equal to /options/sessionTimeout.')
+    }
+
+    // Test with heartbeatInterval > sessionTimeout and heartbeatInterval > rebalanceTimeout (invalid)
+    try {
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092'],
+        groupId: 'test-group',
+        sessionTimeout: 30000,
+        rebalanceTimeout: 60000,
+        heartbeatInterval: 40000 // Greater than sessionTimeout
+      })
+      throw new Error('Should have thrown for heartbeatInterval > sessionTimeout')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/heartbeatInterval must be less than or equal to /options/sessionTimeout.')
+    }
+
+    // Test with heartbeatInterval > rebalanceTimeout (invalid)
+    try {
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092'],
+        groupId: 'test-group',
+        sessionTimeout: 30000,
+        rebalanceTimeout: 60000,
+        heartbeatInterval: 70000 // Greater than rebalanceTimeout
+      })
+      throw new Error('Should have thrown for heartbeatInterval > rebalanceTimeout')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(
+        error.message,
+        '/options/heartbeatInterval must be less than or equal to /options/sessionTimeout, /options/heartbeatInterval must be less than or equal to /options/rebalanceTimeout.'
+      )
+    }
+
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092'],
+        groupId: 'test-group',
+        deserializers: registry.getDeserializers(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
+    }
+
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
+      // eslint-disable-next-line no-new
+      new Consumer({
+        clientId: 'test-consumer',
+        bootstrapBrokers: ['localhost:9092'],
+        groupId: 'test-group',
+        beforeDeserialization: registry.getBeforeDeserializationHook(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(
+        error.message,
+        '/options/beforeDeserialization cannot be provided when /options/registry is provided.'
+      )
+    }
+
+    // Valid relationship between options
+    const consumer = new Consumer({
       clientId: 'test-consumer',
       bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       sessionTimeout: 30000,
       rebalanceTimeout: 60000,
-      heartbeatInterval: 40000 // Greater than sessionTimeout
+      heartbeatInterval: 5000 // Valid: less than both sessionTimeout and rebalanceTimeout
     })
-    throw new Error('Should have thrown for heartbeatInterval > sessionTimeout')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/heartbeatInterval must be less than or equal to /options/sessionTimeout.')
+
+    strictEqual(consumer instanceof Consumer, true)
+    consumer.close()
+  } finally {
+    process.emitWarning = originalEmitWarning
   }
-
-  // Test with heartbeatInterval > rebalanceTimeout (invalid)
-  try {
-    // eslint-disable-next-line no-new
-    new Consumer({
-      clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:9092'],
-      groupId: 'test-group',
-      sessionTimeout: 30000,
-      rebalanceTimeout: 60000,
-      heartbeatInterval: 70000 // Greater than rebalanceTimeout
-    })
-    throw new Error('Should have thrown for heartbeatInterval > rebalanceTimeout')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(
-      error.message,
-      '/options/heartbeatInterval must be less than or equal to /options/sessionTimeout, /options/heartbeatInterval must be less than or equal to /options/rebalanceTimeout.'
-    )
-  }
-
-  try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
-    // eslint-disable-next-line no-new
-    new Consumer({
-      clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:9092'],
-      groupId: 'test-group',
-      deserializers: registry.getDeserializers(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
-  }
-
-  try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
-    // eslint-disable-next-line no-new
-    new Consumer({
-      clientId: 'test-consumer',
-      bootstrapBrokers: ['localhost:9092'],
-      groupId: 'test-group',
-      beforeDeserialization: registry.getBeforeDeserializationHook(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/beforeDeserialization cannot be provided when /options/registry is provided.')
-  }
-
-  // Valid relationship between options
-  const consumer = new Consumer({
-    clientId: 'test-consumer',
-    bootstrapBrokers: ['localhost:9092'],
-    groupId: 'test-group',
-    sessionTimeout: 30000,
-    rebalanceTimeout: 60000,
-    heartbeatInterval: 5000 // Valid: less than both sessionTimeout and rebalanceTimeout
-  })
-
-  strictEqual(consumer instanceof Consumer, true)
-  consumer.close()
 })
 
 test('constructor should emit warnings for experimental APIs', () => {
@@ -425,7 +435,7 @@ test('constructor should emit warnings for experimental APIs', () => {
       bootstrapBrokers: ['localhost:9092'],
       groupId: 'test-group',
       beforeDeserialization (_u1, _u2, _u3, callback) {
-        callback(null, _u3)
+        callback(null)
       }
     })
 
@@ -746,69 +756,78 @@ test('consume should fail when consumer is closed', async t => {
 
 test('consume should validate the supplied options', async t => {
   const consumer = createConsumer(t, { strict: true })
-
-  // Test with invalid topics type
-  try {
-    await consumer.consume({
-      // @ts-expect-error - Intentionally passing invalid option
-      topics: 'not-an-array'
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message.includes('topics'), true)
-  }
-
-  // Test with invalid autocommit type
-  try {
-    await consumer.consume({
-      topics: [],
-      // @ts-expect-error - Intentionally passing invalid option
-      autocommit: 'not-a-boolean'
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message.includes('autocommit'), true)
-  }
-
-  // Test with invalid maxBytes type
-  try {
-    await consumer.consume({
-      topics: [],
-      // @ts-expect-error - Intentionally passing invalid option
-      maxBytes: 'not-a-number'
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message.includes('maxBytes'), true)
-  }
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
 
   try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
+    // Test with invalid topics type
+    try {
+      await consumer.consume({
+        // @ts-expect-error - Intentionally passing invalid option
+        topics: 'not-an-array'
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message.includes('topics'), true)
+    }
 
-    await consumer.consume({
-      topics: [],
-      deserializers: registry.getDeserializers(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
-  }
+    // Test with invalid autocommit type
+    try {
+      await consumer.consume({
+        topics: [],
+        // @ts-expect-error - Intentionally passing invalid option
+        autocommit: 'not-a-boolean'
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message.includes('autocommit'), true)
+    }
 
-  try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
+    // Test with invalid maxBytes type
+    try {
+      await consumer.consume({
+        topics: [],
+        // @ts-expect-error - Intentionally passing invalid option
+        maxBytes: 'not-a-number'
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message.includes('maxBytes'), true)
+    }
 
-    await consumer.consume({
-      topics: [],
-      beforeDeserialization: registry.getBeforeDeserializationHook(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/beforeDeserialization cannot be provided when /options/registry is provided.')
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
+
+      await consumer.consume({
+        topics: [],
+        deserializers: registry.getDeserializers(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/deserializers cannot be provided when /options/registry is provided.')
+    }
+
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
+
+      await consumer.consume({
+        topics: [],
+        beforeDeserialization: registry.getBeforeDeserializationHook(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(
+        error.message,
+        '/options/beforeDeserialization cannot be provided when /options/registry is provided.'
+      )
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning
   }
 })
 

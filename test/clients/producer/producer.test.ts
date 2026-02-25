@@ -105,34 +105,41 @@ test('constructor should validate options in strict mode', t => {
 })
 
 test('constructor should validat other options even when not in strict mode', () => {
-  try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
-
-    // eslint-disable-next-line no-new
-    new Producer({
-      clientId: 'test-producer',
-      bootstrapBrokers: kafkaBootstrapServers,
-      serializers: registry.getSerializers(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/serializers cannot be provided when /options/registry is provided.')
-  }
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
 
   try {
-    const registry = new ConfluentSchemaRegistry({ url: '' })
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
 
-    // eslint-disable-next-line no-new
-    new Producer({
-      clientId: 'test-producer',
-      bootstrapBrokers: kafkaBootstrapServers,
-      beforeSerialization: registry.getBeforeSerializationHook(),
-      registry
-    })
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message, '/options/beforeSerialization cannot be provided when /options/registry is provided.')
+      // eslint-disable-next-line no-new
+      new Producer({
+        clientId: 'test-producer',
+        bootstrapBrokers: kafkaBootstrapServers,
+        serializers: registry.getSerializers(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/serializers cannot be provided when /options/registry is provided.')
+    }
+
+    try {
+      const registry = new ConfluentSchemaRegistry({ url: '' })
+
+      // eslint-disable-next-line no-new
+      new Producer({
+        clientId: 'test-producer',
+        bootstrapBrokers: kafkaBootstrapServers,
+        beforeSerialization: registry.getBeforeSerializationHook(),
+        registry
+      })
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, '/options/beforeSerialization cannot be provided when /options/registry is provided.')
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning
   }
 })
 
@@ -150,7 +157,7 @@ test('constructor should emit warnings for experimental APIs', () => {
       clientId: 'test-producer',
       bootstrapBrokers: kafkaBootstrapServers,
       beforeSerialization (_m, _t, _d, callback) {
-        callback(null, _d)
+        callback(null)
       }
     })
 
@@ -206,6 +213,40 @@ test('close should handle errors from Base.close', async t => {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual((error as Error).message.includes(mockedErrorMessage), true)
   }
+})
+
+test('close should fail with active producer streams unless force is true', async t => {
+  const producer = createProducer(t)
+  const stream = producer.asStream({ batchTime: -1 })
+
+  strictEqual(producer.streamsCount, 1)
+
+  try {
+    await producer.close()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual(error.message, 'Cannot close producer while producing messages.')
+  }
+
+  strictEqual(producer.closed, false)
+
+  await stream.close()
+})
+
+test('close with force=true should close all producer streams', async t => {
+  const producer = createProducer(t)
+  const stream1 = producer.asStream({ batchTime: -1 })
+  const stream2 = producer.asStream({ batchTime: -1 })
+
+  strictEqual(producer.streamsCount, 2)
+
+  await producer.close(true)
+
+  strictEqual(producer.closed, true)
+  strictEqual(stream1.closed, true)
+  strictEqual(stream2.closed, true)
+  strictEqual(producer.streamsCount, 0)
 })
 
 test('should support both promise and callback API', async t => {
@@ -822,6 +863,30 @@ test('send should handle synchronuous error during payload creation', async t =>
   )
 })
 
+test('send should handle serializer errors', async t => {
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      ...stringSerializers,
+      value () {
+        throw new Error('boom')
+      }
+    }
+  })
+
+  const testTopic = await createTopic(t)
+
+  await rejects(
+    async () => {
+      await producer.send({ messages: [{ topic: testTopic, key: 'k', value: 'v' }] })
+    },
+    error => {
+      strictEqual(error instanceof UserError, true)
+      strictEqual((error as Error).message, 'Failed to serialize a message.')
+      return true
+    }
+  )
+})
+
 test('send should validate options in strict mode', async t => {
   const producer = createProducer(t, { strict: true })
   const testTopic = await createTopic(t)
@@ -1314,139 +1379,183 @@ test('metrics should track the number of produced messages', async t => {
 })
 
 test('should support sync beforeSerialization hooks', async t => {
-  const topic = await createTopic(t, true)
-
-  // Consume messages with autocommit
-  const producer = await createProducer(t, {
-    serializers: stringSerializers,
-    beforeSerialization (_, type, message, callback) {
-      if (type === 'key') {
-        message.key = message.key!.toUpperCase()
-        message.value = message.value!.toUpperCase()
-      }
-
-      callback(null)
-    }
-  })
-
-  await producer.send({
-    messages: [
-      {
-        topic,
-        key: 'key-0',
-        value: 'value-0',
-        headers: {
-          header1: 'value1'
-        }
-      }
-    ]
-  })
-
-  const consumer = await createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
-  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
-
-  const messages = []
-  for await (const message of stream) {
-    messages.push(message)
-  }
-
-  strictEqual(messages.length, 1)
-  deepStrictEqual(messages[0].key, 'KEY-0')
-  deepStrictEqual(messages[0].value, 'VALUE-0')
-})
-
-test('should handle sync beforeSerialization errors', async t => {
-  const topic = await createTopic(t, true)
-
-  // Consume messages with autocommit
-  const producer = await createProducer(t, {
-    serializers: stringSerializers,
-    beforeSerialization (_u1, _u2, _u3, callback) {
-      callback(new MultipleErrors(mockedErrorMessage, []))
-    }
-  })
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
 
   try {
+    const topic = await createTopic(t, true)
+
+    // Consume messages with autocommit
+    const producer = await createProducer(t, {
+      serializers: stringSerializers,
+      beforeSerialization (_, type, message, callback) {
+        if (type === 'key') {
+          message.key = message.key!.toUpperCase()
+          message.value = message.value!.toUpperCase()
+        }
+
+        callback(null)
+      }
+    })
+
     await producer.send({
       messages: [
         {
           topic,
           key: 'key-0',
-          value: 'value-0'
+          value: 'value-0',
+          headers: {
+            header1: 'value1'
+          }
         }
       ]
     })
 
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    const consumer = await createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+    const messages = []
+    for await (const message of stream) {
+      messages.push(message)
+    }
+
+    strictEqual(messages.length, 1)
+    deepStrictEqual(messages[0].key, 'KEY-0')
+    deepStrictEqual(messages[0].value, 'VALUE-0')
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+})
+
+test('should handle sync beforeSerialization errors', async t => {
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
+
+  try {
+    const topic = await createTopic(t, true)
+
+    // Consume messages with autocommit
+    const producer = await createProducer(t, {
+      serializers: stringSerializers,
+      beforeSerialization (_u1, _u2, _u3, callback) {
+        callback(new MultipleErrors(mockedErrorMessage, []))
+      }
+    })
+
+    try {
+      await producer.send({
+        messages: [
+          {
+            topic,
+            key: 'key-0',
+            value: 'value-0'
+          }
+        ]
+      })
+
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning
   }
 })
 
 test('should support async beforeSerialization hooks', async t => {
-  const topic = await createTopic(t, true)
-
-  // Consume messages with autocommit
-  const producer = await createProducer(t, {
-    serializers: stringSerializers,
-    async beforeSerialization (_, type, message) {
-      if (type === 'key') {
-        message.key = message.key!.toUpperCase()
-        message.value = message.value!.toUpperCase()
-      }
-    }
-  })
-
-  await producer.send({
-    messages: [
-      {
-        topic,
-        key: 'key-0',
-        value: 'value-0',
-        headers: new Map<string, string>([['header1', 'value1']])
-      }
-    ]
-  })
-
-  const consumer = await createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
-  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
-
-  const messages = []
-  for await (const message of stream) {
-    messages.push(message)
-  }
-
-  strictEqual(messages.length, 1)
-  deepStrictEqual(messages[0].key, 'KEY-0')
-  deepStrictEqual(messages[0].value, 'VALUE-0')
-})
-
-test('should handle async beforeSerialization hooks errors', async t => {
-  const topic = await createTopic(t, true)
-
-  // Consume messages with autocommit
-  const producer = await createProducer(t, {
-    serializers: stringSerializers,
-    async beforeSerialization () {
-      throw new MultipleErrors(mockedErrorMessage, [])
-    }
-  })
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
 
   try {
+    const topic = await createTopic(t, true)
+
+    // Consume messages with autocommit
+    const producer = await createProducer(t, {
+      serializers: stringSerializers,
+      async beforeSerialization (_, type, message) {
+        if (type === 'key') {
+          message.key = message.key!.toUpperCase()
+          message.value = message.value!.toUpperCase()
+        }
+      }
+    })
+
     await producer.send({
       messages: [
         {
           topic,
           key: 'key-0',
-          value: 'value-0'
+          value: 'value-0',
+          headers: new Map<string, string>([['header1', 'value1']])
         }
       ]
     })
 
+    const consumer = await createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+    const messages = []
+    for await (const message of stream) {
+      messages.push(message)
+    }
+
+    strictEqual(messages.length, 1)
+    deepStrictEqual(messages[0].key, 'KEY-0')
+    deepStrictEqual(messages[0].value, 'VALUE-0')
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+})
+
+test('should handle async beforeSerialization hooks errors', async t => {
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
+
+  try {
+    const topic = await createTopic(t, true)
+
+    // Consume messages with autocommit
+    const producer = await createProducer(t, {
+      serializers: stringSerializers,
+      async beforeSerialization () {
+        throw new MultipleErrors(mockedErrorMessage, [])
+      }
+    })
+
+    try {
+      await producer.send({
+        messages: [
+          {
+            topic,
+            key: 'key-0',
+            value: 'value-0'
+          }
+        ]
+      })
+
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual(error.message.includes(mockedErrorMessage), true)
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+})
+
+test('asStream should validate options', t => {
+  const producer = createProducer(t, { strict: true })
+
+  try {
+    producer.asStream({
+      // @ts-expect-error - invalid option
+      batchSize: 'FOO'
+    })
+
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    strictEqual(error instanceof UserError, true)
+    strictEqual((error as Error).message.includes('/options/batchSize'), true)
   }
 })

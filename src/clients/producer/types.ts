@@ -21,6 +21,18 @@ export type Partitioner<Key, Value, HeaderKey, HeaderValue> = (
   message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>
 ) => number
 
+export interface ProducerStreamReport {
+  batchId: number
+  count: number
+  result: ProduceResult
+}
+
+export interface ProducerStreamMessageReport<Key, Value, HeaderKey, HeaderValue> {
+  batchId: number
+  index: number
+  message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>
+}
+
 export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
   producerId?: bigint
   producerEpoch?: number
@@ -43,3 +55,25 @@ export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
 export type SendOptions<Key, Value, HeaderKey, HeaderValue> = {
   messages: MessageToProduce<Key, Value, HeaderKey, HeaderValue>[]
 } & ProduceOptions<Key, Value, HeaderKey, HeaderValue>
+
+export const ProducerStreamReportModes = {
+  NONE: 'none',
+  BATCH: 'batch',
+  MESSAGE: 'message'
+} as const
+export const allowedProducerStreamReportModes = Object.values(
+  ProducerStreamReportModes
+) as ProducerStreamReportModeValue[]
+
+export type ProducerStreamReportMode = keyof typeof ProducerStreamReportModes
+export type ProducerStreamReportModeValue = (typeof ProducerStreamReportModes)[keyof typeof ProducerStreamReportModes]
+
+export type ProducerStreamOptions<Key, Value, HeaderKey, HeaderValue> = Omit<
+  SendOptions<Key, Value, HeaderKey, HeaderValue>,
+  'messages'
+> & {
+  highWaterMark?: number
+  batchSize?: number
+  batchTime?: number
+  reportMode?: ProducerStreamReportModeValue
+}

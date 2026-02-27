@@ -640,9 +640,15 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.#reauthenticationTimeout = setTimeout(this.reauthenticate.bind(this), Number(sessionLifetimeMs) * 0.8)
     }
 
-    if (this.#status === ConnectionStatuses.CONNECTED || this.#status === ConnectionStatuses.REAUTHENTICATING) {
+    const isReauthenticating = this.#status === ConnectionStatuses.REAUTHENTICATING
+
+    if (this.#status === ConnectionStatuses.CONNECTED || isReauthenticating) {
       this.#status = ConnectionStatuses.CONNECTED
       this.emit('sasl:authentication:extended', authBytes)
+
+      if (isReauthenticating) {
+        this.emit('connect')
+      }
     } else {
       this.emit('sasl:authentication', authBytes)
       this.#onConnectionSucceed(diagnosticContext)

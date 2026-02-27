@@ -1443,6 +1443,22 @@ test('Connection.reauthenticate should trigger reauthentication', async t => {
   await once(connection, 'sasl:authentication:extended')
 })
 
+test('Connection.ready should resolve during SASL reauthentication', async t => {
+  const connection = new Connection('test-client', {
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+
+  const readyPromise = connection.ready()
+  connection.reauthenticate()
+  strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
+
+  await readyPromise
+})
+
 test('Connection.reauthenticate should do nothing when SASL is not configured', async t => {
   const { port } = await createServer(t)
   const connection = new Connection('test-client')

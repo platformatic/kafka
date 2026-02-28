@@ -42,7 +42,7 @@
     "create:api": "node scripts/create-api.ts"
   },
   "dependencies": {
-    "@platformatic/dynamic-buffer": "^0.3.0",
+    "@platformatic/dynamic-buffer": "0.3.0",
     "@platformatic/wasm-utils": "^0.1.0",
     "ajv": "^8.17.1",
     "avsc": "^5.7.9",

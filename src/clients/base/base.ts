@@ -496,7 +496,7 @@ export class Base<
       return
     }
 
-    const discovered = Array.from(this.#metadata.brokers.values()).map(({ host, port }) => ({ host, port }))
+    const discovered = Array.from(this.#metadata.brokers.values())
     this[kConnections].getFirstAvailable([...this[kBootstrapBrokers], ...discovered], callback)
   }
 

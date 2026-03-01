@@ -491,7 +491,13 @@ export class Base<
   }
 
   [kGetBootstrapConnection] (callback: Callback<Connection>): void {
-    this[kConnections].getFirstAvailable(this[kBootstrapBrokers], callback)
+    if (!this.#metadata) {
+      this[kConnections].getFirstAvailable(this[kBootstrapBrokers], callback)
+      return
+    }
+
+    const discovered = Array.from(this.#metadata.brokers.values()).map(({ host, port }) => ({ host, port }))
+    this[kConnections].getFirstAvailable([...this[kBootstrapBrokers], ...discovered], callback)
   }
 
   [kValidateOptions] (

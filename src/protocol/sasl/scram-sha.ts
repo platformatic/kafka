@@ -1,4 +1,5 @@
-import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
+import { createHash, createHmac, pbkdf2, randomBytes } from 'node:crypto'
+import { promisify } from 'node:util'
 import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { type SASLAuthenticationAPI, type SaslAuthenticateResponse } from '../../apis/security/sasl-authenticate-v2.ts'
 import { AuthenticationError } from '../../errors.ts'
@@ -19,7 +20,7 @@ export interface ScramAlgorithmDefinition {
 
 export interface ScramCryptoModule {
   h: (definition: ScramAlgorithmDefinition, data: string | Buffer) => Buffer
-  hi: (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) => Buffer
+  hi: (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number) => Promise<Buffer>
   hmac: (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer) => Buffer
   xor: (a: Buffer, b: Buffer) => Buffer
 }
@@ -62,8 +63,10 @@ export function h (definition: ScramAlgorithmDefinition, data: string | Buffer):
   return createHash(definition.algorithm).update(data).digest()
 }
 
-export function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number): Buffer {
-  return pbkdf2Sync(password, salt, iterations, definition.keyLength, definition.algorithm)
+const pbkdf2Async = promisify(pbkdf2)
+
+export function hi (definition: ScramAlgorithmDefinition, password: string, salt: Buffer, iterations: number): Promise<Buffer> {
+  return pbkdf2Async(password, salt, iterations, definition.keyLength, definition.algorithm)
 }
 
 export function hmac (definition: ScramAlgorithmDefinition, key: Buffer, data: string | Buffer): Buffer {
@@ -143,37 +146,40 @@ function performAuthentication (
     // ClientProof     := ClientKey XOR ClientSignature
     // ServerKey       := HMAC(SaltedPassword, "Server Key")
     // ServerSignature := HMAC(ServerKey, AuthMessage)
-    const saltedPassword = hi(definition, password, salt, iterations)
-    const clientKey = hmac(definition, saltedPassword, HMAC_CLIENT_KEY)
-    const storedKey = h(definition, clientKey)
-    const clientFinalMessageWithoutProof = `c=${GS2_HEADER_BASE64},r=${serverNonce}`
-    const authMessage = `${clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageWithoutProof}`
-    const clientSignature = hmac(definition, storedKey, authMessage)
-    const clientProof = xor(clientKey, clientSignature)
-    const serverKey = hmac(definition, saltedPassword, HMAC_SERVER_KEY)
-    const serverSignature = hmac(definition, serverKey, authMessage)
+    hi(definition, password, salt, iterations).then(saltedPassword => {
+      const clientKey = hmac(definition, saltedPassword, HMAC_CLIENT_KEY)
+      const storedKey = h(definition, clientKey)
+      const clientFinalMessageWithoutProof = `c=${GS2_HEADER_BASE64},r=${serverNonce}`
+      const authMessage = `${clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageWithoutProof}`
+      const clientSignature = hmac(definition, storedKey, authMessage)
+      const clientProof = xor(clientKey, clientSignature)
+      const serverKey = hmac(definition, saltedPassword, HMAC_SERVER_KEY)
+      const serverSignature = hmac(definition, serverKey, authMessage)
 
-    authenticateAPI(connection, Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`), (
-      error,
-      lastResponse
-    ) => {
-      if (error) {
-        callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
-        return
-      }
+      authenticateAPI(connection, Buffer.from(`${clientFinalMessageWithoutProof},p=${clientProof.toString('base64')}`), (
+        error,
+        lastResponse
+      ) => {
+        if (error) {
+          callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
+          return
+        }
 
-      // Send the last message to the server
-      const lastData = parseParameters(lastResponse!.authBytes)
+        // Send the last message to the server
+        const lastData = parseParameters(lastResponse!.authBytes)
 
-      if (lastData.e) {
-        callback(new AuthenticationError(lastData.e))
-        return
-      } else if (lastData.v !== serverSignature.toString('base64')) {
-        callback(new AuthenticationError('Invalid server signature.'))
-        return
-      }
+        if (lastData.e) {
+          callback(new AuthenticationError(lastData.e))
+          return
+        } else if (lastData.v !== serverSignature.toString('base64')) {
+          callback(new AuthenticationError('Invalid server signature.'))
+          return
+        }
 
-      callback(null, lastResponse)
+        callback(null, lastResponse)
+      })
+    }).catch(error => {
+      callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
     })
   })
 }

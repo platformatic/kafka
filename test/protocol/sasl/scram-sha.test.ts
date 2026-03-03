@@ -85,22 +85,22 @@ test('h should hash data using the algorithm from the definition', () => {
 })
 
 // Test hi (PBKDF2) function
-test('hi should derive key using PBKDF2', () => {
+test('hi should derive key using PBKDF2', async () => {
   const sha256Def = ScramAlgorithms['SHA-256']
   const password = 'password'
   const salt = Buffer.from('salt')
   const iterations = 1
 
   // Should return a buffer of the expected length
-  const key = hi(sha256Def, password, salt, iterations)
+  const key = await hi(sha256Def, password, salt, iterations)
   strictEqual(key.length, sha256Def.keyLength, 'Key length should match algorithm definition')
 
   // Different iterations should produce different results
-  const key2 = hi(sha256Def, password, salt, 2)
+  const key2 = await hi(sha256Def, password, salt, 2)
   ok(!key.equals(key2), 'Different iterations should produce different keys')
 
   // Different definitions should produce different results
-  const key512 = hi(ScramAlgorithms['SHA-512'], password, salt, iterations)
+  const key512 = await hi(ScramAlgorithms['SHA-512'], password, salt, iterations)
   strictEqual(key512.length, ScramAlgorithms['SHA-512'].keyLength, 'Key length should match SHA-512 definition')
   ok(!key.equals(key512), 'Different algorithms should produce different keys')
 })

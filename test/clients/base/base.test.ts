@@ -13,12 +13,15 @@ import {
   sleep,
   TimeoutError,
   UnsupportedApiError,
+  type Broker,
+  type CallbackWithPromise,
   type ClientDiagnosticEvent,
   type ClusterMetadata
 } from '../../../src/index.ts'
 import {
   createBase,
   createTracingChannelVerifier,
+  kafkaBootstrapServers,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
@@ -774,4 +777,72 @@ test('initialization should not fail when maxInflights is specifically set to un
   strictEqual(typeof metadata.id, 'string')
   strictEqual(metadata.brokers instanceof Map, true)
   strictEqual(metadata.topics instanceof Map, true)
+})
+
+test('metadata should fall back to discovered brokers when bootstrap broker is unreachable', async t => {
+  // Tests assume a single bootstrap broker; if kafkaBootstrapServers is extended the test is invalidated
+  strictEqual(kafkaBootstrapServers.length, 1, 'test assumes a single bootstrap broker')
+  const [bootstrapHost, bootstrapPortStr] = kafkaBootstrapServers[0].split(':')
+  const bootstrapPort = Number(bootstrapPortStr)
+
+  const client = createBase(t, { retries: 0 })
+
+  // Fetch initial metadata to populate the discovered brokers cache
+  const initialMetadata = await client.metadata({ topics: [] })
+  ok(initialMetadata.brokers.size > 1, 'test requires a multi-broker cluster')
+
+  // Simulate the bootstrap broker becoming unreachable
+  let bootstrapAttempted = false
+  const pool = client[kConnections]
+  const originalGet = pool.get.bind(pool)
+  pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
+    if (broker.host === bootstrapHost && broker.port === bootstrapPort) {
+      bootstrapAttempted = true
+      callback(new Error('Simulated bootstrap broker unreachable'))
+      return
+    }
+    originalGet(broker, callback)
+  } as typeof originalGet
+
+  // Verify that a subsequent metadata request succeeds using a discovered broker
+  const metadata = await client.metadata({ topics: [], forceUpdate: true })
+  ok(bootstrapAttempted, 'bootstrap broker should have been attempted before falling back')
+  strictEqual(typeof metadata.id, 'string')
+  ok(metadata.brokers.size > 0)
+})
+
+test('metadata should use bootstrap brokers only after clearMetadata', async t => {
+  // Tests assume a single bootstrap broker; if kafkaBootstrapServers is extended the test is invalidated
+  strictEqual(kafkaBootstrapServers.length, 1, 'test assumes a single bootstrap broker')
+  const [bootstrapHost, bootstrapPortStr] = kafkaBootstrapServers[0].split(':')
+  const bootstrapPort = Number(bootstrapPortStr)
+
+  const client = createBase(t, { retries: 0 })
+
+  // Fetch initial metadata to populate the discovered brokers cache
+  const initialMetadata = await client.metadata({ topics: [] })
+  ok(initialMetadata.brokers.size > 1, 'test requires a multi-broker cluster')
+
+  // Clear the cache — subsequent fetches should revert to bootstrap-only discovery
+  client.clearMetadata()
+
+  // Simulate the bootstrap broker becoming unreachable
+  const pool = client[kConnections]
+  const originalGet = pool.get.bind(pool)
+  pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
+    if (broker.host === bootstrapHost && broker.port === bootstrapPort) {
+      callback(new Error('Simulated bootstrap broker unreachable'))
+      return
+    }
+    originalGet(broker, callback)
+  } as typeof originalGet
+
+  // Should fail because clearMetadata reset the discovered broker cache
+  try {
+    await client.metadata({ topics: [] })
+    throw new Error('Expected metadata call to fail')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Cannot connect to any broker.')
+  }
 })

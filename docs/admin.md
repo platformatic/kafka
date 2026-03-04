@@ -60,10 +60,10 @@ The return value is `void`.
 
 Options:
 
-| Property      | Type                             | Description                                                                                            |
-| ------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `topics`      | `CreatePartitionsRequestTopic[]` | Topics to create partitions for with information about partition count and assignments for each topic. |
-| `validateOnly`| `boolean`                        | Whether to only validate the request without applying changes. Defaults to `false`.                    |
+| Property       | Type                             | Description                                                                                            |
+| -------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `topics`       | `CreatePartitionsRequestTopic[]` | Topics to create partitions for with information about partition count and assignments for each topic. |
+| `validateOnly` | `boolean`                        | Whether to only validate the request without applying changes. Defaults to `false`.                    |
 
 ### `listGroups(options[, callback])`
 
@@ -150,9 +150,9 @@ The return value is `void`.
 
 Options:
 
-| Property   | Type    | Description                     |
-| ---------- | ------- | ------------------------------- |
-| creations  | `Acl[]` | Array of ACL entries to create. |
+| Property  | Type    | Description                     |
+| --------- | ------- | ------------------------------- |
+| creations | `Acl[]` | Array of ACL entries to create. |
 
 ### `describeAcls(options[, callback])`
 
@@ -230,6 +230,18 @@ Options:
 | -------- | ------------------------------------------------ | ----------------------------------------------------------- |
 | groupId  | `string`                                         | The consumer group ID from which to delete offsets.         |
 | topics   | `{ name: string, partitionIndexes: number[] }[]` | Array of topics and partitions for which to delete offsets. |
+
+### `deleteRecords(options[, callback])`
+
+Deletes records up to (but not including) the provided offset for each topic partition.
+
+The return value is an array of topics with per-partition low watermarks after deletion (`{ partition, lowWatermark }`).
+
+Options:
+
+| Property | Type                                                                      | Description                                                           |
+| -------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| topics   | `{ name: string, partitions: { partition: number, offset: bigint }[] }[]` | Array of topics and partition offset targets to delete records up to. |
 
 ### `describeConfigs(options[, callback])`
 

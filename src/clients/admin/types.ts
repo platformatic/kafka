@@ -173,6 +173,30 @@ export interface DeleteConsumerGroupOffsetsOptions {
   topics: { name: string; partitionIndexes: number[] }[]
 }
 
+export interface DeleteRecordsPartitionOffset {
+  partition: number
+  offset: bigint
+}
+
+export interface DeleteRecordsTopic {
+  name: string
+  partitions: DeleteRecordsPartitionOffset[]
+}
+
+export interface DeleteRecordsOptions {
+  topics: DeleteRecordsTopic[]
+}
+
+export interface DeletedRecordsPartition {
+  partition: number
+  lowWatermark: bigint
+}
+
+export interface DeletedRecordsTopic {
+  name: string
+  partitions: DeletedRecordsPartition[]
+}
+
 export interface DescribeConfigsOptions {
   resources: DescribeConfigsRequestResource[]
   includeSynonyms?: boolean

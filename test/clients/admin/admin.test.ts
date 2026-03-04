@@ -45,6 +45,7 @@ import {
   Consumer,
   createAclsV3,
   createPartitionsV3,
+  deleteRecordsV2,
   deleteAclsV3,
   describeAclsV3,
   describeClientQuotasV0,
@@ -353,6 +354,16 @@ test('all operations should fail when admin is closed', async t => {
   try {
     await admin.listOffsets({
       topics: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, timestamp: BigInt(0) }] }]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, 'Client is closed.')
+  }
+
+  // Attempt to call deleteRecords on closed admin
+  try {
+    await admin.deleteRecords({
+      topics: [{ name: 'test-topic', partitions: [{ partition: 0, offset: BigInt(0) }] }]
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
@@ -8126,5 +8137,281 @@ test('listOffsets should handle unavailable API errors', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.errors[0].message.includes('Unsupported API ListOffsets.'), true)
+  }
+})
+
+test('deleteRecords should delete records for topic partitions', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 2,
+    replicas: 1
+  })
+
+  const producer = createProducer(t, { acks: 1, serializers: stringSerializers })
+
+  for (let i = 0; i < 5; i++) {
+    await producer.send({
+      messages: [
+        { key: `partition-0-${i}`, value: `value-${i}`, topic: topicName, partition: 0 },
+        { key: `partition-1-${i}`, value: `value-${i}`, topic: topicName, partition: 1 }
+      ]
+    })
+  }
+
+  await scheduler.wait(500)
+
+  const latestOffsets = await admin.listOffsets({
+    topics: [
+      {
+        name: topicName,
+        partitions: [
+          { partitionIndex: 0, timestamp: ListOffsetTimestamps.LATEST },
+          { partitionIndex: 1, timestamp: ListOffsetTimestamps.LATEST }
+        ]
+      }
+    ]
+  })
+
+  const partitionOffsets = [...latestOffsets[0].partitions].sort((a, b) => a.partitionIndex - b.partitionIndex)
+
+  const deleted = await admin.deleteRecords({
+    topics: [
+      {
+        name: topicName,
+        partitions: partitionOffsets.map(partition => ({
+          partition: partition.partitionIndex,
+          offset: partition.offset
+        }))
+      }
+    ]
+  })
+
+  deepStrictEqual(deleted, [
+    {
+      name: topicName,
+      partitions: partitionOffsets.map(partition => ({
+        partition: partition.partitionIndex,
+        lowWatermark: partition.offset
+      }))
+    }
+  ])
+
+  await retry(10, 500, async () => {
+    const earliestOffsets = await admin.listOffsets({
+      topics: [
+        {
+          name: topicName,
+          partitions: [
+            { partitionIndex: 0, timestamp: ListOffsetTimestamps.EARLIEST },
+            { partitionIndex: 1, timestamp: ListOffsetTimestamps.EARLIEST }
+          ]
+        }
+      ]
+    })
+
+    deepStrictEqual(
+      [...earliestOffsets[0].partitions].sort((a, b) => a.partitionIndex - b.partitionIndex).map(p => p.offset),
+      partitionOffsets.map(p => p.offset)
+    )
+  })
+
+  await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('deleteRecords should support diagnostic channels', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  const options = {
+    topics: [
+      {
+        name: topicName,
+        partitions: [{ partition: 0, offset: BigInt(0) }]
+      }
+    ]
+  }
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    adminOffsetsChannel,
+    'client',
+    {
+      start (context: ClientDiagnosticEvent) {
+        deepStrictEqual(context, {
+          client: admin,
+          operation: 'deleteRecords',
+          options,
+          operationId: mockedOperationId
+        })
+      },
+      asyncStart (context: ClientDiagnosticEvent) {
+        const result = context.result as {
+          name: string
+          partitions: { partition: number; lowWatermark: bigint }[]
+        }[]
+        ok(result)
+        strictEqual(Array.isArray(result), true)
+      },
+      error (context: ClientDiagnosticEvent) {
+        ok(typeof context === 'undefined')
+      }
+    },
+    (_label: string, data: ClientDiagnosticEvent) => data.operation === 'deleteRecords'
+  )
+
+  await admin.deleteRecords(options)
+
+  verifyTracingChannel()
+})
+
+test('deleteRecords should validate options in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.deleteRecords({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  try {
+    await admin.deleteRecords({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  try {
+    await admin.deleteRecords({ topics: [{ name: 'test-topic', partitions: [{ partition: 0 }] }] as any })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('offset'), true)
+  }
+
+  try {
+    await admin.deleteRecords({ topics: [{ name: 'test-topic', partitions: [{ partition: -1, offset: BigInt(0) }] }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('partition'), true)
+  }
+})
+
+test('deleteRecords should handle errors from Base.metadata', async t => {
+  const admin = createAdmin(t)
+
+  mockMetadata(admin, 1)
+
+  try {
+    await admin.deleteRecords({
+      topics: [
+        {
+          name: 'test-topic',
+          partitions: [{ partition: 0, offset: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+  }
+})
+
+test('deleteRecords should handle errors from Connection.get', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockConnectionPoolGet(admin[kConnections], 2)
+
+  try {
+    await admin.deleteRecords({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partition: 0, offset: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting records failed.'), true)
+  }
+})
+
+test('deleteRecords should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockAPI(admin[kConnections], deleteRecordsV2.api.key)
+
+  try {
+    await admin.deleteRecords({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partition: 0, offset: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes('Deleting records failed.'), true)
+  }
+})
+
+test('deleteRecords should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  const topicName = `test-topic-${randomUUID()}`
+  await admin.createTopics({
+    topics: [topicName],
+    partitions: 1,
+    replicas: 1
+  })
+
+  await scheduler.wait(1000)
+
+  mockUnavailableAPI(admin, 'DeleteRecords')
+
+  try {
+    await admin.deleteRecords({
+      topics: [
+        {
+          name: topicName,
+          partitions: [{ partition: 0, offset: BigInt(0) }]
+        }
+      ]
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.errors[0].message.includes('Unsupported API DeleteRecords.'), true)
   }
 })

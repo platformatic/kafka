@@ -15,6 +15,11 @@ import {
 import { type DeleteAclsRequest, type DeleteAclsResponse } from '../../apis/admin/delete-acls-v3.ts'
 import { type DeleteGroupsRequest, type DeleteGroupsResponse } from '../../apis/admin/delete-groups-v2.ts'
 import {
+  type DeleteRecordsRequest,
+  type DeleteRecordsRequestTopics,
+  type DeleteRecordsResponse
+} from '../../apis/admin/delete-records-v2.ts'
+import {
   type DeleteTopicsRequest,
   type DeleteTopicsRequestTopic,
   type DeleteTopicsResponse
@@ -119,6 +124,7 @@ import {
   createTopicsOptionsValidator,
   deleteAclsOptionsValidator,
   deleteConsumerGroupOffsetsOptionsValidator,
+  deleteRecordsOptionsValidator,
   deleteGroupsOptionsValidator,
   deleteTopicsOptionsValidator,
   describeAclsOptionsValidator,
@@ -146,8 +152,10 @@ import {
   type CreateTopicsOptions,
   type DeleteAclsOptions,
   type DeleteConsumerGroupOffsetsOptions,
+  type DeleteRecordsOptions,
   type DeleteGroupsOptions,
   type DeleteTopicsOptions,
+  type DeletedRecordsTopic,
   type DescribeAclsOptions,
   type DescribeClientQuotasOptions,
   type DescribeConfigsOptions,
@@ -865,6 +873,38 @@ export class Admin extends Base<AdminOptions> {
     )
 
     return callback![kCallbackPromise]
+  }
+
+  deleteRecords (options: DeleteRecordsOptions, callback: CallbackWithPromise<DeletedRecordsTopic[]>): void
+  deleteRecords (options: DeleteRecordsOptions): Promise<DeletedRecordsTopic[]>
+  deleteRecords (
+    options: DeleteRecordsOptions,
+    callback?: CallbackWithPromise<DeletedRecordsTopic[]>
+  ): void | Promise<DeletedRecordsTopic[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, deleteRecordsOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError)
+      return callback[kCallbackPromise]
+    }
+
+    adminOffsetsChannel.traceCallback(
+      this.#deleteRecords,
+      1,
+      createDiagnosticContext({ client: this, operation: 'deleteRecords', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
   }
 
   #getControllerConnection (callback: Callback<Connection>): void {
@@ -2207,6 +2247,100 @@ export class Admin extends Base<AdminOptions> {
       },
       0
     )
+  }
+
+  #deleteRecords (options: DeleteRecordsOptions, callback: CallbackWithPromise<DeletedRecordsTopic[]>): void {
+    this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      const requestsByLeader = new Map<number, Map<string, DeleteRecordsRequestTopics>>()
+
+      for (const topic of options.topics) {
+        for (const partition of topic.partitions) {
+          const { leader } = metadata!.topics.get(topic.name)!.partitions[partition.partition]
+          let leaderRequests = requestsByLeader.get(leader)
+          if (!leaderRequests) {
+            leaderRequests = new Map()
+            requestsByLeader.set(leader, leaderRequests)
+          }
+
+          let topicRequest = leaderRequests.get(topic.name)
+          if (!topicRequest) {
+            topicRequest = { name: topic.name, partitions: [] }
+            leaderRequests.set(topic.name, topicRequest)
+          }
+
+          topicRequest.partitions.push({
+            partitionIndex: partition.partition,
+            offset: partition.offset
+          })
+        }
+      }
+
+      const requests = new Map<number, DeleteRecordsRequestTopics[]>()
+      for (const [leader, topics] of requestsByLeader) {
+        requests.set(leader, Array.from(topics.values()))
+      }
+
+      runConcurrentCallbacks(
+        'Deleting records failed.',
+        requests,
+        ([leader, requests], concurrentCallback) => {
+          this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
+            if (error) {
+              concurrentCallback(error)
+              return
+            }
+
+            this[kPerformWithRetry](
+              'deleteRecords',
+              retryCallback => {
+                this[kGetApi]<DeleteRecordsRequest, DeleteRecordsResponse>('DeleteRecords', (error, api) => {
+                  if (error) {
+                    retryCallback(error)
+                    return
+                  }
+
+                  api!(connection!, Array.from(requests.values()), this[kOptions].timeout!, retryCallback)
+                })
+              },
+              concurrentCallback,
+              0
+            )
+          })
+        },
+        (error, responses) => {
+          if (error) {
+            callback(error)
+            return
+          }
+
+          const deletedRecordsByTopic = new Map<string, DeletedRecordsTopic>()
+
+          for (const response of responses as DeleteRecordsResponse[]) {
+            for (const topic of response.topics) {
+              let topicDeletedRecords = deletedRecordsByTopic.get(topic.name)
+              if (!topicDeletedRecords) {
+                topicDeletedRecords = { name: topic.name, partitions: [] }
+                deletedRecordsByTopic.set(topic.name, topicDeletedRecords)
+              }
+
+              for (const partition of topic.partitions) {
+                topicDeletedRecords.partitions.push({
+                  partition: partition.partitionIndex,
+                  lowWatermark: partition.lowWatermark
+                })
+              }
+            }
+          }
+
+          callback(null, Array.from(deletedRecordsByTopic.values()))
+        }
+      )
+    })
   }
 
   #listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void {

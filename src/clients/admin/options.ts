@@ -369,6 +369,39 @@ export const deleteConsumerGroupOffsetsOptionsSchema = {
   additionalProperties: false
 }
 
+export const deleteRecordsOptionsSchema = {
+  type: 'object',
+  properties: {
+    topics: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          partitions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                partition: { type: 'number', minimum: 0 },
+                offset: { bigint: true }
+              },
+              required: ['partition', 'offset'],
+              additionalProperties: false
+            },
+            minItems: 1
+          }
+        },
+        required: ['name', 'partitions'],
+        additionalProperties: false
+      },
+      minItems: 1
+    }
+  },
+  required: ['topics'],
+  additionalProperties: false
+}
+
 export const describeConfigsOptionsSchema = {
   type: 'object',
   properties: {
@@ -605,6 +638,7 @@ export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOp
 export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
 export const alterConsumerGroupOffsetsOptionsValidator = ajv.compile(alterConsumerGroupOffsetsOptionsSchema)
 export const deleteConsumerGroupOffsetsOptionsValidator = ajv.compile(deleteConsumerGroupOffsetsOptionsSchema)
+export const deleteRecordsOptionsValidator = ajv.compile(deleteRecordsOptionsSchema)
 export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumerGroupOffsetsOptionsSchema)
 export const describeConfigsOptionsValidator = ajv.compile(describeConfigsOptionsSchema)
 export const alterConfigsOptionsValidator = ajv.compile(alterConfigsOptionsSchema)

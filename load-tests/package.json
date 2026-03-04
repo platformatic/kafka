@@ -1,0 +1,28 @@
+{
+  "name": "@platformatic/kafka-load-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "load:direct": "node src/run-direct.ts",
+    "load:direct:light": "node src/run-direct.ts --rate 100 --duration 30",
+    "load:direct:medium": "node src/run-direct.ts --rate 1000 --duration 60",
+    "load:direct:heavy": "node src/run-direct.ts --rate 5000 --duration 120",
+    "load:direct:batch": "node src/run-direct-batch.ts",
+    "load:direct:batch:light": "node src/run-direct-batch.ts --rate 100 --duration 30",
+    "load:direct:batch:medium": "node src/run-direct-batch.ts --rate 1000 --duration 60",
+    "load:direct:batch:heavy": "node src/run-direct-batch.ts --rate 5000 --duration 120",
+    "load:stress": "node src/run-stress.ts",
+    "load:stress:light": "node src/run-stress.ts --rate 1000 --duration 60 --handler-delay 5 --cpu-work 1 --retry-rate 0.05 --partitions 3 --payload-kb 1 --topics 2",
+    "load:stress:heavy": "node src/run-stress.ts --rate 10000 --duration 180 --handler-delay 20 --cpu-work 5 --retry-rate 0.2 --partitions 12 --payload-kb 5 --topics 4",
+    "load:stress:batch": "node src/run-stress-batch.ts",
+    "load:stress:batch:light": "node src/run-stress-batch.ts --rate 1000 --duration 60 --handler-delay 5 --cpu-work 1 --retry-rate 0.05 --partitions 3 --payload-kb 1 --topics 2",
+    "load:stress:batch:heavy": "node src/run-stress-batch.ts --rate 10000 --duration 180 --handler-delay 20 --cpu-work 5 --retry-rate 0.2 --partitions 12 --payload-kb 5 --topics 4"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "zod": "^4.3.5"
+  }
+}

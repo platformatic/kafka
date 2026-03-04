@@ -8,7 +8,9 @@ import {
   MultipleErrors,
   NetworkError,
   parseBroker,
-  sleep
+  SASLMechanisms,
+  sleep,
+  UserError
 } from '../../../src/index.ts'
 import { createScramUsers } from '../../fixtures/create-users.ts'
 import { kafkaSaslBootstrapServers } from '../../helpers.ts'
@@ -201,3 +203,29 @@ for (const mechanism of allowedSASLMechanisms) {
     await base.metadata({ topics: [], forceUpdate: true })
   })
 }
+
+test('should show proper error when SASL failed due to attempted TLS to a non TLS broker', async t => {
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: kafkaSaslBootstrapServers,
+    strict: true,
+    retries: false,
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' },
+    tls: {
+      rejectUnauthorized: false
+    }
+  })
+  t.after(() => base.close())
+
+  try {
+    await base.metadata({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    ok(error instanceof MultipleErrors)
+    ok(error.errors[0] instanceof NetworkError)
+
+    const cause = error.errors[0].cause
+    ok(cause instanceof UserError)
+    deepStrictEqual(cause.message, 'TLS handshake failed. Please verify the broker supports TLS.')
+  }
+})

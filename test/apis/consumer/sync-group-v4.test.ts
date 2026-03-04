@@ -11,7 +11,7 @@ test('createRequest serializes basic parameters correctly', () => {
   const groupInstanceId = null
   const assignments: any[] = []
 
-  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, assignments)
+  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, '', '', assignments)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -67,7 +67,7 @@ test('createRequest with assignments', () => {
     }
   ]
 
-  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, assignments)
+  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, '', '', assignments)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -123,7 +123,7 @@ test('createRequest with group instance ID', () => {
   const groupInstanceId = 'test-instance-id'
   const assignments: any[] = []
 
-  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, assignments)
+  const writer = createRequest(groupId, generationId, memberId, groupInstanceId, '', '', assignments)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')

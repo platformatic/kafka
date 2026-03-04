@@ -7,7 +7,7 @@ const { createRequest, parseResponse } = describeClusterV0
 test('createRequest serializes parameters correctly', () => {
   const includeClusterAuthorizedOperations = true
 
-  const writer = createRequest(includeClusterAuthorizedOperations)
+  const writer = createRequest(includeClusterAuthorizedOperations, 0)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -29,7 +29,7 @@ test('createRequest serializes parameters correctly', () => {
 test('createRequest serializes false include_cluster_authorized_operations correctly', () => {
   const includeClusterAuthorizedOperations = false
 
-  const writer = createRequest(includeClusterAuthorizedOperations)
+  const writer = createRequest(includeClusterAuthorizedOperations, 0)
   const reader = Reader.from(writer)
 
   // Read includeClusterAuthorizedOperations boolean

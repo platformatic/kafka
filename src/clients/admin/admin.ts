@@ -1129,16 +1129,7 @@ export class Admin extends Base<AdminOptions> {
                   }
 
                   /* c8 ignore next 5 */
-                  if (api!.version === 4) {
-                    api!(connection!, (options.states as ConsumerGroupStateValue[]) ?? [], retryCallback)
-                  } else {
-                    api!(
-                      connection!,
-                      (options.states as ConsumerGroupStateValue[]) ?? [],
-                      options.types!,
-                      retryCallback
-                    )
-                  }
+                  api!(connection!, (options.states as ConsumerGroupStateValue[]) ?? [], options.types!, retryCallback)
                 })
               },
               concurrentCallback,

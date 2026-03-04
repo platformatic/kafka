@@ -50,7 +50,7 @@ export interface OffsetCommitResponse {
 export function createRequest (
   groupId: string,
   generationIdOrMemberEpoch: number,
-  memberId: string,
+  memberId: NullableString,
   groupInstanceId: NullableString,
   topics: OffsetCommitRequestTopic[]
 ): Writer {

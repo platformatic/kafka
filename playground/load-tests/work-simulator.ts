@@ -17,10 +17,7 @@ export interface WorkSimulatorOptions {
  * - Configurable CPU-bound work (tight loop for serialization overhead)
  * - Handler retry logic with exponential backoff (1ms, 2ms, 4ms)
  */
-export async function simulateWork (
-  message: Record<string, unknown>,
-  options: WorkSimulatorOptions
-): Promise<void> {
+export async function simulateWork (message: Record<string, unknown>, options: WorkSimulatorOptions): Promise<void> {
   // MQT overhead: transaction ID, error context serialization, parsed message cloning
   simulateMqtOverhead(message)
 
@@ -50,8 +47,10 @@ export async function simulateWork (
  */
 function simulateMqtOverhead (message: Record<string, unknown>): void {
   const _transactionId = randomUUID()
+  // @ts-expect-error
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _serialized = JSON.stringify(message)
+  // @ts-expect-error
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _clone = { ...message, _transactionId }
 }

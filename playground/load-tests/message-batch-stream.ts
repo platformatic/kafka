@@ -25,40 +25,31 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
 
   private messages: TMessage[]
   private existingTimeout: NodeJS.Timeout | undefined
-  private pendingCallback: CallbackFunction | undefined
-  private isBackPressured: boolean
+  private pendingBatches: TMessage[][]
 
   constructor (options: MessageBatchOptions) {
     super({ objectMode: true })
     this.batchSize = options.batchSize
     this.timeout = options.timeoutMilliseconds
     this.messages = []
-    this.isBackPressured = false
+    this.pendingBatches = []
   }
 
   override _read (): void {
-    this.isBackPressured = false
-    if (!this.pendingCallback) return
-
-    const cb = this.pendingCallback
-    this.pendingCallback = undefined
-    cb()
+    this.flushPendingBatches()
   }
 
   override _write (message: TMessage, _encoding: BufferEncoding, callback: CallbackFunction): void {
-    let canContinue = true
-
     try {
       this.messages.push(message)
 
       if (this.messages.length >= this.batchSize) {
-        canContinue = this.flushMessages()
+        this.flushMessages()
       } else {
         this.existingTimeout ??= setTimeout(() => this.flushMessages(), this.timeout)
       }
     } finally {
-      if (!canContinue) this.pendingCallback = callback
-      else callback()
+      callback()
     }
   }
 
@@ -67,18 +58,16 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
     this.existingTimeout = undefined
     // Remaining messages are not committed, next consumer will process them
     this.messages = []
+    this.pendingBatches = []
     this.push(null)
     callback()
   }
 
-  private flushMessages (): boolean {
+  private flushMessages (): void {
     clearTimeout(this.existingTimeout)
     this.existingTimeout = undefined
 
-    if (this.isBackPressured) {
-      this.existingTimeout = setTimeout(() => this.flushMessages(), this.timeout)
-      return false
-    }
+    if (this.messages.length === 0) return
 
     const messageBatch = this.messages.splice(0, this.messages.length)
 
@@ -90,13 +79,19 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
       messagesByTopicPartition[key].push(message)
     }
 
-    let canContinue = true
     for (const messagesForKey of Object.values(messagesByTopicPartition)) {
-      canContinue = this.push(messagesForKey)
+      this.pendingBatches.push(messagesForKey)
     }
 
-    if (!canContinue) this.isBackPressured = true
+    this.flushPendingBatches()
+  }
 
-    return canContinue
+  private flushPendingBatches (): void {
+    while (this.pendingBatches.length > 0) {
+      const canContinue = this.push(this.pendingBatches[0]!)
+      if (!canContinue) return
+
+      this.pendingBatches.shift()
+    }
   }
 }

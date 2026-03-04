@@ -185,8 +185,8 @@ function performAuthentication (
             callback(null, lastResponse)
           }
         )
-        /* c8 ignore next 3 - Hard to test */
       })
+      /* c8 ignore next 3 - Hard to test */
       .catch(error => {
         callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
       })

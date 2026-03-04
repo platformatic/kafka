@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
-import type { z } from 'zod/v4'
 import {
   Admin,
   Consumer,
@@ -10,7 +9,7 @@ import {
   stringDeserializer,
   stringSerializer,
   type Message,
-  type MessagesStream,
+  type MessagesStream
 } from '../../src/index.ts'
 import { config } from './config.ts'
 import { MetricsCollector } from './metrics-collector.ts'
@@ -20,10 +19,11 @@ import {
   STRESS_METRIC_SCHEMA,
   STRESS_ORDER_SCHEMA,
   STRESS_TOPICS,
+  type Schema,
   type StressEvent,
   type StressLog,
   type StressMetric,
-  type StressOrder,
+  type StressOrder
 } from './schemas.ts'
 import { simulateWork, type WorkSimulatorOptions } from './work-simulator.ts'
 
@@ -52,10 +52,10 @@ export interface StressLoadTestOptions {
   maxBytes: number
 }
 
-type DeserializedMessage = Message<string, Record<string, unknown>, string, string>
+type DeserializedMessage = Message<string, object, string, string>
 
 interface HandlerConfig {
-  schema: z.ZodType
+  schema: Schema
   handler: (message: DeserializedMessage, metrics: MetricsCollector) => Promise<void>
 }
 
@@ -66,10 +66,9 @@ function buildHandlers (workOptions: WorkSimulatorOptions): Record<string, Handl
       handler: async (message, metrics) => {
         const value = message.value as unknown as StressEvent
         await simulateWork(value as unknown as Record<string, unknown>, workOptions)
-        const loadtestTs =
-          typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
+        const loadtestTs = typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
         metrics.recordConsumed(STRESS_TOPICS.EVENTS, loadtestTs)
-      },
+      }
     },
     [STRESS_TOPICS.ORDERS]: {
       schema: STRESS_ORDER_SCHEMA,
@@ -77,28 +76,26 @@ function buildHandlers (workOptions: WorkSimulatorOptions): Record<string, Handl
         const value = message.value as unknown as StressOrder
         await simulateWork(value as unknown as Record<string, unknown>, workOptions)
         metrics.recordConsumed(STRESS_TOPICS.ORDERS)
-      },
+      }
     },
     [STRESS_TOPICS.METRICS]: {
       schema: STRESS_METRIC_SCHEMA,
       handler: async (message, metrics) => {
         const value = message.value as unknown as StressMetric
         await simulateWork(value as unknown as Record<string, unknown>, workOptions)
-        const loadtestTs =
-          typeof value.tags?.loadtest_ts === 'number' ? value.tags.loadtest_ts : undefined
+        const loadtestTs = typeof value.tags?.loadtest_ts === 'number' ? value.tags.loadtest_ts : undefined
         metrics.recordConsumed(STRESS_TOPICS.METRICS, loadtestTs)
-      },
+      }
     },
     [STRESS_TOPICS.LOGS]: {
       schema: STRESS_LOG_SCHEMA,
       handler: async (message, metrics) => {
         const value = message.value as unknown as StressLog
         await simulateWork(value as unknown as Record<string, unknown>, workOptions)
-        const loadtestTs =
-          typeof value.context?.loadtest_ts === 'number' ? value.context.loadtest_ts : undefined
+        const loadtestTs = typeof value.context?.loadtest_ts === 'number' ? value.context.loadtest_ts : undefined
         metrics.recordConsumed(STRESS_TOPICS.LOGS, loadtestTs)
-      },
-    },
+      }
+    }
   }
 }
 
@@ -117,7 +114,7 @@ function generateStressEvent (index: number, padding: string): StressEvent {
     id: randomUUID(),
     event_type: `stress_test_${index % 5}`,
     payload: { loadtest_ts: Date.now(), index, data: padding },
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
@@ -127,7 +124,7 @@ function generateStressOrder (index: number, padding: string): StressOrder {
     customer_id: `customer-${(index % 100).toString().padStart(3, '0')}`,
     amount: (Math.random() * 1000).toFixed(2),
     status: ['pending', 'confirmed', 'shipped', 'delivered'][index % 4]!,
-    created_at: new Date().toISOString() + padding.slice(0, 1),
+    created_at: new Date().toISOString() + padding.slice(0, 1)
   }
 }
 
@@ -137,7 +134,7 @@ function generateStressMetric (index: number, padding: string): StressMetric {
     metric_name: `stress_metric_${index % 10}`,
     value: Math.random() * 1000,
     tags: { loadtest_ts: Date.now(), index, data: padding },
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
@@ -147,24 +144,19 @@ function generateStressLog (index: number, padding: string): StressLog {
     level: ['debug', 'info', 'warn', 'error'][index % 4]!,
     message: `Stress log message ${index} ${padding.slice(0, 100)}`,
     context: { loadtest_ts: Date.now(), index, data: padding },
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
 function getActiveTopics (topicCount: number): string[] {
-  const allTopics = [
-    STRESS_TOPICS.EVENTS,
-    STRESS_TOPICS.ORDERS,
-    STRESS_TOPICS.METRICS,
-    STRESS_TOPICS.LOGS,
-  ]
+  const allTopics = [STRESS_TOPICS.EVENTS, STRESS_TOPICS.ORDERS, STRESS_TOPICS.METRICS, STRESS_TOPICS.LOGS]
   return allTopics.slice(0, Math.min(topicCount, allTopics.length))
 }
 
 async function ensureTopics (topics: string[], partitions: number): Promise<void> {
   const admin = new Admin({
     clientId: 'stress-test-admin',
-    bootstrapBrokers: config.kafka.bootstrapBrokers,
+    bootstrapBrokers: config.kafka.bootstrapBrokers
   })
 
   for (const topic of topics) {
@@ -179,10 +171,10 @@ async function ensureTopics (topics: string[], partitions: number): Promise<void
 }
 
 async function handleSyncStream (
-  stream: MessagesStream<string, Record<string, unknown>, string, string>,
+  stream: MessagesStream<string, object, string, string>,
   handlers: Record<string, HandlerConfig>,
   metrics: MetricsCollector,
-  errorCount: { value: number }
+  _errorCount: { value: number }
 ): Promise<void> {
   for await (const message of stream) {
     const handlerConfig = handlers[message.topic]
@@ -220,16 +212,16 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
     payloadKb,
     topics: topicCount,
     maxWaitTime,
-    maxBytes,
+    maxBytes
   } = options
 
   const activeTopics = getActiveTopics(topicCount)
 
   console.log(
     `Starting stress load test: ${rate} msgs/sec, ${duration}s, batch=${batchSize}, ` +
-    `delay=${handlerDelayMs}ms, cpu=${cpuWorkMs}ms, retry=${(retryRate * 100).toFixed(0)}%, ` +
-    `partitions=${partitions}, payload=${payloadKb}KB, topics=${activeTopics.length}, ` +
-    `maxWaitTime=${maxWaitTime}ms, maxBytes=${(maxBytes / 1024 / 1024).toFixed(1)}MB`
+      `delay=${handlerDelayMs}ms, cpu=${cpuWorkMs}ms, retry=${(retryRate * 100).toFixed(0)}%, ` +
+      `partitions=${partitions}, payload=${payloadKb}KB, topics=${activeTopics.length}, ` +
+      `maxWaitTime=${maxWaitTime}ms, maxBytes=${(maxBytes / 1024 / 1024).toFixed(1)}MB`
   )
 
   await ensureTopics(activeTopics, partitions)
@@ -242,26 +234,26 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
   const workOptions: WorkSimulatorOptions = {
     handlerDelayMs,
     cpuWorkMs,
-    retryRate,
+    retryRate
   }
   const handlers = buildHandlers(workOptions)
 
-  const producer = new Producer({
+  const producer = new Producer<string, object, string, string>({
     clientId: `stress-producer-${randomUUID()}`,
     bootstrapBrokers: config.kafka.bootstrapBrokers,
     serializers: {
       key: stringSerializer,
       value: jsonSerializer,
       headerKey: stringSerializer,
-      headerValue: stringSerializer,
-    },
+      headerValue: stringSerializer
+    }
   })
 
   // Use realistic fetch parameters matching MQT defaults:
   // - maxWaitTime: 5000ms (broker accumulates data before responding → large multi-chunk DynamicBuffers)
   // - maxBytes: 10MB (allows large fetch responses that arrive in many TCP packets)
   // Setting maxWaitTime: 5 (as in direct tests) creates tiny single-chunk responses that never stress DynamicBuffer
-  const consumer = new Consumer<string, Record<string, unknown>, string, string>({
+  const consumer = new Consumer<string, object, string, string>({
     clientId: `stress-consumer-${randomUUID()}`,
     groupId,
     bootstrapBrokers: config.kafka.bootstrapBrokers,
@@ -269,11 +261,11 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
       key: stringDeserializer,
       value: safeJsonDeserializer,
       headerKey: stringDeserializer,
-      headerValue: stringDeserializer,
+      headerValue: stringDeserializer
     },
     autocommit: false,
     maxWaitTime,
-    maxBytes,
+    maxBytes
   })
 
   console.log('Initializing Kafka consumer and producer...')
@@ -283,11 +275,11 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
 
   const stream = await consumer.consume({
     topics: activeTopics,
-    mode: MessagesStreamModes.LATEST,
+    mode: MessagesStreamModes.LATEST
   })
 
   // Listen for stream errors to detect DynamicBuffer bug
-  stream.on('error', (error) => {
+  stream.on('error', error => {
     errorCount.value++
     console.error(`[stream-error] #${errorCount.value}:`, error)
     if (error.cause) {
@@ -300,7 +292,7 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
     }
   })
 
-  handleSyncStream(stream, handlers, metrics, errorCount).catch((error) => {
+  handleSyncStream(stream, handlers, metrics, errorCount).catch(error => {
     errorCount.value++
     console.error(`[consumer-error] #${errorCount.value}:`, error)
   })
@@ -324,7 +316,7 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
     (i: number) => ({ topic: STRESS_TOPICS.EVENTS, value: generateStressEvent(i, padding) }),
     (i: number) => ({ topic: STRESS_TOPICS.ORDERS, value: generateStressOrder(i, padding) }),
     (i: number) => ({ topic: STRESS_TOPICS.METRICS, value: generateStressMetric(i, padding) }),
-    (i: number) => ({ topic: STRESS_TOPICS.LOGS, value: generateStressLog(i, padding) }),
+    (i: number) => ({ topic: STRESS_TOPICS.LOGS, value: generateStressLog(i, padding) })
   ].slice(0, activeTopics.length)
 
   while (totalPublished < totalMessages) {
@@ -344,7 +336,7 @@ export async function runStressLoadTest (options: StressLoadTestOptions): Promis
         messages.push({
           topic: generated.topic,
           key: randomUUID(),
-          value: generated.value,
+          value: generated.value
         })
       }
 

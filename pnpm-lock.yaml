@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@platformatic/dynamic-buffer':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: ^0.3.1
+        version: 0.3.1
       '@platformatic/wasm-utils':
         specifier: ^0.1.0
         version: 0.1.0
@@ -705,8 +705,8 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@platformatic/dynamic-buffer@0.3.0':
-    resolution: {integrity: sha512-x/SN9lEK9qYqRXAQKXC61bD2LPCd3uUYfzAIX7+tpgaCLky7voJ/xcSh9cC+jmNbbzNH8cxDzYUJD4Lua5VmlQ==}
+  '@platformatic/dynamic-buffer@0.3.1':
+    resolution: {integrity: sha512-xQD5JSkQc4D15suOk7FezGDmh6Vb5e4phDoFZ/ASpa3Ft+3fOVwFOENmHtC1561zm/xHnKwI91NbMF8inpbk0Q==}
     engines: {node: '>= 22.19.0'}
 
   '@platformatic/rdkafka@4.0.0':
@@ -2991,7 +2991,7 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@platformatic/dynamic-buffer@0.3.0': {}
+  '@platformatic/dynamic-buffer@0.3.1': {}
 
   '@platformatic/rdkafka@4.0.0':
     dependencies:
@@ -3000,7 +3000,7 @@ snapshots:
 
   '@platformatic/wasm-utils@0.1.0':
     dependencies:
-      '@platformatic/dynamic-buffer': 0.3.0
+      '@platformatic/dynamic-buffer': 0.3.1
 
   '@protobufjs/aspromise@1.1.2':
     optional: true

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout } from 'node:timers/promises'
-import type { z } from 'zod/v4'
 import {
   Admin,
   Consumer,
@@ -11,7 +10,7 @@ import {
   jsonSerializer,
   stringDeserializer,
   stringSerializer,
-  type Message,
+  type Message
 } from '../../src/index.ts'
 import { config } from './config.ts'
 import { MessageBatchStream } from './message-batch-stream.ts'
@@ -22,6 +21,7 @@ import {
   TOPICS,
   type DirectEvent,
   type DirectOrder,
+  type Schema
 } from './schemas.ts'
 
 export interface BatchLoadTestOptions {
@@ -36,7 +36,7 @@ type DeserializedMessage = Message<string, Record<string, unknown>, string, stri
 
 // Replicates MQT's handler config: schema + handler function per topic
 interface HandlerConfig {
-  schema: z.ZodType
+  schema: Schema
   handler: (messages: DeserializedMessage[], metrics: MetricsCollector) => void
 }
 
@@ -49,11 +49,10 @@ const handlers: Record<string, HandlerConfig> = {
       )
       for (const message of messages) {
         const value = message.value as unknown as DirectEvent
-        const loadtestTs =
-          typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
+        const loadtestTs = typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
         metrics.recordConsumed(TOPICS.EVENTS, loadtestTs)
       }
-    },
+    }
   },
   [TOPICS.ORDERS]: {
     schema: DIRECT_ORDER_SCHEMA,
@@ -64,8 +63,8 @@ const handlers: Record<string, HandlerConfig> = {
       for (let i = 0; i < messages.length; i++) {
         metrics.recordConsumed(TOPICS.ORDERS)
       }
-    },
-  },
+    }
+  }
 }
 
 function generateEvent (index: number): DirectEvent {
@@ -73,7 +72,7 @@ function generateEvent (index: number): DirectEvent {
     id: randomUUID(),
     event_type: `load_test_${index % 5}`,
     payload: { loadtest_ts: Date.now(), index, data: `event-payload-${index}` },
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
@@ -83,14 +82,14 @@ function generateOrder (index: number): DirectOrder {
     customer_id: `customer-${(index % 100).toString().padStart(3, '0')}`,
     amount: (Math.random() * 1000).toFixed(2),
     status: ['pending', 'confirmed', 'shipped', 'delivered'][index % 4]!,
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
 async function ensureTopics (): Promise<void> {
   const admin = new Admin({
     clientId: 'load-test-admin',
-    bootstrapBrokers: config.kafka.bootstrapBrokers,
+    bootstrapBrokers: config.kafka.bootstrapBrokers
   })
 
   for (const topic of [TOPICS.EVENTS, TOPICS.ORDERS]) {
@@ -156,15 +155,15 @@ export async function runDirectBatchLoadTest (options: BatchLoadTestOptions): Pr
   const metrics = new MetricsCollector()
   const groupId = `direct-batch-load-test-${randomUUID()}`
 
-  const producer = new Producer({
+  const producer = new Producer<string, object, string, string>({
     clientId: `direct-producer-${randomUUID()}`,
     bootstrapBrokers: config.kafka.bootstrapBrokers,
     serializers: {
       key: stringSerializer,
       value: jsonSerializer,
       headerKey: stringSerializer,
-      headerValue: stringSerializer,
-    },
+      headerValue: stringSerializer
+    }
   })
 
   const consumer = new Consumer<string, Record<string, unknown>, string, string>({
@@ -175,32 +174,32 @@ export async function runDirectBatchLoadTest (options: BatchLoadTestOptions): Pr
       key: stringDeserializer,
       value: jsonDeserializer,
       headerKey: stringDeserializer,
-      headerValue: stringDeserializer,
+      headerValue: stringDeserializer
     },
     autocommit: false,
-    maxWaitTime: 5,
+    maxWaitTime: 5
   })
 
   console.log('Initializing Kafka batch consumer and producer...')
 
   const consumerStream = await consumer.consume({
     topics: [TOPICS.EVENTS, TOPICS.ORDERS],
-    mode: MessagesStreamModes.LATEST,
+    mode: MessagesStreamModes.LATEST
   })
 
   // Create batch stream and pipe consumer stream through it (replicates MQT pattern)
   const messageBatchStream = new MessageBatchStream<DeserializedMessage>({
     batchSize: consumerBatchSize,
-    timeoutMilliseconds: consumerBatchTimeoutMs,
+    timeoutMilliseconds: consumerBatchTimeoutMs
   })
 
   // Use pipeline for backpressure management (same as MQT)
-  pipeline(consumerStream, messageBatchStream).catch((error) => {
+  const pipelinePromise = pipeline(consumerStream, messageBatchStream).catch(error => {
     console.error('Pipeline error:', error)
   })
 
   // Start batch consumption loop in background (replicates MQT's handleSyncStreamBatch)
-  handleSyncStreamBatch(messageBatchStream, metrics).catch((error) => {
+  handleSyncStreamBatch(messageBatchStream, metrics).catch(error => {
     console.error('Batch consumer stream error:', error)
   })
 
@@ -231,14 +230,14 @@ export async function runDirectBatchLoadTest (options: BatchLoadTestOptions): Pr
         messages.push({
           topic: TOPICS.EVENTS,
           key: randomUUID(),
-          value: generateEvent(totalPublished + i),
+          value: generateEvent(totalPublished + i)
         })
       }
       for (let i = 0; i < orderCount; i++) {
         messages.push({
           topic: TOPICS.ORDERS,
           key: randomUUID(),
-          value: generateOrder(totalPublished + eventCount + i),
+          value: generateOrder(totalPublished + eventCount + i)
         })
       }
 
@@ -271,7 +270,8 @@ export async function runDirectBatchLoadTest (options: BatchLoadTestOptions): Pr
   metrics.printFinalReport()
 
   console.log('Shutting down...')
-  await new Promise((resolve) => messageBatchStream.end(resolve))
-  await Promise.all([consumer.close(), producer.close()])
+  await consumer.close()
+  await pipelinePromise
+  await producer.close()
   console.log('Done.')
 }

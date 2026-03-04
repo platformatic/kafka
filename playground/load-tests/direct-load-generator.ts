@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout } from 'node:timers/promises'
-import type { z } from 'zod/v4'
 import {
   Admin,
   Consumer,
@@ -11,7 +10,7 @@ import {
   stringDeserializer,
   stringSerializer,
   type Message,
-  type MessagesStream,
+  type MessagesStream
 } from '../../src/index.ts'
 import { config } from './config.ts'
 import { MetricsCollector } from './metrics-collector.ts'
@@ -21,6 +20,7 @@ import {
   TOPICS,
   type DirectEvent,
   type DirectOrder,
+  type Schema
 } from './schemas.ts'
 
 export interface LoadTestOptions {
@@ -33,7 +33,7 @@ type DeserializedMessage = Message<string, Record<string, unknown>, string, stri
 
 // Replicates MQT's handler config: schema + handler function per topic
 interface HandlerConfig {
-  schema: z.ZodType
+  schema: Schema
   handler: (message: DeserializedMessage, metrics: MetricsCollector) => void
 }
 
@@ -42,17 +42,16 @@ const handlers: Record<string, HandlerConfig> = {
     schema: DIRECT_EVENT_SCHEMA,
     handler: (message, metrics) => {
       const value = message.value as unknown as DirectEvent
-      const loadtestTs =
-        typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
+      const loadtestTs = typeof value.payload?.loadtest_ts === 'number' ? value.payload.loadtest_ts : undefined
       metrics.recordConsumed(TOPICS.EVENTS, loadtestTs)
-    },
+    }
   },
   [TOPICS.ORDERS]: {
     schema: DIRECT_ORDER_SCHEMA,
     handler: (_message, metrics) => {
       metrics.recordConsumed(TOPICS.ORDERS)
-    },
-  },
+    }
+  }
 }
 
 function generateEvent (index: number): DirectEvent {
@@ -60,7 +59,7 @@ function generateEvent (index: number): DirectEvent {
     id: randomUUID(),
     event_type: `load_test_${index % 5}`,
     payload: { loadtest_ts: Date.now(), index, data: `event-payload-${index}` },
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
@@ -70,14 +69,14 @@ function generateOrder (index: number): DirectOrder {
     customer_id: `customer-${(index % 100).toString().padStart(3, '0')}`,
     amount: (Math.random() * 1000).toFixed(2),
     status: ['pending', 'confirmed', 'shipped', 'delivered'][index % 4]!,
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString()
   }
 }
 
 async function ensureTopics (): Promise<void> {
   const admin = new Admin({
     clientId: 'load-test-admin',
-    bootstrapBrokers: config.kafka.bootstrapBrokers,
+    bootstrapBrokers: config.kafka.bootstrapBrokers
   })
 
   for (const topic of [TOPICS.EVENTS, TOPICS.ORDERS]) {
@@ -127,24 +126,22 @@ async function handleSyncStream (
 export async function runDirectLoadTest (options: LoadTestOptions): Promise<void> {
   const { rate, duration, batchSize } = options
 
-  console.log(
-    `Starting direct Kafka load test: ${rate} msgs/sec, ${duration}s duration, batch=${batchSize}`
-  )
+  console.log(`Starting direct Kafka load test: ${rate} msgs/sec, ${duration}s duration, batch=${batchSize}`)
 
   await ensureTopics()
 
   const metrics = new MetricsCollector()
   const groupId = `direct-load-test-${randomUUID()}`
 
-  const producer = new Producer({
+  const producer = new Producer<string, object, string, string>({
     clientId: `direct-producer-${randomUUID()}`,
     bootstrapBrokers: config.kafka.bootstrapBrokers,
     serializers: {
       key: stringSerializer,
       value: jsonSerializer,
       headerKey: stringSerializer,
-      headerValue: stringSerializer,
-    },
+      headerValue: stringSerializer
+    }
   })
 
   const consumer = new Consumer<string, Record<string, unknown>, string, string>({
@@ -155,21 +152,21 @@ export async function runDirectLoadTest (options: LoadTestOptions): Promise<void
       key: stringDeserializer,
       value: jsonDeserializer,
       headerKey: stringDeserializer,
-      headerValue: stringDeserializer,
+      headerValue: stringDeserializer
     },
     autocommit: false,
-    maxWaitTime: 5,
+    maxWaitTime: 5
   })
 
   console.log('Initializing Kafka consumer and producer...')
 
   const stream = await consumer.consume({
     topics: [TOPICS.EVENTS, TOPICS.ORDERS],
-    mode: MessagesStreamModes.LATEST,
+    mode: MessagesStreamModes.LATEST
   })
 
   // Start consumption loop in background (replicates MQT's handleSyncStream)
-  handleSyncStream(stream, metrics).catch((error) => {
+  handleSyncStream(stream, metrics).catch(error => {
     console.error('Consumer stream error:', error)
   })
 
@@ -200,14 +197,14 @@ export async function runDirectLoadTest (options: LoadTestOptions): Promise<void
         messages.push({
           topic: TOPICS.EVENTS,
           key: randomUUID(),
-          value: generateEvent(totalPublished + i),
+          value: generateEvent(totalPublished + i)
         })
       }
       for (let i = 0; i < orderCount; i++) {
         messages.push({
           topic: TOPICS.ORDERS,
           key: randomUUID(),
-          value: generateOrder(totalPublished + eventCount + i),
+          value: generateOrder(totalPublished + eventCount + i)
         })
       }
 

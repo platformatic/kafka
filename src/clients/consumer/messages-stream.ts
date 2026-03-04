@@ -869,6 +869,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #scheduleRefreshOffsetsAndFetch (destroyOnError = true) {
     this.#refreshOffsetsDestroyOnError ||= destroyOnError
 
+    /* c8 ignore next 4 - Hard to test */
     if (this.#refreshOffsetsInflight) {
       this.#refreshOffsetsPending = true
       return

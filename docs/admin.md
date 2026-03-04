@@ -89,7 +89,7 @@ Options:
 | Property | Type                          | Description                                                                                 |
 | -------- | ----------------------------- | ------------------------------------------------------------------------------------------- |
 | groups   | `string[]`                    | Groups to describe.                                                                         |
-| types    | `includeAuthorizedOperations` | Whether to include authorisation information in the response.<br/><br/> Default is `false`. |
+| `includeAuthorizedOperations` | `boolean` | Whether to include authorisation information in the response.<br/><br/> Default is `false`. |
 
 ### `deleteGroups(options[, callback])`
 

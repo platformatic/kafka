@@ -29,11 +29,12 @@ Creates a new base client.
 | `timeout`            | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`            | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
 | `retryDelay`         | `number` \| `function` | `1000`    | Amount of time in milliseconds to wait between retries, or a function to calculate custom delays. See section below.                                               |
-| `metadataMaxAge`     | `number`               | 5 minutes | Maximum lifetime of cluster metadata.                                                                                                                              |
+| `metadataMaxAge`     | `number`               | 5 seconds | Maximum lifetime of cluster metadata.                                                                                                                              |
 | `autocreateTopics`   | `boolean`              | `false`   | Whether to autocreate missing topics during metadata retrieval.                                                                                                    |
 | `strict`             | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production.                   |
 | `metrics`            | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                                          |
 | `connectTimeout`     | `number`               | `5000`    | Client connection timeout.                                                                                                                                         |
+| `requestTimeout`     | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                              |
 | `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
@@ -99,6 +100,15 @@ When using a function, it receives the following parameters:
 | `error`       | `Error`  | The error that caused the retry                          |
 
 The function must return a number representing the delay in milliseconds before the next retry attempt.
+
+## `timeout` vs `requestTimeout`
+
+Both options are valid and control different things:
+
+- `timeout`: request-level Kafka timeout that is sent to broker APIs that expose a timeout field.
+- `requestTimeout`: client-side timeout that limits how long this client waits for a response on an in-flight request.
+
+In practice, `requestTimeout` is the guard for `TimeoutError: Request timed out` coming from the connection layer.
 
 ## Connecting to Kafka via TLS connection
 

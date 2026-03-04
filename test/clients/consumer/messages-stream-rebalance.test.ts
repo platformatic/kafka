@@ -42,9 +42,7 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
     consumer.metadataCalls++
 
     callback(null, {
-      topics: new Map([
-        ['test-topic', { id: 'test-topic-id', partitions: [{ leader: 1, leaderEpoch: 0 }] }]
-      ])
+      topics: new Map([['test-topic', { id: 'test-topic-id', partitions: [{ leader: 1, leaderEpoch: 0 }] }]])
     })
   }
 

@@ -35,6 +35,8 @@ export function createRequest (
   generationId: number,
   memberId: string,
   groupInstanceId: NullableString,
+  _protocolType: NullableString,
+  _protocolName: NullableString,
   assignments: SyncGroupRequestAssignment[]
 ): Writer {
   return Writer.create()

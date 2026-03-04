@@ -48,7 +48,8 @@ export function createRequest (
   memberId: string,
   groupInstanceId: NullableString,
   protocolType: string,
-  protocols: JoinGroupRequestProtocol[]
+  protocols: JoinGroupRequestProtocol[],
+  _reason?: NullableString
 ): Writer {
   return Writer.create()
     .appendString(groupId)

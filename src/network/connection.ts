@@ -241,7 +241,18 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
 
       const connectingSocketErrorHandler = (error: Error) => {
-        this.#onConnectionError(host, port, diagnosticContext, error)
+        let cause = error
+        const tlsConnectionError = error as NodeJS.ErrnoException
+
+        if (
+          this.#options.tls &&
+          tlsConnectionError.code === 'ECONNRESET' &&
+          tlsConnectionError.message.includes('secure TLS connection was established')
+        ) {
+          cause = new UserError('TLS handshake failed. Please verify the broker supports TLS.', { cause: error })
+        }
+
+        this.#onConnectionError(host, port, diagnosticContext, cause)
       }
 
       this.emit('connecting')

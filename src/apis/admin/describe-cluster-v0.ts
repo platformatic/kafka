@@ -28,7 +28,7 @@ export interface DescribeClusterResponse {
   DescribeCluster Request (Version: 0) => include_cluster_authorized_operations TAG_BUFFER
     include_cluster_authorized_operations => BOOLEAN
 */
-export function createRequest (includeClusterAuthorizedOperations: boolean): Writer {
+export function createRequest (includeClusterAuthorizedOperations: boolean, _endpointType: number): Writer {
   return Writer.create().appendBoolean(includeClusterAuthorizedOperations).appendTaggedFields()
 }
 

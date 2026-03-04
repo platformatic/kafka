@@ -6,7 +6,7 @@ import { listGroupsV4, Reader, ResponseError, Writer } from '../../../src/index.
 const { createRequest, parseResponse } = listGroupsV4
 
 test('createRequest serializes states filter and types filter correctly', () => {
-  const writer = createRequest(['STABLE', 'EMPTY'])
+  const writer = createRequest(['STABLE', 'EMPTY'], [])
 
   // Verify it returns a Writer instance
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -32,7 +32,7 @@ test('createRequest serializes states filter and types filter correctly', () => 
 })
 
 test('createRequest with empty states and types filters', () => {
-  const writer = createRequest([])
+  const writer = createRequest([], [])
 
   // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
@@ -62,7 +62,7 @@ test('createRequest with empty states and types filters', () => {
 test('createRequest with all possible consumer group states', () => {
   const statesFilter = [...ConsumerGroupStates]
 
-  const writer = createRequest(statesFilter)
+  const writer = createRequest(statesFilter, [])
 
   // Read the serialized data to verify correctness
   const reader = Reader.from(writer)

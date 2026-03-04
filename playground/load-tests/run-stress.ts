@@ -13,9 +13,9 @@ const { values } = parseArgs({
     'payload-kb': { type: 'string', default: '2' },
     topics: { type: 'string', default: '4' },
     'max-wait-time': { type: 'string', default: '5000' },
-    'max-bytes': { type: 'string', default: '10485760' },
+    'max-bytes': { type: 'string', default: '10485760' }
   },
-  strict: true,
+  strict: true
 })
 
 await runStressLoadTest({
@@ -29,5 +29,5 @@ await runStressLoadTest({
   payloadKb: Number.parseInt(values['payload-kb']!, 10),
   topics: Number.parseInt(values.topics!, 10),
   maxWaitTime: Number.parseInt(values['max-wait-time']!, 10),
-  maxBytes: Number.parseInt(values['max-bytes']!, 10),
+  maxBytes: Number.parseInt(values['max-bytes']!, 10)
 })

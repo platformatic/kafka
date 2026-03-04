@@ -101,7 +101,7 @@ export class MetricsCollector {
       avg: Math.round(sum / sorted.length),
       p50: sorted[Math.floor(sorted.length * 0.5)]!,
       p95: sorted[Math.floor(sorted.length * 0.95)]!,
-      p99: sorted[Math.floor(sorted.length * 0.99)]!,
+      p99: sorted[Math.floor(sorted.length * 0.99)]!
     }
   }
 }

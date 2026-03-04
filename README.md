@@ -18,6 +18,10 @@ A modern, high-performance, pure TypeScript/JavaScript type safe client for Apac
 
 Supported Kafka version are from **3.5.0** to **4.0.0** and equivalent, edges included.
 
+## Supported KIPs
+
+See the maintained list in [`docs/kips.md`](./docs/kips.md).
+
 ## Installation
 
 ```bash
@@ -173,15 +177,17 @@ const producer = new Producer({
 
 // Send messages with schema IDs
 await producer.send({
-  messages: [{
-    topic: 'users',
-    value: { id: 1, name: 'Alice' },
-    metadata: {
-      schemas: {
-        value: 100 // Schema ID in the registry
+  messages: [
+    {
+      topic: 'users',
+      value: { id: 1, name: 'Alice' },
+      metadata: {
+        schemas: {
+          value: 100 // Schema ID in the registry
+        }
       }
     }
-  }]
+  ]
 })
 
 // Consumer with schema registry

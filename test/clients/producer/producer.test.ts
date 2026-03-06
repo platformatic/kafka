@@ -1427,6 +1427,31 @@ test('should support sync beforeSerialization hooks', async t => {
   }
 })
 
+test('should shortcircuit beforeSerialization hooks when there are no messages', async t => {
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
+
+  try {
+    let hookCalls = 0
+
+    const producer = await createProducer(t, {
+      serializers: stringSerializers,
+      beforeSerialization () {
+        hookCalls++
+      }
+    })
+
+    const result = await producer.send({
+      messages: []
+    })
+
+    deepStrictEqual(result, {})
+    strictEqual(hookCalls, 0)
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+})
+
 test('should handle sync beforeSerialization errors', async t => {
   const originalEmitWarning = process.emitWarning
   process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning

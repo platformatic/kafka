@@ -1594,6 +1594,40 @@ test('should support sync beforeDeserialization hooks', async t => {
   }
 })
 
+test('should shortcircuit beforeDeserialization hooks when no records are fetched', async t => {
+  const originalEmitWarning = process.emitWarning
+  process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
+
+  try {
+    const groupId = createTestGroupId()
+    const topic = await createTopic(t, true)
+    let hookCalls = 0
+
+    const consumer = await createConsumer(t, groupId, {
+      deserializers: stringDeserializers,
+      beforeDeserialization () {
+        hookCalls++
+      }
+    })
+
+    const stream = await consumer.consume({
+      topics: [topic],
+      mode: MessagesStreamModes.EARLIEST,
+      maxFetches: 1
+    })
+
+    const messages = []
+    for await (const message of stream) {
+      messages.push(message)
+    }
+
+    strictEqual(messages.length, 0)
+    strictEqual(hookCalls, 0)
+  } finally {
+    process.emitWarning = originalEmitWarning
+  }
+})
+
 test('should handle sync beforeDeserialization errors', async t => {
   const originalEmitWarning = process.emitWarning
   process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning

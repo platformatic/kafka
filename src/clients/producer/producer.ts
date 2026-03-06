@@ -1189,6 +1189,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
+    if (requests.length === 0) {
+      this.#send(options, callback)
+      return
+    }
+
     runAsyncSeries(
       (request, cb) => {
         const [data, type, message] = request

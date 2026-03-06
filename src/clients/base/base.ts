@@ -594,6 +594,16 @@ export class Base<
           },
           (error, metadata) => {
             if (error) {
+              const unknownTopicError = (error as GenericError).findBy('apiCode', 3)
+              if (unknownTopicError) {
+                const topicIndexMatch = unknownTopicError.path?.match(/\/topics\/(\d+)/)
+                const topicIndex = topicIndexMatch ? parseInt(topicIndexMatch[1]) : -1
+                const topicName =
+                  topicIndex >= 0 && topicIndex < topicsToFetch.length ? topicsToFetch[topicIndex] : 'unknown'
+                deduplicateCallback(new UserError(`Unknown topic ${topicName}.`))
+                return
+              }
+
               const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again

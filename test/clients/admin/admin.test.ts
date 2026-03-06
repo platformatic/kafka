@@ -65,6 +65,7 @@ import {
   sleep,
   stringSerializers,
   UnsupportedApiError,
+  UserError,
   type Writer
 } from '../../../src/index.ts'
 import {
@@ -990,15 +991,15 @@ test('deleteTopics should not deduplicate deletion of different topics', async t
       await admin.metadata({ topics: [topicNames[0]] })
       throw Error('Topic still exists: ' + topicNames[0])
     } catch (error) {
-      // ApiCode 3 = UnknownTopicOrPartition
-      ok(error.findBy?.('apiCode', 3))
+      // UserError is thrown for unknown topics
+      ok(error instanceof UserError)
     }
     try {
       await admin.metadata({ topics: [topicNames[1]] })
       throw Error('Topic still exists: ' + topicNames[1])
     } catch (error) {
-      // ApiCode 3 = UnknownTopicOrPartition
-      ok(error.findBy?.('apiCode', 3))
+      // UserError is thrown for unknown topics
+      ok(error instanceof UserError)
     }
   })
 })

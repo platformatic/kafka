@@ -2563,11 +2563,11 @@ test('startLagMonitoring should handle errors', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)
 
-  const { promise, resolve } = promiseWithResolvers<MultipleErrors>()
+  const { promise, resolve } = promiseWithResolvers<UserError>()
   consumer.startLagMonitoring({ topics: ['invalid'] }, 1000)
 
   consumer.on('consumer:lag:error', error => {
-    resolve(error as MultipleErrors)
+    resolve(error as UserError)
   })
 
   await consumer.consume({
@@ -2579,8 +2579,8 @@ test('startLagMonitoring should handle errors', async t => {
   })
 
   const error = await promise
-  ok(MultipleErrors.isMultipleErrors(error))
-  deepStrictEqual(error.errors[0].errors[0].message, 'This server does not host this topic-partition.')
+  ok(error instanceof UserError)
+  ok(error.message.startsWith('Unknown topic '))
 })
 
 test('findGroupCoordinator should return the coordinator nodeId and support diagnostic channels', async t => {

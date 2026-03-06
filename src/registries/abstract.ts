@@ -34,6 +34,11 @@ export function runAsyncSeries<V> (
   index: number,
   callback: Callback<void>
 ): void {
+  if (collection.length === 0 || index >= collection.length) {
+    callback(null)
+    return
+  }
+
   operation(collection[index], error => {
     if (error) {
       callback(error)

@@ -1014,6 +1014,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
+    if (requests.length === 0) {
+      this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+      return
+    }
+
     runAsyncSeries(
       (request, cb) => {
         const [data, type, message] = request

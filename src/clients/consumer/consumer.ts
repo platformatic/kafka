@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type ValidateFunction } from 'ajv'
 import {
   type CallbackWithPromise,
@@ -1203,10 +1204,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
+
           api!(
             connection,
             this.groupId,
-            this.memberId || '',
+            memberId,
             this.#memberEpoch,
             this.groupInstanceId,
             null, // rackId
@@ -1388,10 +1391,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
+
           api!(
             connection,
             this.groupId,
-            this.memberId!,
+            memberId,
             -1, // memberEpoch = -1 signals leave
             this.groupInstanceId,
             null, // rackId
@@ -1414,6 +1419,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         callback(null)
       }
     )
+  }
+
+  #getConsumerGroupHeartbeatMemberId (apiVersion: number): string {
+    if (this.memberId) {
+      return this.memberId
+    }
+
+    if (apiVersion >= 1) {
+      this.memberId = randomUUID()
+      return this.memberId
+    }
+
+    return ''
   }
 
   #performConsume (

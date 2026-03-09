@@ -23,6 +23,7 @@ test('createRequest serializes basic parameters correctly', () => {
     rackId,
     rebalanceTimeoutMs,
     subscribedTopicNames,
+    null,
     serverAssignor,
     topicPartitions
   )
@@ -100,6 +101,7 @@ test('createRequest with topic partitions', () => {
     rackId,
     rebalanceTimeoutMs,
     subscribedTopicNames,
+    null,
     serverAssignor,
     topicPartitions
   )
@@ -163,6 +165,7 @@ test('createRequest with instance ID and rack ID', () => {
     rackId,
     rebalanceTimeoutMs,
     subscribedTopicNames,
+    null,
     serverAssignor,
     topicPartitions
   )

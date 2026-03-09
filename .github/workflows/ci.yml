@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         node-version: [20.x, 22.x, 24.x]
-        confluent-kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0]
+        confluent-kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0, 8.1.0]
     name: 'Node.js ${{ matrix.node-version }} / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -26,7 +26,7 @@
 | Heartbeat              | 12  | 4       |
 | LeaveGroup             | 13  | 5       |
 | SyncGroup              | 14  | 5       |
-| ConsumerGroupHeartbeat | 68  | 0       |
+| ConsumerGroupHeartbeat | 68  | 1       |
 
 ## Admin API
 
@@ -51,7 +51,7 @@
 | DescribeDelegationToken      | 41  | 3       |
 | DeleteGroups                 | 42  | 2       |
 | IncrementalAlterConfigs      | 44  | 1       |
-| AlterPartitionReassignments  | 45  | 0       |
+| AlterPartitionReassignments  | 45  | 1       |
 | ListPartitionReassignments   | 46  | 0       |
 | OffsetDelete                 | 47  | 0       |
 | DescribeClientQuotas         | 48  | 1       |
@@ -66,7 +66,7 @@
 | DescribeProducers            | 61  | 0       |
 | UnregisterBroker             | 64  | 0       |
 | DescribeTransactions         | 65  | 0       |
-| ListTransactions             | 66  | 1       |
+| ListTransactions             | 66  | 2       |
 | ConsumerGroupDescribe        | 69  | 0       |
 | DescribeTopicPartitions      | 75  | 0       |
 

@@ -1,4 +1,5 @@
 export * as consumerGroupHeartbeatV0 from './consumer-group-heartbeat-v0.ts'
+export * as consumerGroupHeartbeatV1 from './consumer-group-heartbeat-v1.ts'
 export * as fetchV12 from './fetch-v12.ts'
 export * as fetchV13 from './fetch-v13.ts'
 export * as fetchV14 from './fetch-v14.ts'

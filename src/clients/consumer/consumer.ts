@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type ValidateFunction } from 'ajv'
 import {
   type CallbackWithPromise,
@@ -8,7 +9,7 @@ import {
 import {
   type ConsumerGroupHeartbeatRequest,
   type ConsumerGroupHeartbeatResponse
-} from '../../apis/consumer/consumer-group-heartbeat-v0.ts'
+} from '../../apis/consumer/consumer-group-heartbeat-v1.ts'
 import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
@@ -1203,15 +1204,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
+
           api!(
             connection,
             this.groupId,
-            this.memberId || '',
+            memberId,
             this.#memberEpoch,
             this.groupInstanceId,
             null, // rackId
             options.rebalanceTimeout,
             this.topics.current,
+            null,
             this.#groupRemoteAssignor,
             this.#assignments,
             groupCallback
@@ -1387,15 +1391,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
+
           api!(
             connection,
             this.groupId,
-            this.memberId!,
+            memberId,
             -1, // memberEpoch = -1 signals leave
             this.groupInstanceId,
             null, // rackId
             0, // rebalanceTimeout
             [], // subscribedTopicNames
+            null, // subscribedTopicRegex
             this.#groupRemoteAssignor,
             [], // topicPartitions
             groupCallback
@@ -1412,6 +1419,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         callback(null)
       }
     )
+  }
+
+  #getConsumerGroupHeartbeatMemberId (apiVersion: number): string {
+    if (this.memberId) {
+      return this.memberId
+    }
+
+    if (apiVersion >= 1) {
+      this.memberId = randomUUID()
+      return this.memberId
+    }
+
+    return ''
   }
 
   #performConsume (

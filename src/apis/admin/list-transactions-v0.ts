@@ -1,4 +1,5 @@
 import { ResponseError } from '../../errors.ts'
+import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
@@ -27,7 +28,8 @@ export interface ListTransactionsResponse {
 export function createRequest (
   stateFilters: TransactionState[],
   producerIdFilters: bigint[],
-  _durationFilter: bigint
+  _durationFilter: bigint,
+  _transactionalIdPattern: NullableString
 ): Writer {
   return Writer.create()
     .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)

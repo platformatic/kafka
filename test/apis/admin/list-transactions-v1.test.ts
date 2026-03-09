@@ -9,7 +9,7 @@ test('createRequest serializes basic parameters correctly', () => {
   const producerIdFilters: bigint[] = []
   const durationFilter = BigInt(0)
 
-  const writer = createRequest(stateFilters, producerIdFilters, durationFilter)
+  const writer = createRequest(stateFilters, producerIdFilters, durationFilter, null)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -39,7 +39,7 @@ test('createRequest serializes state filters correctly', () => {
   const producerIdFilters: bigint[] = []
   const durationFilter = BigInt(0)
 
-  const writer = createRequest(stateFilters, producerIdFilters, durationFilter)
+  const writer = createRequest(stateFilters, producerIdFilters, durationFilter, null)
   const reader = Reader.from(writer)
 
   // Read stateFilters array
@@ -57,7 +57,7 @@ test('createRequest serializes producer ID filters correctly', () => {
   const producerIdFilters = [BigInt(1000), BigInt(2000), BigInt(3000)]
   const durationFilter = BigInt(0)
 
-  const writer = createRequest([], producerIdFilters, durationFilter)
+  const writer = createRequest([], producerIdFilters, durationFilter, null)
   const reader = Reader.from(writer)
 
   // Skip stateFilters array
@@ -78,7 +78,7 @@ test('createRequest serializes duration filter correctly', () => {
   const producerIdFilters: bigint[] = []
   const durationFilter = BigInt(60000) // 1 minute in milliseconds
 
-  const writer = createRequest([], producerIdFilters, durationFilter)
+  const writer = createRequest([], producerIdFilters, durationFilter, null)
   const reader = Reader.from(writer)
 
   // Skip stateFilters array

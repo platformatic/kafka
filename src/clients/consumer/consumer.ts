@@ -8,7 +8,7 @@ import {
 import {
   type ConsumerGroupHeartbeatRequest,
   type ConsumerGroupHeartbeatResponse
-} from '../../apis/consumer/consumer-group-heartbeat-v0.ts'
+} from '../../apis/consumer/consumer-group-heartbeat-v1.ts'
 import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
@@ -1212,6 +1212,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             null, // rackId
             options.rebalanceTimeout,
             this.topics.current,
+            null,
             this.#groupRemoteAssignor,
             this.#assignments,
             groupCallback
@@ -1396,6 +1397,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             null, // rackId
             0, // rebalanceTimeout
             [], // subscribedTopicNames
+            null, // subscribedTopicRegex
             this.#groupRemoteAssignor,
             [], // topicPartitions
             groupCallback

@@ -35,8 +35,9 @@ export interface AlterPartitionReassignmentsResponse {
 }
 
 /*
-  AlterPartitionReassignments Request (Version: 0) => timeout_ms [topics] TAG_BUFFER
+  AlterPartitionReassignments Request (Version: 1) => timeout_ms allow_replication_factor_change [topics] TAG_BUFFER
     timeout_ms => INT32
+    allow_replication_factor_change => BOOLEAN
     topics => name [partitions] TAG_BUFFER
       name => COMPACT_STRING
       partitions => partition_index [replicas] TAG_BUFFER
@@ -45,11 +46,12 @@ export interface AlterPartitionReassignmentsResponse {
 */
 export function createRequest (
   timeoutMs: number,
-  _allowReplicationFactorChange: boolean,
+  allowReplicationFactorChange: boolean,
   topics: AlterPartitionReassignmentsRequestTopic[]
 ): Writer {
   return Writer.create()
     .appendInt32(timeoutMs)
+    .appendBoolean(allowReplicationFactorChange)
     .appendArray(topics, (w, t) => {
       w.appendString(t.name).appendArray(t.partitions, (w, p) => {
         w.appendInt32(p.partitionIndex).appendArray(p.replicas, (w, r) => w.appendInt32(r), true, false)
@@ -59,7 +61,7 @@ export function createRequest (
 }
 
 /*
-  AlterPartitionReassignments Response (Version: 0) => throttle_time_ms error_code error_message [responses] TAG_BUFFER
+  AlterPartitionReassignments Response (Version: 1) => throttle_time_ms error_code error_message [responses] TAG_BUFFER
     throttle_time_ms => INT32
     error_code => INT16
     error_message => COMPACT_NULLABLE_STRING
@@ -119,7 +121,7 @@ export function parseResponse (
 
 export const api = createAPI<AlterPartitionReassignmentsRequest, AlterPartitionReassignmentsResponse>(
   45,
-  0,
+  1,
   createRequest,
   parseResponse
 )

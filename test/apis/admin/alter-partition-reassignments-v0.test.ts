@@ -18,7 +18,7 @@ test('createRequest serializes basic parameters correctly', () => {
     }
   ]
 
-  const writer = createRequest(timeoutMs, topics)
+  const writer = createRequest(timeoutMs, false, topics)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -90,7 +90,7 @@ test('createRequest serializes multiple topics correctly', () => {
     }
   ]
 
-  const writer = createRequest(timeoutMs, topics)
+  const writer = createRequest(timeoutMs, false, topics)
   const reader = Reader.from(writer)
 
   // Skip timeoutMs
@@ -159,7 +159,7 @@ test('createRequest serializes multiple partitions correctly', () => {
     }
   ]
 
-  const writer = createRequest(timeoutMs, topics)
+  const writer = createRequest(timeoutMs, false, topics)
   const reader = Reader.from(writer)
 
   // Skip timeoutMs
@@ -214,7 +214,7 @@ test('createRequest serializes empty replicas array correctly', () => {
     }
   ]
 
-  const writer = createRequest(timeoutMs, topics)
+  const writer = createRequest(timeoutMs, false, topics)
   const reader = Reader.from(writer)
 
   // Skip timeoutMs

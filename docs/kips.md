@@ -2,7 +2,7 @@
 
 This page lists the KIPs we have explicitly verified in `@platformatic/kafka`.
 
-Other KIPs up to Kafka 3.9.0 are likely supported, or at least have protocol/API support internally, but may not yet have a public-facing client method.
+Other KIPs up to Kafka 4.1.0 are likely supported, or at least have protocol/API support internally, but may not yet have a public-facing client method.
 
 | KIP                                                                                                                                                                  | Status    |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |

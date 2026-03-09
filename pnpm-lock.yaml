@@ -146,6 +146,8 @@ importers:
         specifier: ^8.0.0
         version: 8.0.0
 
+  playground/load-tests: {}
+
 packages:
 
   '@antoniomuso/lz4-napi-android-arm-eabi@2.9.0':

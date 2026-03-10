@@ -15,6 +15,7 @@ import {
   UnsupportedApiError,
   type Broker,
   type CallbackWithPromise,
+  UserError,
   type ClientDiagnosticEvent,
   type ClusterMetadata
 } from '../../../src/index.ts'
@@ -730,9 +731,8 @@ test('kPerformWithRetry should not leak timers', async t => {
   // If the timeout was already resolved, the test runner would complain
   const error = await promise
 
-  ok(error instanceof MultipleErrors)
-  strictEqual(error.errors.length, 2)
-  ok(error.errors[1].message.startsWith('Client closed while retrying'))
+  // UserError is thrown for unknown topics
+  ok(error instanceof UserError)
 })
 
 test('kPerformWithRetry should accept a custom function', async t => {

@@ -95,7 +95,7 @@ import {
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { MultipleErrors } from '../../errors.ts'
+import { MultipleErrors, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
@@ -2350,15 +2350,26 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
+      // metadata must be defined at this point
+      const { topics, brokers } = metadata!
+
       const requests = new Map<number, ListOffsetsRequestTopic[]>()
 
       for (const topic of options.topics) {
         for (const partition of topic.partitions) {
-          const { leader, leaderEpoch } = metadata!.topics.get(topic.name)!.partitions[partition.partitionIndex]
-          let leaderRequests = requests.get(leader)
+          // topics.get(topic.name) must be defined as the metadata request was successful
+          const topicData = topics.get(topic.name)!
+
+          const targetPartitionData = topicData.partitions[partition.partitionIndex]
+          if (!targetPartitionData) {
+            callback(new UserError(`Unknown partition ${partition.partitionIndex} for topic ${topic.name}.`))
+            return
+          }
+
+          let leaderRequests = requests.get(targetPartitionData.leader)
           if (!leaderRequests) {
             leaderRequests = []
-            requests.set(leader, leaderRequests)
+            requests.set(targetPartitionData.leader, leaderRequests)
           }
 
           let topicRequest = leaderRequests.find(t => t.name === topic.name)
@@ -2369,7 +2380,7 @@ export class Admin extends Base<AdminOptions> {
 
           topicRequest.partitions.push({
             partitionIndex: partition.partitionIndex,
-            currentLeaderEpoch: leaderEpoch,
+            currentLeaderEpoch: targetPartitionData.leaderEpoch,
             /* c8 ignore next - Hard to test */
             timestamp: partition.timestamp ?? -1n
           })
@@ -2380,7 +2391,7 @@ export class Admin extends Base<AdminOptions> {
         'Listing offsets failed.',
         requests,
         ([leader, requests], concurrentCallback) => {
-          this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
+          this[kGetConnection](brokers.get(leader)!, (error, connection) => {
             if (error) {
               concurrentCallback(error)
               return

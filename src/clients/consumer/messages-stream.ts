@@ -553,8 +553,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       if (requests.size === 0) {
-        this.emit('fetch')
-
         // If there are inflight nodes but no new requests could be built,
         // schedule a delayed retry to allow the stale inflight cleanup to run.
         // Without this, _read() won't be called again (no data was pushed)

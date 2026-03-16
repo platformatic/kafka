@@ -450,7 +450,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       clearInterval(this.#autocommitInterval)
     }
 
-    callback(error)
+    this[kConnections].close(closeError => {
+      callback(closeError ?? error)
+    })
   }
 
   _read () {

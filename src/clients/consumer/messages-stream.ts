@@ -212,6 +212,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#consumer.on('consumer:group:join', () => {
       this.#offsetsCommitted.clear()
       this.#inflightNodes.clear()
+      this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
     })
 
@@ -549,6 +550,24 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             ]
           })
         }
+      }
+
+      if (requests.size === 0) {
+        this.emit('fetch')
+
+        // If there are inflight nodes but no new requests could be built,
+        // schedule a delayed retry to allow the stale inflight cleanup to run.
+        // Without this, _read() won't be called again (no data was pushed)
+        // and the 120-second cleanup sweep at the top of #fetch() can never execute.
+        if (this.#inflightNodes.size > 0) {
+          setTimeout(() => {
+            if (!this.#closed && !this.closed && !this.destroyed) {
+              this.#fetch()
+            }
+          }, 1000)
+        }
+
+        return
       }
 
       for (const [leader, leaderRequests] of requests) {

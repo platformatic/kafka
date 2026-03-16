@@ -781,7 +781,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               const fetchCallback: typeof retryCallback = (error, result) => {
                 if (error) {
                   const genericError = error as GenericError
-                  if (genericError.findBy?.('hasStaleMetadata', true)) {
+                  if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
                     this.clearMetadata()
                     for (const topic of options.topics) {
                       for (const partition of topic.partitions) {

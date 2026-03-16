@@ -778,6 +778,23 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 return
               }
 
+              const fetchCallback: typeof retryCallback = (error, result) => {
+                if (error) {
+                  const genericError = error as GenericError
+                  if (genericError.findBy?.('hasStaleMetadata', true)) {
+                    this.clearMetadata()
+                    for (const topic of options.topics) {
+                      for (const partition of topic.partitions) {
+                        partition.currentLeaderEpoch = -1
+                        partition.lastFetchedEpoch = -1
+                      }
+                    }
+                  }
+                }
+
+                retryCallback(error, result)
+              }
+
               api!(
                 connection!,
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
@@ -789,7 +806,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 options.topics,
                 [],
                 '',
-                retryCallback
+                fetchCallback
               )
             })
           })

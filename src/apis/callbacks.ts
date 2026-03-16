@@ -71,7 +71,7 @@ export function runConcurrentCallbacks<ReturnType> (
     remaining--
 
     if (remaining === 0) {
-      callback(hasErrors ? new MultipleErrors(errorMessage, errors) : null, results)
+      callback(hasErrors ? new MultipleErrors(errorMessage, errors.filter(Boolean) as Error[]) : null, results)
     }
   }
 

@@ -112,6 +112,10 @@ export class MultipleErrors extends AggregateError {
     }
 
     for (const error of this.errors) {
+      if (!error) {
+        continue
+      }
+
       if (error[property] === value) {
         return error as unknown as ErrorType
       }
@@ -162,7 +166,7 @@ export class ProtocolError extends GenericError {
       apiCode: code,
       serverErrorMessage,
       canRetry,
-      hasStaleMetadata: ['UNKNOWN_TOPIC_OR_PARTITION', 'LEADER_NOT_AVAILABLE', 'NOT_LEADER_OR_FOLLOWER'].includes(id),
+      hasStaleMetadata: ['UNKNOWN_TOPIC_OR_PARTITION', 'LEADER_NOT_AVAILABLE', 'NOT_LEADER_OR_FOLLOWER', 'FENCED_LEADER_EPOCH'].includes(id),
       needsRejoin: ['MEMBER_ID_REQUIRED', 'UNKNOWN_MEMBER_ID', 'REBALANCE_IN_PROGRESS'].includes(id),
       producerFenced: id === 'INVALID_PRODUCER_EPOCH',
       rebalanceInProgress: id === 'REBALANCE_IN_PROGRESS',

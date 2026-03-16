@@ -308,20 +308,36 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       callback = createPromisifiedCallback()
     }
 
-    const onConnect = () => {
+    const cleanup = () => {
+      clearTimeout(timeout)
+      this.removeListener('connect', onConnect)
       this.removeListener('error', onError)
+      this.removeListener('close', onClose)
+    }
 
+    const onConnect = () => {
+      cleanup()
       callback!(null)
     }
 
     const onError = (error: Error) => {
-      this.removeListener('connect', onConnect)
-
+      cleanup()
       callback!(error)
     }
 
+    const onClose = () => {
+      cleanup()
+      callback!(new NetworkError('Connection closed while waiting for ready.'))
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup()
+      callback!(new TimeoutError(`Connection ready timed out after ${this.#options.connectTimeout}ms.`))
+    }, this.#options.connectTimeout)
+
     this.once('connect', onConnect)
     this.once('error', onError)
+    this.once('close', onClose)
     this.emit('ready')
 
     return callback[kCallbackPromise]

@@ -21,15 +21,15 @@ cronometro(
       const value = randomBytes(size)
       return kafkaJsCRC32(value)
     },
-    '@platformatic/kafka (JS)' () {
+    '@platformatic/kafka (JS)'() {
       const value = randomBytes(size)
       return jsCRC32C(value)
     },
-    '@platformatic/kafka (@node-rs/crc32)' () {
+    '@platformatic/kafka (@node-rs/crc32)'() {
       const value = randomBytes(size)
       return nativeCRC32C(value)
     },
-    '@platformatic/kafka (WASM)' () {
+    '@platformatic/kafka (WASM)'() {
       const value = randomBytes(size)
       return wasmCRC32C(value)
     }

@@ -333,8 +333,30 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   resume () {
+    const wasPaused = this.#paused
     this.#paused = false
-    return super.resume()
+    const result = super.resume()
+
+    // Restart the fetch loop when transitioning from paused → unpaused.
+    //
+    // When a downstream Duplex (e.g. a batching stream) signals backpressure,
+    // pipeline()/pipe() calls pause() on this stream, setting #paused = true.
+    // If a previously scheduled process.nextTick(#fetch) fires while #paused is
+    // true, #fetch() returns early without scheduling another iteration — the
+    // loop is now dead. Later, pipe() calls resume() when the downstream drains,
+    // but super.resume() does not reliably trigger _read() when the readable
+    // buffer is already empty and the stream is in flowing mode (Node.js
+    // considers it "already flowing" and skips the _read() → #fetch() path).
+    //
+    // The wasPaused guard prevents a premature fetch during initial pipeline()
+    // setup, where resume() is called before _construct() completes.
+    if (wasPaused) {
+      process.nextTick(() => {
+        this.#fetch()
+      })
+    }
+
+    return result
   }
 
   // We want to track if the stream is paused explicitly by the user, while isPaused from Node.js can also
@@ -545,34 +567,37 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const [leader, leaderRequests] of requests) {
         this.#inflightNodes.add(leader)
-        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] }, (error, response) => {
-          this.#inflightNodes.delete(leader)
-          this.emit('fetch')
+        this.#consumer.fetch(
+          { ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] },
+          (error, response) => {
+            this.#inflightNodes.delete(leader)
+            this.emit('fetch')
 
-          if (error) {
-            // The stream has been closed, ignore the error
-            /* c8 ignore next 4 - Hard to test */
-            if (this.#closed || this.closed || this.destroyed) {
-              this.push(null)
+            if (error) {
+              // The stream has been closed, ignore the error
+              /* c8 ignore next 4 - Hard to test */
+              if (this.#closed || this.closed || this.destroyed) {
+                this.push(null)
+                return
+              }
+
+              this.destroy(error)
               return
             }
 
-            this.destroy(error)
-            return
-          }
+            if (this.#closed || this.closed || this.destroyed) {
+              // When it's the last inflight, we finally close the stream.
+              // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
+              if (this.#inflightNodes.size === 0) {
+                this.push(null)
+              }
 
-          if (this.#closed || this.closed || this.destroyed) {
-            // When it's the last inflight, we finally close the stream.
-            // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
-            if (this.#inflightNodes.size === 0) {
-              this.push(null)
+              return
             }
 
-            return
+            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
           }
-
-          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
-        })
+        )
       }
     })
   }
@@ -727,11 +752,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this[kAutocommit]()
     }
 
-    if (canPush) {
-      process.nextTick(() => {
-        this.#fetch()
-      })
-    }
+    // Always schedule the next fetch, even when push() returned false (canPush).
+    //
+    // In pull mode, _read() would restart the loop once the buffer drains.
+    // In flowing mode with pipeline(), however, _read() is not reliably called
+    // again when the buffer is already empty — Node.js considers the stream
+    // "already flowing" and does not re-invoke _read(). The fetch loop dies
+    // and unconsumed messages remain in Kafka.
+    //
+    // Unconditionally scheduling is safe because #fetch() checks #paused,
+    // #closed, and other guards before issuing a Kafka fetch request.
+    process.nextTick(() => {
+      this.#fetch()
+    })
 
     if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
       this.push(null)

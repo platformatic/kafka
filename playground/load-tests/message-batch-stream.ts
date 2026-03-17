@@ -8,6 +8,8 @@ export interface MessageBatchOptions {
   batchSize: number
   /** Time in milliseconds to wait before flushing incomplete batches */
   timeoutMilliseconds: number
+  /** Maximum number of batches to buffer on the readable side before signaling backpressure */
+  readableHighWaterMark?: number
 }
 
 /**
@@ -28,28 +30,49 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
   private pendingBatches: TMessage[][]
 
   constructor (options: MessageBatchOptions) {
-    super({ objectMode: true })
+    super({ objectMode: true, readableHighWaterMark: options.readableHighWaterMark })
     this.batchSize = options.batchSize
     this.timeout = options.timeoutMilliseconds
     this.messages = []
     this.pendingBatches = []
   }
 
+  private pendingCallback: CallbackFunction | undefined
+  private isBackPressured: boolean = false
+
   override _read (): void {
+    this.isBackPressured = false
     this.flushPendingBatches()
+
+    // Release held callback when downstream pulls — this is the backpressure
+    // release mechanism that allows pipeline to resume writing.
+    if (this.pendingCallback) {
+      const cb = this.pendingCallback
+      this.pendingCallback = undefined
+      cb()
+    }
   }
 
   override _write (message: TMessage, _encoding: BufferEncoding, callback: CallbackFunction): void {
+    let canContinue = true
+
     try {
       this.messages.push(message)
 
       if (this.messages.length >= this.batchSize) {
-        this.flushMessages()
+        canContinue = this.flushMessages()
       } else {
         this.existingTimeout ??= setTimeout(() => this.flushMessages(), this.timeout)
       }
     } finally {
-      callback()
+      // Hold the callback when backpressured — this causes pipeline's writable
+      // buffer to fill, eventually making write() return false, which triggers
+      // pipe() to call pause() on the source consumer stream.
+      if (!canContinue) {
+        this.pendingCallback = callback
+      } else {
+        callback()
+      }
     }
   }
 
@@ -63,15 +86,20 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
     callback()
   }
 
-  private flushMessages (): void {
+  private flushMessages (): boolean {
     clearTimeout(this.existingTimeout)
     this.existingTimeout = undefined
 
-    if (this.messages.length === 0) return
+    if (this.messages.length === 0) return true
+
+    if (this.isBackPressured) {
+      this.existingTimeout = setTimeout(() => this.flushMessages(), this.timeout)
+      return false
+    }
 
     const messageBatch = this.messages.splice(0, this.messages.length)
 
-    // Group by topic:partition
+    // Group by topic:partition — each group is pushed as a separate readable object
     const messagesByTopicPartition: Record<string, TMessage[]> = {}
     for (const message of messageBatch) {
       const key = `${message.topic}:${message.partition}`
@@ -79,19 +107,18 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
       messagesByTopicPartition[key].push(message)
     }
 
+    let canContinue = true
     for (const messagesForKey of Object.values(messagesByTopicPartition)) {
-      this.pendingBatches.push(messagesForKey)
+      canContinue = this.push(messagesForKey)
     }
 
-    this.flushPendingBatches()
+    if (!canContinue) this.isBackPressured = true
+
+    return canContinue
   }
 
   private flushPendingBatches (): void {
-    while (this.pendingBatches.length > 0) {
-      const canContinue = this.push(this.pendingBatches[0]!)
-      if (!canContinue) return
-
-      this.pendingBatches.shift()
-    }
+    // No-op — kept for _read() compatibility. Backpressure is handled
+    // by holding the _write() callback in the new implementation.
   }
 }

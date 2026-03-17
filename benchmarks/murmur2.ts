@@ -10,7 +10,7 @@ cronometro(
       const value = randomBytes(16)
       return kafkaJsMurmur2(value)
     },
-    '@platformatic/kafka'() {
+    '@platformatic/kafka' () {
       const value = randomBytes(16)
       return murmur2(value)
     }

@@ -25,7 +25,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
-import { setTimeout } from 'node:timers/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 import {
   Admin,
   Consumer,
@@ -38,7 +38,6 @@ import {
 } from '../../src/index.ts'
 import { config } from './config.ts'
 import { MessageBatchStream } from './message-batch-stream.ts'
-import { setTimeout as sleep } from 'node:timers/promises'
 
 export interface BackpressureStallTestOptions {
   topicCount: number
@@ -55,7 +54,7 @@ export async function runBackpressureStallTest (options: BackpressureStallTestOp
   const { topicCount, messagesPerTopic, batchSize, handlerDelayMs, timeoutSeconds, consumerHighWaterMark } = options
   const totalMessages = topicCount * messagesPerTopic
 
-  console.log(`\n=== Backpressure Stall Test ===`)
+  console.log('\n=== Backpressure Stall Test ===')
   console.log(`  Topics: ${topicCount}`)
   console.log(`  Messages per topic: ${messagesPerTopic}`)
   console.log(`  Total: ${totalMessages}`)
@@ -84,7 +83,7 @@ export async function runBackpressureStallTest (options: BackpressureStallTestOp
     }
   }
   await admin.close()
-  await setTimeout(500) // Wait for topics to propagate
+  await sleep(500) // Wait for topics to propagate
 
   // Producer setup
   const producer = new Producer<string, object, string, string>({
@@ -207,12 +206,12 @@ export async function runBackpressureStallTest (options: BackpressureStallTestOp
       const batch = messageBatch as DeserializedMessage[]
       batchesProcessed++
 
-      // Matches real handler: iterate messages synchronously to extract IDs
+      // Matches real handler: iterate messages synchronously
       for (const message of batch) {
         consumed++
-        // Sync work: extract IDs, schema validation (simulated by object access)
-        const value = message.value
-        const _id = value?.id ?? value?.entry_id ?? value?.key_id ?? value?.form_id
+        // Sync work: schema validation (simulated by object access)
+        // eslint-disable-next-line no-void
+        void message.value
       }
 
       // Async flush: 3 parallel Redis SADD calls (simulated with sleep)

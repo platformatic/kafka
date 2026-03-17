@@ -166,7 +166,7 @@ test('#consumerGroupHeartbeat should ignore response when closed ', skipConsumer
 })
 
 test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', skipConsumerGroupProtocol, async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, requestTimeout: 200 })
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
   const stream = await consumer.consume({ topics: [topic] })
   mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, (

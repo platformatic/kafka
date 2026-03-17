@@ -24,6 +24,7 @@ import {
   NetworkError,
   parseBroker,
   promiseWithResolvers,
+  TimeoutError,
   type Reader,
   saslHandshakeV1,
   SASLMechanisms,
@@ -295,6 +296,30 @@ test('Connection.ready should reject when connection errors', async t => {
   })
 
   await readyPromise
+})
+
+test('Connection.ready should reject with TimeoutError when connection does not become ready in time', async t => {
+  const connection = new Connection('test-client', { connectTimeout: 100 })
+  t.after(() => connection.close())
+
+  await rejects(() => connection.ready() as Promise<unknown>, {
+    message: 'Connection ready timed out after 100ms.'
+  })
+})
+
+test('Connection.ready should reject with NetworkError when connection closes while waiting', async t => {
+  const connection = new Connection('test-client', { connectTimeout: 5000 })
+  t.after(() => connection.close())
+
+  const readyPromise = connection.ready()
+
+  // Simulate a close event while waiting for ready
+  connection.emit('close')
+
+  await rejects(() => readyPromise as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK',
+    message: 'Connection closed while waiting for ready.'
+  })
 })
 
 test('Connection.close should close the connection', async t => {

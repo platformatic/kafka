@@ -1517,7 +1517,7 @@ test('should automatically reconnect and resume operations when retries=true', a
   }
 })
 
-test('should retry fetch via nextTick when all partition leaders are inflight', async t => {
+test('should retry fetch when all partition leaders are inflight', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)
 
@@ -1530,7 +1530,7 @@ test('should retry fetch via nextTick when all partition leaders are inflight', 
 
   // Wrap consumer.fetch to delay the first call, simulating a slow broker.
   // This forces the stream into the state where inflightNodes is non-empty
-  // but no new requests can be built, triggering the nextTick retry.
+  // but no new requests can be built, triggering the delayed retry.
   const originalFetch = consumer.fetch.bind(consumer)
   let calls = 0
   consumer.fetch = function (options: any, callback: CallbackWithPromise<any>) {

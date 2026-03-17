@@ -556,11 +556,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       if (requests.size === 0) {
         // If there are inflight nodes but no new requests could be built,
-        // schedule a delayed retry to allow the stale inflight cleanup to run.
-        // Without this, _read() won't be called again (no data was pushed)
-        // and the 120-second cleanup sweep at the top of #fetch() can never execute.
+        // wait for any inflight fetch to complete (which emits 'fetch')
+        // and then retry. This avoids polling and lets the stale-entry
+        // cleanup at the top of #fetch() run on the next cycle.
         if (this.#inflightNodes.size > 0) {
-          process.nextTick(() => {
+          this.once('fetch', () => {
             if (!this.#closed && !this.closed && !this.destroyed) {
               this.#fetch()
             }

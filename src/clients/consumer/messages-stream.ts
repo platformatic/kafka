@@ -452,7 +452,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       clearInterval(this.#autocommitInterval)
     }
 
-    callback(error)
+    this[kConnections].close(closeError => {
+      callback(closeError ?? error)
+    })
   }
 
   _read () {
@@ -570,7 +572,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const [leader, leaderRequests] of requests) {
         this.#inflightNodes.set(leader, Date.now())
-        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests }, (error, response) => {
+        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] }, (error, response) => {
           this.#inflightNodes.delete(leader)
           this.emit('fetch')
 

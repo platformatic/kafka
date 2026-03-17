@@ -132,6 +132,7 @@ import {
   describeConfigsOptionsValidator,
   describeGroupsOptionsValidator,
   describeLogDirsOptionsValidator,
+  findCoordinatorOptionsValidator,
   incrementalAlterConfigsOptionsValidator,
   listConsumerGroupOffsetsOptionsValidator,
   listGroupsOptionsValidator,
@@ -161,6 +162,8 @@ import {
   type DescribeConfigsOptions,
   type DescribeGroupsOptions,
   type DescribeLogDirsOptions,
+  type FindCoordinatorOptions,
+  type FindCoordinatorResult,
   type Group,
   type GroupBase,
   type GroupMember,
@@ -366,6 +369,38 @@ export class Admin extends Base<AdminOptions> {
       this.#describeGroups,
       1,
       createDiagnosticContext({ client: this, operation: 'describeGroups', options }),
+      this,
+      options,
+      callback
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  findCoordinator (options: FindCoordinatorOptions, callback: CallbackWithPromise<FindCoordinatorResult[]>): void
+  findCoordinator (options: FindCoordinatorOptions): Promise<FindCoordinatorResult[]>
+  findCoordinator (
+    options: FindCoordinatorOptions,
+    callback?: CallbackWithPromise<FindCoordinatorResult[]>
+  ): void | Promise<FindCoordinatorResult[]> {
+    if (!callback) {
+      callback = createPromisifiedCallback()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    const validationError = this[kValidateOptions](options, findCoordinatorOptionsValidator, '/options', false)
+    if (validationError) {
+      callback(validationError)
+      return callback[kCallbackPromise]
+    }
+
+    adminGroupsChannel.traceCallback(
+      this.#findCoordinator,
+      1,
+      createDiagnosticContext({ client: this, operation: 'findCoordinator', options }),
       this,
       options,
       callback
@@ -1208,19 +1243,19 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      this.#findGroupCoordinator(options.groups, (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (error, coordinators) => {
         if (error) {
           callback(error)
           return
         }
 
         // Group the groups by coordinator
-        const coordinators: Map<number, string[]> = new Map()
-        for (const { key: group, nodeId: node } of response!.coordinators) {
-          let coordinator = coordinators.get(node)
+        const coordinatorsMap: Map<number, string[]> = new Map()
+        for (const { key: group, nodeId: node } of coordinators!) {
+          let coordinator = coordinatorsMap.get(node)
           if (!coordinator) {
             coordinator = []
-            coordinators.set(node, coordinator)
+            coordinatorsMap.set(node, coordinator)
           }
 
           coordinator.push(group)
@@ -1228,7 +1263,7 @@ export class Admin extends Base<AdminOptions> {
 
         runConcurrentCallbacks(
           'Describing groups failed.',
-          coordinators,
+          coordinatorsMap,
           ([node, groups], concurrentCallback) => {
             this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
               if (error) {
@@ -1328,19 +1363,19 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      this.#findGroupCoordinator(options.groups, (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (error, coordinators) => {
         if (error) {
           callback(error)
           return
         }
 
         // Group the groups by coordinator
-        const coordinators: Map<number, string[]> = new Map()
-        for (const { key: group, nodeId: node } of response!.coordinators) {
-          let coordinator = coordinators.get(node)
+        const coordinatorsMap: Map<number, string[]> = new Map()
+        for (const { key: group, nodeId: node } of coordinators!) {
+          let coordinator = coordinatorsMap.get(node)
           if (!coordinator) {
             coordinator = []
-            coordinators.set(node, coordinator)
+            coordinatorsMap.set(node, coordinator)
           }
 
           coordinator.push(group)
@@ -1348,7 +1383,7 @@ export class Admin extends Base<AdminOptions> {
 
         runConcurrentCallbacks(
           'Deleting groups failed.',
-          coordinators,
+          coordinatorsMap,
           ([node, groups], concurrentCallback) => {
             this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
               if (error) {
@@ -1418,13 +1453,16 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      this.#findGroupCoordinator([options.groupId], (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+        error,
+        coordinators
+      ) => {
         if (error) {
           callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
           return
         }
 
-        const coordinator = response!.coordinators.find(c => c.key === options.groupId)
+        const coordinator = coordinators!.find(c => c.key === options.groupId)
         /* c8 ignore next 8 - Hard to test */
         if (!coordinator) {
           callback(
@@ -1486,9 +1524,9 @@ export class Admin extends Base<AdminOptions> {
     })
   }
 
-  #findGroupCoordinator (groups: string[], callback: CallbackWithPromise<FindCoordinatorResponse>): void {
+  #findCoordinator (options: FindCoordinatorOptions, callback: CallbackWithPromise<FindCoordinatorResult[]>): void {
     this[kPerformWithRetry]<FindCoordinatorResponse>(
-      'findGroupCoordinator',
+      'findCoordinator',
       retryCallback => {
         this[kGetBootstrapConnection]((error, connection) => {
           if (error) {
@@ -1502,7 +1540,7 @@ export class Admin extends Base<AdminOptions> {
               return
             }
 
-            api!(connection!, FindCoordinatorKeyTypes.GROUP, groups, retryCallback)
+            api!(connection!, options.keyType, options.keys, retryCallback)
           })
         })
       },
@@ -1512,7 +1550,15 @@ export class Admin extends Base<AdminOptions> {
           return
         }
 
-        callback(null, response)
+        callback(
+          null,
+          response!.coordinators.map(coordinator => ({
+            key: coordinator.key,
+            nodeId: coordinator.nodeId,
+            host: coordinator.host,
+            port: coordinator.port
+          }))
+        )
       },
       0
     )
@@ -1660,14 +1706,14 @@ export class Admin extends Base<AdminOptions> {
       /* c8 ignore next - Hard to test */
       const groupIds = options.groups.map(group => (typeof group === 'string' ? group : group.groupId))
 
-      this.#findGroupCoordinator(groupIds, (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: groupIds }, (error, coordinators) => {
         if (error) {
           callback(new MultipleErrors('Listing consumer group offsets failed.', [error]))
           return
         }
 
-        const coordinators: Map<number, OffsetFetchRequestGroup[]> = new Map()
-        for (const { key: groupId, nodeId: node } of response!.coordinators) {
+        const coordinatorsMap: Map<number, OffsetFetchRequestGroup[]> = new Map()
+        for (const { key: groupId, nodeId: node } of coordinators!) {
           const groupRequest: OffsetFetchRequestGroup = {
             groupId,
             memberId: null,
@@ -1681,10 +1727,10 @@ export class Admin extends Base<AdminOptions> {
             }
           }
 
-          let coordinator = coordinators.get(node)
+          let coordinator = coordinatorsMap.get(node)
           if (!coordinator) {
             coordinator = []
-            coordinators.set(node, coordinator)
+            coordinatorsMap.set(node, coordinator)
           }
 
           coordinator.push(groupRequest)
@@ -1692,7 +1738,7 @@ export class Admin extends Base<AdminOptions> {
 
         runConcurrentCallbacks(
           'Listing consumer group offsets failed.',
-          coordinators,
+          coordinatorsMap,
           ([node, groups], concurrentCallback) => {
             this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
               if (error) {
@@ -1753,13 +1799,16 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      this.#findGroupCoordinator([options.groupId], (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+        error,
+        coordinators
+      ) => {
         if (error) {
           callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
           return
         }
 
-        const coordinator = response!.coordinators.find(c => c.key === options.groupId)
+        const coordinator = coordinators!.find(c => c.key === options.groupId)
         /* c8 ignore next 9 - Hard to test */
         if (!coordinator) {
           callback(
@@ -1835,13 +1884,16 @@ export class Admin extends Base<AdminOptions> {
         return
       }
 
-      this.#findGroupCoordinator([options.groupId], (error, response) => {
+      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+        error,
+        coordinators
+      ) => {
         if (error) {
           callback(new MultipleErrors('Deleting consumer group offsets failed.', [error]))
           return
         }
 
-        const coordinator = response!.coordinators.find(c => c.key === options.groupId)
+        const coordinator = coordinators!.find(c => c.key === options.groupId)
         /* c8 ignore next 9 - Hard to test */
         if (!coordinator) {
           callback(

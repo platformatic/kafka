@@ -3,6 +3,7 @@ import {
   allowedAclPermissionTypes,
   allowedClientQuotaMatchTypes,
   allowedFetchIsolationLevels,
+  allowedFindCoordinatorKeyTypes,
   allowedIncrementalAlterConfigOperationTypes,
   allowedResourcePatternTypes,
   allowedResourceTypes,
@@ -625,6 +626,20 @@ export const adminListOffsetsOptionsSchema = {
   additionalProperties: false
 }
 
+export const findCoordinatorOptionsSchema = {
+  type: 'object',
+  properties: {
+    keyType: { type: 'number', enum: [...allowedFindCoordinatorKeyTypes] },
+    keys: {
+      type: 'array',
+      items: idProperty,
+      minItems: 1
+    }
+  },
+  required: ['keyType', 'keys'],
+  additionalProperties: false
+}
+
 export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
 export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
 export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
@@ -647,3 +662,4 @@ export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
 export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
 export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)
 export const adminListOffsetsOptionsValidator = ajv.compile(adminListOffsetsOptionsSchema)
+export const findCoordinatorOptionsValidator = ajv.compile(findCoordinatorOptionsSchema)

@@ -16,7 +16,8 @@ import { type IncrementalAlterConfigsRequestResource } from '../../apis/admin/in
 import {
   type ConfigResourceTypeValue,
   type ConsumerGroupStateValue,
-  type FetchIsolationLevelValue
+  type FetchIsolationLevelValue,
+  type FindCoordinatorKeyTypeValue
 } from '../../apis/enumerations.ts'
 import { type Acl, type AclFilter } from '../../apis/types.ts'
 import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
@@ -90,6 +91,18 @@ export interface ListGroupsOptions {
 export interface DescribeGroupsOptions {
   groups: string[]
   includeAuthorizedOperations?: boolean
+}
+
+export interface FindCoordinatorOptions {
+  keyType: FindCoordinatorKeyTypeValue
+  keys: string[]
+}
+
+export interface FindCoordinatorResult {
+  key: string
+  nodeId: number
+  host: string
+  port: number
 }
 
 export interface DeleteGroupsOptions {

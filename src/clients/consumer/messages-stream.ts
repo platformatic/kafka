@@ -558,11 +558,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // Without this, _read() won't be called again (no data was pushed)
         // and the 120-second cleanup sweep at the top of #fetch() can never execute.
         if (this.#inflightNodes.size > 0) {
-          setTimeout(() => {
+          process.nextTick(() => {
             if (!this.#closed && !this.closed && !this.destroyed) {
               this.#fetch()
             }
-          }, 1000)
+          })
         }
 
         return

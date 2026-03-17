@@ -1517,6 +1517,61 @@ test('should automatically reconnect and resume operations when retries=true', a
   }
 })
 
+test('should retry fetch via nextTick when all partition leaders are inflight', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  // Produce test messages
+  await produceTestMessages(t, topic, 3)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup()
+
+  // Wrap consumer.fetch to delay the first call, simulating a slow broker.
+  // This forces the stream into the state where inflightNodes is non-empty
+  // but no new requests can be built, triggering the nextTick retry.
+  const originalFetch = consumer.fetch.bind(consumer)
+  let calls = 0
+  consumer.fetch = function (options: any, callback: CallbackWithPromise<any>) {
+    calls++
+
+    if (calls === 1) {
+      // Delay the first fetch callback so the node stays inflight
+      // while the stream attempts another fetch cycle
+      setTimeout(() => {
+        originalFetch(options, callback)
+      }, 100)
+      return
+    }
+
+    originalFetch(options, callback)
+  } as typeof consumer.fetch
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxWaitTime: 1000,
+    autocommit: false
+  })
+
+  const messages: Message<string, string, string, string>[] = []
+
+  for await (const message of stream) {
+    messages.push(message)
+
+    if (messages.length >= 3) {
+      break
+    }
+  }
+
+  strictEqual(messages.length, 3)
+  // Verify the fetch was called more than once, confirming the retry path was exercised
+  ok(calls >= 2, `Expected at least 2 fetch calls, got ${calls}`)
+
+  await stream.close()
+})
+
 test('should handle close errors from ConnectionPool.close', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)

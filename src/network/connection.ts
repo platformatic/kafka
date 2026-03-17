@@ -332,7 +332,18 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     const timeout = setTimeout(() => {
       cleanup()
-      callback!(new TimeoutError(`Connection ready timed out after ${this.#options.connectTimeout}ms.`))
+
+      // If the connection already failed (e.g. invalid port), don't double-invoke the callback
+      if (this.#status === ConnectionStatuses.ERROR || this.#status === ConnectionStatuses.CLOSED) {
+        return
+      }
+
+      this.#socket?.destroy()
+      callback!(new TimeoutError(
+        this.#host
+          ? `Connection to ${this.#host}:${this.#port} timed out.`
+          : `Connection ready timed out after ${this.#options.connectTimeout}ms.`
+      ))
     }, this.#options.connectTimeout)
 
     this.once('connect', onConnect)

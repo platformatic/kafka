@@ -609,8 +609,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     requestedOffsets: Map<string, bigint>
   ) {
     const autocommit = this.#autocommitEnabled
-    let canPush = true
-
     const keyDeserializer = this.#keyDeserializer
     const valueDeserializer = this.#valueDeserializer
     const headerKeyDeserializer = this.#headerKeyDeserializer
@@ -720,7 +718,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
               consumerReceivesChannel.asyncStart.publish(diagnosticContext)
 
-              canPush = this.push(message)
+              this.push(message)
 
               consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
             } catch (error) {
@@ -752,7 +750,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this[kAutocommit]()
     }
 
-    // Always schedule the next fetch, even when push() returned false (canPush).
+    // Always schedule the next fetch, even when push() returned false.
     //
     // In pull mode, _read() would restart the loop once the buffer drains.
     // In flowing mode with pipeline(), however, _read() is not reliably called

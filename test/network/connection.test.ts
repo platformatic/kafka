@@ -24,7 +24,6 @@ import {
   NetworkError,
   parseBroker,
   promiseWithResolvers,
-  TimeoutError,
   type Reader,
   saslHandshakeV1,
   SASLMechanisms,

@@ -615,7 +615,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const firstOffset = batch.firstOffset
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
-          this.#partitionsEpochs.set(`${topic}:${partition}`, batch.partitionLeaderEpoch)
+          this.#partitionsEpochs.set(`${topic}:${partition}`, leaderEpoch)
 
           // Track offsets
           if (batch === recordsBatches[recordsBatches.length - 1]) {

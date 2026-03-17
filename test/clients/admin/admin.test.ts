@@ -9,6 +9,7 @@ import {
   ConfigResourceTypes,
   ConfigSources,
   ConfigTypes,
+  FindCoordinatorKeyTypes,
   IncrementalAlterConfigOperationTypes,
   ListOffsetTimestamps
 } from '../../../src/apis/enumerations.ts'
@@ -53,6 +54,7 @@ import {
   describeGroupsV5,
   describeLogDirsV4,
   EMPTY_BUFFER,
+  findCoordinatorV6,
   incrementalAlterConfigsV1,
   instancesChannel,
   listGroupsV5,
@@ -8414,5 +8416,149 @@ test('deleteRecords should handle unavailable API errors', async t => {
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.errors[0].message.includes('Unsupported API DeleteRecords.'), true)
+  }
+})
+
+test('findCoordinator should find group coordinators', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const consumer = new Consumer({
+    clientId: `test-admin-admin-${randomUUID()}`,
+    groupId,
+    bootstrapBrokers: kafkaBootstrapServers
+  })
+  t.after(() => consumer.close())
+
+  const admin = createAdmin(t)
+  const testTopic = `test-topic-${randomUUID()}`
+  await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
+  await consumer.topics.trackAll(testTopic)
+  await consumer.joinGroup()
+
+  const coordinators = await admin.findCoordinator({
+    keyType: FindCoordinatorKeyTypes.GROUP,
+    keys: [groupId]
+  })
+
+  strictEqual(coordinators.length, 1)
+  strictEqual(coordinators[0].key, groupId)
+  strictEqual(typeof coordinators[0].nodeId, 'number')
+  strictEqual(typeof coordinators[0].host, 'string')
+  strictEqual(typeof coordinators[0].port, 'number')
+})
+
+test('findCoordinator should validate options', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  // Test with missing required fields
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({})
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with missing keyType
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keys: ['test-group'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with missing keys
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with empty keys array
+  try {
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [] } as any)
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with invalid keyType (not in enum)
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: 99, keys: ['test-group'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with non-number keyType
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: 'GROUP', keys: ['test-group'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with non-string key in keys array
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [123] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with non-array keys
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: 'test-group' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+
+  // Test with additional properties
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: ['test-group'], extra: true })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+  }
+})
+
+test('findCoordinator should handle errors from the API', async t => {
+  const admin = createAdmin(t)
+
+  mockAPI(admin[kConnections], findCoordinatorV6.api.key)
+
+  try {
+    await admin.findCoordinator({
+      keyType: FindCoordinatorKeyTypes.GROUP,
+      keys: ['test-group']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message, mockedErrorMessage)
+  }
+})
+
+test('findCoordinator should handle unavailable API errors', async t => {
+  const admin = createAdmin(t)
+
+  mockUnavailableAPI(admin, 'FindCoordinator')
+
+  try {
+    await admin.findCoordinator({
+      keyType: FindCoordinatorKeyTypes.GROUP,
+      keys: ['test-group']
+    })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UnsupportedApiError, true)
+    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
   }
 })

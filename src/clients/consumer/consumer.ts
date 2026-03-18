@@ -1361,6 +1361,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #updateAssignments (newAssignments: TopicPartition[], callback: CallbackWithPromise<void>): void {
     this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+      if (!this.#membershipActive) {
+        callback(null)
+        return
+      }
+
       if (error) {
         callback(error)
         return

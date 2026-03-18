@@ -585,30 +585,30 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           this.#inflightNodes.delete(leader)
           this.emit('fetch')
 
-            if (error) {
-              // The stream has been closed, ignore the error
-              /* c8 ignore next 4 - Hard to test */
-              if (this.#closed || this.closed || this.destroyed) {
-                this.push(null)
-                return
-              }
-
-              this.destroy(error)
-              return
-            }
-
+          if (error) {
+            // The stream has been closed, ignore the error
+            /* c8 ignore next 4 - Hard to test */
             if (this.#closed || this.closed || this.destroyed) {
-              // When it's the last inflight, we finally close the stream.
-              // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
-              if (this.#inflightNodes.size === 0) {
-                this.push(null)
-              }
-
+              this.push(null)
               return
             }
 
-            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
+            this.destroy(error)
+            return
           }
+
+          if (this.#closed || this.closed || this.destroyed) {
+            // When it's the last inflight, we finally close the stream.
+            // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
+            if (this.#inflightNodes.size === 0) {
+              this.push(null)
+            }
+
+            return
+          }
+
+          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
+        }
         )
       }
     })

@@ -82,7 +82,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
   #partitionsEpochs: Map<string, number>
-  #inflightNodes: Set<number>
+  #inflightNodes: Map<number, number>
   #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
   #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeyDeserializer: Deserializer<HeaderKey>
@@ -167,7 +167,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
-    this.#inflightNodes = new Set()
+    this.#inflightNodes = new Map()
     this.#keyDeserializer =
       deserializers?.key ?? (noopDeserializer as DeserializerWithHeaders<Key, HeaderKey, HeaderValue>)
     this.#valueDeserializer =
@@ -494,6 +494,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
+      // Remove stale inflight entries that have been pending for too long.
+      // This prevents permanent partition starvation if a fetch callback is never invoked.
+      const now = Date.now()
+      for (const [node, timestamp] of this.#inflightNodes) {
+        if (now - timestamp > 120_000) {
+          this.#inflightNodes.delete(node)
+        }
+      }
+
       const requests = new Map<number, FetchRequestTopic[]>()
       const topicIds = new Map<string, string>()
 
@@ -544,8 +553,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
       }
 
+      if (requests.size === 0) {
+        return
+      }
+
       for (const [leader, leaderRequests] of requests) {
-        this.#inflightNodes.add(leader)
+        this.#inflightNodes.set(leader, Date.now())
         this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] }, (error, response) => {
           this.#inflightNodes.delete(leader)
           this.emit('fetch')

@@ -789,7 +789,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 options.topics,
                 [],
                 '',
-                retryCallback
+                (error, result) => {
+                  if (error) {
+                    const genericError = error as GenericError
+                    if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
+                      this.clearMetadata()
+                      for (const topic of options.topics) {
+                        for (const partition of topic.partitions) {
+                          partition.currentLeaderEpoch = -1
+                          partition.lastFetchedEpoch = -1
+                        }
+                      }
+                    }
+                  }
+
+                  retryCallback(error, result)
+                }
               )
             })
           })
@@ -1346,6 +1361,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #updateAssignments (newAssignments: TopicPartition[], callback: CallbackWithPromise<void>): void {
     this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+      if (!this.#membershipActive) {
+        callback(null)
+        return
+      }
+
       if (error) {
         callback(error)
         return

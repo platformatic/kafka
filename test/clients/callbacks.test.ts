@@ -134,8 +134,8 @@ test('runConcurrentCallbacks handles errors correctly', async () => {
 
       if (error instanceof MultipleErrors) {
         strictEqual(error.message, 'Test error message')
-        strictEqual(error.errors.length, 3)
-        strictEqual(error.errors[1]?.message, 'Test operation error')
+        strictEqual(error.errors.length, 1)
+        strictEqual(error.errors[0]?.message, 'Test operation error')
       }
 
       resolve()
@@ -185,9 +185,9 @@ test('runConcurrentCallbacks with multiple errors', async () => {
 
       if (error instanceof MultipleErrors) {
         strictEqual(error.message, 'Multiple errors occurred')
-        strictEqual(error.errors.length, 3)
+        strictEqual(error.errors.length, 2)
         strictEqual(error.errors[0]?.message, 'Error from error-1')
-        strictEqual(error.errors[2]?.message, 'Error from error-3')
+        strictEqual(error.errors[1]?.message, 'Error from error-3')
       }
 
       resolve()

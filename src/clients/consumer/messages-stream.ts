@@ -211,7 +211,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // having some.
     this.#consumer.on('consumer:group:join', () => {
       this.#offsetsCommitted.clear()
-      this.#inflightNodes.clear()
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
     })

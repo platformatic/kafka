@@ -265,3 +265,22 @@ test('UserError', () => {
   deepStrictEqual(error.param, 'clientId')
   ok(GenericError.isGenericError(error))
 })
+
+test('ProtocolError FENCED_LEADER_EPOCH has hasStaleMetadata', () => {
+  const error = new ProtocolError('FENCED_LEADER_EPOCH')
+  deepStrictEqual(error.code, 'PLT_KFK_PROTOCOL')
+  deepStrictEqual(error.apiId, 'FENCED_LEADER_EPOCH')
+  deepStrictEqual(error.hasStaleMetadata, true)
+})
+
+test('MultipleErrors.findBy - handles undefined entries in errors array', () => {
+  const error1 = new GenericError('PLT_KFK_USER', 'error1', { foo: 'bar' })
+
+  // Simulate undefined entries as would happen with pre-allocated sparse arrays
+  const errors = [undefined, error1, undefined] as unknown as Error[]
+  const multiError = new MultipleErrors('with undefined entries', errors)
+
+  // findBy should not crash and should find the valid error
+  deepStrictEqual(multiError.findBy('foo', 'bar'), error1)
+  deepStrictEqual(multiError.findBy('unknown', 'value'), null)
+})

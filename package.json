@@ -32,7 +32,7 @@
     "format": "prettier -w benchmarks playground src test",
     "test": "c8 -c test/config/c8-local.json ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
     "test:ci": "c8 -c test/config/c8-ci.json ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
-    "test:memory": "./scripts/node --expose-gc --test --test-isolation=none --test-reporter=cleaner-spec-reporter 'test/**/*.memory-test.ts'",
+    "test:memory": "NODE_OPTIONS='--expose-gc' ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/**/*.memory-test.ts'",
     "test:docker:up": "docker-compose up -d --wait",
     "test:docker:down": "docker-compose down",
     "ci": "npm run build && npm run lint && npm run test:ci",

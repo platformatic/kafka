@@ -9,8 +9,7 @@ import { kafkaBootstrapServers } from '../helpers.ts'
  * General memory leak test for the consumer stream under sustained backpressure.
  *
  * Uses the real pipeline + MessageBatchStream pattern with a slow async handler
- * to create sustained backpressure, then monitors heapUsed over time using the
- * undici fetch-leak.js "stabilization" pattern.
+ * to create sustained backpressure, then monitors heapUsed over time.
  *
  * This test catches the broad class of memory leaks that can occur during
  * backpressured consumption:
@@ -24,13 +23,15 @@ import { kafkaBootstrapServers } from '../helpers.ts'
  * Note: this test does NOT specifically catch the removal of the #paused guard
  * in #fetch() — that is covered by the behavioral test in
  * messages-stream-paused-guard.test.ts. The #inflightNodes per-broker
- * serialization bounds the observable effect with only 3 CI brokers, making
- * heap-based detection unreliable for that specific guard.
+ * serialization bounds the observable effect to N concurrent fetches (N = brokers),
+ * making heap-based detection unreliable for that specific guard.
  *
- * Uses a 3-broker cluster with multiple partitions for realistic distribution.
+ * Uses a 3-broker cluster with multiple partitions for realistic distribution
+ * and ~1 KB payloads for measurable heap signal. Run locally via:
+ *   npm run test:memory
  */
 
-// ~1 KB payload per message
+// ~1 KB payload per message — large enough to surface buffer growth over heap noise
 const PADDING = 'x'.repeat(900)
 
 function forceGC (): void {
@@ -107,10 +108,7 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
     }
   })()
 
-  // Heap stabilization check (undici fetch-leak.js pattern):
-  // Take a baseline, then sample every interval. If heapUsed ever drops
-  // or stays equal compared to the previous sample, memory has stabilized.
-  // If it grows monotonically for maxConsecutiveGrowth samples, it's leaking.
+  // Heap monitoring: take baseline, then 15 samples at 1.5s intervals.
   const sampleCount = 15
   const sampleIntervalMs = 1500
   const maxConsecutiveGrowth = 10
@@ -140,10 +138,13 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
     }
   }
 
-  // Cleanup
+  // Cleanup — destroy batchStream explicitly to unblock the for-await
+  // in consumePromise. Without this, pipeline may not propagate the
+  // close signal reliably, leaving the test hanging.
   publishState.stopped = true
   await publishLoop
   await consumerStream.close()
+  batchStream.destroy()
   await Promise.all([pipelinePromise, consumePromise]).catch(() => {})
 
   // Two complementary checks:
@@ -173,7 +174,7 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
   ok(
     !monotonicLeak && !envelopeLeak,
     'Possible memory leak under backpressure: ' +
-      (monotonicLeak ? `heap grew monotonically (${consecutiveGrowth} consecutive increases). ` : '') +
+      (monotonicLeak ? 'heap grew monotonically. ' : '') +
       (envelopeLeak ? `envelope grew ${envelopeGrowthMB.toFixed(1)} MB (limit: ${maxEnvelopeGrowthMB} MB). ` : '') +
       `Samples (MB): [${heapSamples.map(s => (s / (1024 * 1024)).toFixed(1)).join(', ')}]. ` +
       `Consumed ${consumed}/${totalMessages}+ messages during monitoring.`

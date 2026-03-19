@@ -68,6 +68,17 @@ Then you run the test normally:
 pnpm test
 ```
 
+#### Memory Tests
+
+Memory tests (`test/memory/*.memory-test.ts`) are not part of the regular test suite or CI.
+They use `--expose-gc` and a 3-broker cluster with sustained backpressure to detect heap
+leaks in the consumer stream. Run them manually when modifying the consumer stream, fetch
+loop, or backpressure handling:
+
+```bash
+pnpm run test:memory
+```
+
 ## Pull Request Process
 
 ### Before Submitting

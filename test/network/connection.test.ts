@@ -336,6 +336,26 @@ test('Connection.close should close the connection', async t => {
   ok(connection.socket.closed)
 })
 
+test('Connection.close should not wait forever for peer close', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  let destroySoonCalled = false
+  connection.socket.destroySoon = function destroySoon () {
+    destroySoonCalled = true
+    this.destroy()
+    return this
+  }
+
+  await connection.close()
+
+  strictEqual(destroySoonCalled, true)
+  ok(connection.socket.closed)
+})
+
 test('Connection.send should enqueue request and process response', async t => {
   const { server, port } = await createServer(t)
   const connection = new Connection('test-client')

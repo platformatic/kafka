@@ -17,7 +17,16 @@ c8 -c test/config/c8-local.json node --test --test 'test/path/to/file.test.ts'
 
 # Lint the code
 npm run lint
+
+# Run memory tests (manual — not part of CI)
+# Requires Docker with 3-broker cluster running (docker compose up -d --wait)
+npm run test:memory
 ```
+
+Memory tests (`test/memory/*.memory-test.ts`) use `--expose-gc` and a 3-broker cluster
+with sustained backpressure to detect heap leaks. They are excluded from CI due to resource
+requirements but should be run manually when modifying the consumer stream, fetch loop, or
+backpressure handling. Use the `.memory-test.ts` suffix for new memory tests.
 
 ## Code Style Guidelines
 

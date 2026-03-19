@@ -403,7 +403,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     this.#status = ConnectionStatuses.CLOSING
     this.emit('closing')
-    this.#socket.end()
+    this.#socket.destroySoon()
 
     return callback[kCallbackPromise]
   }

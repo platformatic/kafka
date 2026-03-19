@@ -1,0 +1,189 @@
+import { ok } from 'node:assert'
+import { pipeline } from 'node:stream/promises'
+import { test } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { type DeserializedMessage, MessageBatchStream, setupBackpressureTest } from '../helpers/backpressure.ts'
+import { kafkaBootstrapServers } from '../helpers.ts'
+
+/**
+ * General memory leak test for the consumer stream under sustained backpressure.
+ *
+ * Uses the real pipeline + MessageBatchStream pattern with a slow async handler
+ * to create sustained backpressure, then monitors heapUsed over time.
+ *
+ * This test catches the broad class of memory leaks that can occur during
+ * backpressured consumption:
+ *  - Retained references to already-consumed Message objects (e.g., closures
+ *    in commit() holding entire batches, diagnostic channel references)
+ *  - Growing internal maps (#offsetsToFetch, #offsetsToCommit, #inflightNodes,
+ *    #partitionsEpochs) that accumulate entries without pruning
+ *  - Closure allocations from the process.nextTick(#fetch) scheduling loop
+ *  - Buffer leaks in the downstream MessageBatchStream
+ *
+ * Note: this test does NOT specifically catch the removal of the #paused guard
+ * in #fetch() — that is covered by the behavioral test in
+ * messages-stream-paused-guard.test.ts. The #inflightNodes per-broker
+ * serialization bounds the observable effect to N concurrent fetches (N = brokers),
+ * making heap-based detection unreliable for that specific guard.
+ *
+ * Uses a 3-broker cluster with multiple partitions for realistic distribution
+ * and ~1 KB payloads for measurable heap signal. Run locally via:
+ *   npm run test:memory
+ */
+
+// ~1 KB payload per message — large enough to surface buffer growth over heap noise
+const PADDING = 'x'.repeat(900)
+
+function forceGC (): void {
+  // Double GC — Node may need multiple passes for closures, weak refs, etc.
+  // Pattern from undici tls-cert-leak.js.
+  global.gc!()
+  global.gc!()
+}
+
+test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, async t => {
+  const batchSize = 500
+  const handlerDelayMs = 200
+
+  const { totalMessages, consumerStream, producer, topics } = await setupBackpressureTest(t, {
+    topicCount: 15,
+    messagesPerTopic: 100,
+    consumerHighWaterMark: 1024,
+    publishBatchSize: 2_000,
+    publishConcurrency: 1,
+    messageValueFactory: id => ({ id, padding: PADDING }),
+    bootstrapBrokers: kafkaBootstrapServers,
+    partitionsPerTopic: 3,
+    replicas: 3
+  })
+
+  const batchStream = new MessageBatchStream<DeserializedMessage>({
+    batchSize,
+    timeoutMilliseconds: 2000,
+    readableHighWaterMark: 32
+  })
+
+  const pipelinePromise = pipeline(consumerStream, batchStream).catch(() => {})
+
+  // Consume with slow async handler to sustain backpressure
+  let consumed = 0
+  const consumePromise = (async () => {
+    for await (const messageBatch of batchStream) {
+      const batch = messageBatch as DeserializedMessage[]
+
+      for (const message of batch) {
+        consumed++
+        // eslint-disable-next-line no-void
+        void message.value
+      }
+
+      await sleep(handlerDelayMs)
+
+      const lastMessage = batch[batch.length - 1]!
+      await lastMessage.commit()
+    }
+  })()
+
+  // Let the pipeline warm up and enter steady-state backpressure
+  forceGC()
+  await sleep(5000)
+
+  // Background publisher keeps Kafka fed so the fetch loop has data to
+  // return throughout the monitoring window. Without this, the pre-published
+  // corpus gets exhausted and the test can't detect leaks from ongoing fetches.
+  const publishState = { stopped: false }
+  const publishLoop = (async () => {
+    let seq = 0
+    while (!publishState.stopped) {
+      try {
+        await producer.send({
+          messages: topics.map(topic => ({
+            topic,
+            key: `monitor-${seq++}`,
+            value: { seq, padding: PADDING } as object
+          }))
+        })
+      } catch {
+        // Ignore errors during shutdown
+      }
+      await sleep(50)
+    }
+  })()
+
+  // Heap monitoring: take baseline, then 15 samples at 1.5s intervals.
+  const sampleCount = 15
+  const sampleIntervalMs = 1500
+  const maxConsecutiveGrowth = 10
+
+  const heapSamples: number[] = []
+
+  // Baseline — not counted toward growth detection
+  forceGC()
+  heapSamples.push(process.memoryUsage().heapUsed)
+
+  let consecutiveGrowth = 0
+  let stabilized = false
+
+  for (let i = 0; i < sampleCount; i++) {
+    await sleep(sampleIntervalMs)
+
+    forceGC()
+    const heap = process.memoryUsage().heapUsed
+    heapSamples.push(heap)
+
+    const prevHeap = heapSamples[heapSamples.length - 2]!
+    if (heap <= prevHeap) {
+      stabilized = true
+      consecutiveGrowth = 0
+    } else {
+      consecutiveGrowth++
+    }
+  }
+
+  // Cleanup — stop the background publisher first. Close the producer before
+  // awaiting the publish loop so any in-flight produce request is interrupted
+  // and the loop can exit promptly.
+  publishState.stopped = true
+  await producer.close().catch(() => {})
+  await publishLoop
+
+  // Destroy batchStream explicitly to unblock the for-await in consumePromise.
+  // Without this, pipeline may not propagate the close signal reliably,
+  // leaving the test hanging.
+  await consumerStream.close()
+  batchStream.destroy()
+  await Promise.all([pipelinePromise, consumePromise]).catch(() => {})
+
+  // Two complementary checks:
+  //
+  // 1. Monotonic growth: heap grew every single sample for 10+ consecutive
+  //    checks. Catches pure monotonic leaks (e.g., tight allocation loop).
+  //
+  // 2. Envelope growth: compare first-third average to last-third average.
+  //    Catches step-wise leaks where heap grows in bursts between plateaus
+  //    (e.g., retained message references accumulated during batch processing).
+  //    The stabilization check misses these because a plateau reads as
+  //    "stabilized" even if the overall envelope is trending upward.
+  //
+  // Both must pass. A healthy pipeline shows flat or oscillating heapUsed
+  // with less than 15 MB of drift over the monitoring window.
+  const thirdLen = Math.floor(heapSamples.length / 3)
+  const firstThird = heapSamples.slice(1, 1 + thirdLen)
+  const lastThird = heapSamples.slice(-thirdLen)
+  const avgFirst = firstThird.reduce((a, b) => a + b, 0) / firstThird.length
+  const avgLast = lastThird.reduce((a, b) => a + b, 0) / lastThird.length
+  const envelopeGrowthMB = (avgLast - avgFirst) / (1024 * 1024)
+  const maxEnvelopeGrowthMB = 15
+
+  const monotonicLeak = !stabilized && consecutiveGrowth >= maxConsecutiveGrowth
+  const envelopeLeak = envelopeGrowthMB > maxEnvelopeGrowthMB
+
+  ok(
+    !monotonicLeak && !envelopeLeak,
+    'Possible memory leak under backpressure: ' +
+      (monotonicLeak ? 'heap grew monotonically. ' : '') +
+      (envelopeLeak ? `envelope grew ${envelopeGrowthMB.toFixed(1)} MB (limit: ${maxEnvelopeGrowthMB} MB). ` : '') +
+      `Samples (MB): [${heapSamples.map(s => (s / (1024 * 1024)).toFixed(1)).join(', ')}]. ` +
+      `Consumed ${consumed}/${totalMessages}+ messages during monitoring.`
+  )
+})

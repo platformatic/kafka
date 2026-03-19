@@ -10,7 +10,8 @@ cronometro(
       const value = randomBytes(16)
       return kafkaJsMurmur2(value)
     },
-    '@platformatic/kafka' () {
+    /* eslint-disable-next-line @stylistic/space-before-function-paren */
+    '@platformatic/kafka'() {
       const value = randomBytes(16)
       return murmur2(value)
     }

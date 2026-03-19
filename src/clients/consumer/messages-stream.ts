@@ -581,31 +581,33 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const [leader, leaderRequests] of requests) {
         this.#inflightNodes.set(leader, Date.now())
-        this.#consumer.fetch({ ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] }, (error, response) => {
-          this.#inflightNodes.delete(leader)
-          this.emit('fetch')
+        this.#consumer.fetch(
+          { ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] },
+          (error, response) => {
+            this.#inflightNodes.delete(leader)
+            this.emit('fetch')
 
-          if (error) {
-            // The stream has been closed, ignore the error
-            /* c8 ignore next 4 - Hard to test */
-            if (this.#closed || this.closed || this.destroyed) {
-              this.push(null)
+            if (error) {
+              // The stream has been closed, ignore the error
+              /* c8 ignore next 4 - Hard to test */
+              if (this.#closed || this.closed || this.destroyed) {
+                this.push(null)
+                return
+              }
+
+              this.destroy(error)
               return
             }
 
-            this.destroy(error)
-            return
-          }
+            if (this.#closed || this.closed || this.destroyed) {
+              // When it's the last inflight, we finally close the stream.
+              // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
+              if (this.#inflightNodes.size === 0) {
+                this.push(null)
+              }
 
-          if (this.#closed || this.closed || this.destroyed) {
-            // When it's the last inflight, we finally close the stream.
-            // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
-            if (this.#inflightNodes.size === 0) {
-              this.push(null)
+              return
             }
-
-            return
-          }
 
           this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
         }

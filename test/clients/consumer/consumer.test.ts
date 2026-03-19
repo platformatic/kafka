@@ -687,6 +687,7 @@ test('consume should return a MessagesStream instance and support diagnostic cha
         operation: 'consume',
         options: {
           beforeDeserialization: undefined,
+          context: undefined,
           registry: undefined,
           topics: [],
           autocommit: true,

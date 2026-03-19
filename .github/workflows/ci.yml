@@ -44,3 +44,5 @@ jobs:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
         run: 'pnpm run ci'
+      - name: Run Memory Tests
+        run: 'pnpm run test:memory'

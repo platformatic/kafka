@@ -79,6 +79,7 @@ export const consumeOptionsSchema = {
   type: 'object',
   properties: {
     topics: { type: 'array', items: idProperty },
+    context: true,
     mode: { type: 'string', enum: allowedMessagesStreamModes },
     fallbackMode: { type: 'string', enum: allowedMessagesStreamFallbackModes },
     maxFetches: { type: 'number', minimum: 0, default: 0 },
@@ -103,6 +104,8 @@ export const consumerOptionsSchema = {
   type: 'object',
   properties: {
     groupId: idProperty,
+    context: true,
+    streamContext: true,
     ...groupOptionsProperties,
     ...consumeOptionsProperties
   },

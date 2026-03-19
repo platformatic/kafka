@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { type ValidateFunction } from 'ajv'
+import { randomUUID } from 'node:crypto'
 import {
   type CallbackWithPromise,
   createPromisifiedCallback,
@@ -66,6 +66,7 @@ import {
   kCheckNotClosed,
   kClosed,
   kConnections,
+  kCreateConnectionPool,
   kFormatValidationErrors,
   kGetApi,
   kGetBootstrapConnection,
@@ -160,6 +161,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #groupRemoteAssignor: string | null
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #lagMonitoring: NodeJS.Timeout | null
+  #streamContext: unknown
 
   // Metrics
   #metricActiveStreams: Gauge | undefined
@@ -208,6 +210,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#memberEpoch = 0
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
+    this.#streamContext = options.streamContext ?? options.context
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
 
@@ -246,6 +249,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get coordinatorId (): number | null {
     return this.#coordinatorId
+  }
+
+  get streamContext (): unknown {
+    return this.#streamContext
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -349,6 +356,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.highWaterMark ??= this[kOptions].highWaterMark!
     options.registry ??= this[kOptions].registry
     options.beforeDeserialization ??= this[kOptions].beforeDeserialization
+    options.context ??= this.#streamContext
 
     if (options.beforeDeserialization) {
       emitExperimentalApiWarning('beforeDeserialization')
@@ -641,6 +649,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#findGroupCoordinator(callback)
 
     return callback[kCallbackPromise]
+  }
+
+  [kCreateConnectionPool] (context?: unknown): ConnectionPool {
+    return super[kCreateConnectionPool](context)
   }
 
   joinGroup (options: GroupOptions, callback: CallbackWithPromise<string>): void

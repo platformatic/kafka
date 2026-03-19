@@ -86,6 +86,7 @@ export interface ConnectionOptions {
   sasl?: SASLOptions
   ownerId?: number
   handleBackPressure?: boolean
+  context?: unknown
 }
 
 export interface Request {
@@ -131,7 +132,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #status: ConnectionStatusValue
   #instanceId: number
   #clientId: string | undefined
-  // @ts-ignore This is used just for debugging
+  #context: unknown
   #ownerId: number | undefined
   #handleBackPressure: boolean
   #correlationId: number
@@ -154,6 +155,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#options.tls ??= this.#options.ssl
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId
+    this.#context = options.context
     this.#ownerId = options.ownerId
     this.#handleBackPressure = options.handleBackPressure ?? false
     this.#correlationId = 0
@@ -182,8 +184,17 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.#instanceId
   }
 
+  /* c8 ignore next 3 - Simple getter */
+  get ownerId (): number | undefined {
+    return this.#ownerId
+  }
+
   get status (): ConnectionStatusValue {
     return this.#status
+  }
+
+  get context (): unknown {
+    return this.#context
   }
 
   get socket (): Socket {

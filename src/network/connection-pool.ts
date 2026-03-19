@@ -6,8 +6,8 @@ import {
 } from '../apis/callbacks.ts'
 import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
-import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { MultipleErrors } from '../errors.ts'
+import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
 
 export interface ConnectionPoolEventPayload {
@@ -32,7 +32,7 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
   #instanceId: number
   #clientId: string
   #closed: boolean
-  // @ts-ignore This is used just for debugging
+  #context: unknown
   #ownerId: number | undefined
   #connections: Map<string, Connection>
   #connectionOptions: ConnectionOptions
@@ -42,6 +42,7 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
     this.#closed = false
     this.#instanceId = currentInstance++
     this.#clientId = clientId
+    this.#context = connectionOptions.context
     this.#ownerId = connectionOptions.ownerId
     this.#connections = new Map()
     this.#connectionOptions = connectionOptions
@@ -51,6 +52,16 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
 
   get instanceId (): number {
     return this.#instanceId
+  }
+
+  /* c8 ignore next 3 - Simple getter */
+  get ownerId (): number | undefined {
+    return this.#ownerId
+  }
+
+  /* c8 ignore next 3 - Simple getter */
+  get context (): unknown {
+    return this.#context
   }
 
   get (broker: Broker, callback: CallbackWithPromise<Connection>): void

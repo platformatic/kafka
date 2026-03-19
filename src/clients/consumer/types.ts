@@ -102,6 +102,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
 
 export interface StreamOptions {
   topics: string[]
+  context?: unknown
   mode?: MessagesStreamModeValue
   fallbackMode?: MessagesStreamFallbackModeValue
   maxFetches?: number
@@ -115,6 +116,8 @@ export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
 
 export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & {
   groupId: string
+  context?: unknown
+  streamContext?: unknown
 } & (GroupOptions | ConsumerGroupOptions) &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>
 

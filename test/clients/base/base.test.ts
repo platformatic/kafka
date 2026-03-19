@@ -39,6 +39,20 @@ test('constructor should properly set getters', () => {
   deepStrictEqual(base.type, 'base')
 })
 
+test('constructor should expose context and forward it to the default pool', () => {
+  const context = { scope: 'base' }
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: ['localhost:9092'],
+    retries: false,
+    strict: true,
+    context
+  })
+
+  strictEqual(base.context, context)
+  strictEqual(base[kConnections].context, context)
+})
+
 test('constructor should throw on invalid options when strict mode is enabled', () => {
   // Missing required clientId
   try {

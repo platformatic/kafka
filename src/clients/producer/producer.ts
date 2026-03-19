@@ -22,7 +22,7 @@ import {
   producerSendsChannel,
   producerTransactionsChannel
 } from '../../diagnostic.ts'
-import { type GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type Connection } from '../../network/connection.ts'
 import { murmur2 } from '../../protocol/murmur2.ts'
 import {
@@ -1100,7 +1100,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (error) {
             // If the last error was due to stale metadata, we retry the operation with this set of messages
             // since the partition is already set, it should attempt on the new destination
-            const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
+            const kafkaError = GenericError.isGenericError(error)
+              ? (error as GenericError & { findBy: (property: string, value: unknown) => GenericError | null })
+              : null
+            const hasStaleMetadata = kafkaError?.findBy('hasStaleMetadata', true)
 
             if (hasStaleMetadata && repeatOnStaleMetadata) {
               this.clearMetadata()
@@ -1126,7 +1129,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         0,
         [],
         error => {
-          return repeatOnStaleMetadata && !!(error as GenericError).findBy('hasStaleMetadata', true)
+          if (!repeatOnStaleMetadata || !GenericError.isGenericError(error)) {
+            return false
+          }
+
+          return !!(
+            error as GenericError & { findBy: (property: string, value: unknown) => GenericError | null }
+          ).findBy('hasStaleMetadata', true)
         }
       )
     })

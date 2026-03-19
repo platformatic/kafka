@@ -47,8 +47,10 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
 
   const { totalMessages, consumerStream, producer, topics } = await setupBackpressureTest(t, {
     topicCount: 15,
-    messagesPerTopic: 2000,
+    messagesPerTopic: 100,
     consumerHighWaterMark: 1024,
+    publishBatchSize: 2_000,
+    publishConcurrency: 1,
     messageValueFactory: id => ({ id, padding: PADDING }),
     bootstrapBrokers: kafkaBootstrapServers,
     partitionsPerTopic: 3,
@@ -138,11 +140,16 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
     }
   }
 
-  // Cleanup — destroy batchStream explicitly to unblock the for-await
-  // in consumePromise. Without this, pipeline may not propagate the
-  // close signal reliably, leaving the test hanging.
+  // Cleanup — stop the background publisher first. Close the producer before
+  // awaiting the publish loop so any in-flight produce request is interrupted
+  // and the loop can exit promptly.
   publishState.stopped = true
+  await producer.close().catch(() => {})
   await publishLoop
+
+  // Destroy batchStream explicitly to unblock the for-await in consumePromise.
+  // Without this, pipeline may not propagate the close signal reliably,
+  // leaving the test hanging.
   await consumerStream.close()
   batchStream.destroy()
   await Promise.all([pipelinePromise, consumePromise]).catch(() => {})

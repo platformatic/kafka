@@ -159,6 +159,7 @@ export interface BackpressureTestSetupOptions {
   messagesPerTopic: number
   consumerHighWaterMark: number
   publishBatchSize?: number
+  publishConcurrency?: number
   topicPrefix?: string
   messageValueFactory?: (id: number, topicIndex: number) => object
   bootstrapBrokers?: string[]
@@ -190,6 +191,7 @@ export async function setupBackpressureTest (
     messagesPerTopic,
     consumerHighWaterMark,
     publishBatchSize = 500,
+    publishConcurrency = 4,
     topicPrefix = `bp-${randomUUID().slice(0, 8)}`,
     messageValueFactory,
     bootstrapBrokers = kafkaSingleBootstrapServers,
@@ -224,6 +226,8 @@ export async function setupBackpressureTest (
   const producer = new Producer<string, object, string, string>({
     clientId: `bp-producer-${randomUUID().slice(0, 8)}`,
     bootstrapBrokers,
+    timeout: 120_000,
+    requestTimeout: 120_000,
     serializers: {
       key: stringSerializer,
       value: jsonSerializer,
@@ -291,13 +295,20 @@ export async function setupBackpressureTest (
     highWaterMark: consumerHighWaterMark
   })
 
-  // Publish AFTER consumer is running — fire all batches concurrently
-  // so messages arrive gradually while the consumer is already fetching.
+  // Publish AFTER consumer is running with bounded concurrency so messages
+  // arrive while the consumer is already fetching without overwhelming the
+  // brokers with dozens of simultaneous produce requests.
   const publishPromises: Promise<unknown>[] = []
   for (let i = 0; i < allMessages.length; i += publishBatchSize) {
     const batch = allMessages.slice(i, i + publishBatchSize)
     publishPromises.push(producer.send({ messages: batch }))
+
+    if (publishPromises.length >= publishConcurrency) {
+      await Promise.all(publishPromises)
+      publishPromises.length = 0
+    }
   }
+
   await Promise.all(publishPromises)
 
   return { topics, totalMessages, consumerStream, consumer, producer }

@@ -161,6 +161,9 @@ export interface BackpressureTestSetupOptions {
   publishBatchSize?: number
   topicPrefix?: string
   messageValueFactory?: (id: number, topicIndex: number) => object
+  bootstrapBrokers?: string[]
+  partitionsPerTopic?: number
+  replicas?: number
 }
 
 export interface BackpressureTestSetup {
@@ -188,7 +191,10 @@ export async function setupBackpressureTest (
     consumerHighWaterMark,
     publishBatchSize = 500,
     topicPrefix = `bp-${randomUUID().slice(0, 8)}`,
-    messageValueFactory
+    messageValueFactory,
+    bootstrapBrokers = kafkaSingleBootstrapServers,
+    partitionsPerTopic = 1,
+    replicas = 1
   } = options
 
   const totalMessages = topicCount * messagesPerTopic
@@ -201,13 +207,13 @@ export async function setupBackpressureTest (
 
   const admin = new Admin({
     clientId: `bp-admin-${randomUUID().slice(0, 8)}`,
-    bootstrapBrokers: kafkaSingleBootstrapServers
+    bootstrapBrokers
   })
   t.after(() => admin.close())
 
   for (const topic of topics) {
     try {
-      await admin.createTopics({ topics: [topic], partitions: 1, replicas: 1 })
+      await admin.createTopics({ topics: [topic], partitions: partitionsPerTopic, replicas })
     } catch {
       // May already exist
     }
@@ -217,7 +223,7 @@ export async function setupBackpressureTest (
   // Producer setup
   const producer = new Producer<string, object, string, string>({
     clientId: `bp-producer-${randomUUID().slice(0, 8)}`,
-    bootstrapBrokers: kafkaSingleBootstrapServers,
+    bootstrapBrokers,
     serializers: {
       key: stringSerializer,
       value: jsonSerializer,
@@ -252,7 +258,7 @@ export async function setupBackpressureTest (
   const consumer = new Consumer<string, Record<string, unknown>, string, string>({
     clientId: `bp-consumer-${randomUUID().slice(0, 8)}`,
     groupId: `bp-group-${randomUUID()}`,
-    bootstrapBrokers: kafkaSingleBootstrapServers,
+    bootstrapBrokers,
     deserializers: {
       key: stringDeserializer,
       value: data => {

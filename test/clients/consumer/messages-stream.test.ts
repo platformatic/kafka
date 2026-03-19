@@ -246,6 +246,20 @@ test('should throw error when not specifying offsets with MANUAL mode', async t 
   )
 })
 
+test('should expose context and forward stream context to the stream pool', async t => {
+  const streamContext = { scope: 'stream' }
+  const consumer = createConsumer(t, undefined, { context: { scope: 'consumer' } })
+  const stream = new MessagesStream(consumer, {
+    topics: [createTestTopic()],
+    context: streamContext
+  })
+
+  strictEqual(stream.context, streamContext)
+  strictEqual(stream[kConnections].context, streamContext)
+
+  await stream.close()
+})
+
 test('should support diagnostic channels', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)

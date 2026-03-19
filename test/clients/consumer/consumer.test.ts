@@ -183,6 +183,34 @@ test('constructor should initialize with custom options', t => {
   consumer.close()
 })
 
+test('constructor should expose context and default streamContext', t => {
+  const context = { scope: 'consumer' }
+  const streamContext = { scope: 'stream' }
+  const consumer = createConsumer(t, { context, streamContext })
+
+  strictEqual(consumer.context, context)
+  strictEqual(consumer.streamContext, streamContext)
+  strictEqual(consumer[kConnections].context, context)
+})
+
+test('consume should prefer per-call context over the constructor streamContext', async t => {
+  const consumer = createConsumer(t, { context: { scope: 'consumer' }, streamContext: { scope: 'default-stream' } })
+  const streamContext = { scope: 'call-stream' }
+  const topic = 'test-topic'
+  consumer.memberId = 'test-member'
+  consumer.topics.track(topic)
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    context: streamContext
+  })
+
+  strictEqual(stream.context, streamContext)
+  strictEqual(stream[kConnections].context, streamContext)
+
+  await stream.close()
+})
+
 test('constructor should initialize with groupInstanceId for static membership (KIP-345)', t => {
   const groupId = `static-group-${randomUUID()}`
   const groupInstanceId = `static-instance-${randomUUID()}`
@@ -659,6 +687,7 @@ test('consume should return a MessagesStream instance and support diagnostic cha
         operation: 'consume',
         options: {
           beforeDeserialization: undefined,
+          context: undefined,
           registry: undefined,
           topics: [],
           autocommit: true,

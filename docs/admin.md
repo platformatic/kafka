@@ -86,10 +86,10 @@ The return value is a map where keys are group names and values are the detailed
 
 Options:
 
-| Property | Type                          | Description                                                                                 |
-| -------- | ----------------------------- | ------------------------------------------------------------------------------------------- |
-| groups   | `string[]`                    | Groups to describe.                                                                         |
-| `includeAuthorizedOperations` | `boolean` | Whether to include authorisation information in the response.<br/><br/> Default is `false`. |
+| Property                      | Type       | Description                                                                                 |
+| ----------------------------- | ---------- | ------------------------------------------------------------------------------------------- |
+| groups                        | `string[]` | Groups to describe.                                                                         |
+| `includeAuthorizedOperations` | `boolean`  | Whether to include authorisation information in the response.<br/><br/> Default is `false`. |
 
 ### `deleteGroups(options[, callback])`
 

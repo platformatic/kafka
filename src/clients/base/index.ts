@@ -1,5 +1,6 @@
 export {
   Base,
+  kContext,
   kCheckNotClosed,
   kGetApi,
   kGetBootstrapConnection,

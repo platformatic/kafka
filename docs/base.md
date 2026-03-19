@@ -34,13 +34,16 @@ Creates a new base client.
 | `strict`             | `boolean`              | `false`   | Whether to validate all user-provided options on each request.<br/><br/>This will impact performance so we recommend disabling it in production.                   |
 | `metrics`            | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                                          |
 | `connectTimeout`     | `number`               | `5000`    | Client connection timeout.                                                                                                                                         |
-| `requestTimeout`     | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                              |
+| `requestTimeout`     | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                                |
 | `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
 | `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
+| `context`            | `unknown`              |           | Opaque user data forwarded to internally created `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                |
+
+The readonly `context` getter exposes the same opaque value on the client instance.
 
 ## Methods
 
@@ -91,13 +94,13 @@ The `retryDelay` option can accept either a number (for fixed delay) or a functi
 
 When using a function, it receives the following parameters:
 
-| Parameter     | Type     | Description                                               |
-| ------------- | -------- | --------------------------------------------------------- |
-| `client`      | `object` | The client instance performing the retry                 |
-| `operationId` | `string` | A unique identifier for the operation being retried      |
-| `attempt`     | `number` | The current attempt number (starts from 1)               |
-| `retries`     | `number` | The maximum number of retries configured                 |
-| `error`       | `Error`  | The error that caused the retry                          |
+| Parameter     | Type     | Description                                         |
+| ------------- | -------- | --------------------------------------------------- |
+| `client`      | `object` | The client instance performing the retry            |
+| `operationId` | `string` | A unique identifier for the operation being retried |
+| `attempt`     | `number` | The current attempt number (starts from 1)          |
+| `retries`     | `number` | The maximum number of retries configured            |
+| `error`       | `Error`  | The error that caused the retry                     |
 
 The function must return a number representing the delay in milliseconds before the next retry attempt.
 

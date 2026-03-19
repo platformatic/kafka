@@ -61,6 +61,7 @@ export const kFormatValidationErrors = Symbol('plt.kafka.base.formatValidationEr
 export const kPrometheus = Symbol('plt.kafka.base.prometheus')
 export const kClientType = Symbol('plt.kafka.base.clientType')
 export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
+export const kContext = Symbol('plt.kafka.base.context')
 
 let currentInstance = 0
 
@@ -88,6 +89,7 @@ export class Base<
   // General status - Use symbols rather than JS private property to make them "protected" as in C++
   [kClientId]: string;
   [kClientType]: ClientType;
+  [kContext]: unknown;
   [kBootstrapBrokers]: Broker[];
   [kApis]: ApiVersionsResponseApi[];
   [kOptions]: OptionsType;
@@ -105,6 +107,7 @@ export class Base<
     this[kClientType] = 'base'
     this[kInstance] = currentInstance++
     this[kApis] = []
+    this[kContext] = options.context
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
@@ -148,6 +151,10 @@ export class Base<
 
   get type (): ClientType {
     return this[kClientType]
+  }
+
+  get context (): unknown {
+    return this[kContext]
   }
 
   emitWithDebug (section: string | null, name: string, ...args: any[]): boolean {
@@ -283,10 +290,11 @@ export class Base<
     return this[kConnections].isConnected()
   }
 
-  [kCreateConnectionPool] (): ConnectionPool {
+  [kCreateConnectionPool] (context?: unknown): ConnectionPool {
     const pool = new ConnectionPool(this[kClientId], {
+      ...this[kOptions],
       ownerId: this[kInstance],
-      ...this[kOptions]
+      context: context ?? this[kContext]
     })
 
     this.#forwardEvents(pool, [

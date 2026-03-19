@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
 import { mock, test, type TestContext } from 'node:test'
 import {
@@ -47,6 +47,19 @@ test('constructor should support diagnostic channels', () => {
   const pool = new ConnectionPool('test-client')
   ok(typeof pool.instanceId === 'number')
   deepStrictEqual(created(), { type: 'connection-pool', instance: pool })
+})
+
+test('constructor should expose context and forward it to connections', async t => {
+  const { port } = await createServer(t)
+  const context = { scope: 'pool' }
+  const pool = new ConnectionPool('test-client', { context })
+  t.after(() => pool.close())
+
+  strictEqual(pool.context, context)
+
+  const connection = await pool.get({ host: 'localhost', port })
+
+  strictEqual(connection.context, context)
 })
 
 test('get should return a connection for a broker', async t => {

@@ -56,6 +56,7 @@ export const baseOptionsSchema = {
       required: ['mechanism'],
       additionalProperties: false
     },
+    context: true,
     metadataMaxAge: { type: 'number', minimum: 0 },
     autocreateTopics: { type: 'boolean' },
     strict: { type: 'boolean' },

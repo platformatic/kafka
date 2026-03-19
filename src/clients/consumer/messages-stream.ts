@@ -94,6 +94,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
   #corruptedMessageHandler: CorruptedMessageHandler
+  #context: unknown
   #pushRecordsOperation: (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
@@ -130,6 +131,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       fallbackMode,
       maxFetches,
       offsets,
+      context,
       deserializers,
       onCorruptedMessage,
       registry,
@@ -153,7 +155,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       highWaterMark: maxFetches ?? options.highWaterMark ?? defaultConsumerOptions.highWaterMark
     })
     this[kInstance] = currentInstance++
-    this[kConnections] = consumer[kCreateConnectionPool]()
+    this[kConnections] = consumer[kCreateConnectionPool](context)
     this.#consumer = consumer
     this.#mode = mode ?? MessagesStreamModes.LATEST
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
@@ -179,6 +181,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#closed = false
     this.#closeCallbacks = []
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
+    this.#context = context
 
     if (registry) {
       this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, registry.getBeforeDeserializationHook())
@@ -240,6 +243,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   /* c8 ignore next 3 - Simple getter */
   get offsetsToFetch (): Map<string, bigint> {
     return this.#offsetsToFetch
+  }
+
+  get context (): unknown {
+    return this.#context
   }
 
   /* c8 ignore next 3 - Simple getter */

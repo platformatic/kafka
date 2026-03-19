@@ -44,6 +44,8 @@ It is a Node.js `Readable` stream returned by the [`Consumer`](./consumer.md) `c
 
 Do not try to create this manually.
 
+The readonly `context` getter exposes the opaque value supplied through `Consumer.consume({ context })` or the consumer `streamContext` default.
+
 ## `ClusterMetadata`
 
 Metadata about the Kafka cluster. It is returned by the [`Base`](./base.md) client, which is the base class for the `Producer`, `Consumer` and `Admin` clients.

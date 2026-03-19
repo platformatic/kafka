@@ -146,10 +146,35 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
   await consumerStream.close()
   await Promise.all([pipelinePromise, consumePromise]).catch(() => {})
 
+  // Two complementary checks:
+  //
+  // 1. Monotonic growth: heap grew every single sample for 10+ consecutive
+  //    checks. Catches pure monotonic leaks (e.g., tight allocation loop).
+  //
+  // 2. Envelope growth: compare first-third average to last-third average.
+  //    Catches step-wise leaks where heap grows in bursts between plateaus
+  //    (e.g., retained message references accumulated during batch processing).
+  //    The stabilization check misses these because a plateau reads as
+  //    "stabilized" even if the overall envelope is trending upward.
+  //
+  // Both must pass. A healthy pipeline shows flat or oscillating heapUsed
+  // with less than 15 MB of drift over the monitoring window.
+  const thirdLen = Math.floor(heapSamples.length / 3)
+  const firstThird = heapSamples.slice(1, 1 + thirdLen)
+  const lastThird = heapSamples.slice(-thirdLen)
+  const avgFirst = firstThird.reduce((a, b) => a + b, 0) / firstThird.length
+  const avgLast = lastThird.reduce((a, b) => a + b, 0) / lastThird.length
+  const envelopeGrowthMB = (avgLast - avgFirst) / (1024 * 1024)
+  const maxEnvelopeGrowthMB = 15
+
+  const monotonicLeak = !stabilized && consecutiveGrowth >= maxConsecutiveGrowth
+  const envelopeLeak = envelopeGrowthMB > maxEnvelopeGrowthMB
+
   ok(
-    stabilized || consecutiveGrowth < maxConsecutiveGrowth,
-    'Heap usage grew monotonically under backpressure — possible memory leak: ' +
-      `${consecutiveGrowth} consecutive increases without stabilizing. ` +
+    !monotonicLeak && !envelopeLeak,
+    'Possible memory leak under backpressure: ' +
+      (monotonicLeak ? `heap grew monotonically (${consecutiveGrowth} consecutive increases). ` : '') +
+      (envelopeLeak ? `envelope grew ${envelopeGrowthMB.toFixed(1)} MB (limit: ${maxEnvelopeGrowthMB} MB). ` : '') +
       `Samples (MB): [${heapSamples.map(s => (s / (1024 * 1024)).toFixed(1)).join(', ')}]. ` +
       `Consumed ${consumed}/${totalMessages}+ messages during monitoring.`
   )

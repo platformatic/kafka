@@ -609,8 +609,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               return
             }
 
-          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
-        }
+            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
+          }
         )
       }
     })

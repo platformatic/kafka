@@ -48,7 +48,8 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
-  mockMethod
+  mockMethod,
+  waitFor
 } from '../../helpers.ts'
 
 const defaultRetryDelay = 500
@@ -750,6 +751,10 @@ test('should support consume-transform-produce patterns', async t => {
   }
 
   await transaction.commit()
+  await waitFor(async () => {
+    const committedOffsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+    deepStrictEqual(committedOffsets.get(topic), [10n])
+  })
   await consumer.close(true)
 
   // Now consume again to verify all messages were committed

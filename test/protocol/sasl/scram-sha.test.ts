@@ -62,6 +62,30 @@ test('parseParameters should parse comma-separated key=value pairs', () => {
   strictEqual(result.__original, 'a=1,b=2,c=value')
 })
 
+test('parseParameters should parse empty SCRAM values', () => {
+  const input = Buffer.from('r=clientNonce123serverNonce456,s=,i=4096')
+  const result = parseParameters(input)
+
+  strictEqual(result.r, 'clientNonce123serverNonce456')
+  strictEqual(result.s, '')
+  strictEqual(result.i, '4096')
+  strictEqual(result.__original, 'r=clientNonce123serverNonce456,s=,i=4096')
+})
+
+test('parseParameters should throw for malformed parameter entries', async () => {
+  const input = Buffer.from('r=nonce,s=,i=4096,bad-param')
+
+  await rejects(
+    async () => {
+      parseParameters(input)
+    },
+    (err: Error) => {
+      strictEqual(err instanceof AuthenticationError, true)
+      return true
+    }
+  )
+})
+
 // Test h (hash) function
 test('h should hash data using the algorithm from the definition', () => {
   const sha256Def = ScramAlgorithms['SHA-256']

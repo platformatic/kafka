@@ -18,7 +18,8 @@ export interface ProduceResult {
 }
 
 export type Partitioner<Key, Value, HeaderKey, HeaderValue> = (
-  message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>
+  message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
+  key?: Buffer | undefined
 ) => number
 
 export interface ProducerStreamReport {

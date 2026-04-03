@@ -10,7 +10,7 @@ const GS2_HEADER = 'n,,'
 const GS2_HEADER_BASE64 = Buffer.from(GS2_HEADER).toString('base64')
 const HMAC_CLIENT_KEY = 'Client Key'
 const HMAC_SERVER_KEY = 'Server Key'
-const PARAMETERS_PARSER = /([^=]+)=(.+)/
+const PARAMETERS_PARSER = /([^=]+)=([^,]*)/
 
 export interface ScramAlgorithmDefinition {
   keyLength: number
@@ -52,9 +52,19 @@ export function sanitizeString (str: string): string {
 export function parseParameters (data: Buffer): Record<string, string> {
   const original = data.toString('utf-8')
 
+  const parsed = original.split(',').map(parameter => {
+    const match = parameter.match(PARAMETERS_PARSER)
+
+    if (!match) {
+      throw new AuthenticationError(`Malformed SCRAM parameter: ${parameter}`)
+    }
+
+    return match.slice(1, 3)
+  })
+
   return {
     __original: original,
-    ...Object.fromEntries(original.split(',').map(param => param.match(PARAMETERS_PARSER)!.slice(1, 3)))
+    ...Object.fromEntries(parsed)
   }
 }
 

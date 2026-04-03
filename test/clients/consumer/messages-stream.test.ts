@@ -765,7 +765,7 @@ test('should support consume-transform-produce patterns', async t => {
   stream2.on('data', message => resolve(message.key))
 
   // This will return immediately if there are messages
-  deepStrictEqual(await executeWithTimeout(promise, 1000, 'timeout'), 'timeout')
+  deepStrictEqual(await executeWithTimeout(promise, 3000, 'timeout'), 'timeout')
 })
 
 test('should support maxFetches option', async t => {

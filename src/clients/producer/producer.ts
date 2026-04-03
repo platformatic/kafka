@@ -24,7 +24,6 @@ import {
 } from '../../diagnostic.ts'
 import { GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type Connection } from '../../network/connection.ts'
-import { murmur2 } from '../../protocol/murmur2.ts'
 import {
   type CreateRecordsBatchOptions,
   type Message,
@@ -73,6 +72,7 @@ import {
   producerStreamOptionsValidator,
   sendOptionsValidator
 } from './options.ts'
+import { defaultPartitioner } from './partitioners.ts'
 import { ProducerStream } from './producer-stream.ts'
 import { Transaction } from './transaction.ts'
 import {
@@ -899,9 +899,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       if (typeof message.partition !== 'number') {
         if (partitioner) {
-          partition = partitioner(message)
+          partition = partitioner(message, key)
         } else if (key) {
-          partition = murmur2(key) >>> 0
+          partition = defaultPartitioner(message, key)
         } else {
           // Use the roundrobin
           partition = this.#partitionsRoundRobin.postIncrement(topic, 1, 0)

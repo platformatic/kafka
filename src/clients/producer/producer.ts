@@ -115,7 +115,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (options.idempotent) {
       options.maxInflights = 1
       options.acks = ProduceAcks.ALL
-      options.retries = Number.MAX_SAFE_INTEGER
+      if (options.retries === undefined || (typeof options.retries === 'number' && options.retries <= 1)) {
+        options.retries = Number.MAX_SAFE_INTEGER
+      }
     } else {
       options.idempotent = false
     }

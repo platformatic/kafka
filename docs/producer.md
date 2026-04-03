@@ -31,6 +31,8 @@ Options:
 
 It also supports all the constructor options of `Base`.
 
+When `idempotent` is enabled, `retries` defaults to `Number.MAX_SAFE_INTEGER` when not set, and it is raised to `Number.MAX_SAFE_INTEGER` for values less than or equal to `1` to avoid unsafe idempotent retry behavior.
+
 Notes: `zstd` is not available in node `v20`
 
 ## Basic Methods

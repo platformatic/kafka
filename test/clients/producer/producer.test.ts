@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
-import { kConnections } from '../../../src/clients/base/base.ts'
+import { kConnections, kOptions } from '../../../src/clients/base/base.ts'
 import {
   baseMetadataChannel,
   type ClientDiagnosticEvent,
@@ -141,6 +141,31 @@ test('constructor should validat other options even when not in strict mode', ()
   } finally {
     process.emitWarning = originalEmitWarning
   }
+})
+
+test('constructor should keep custom retries when idempotent is enabled', t => {
+  const producer = createProducer(t, {
+    idempotent: true,
+    retries: 7
+  })
+
+  strictEqual((producer[kOptions] as { retries: number }).retries, 7)
+})
+
+test('constructor should default retries to safe value only when not set', t => {
+  const producer = createProducer(t, { idempotent: true })
+
+  strictEqual((producer[kOptions] as { retries: number }).retries, Number.MAX_SAFE_INTEGER)
+})
+
+test('constructor should set retries to safe value when idempotent and too low', t => {
+  const producerZero = createProducer(t, { idempotent: true, retries: 0 })
+  const producerOne = createProducer(t, { idempotent: true, retries: 1 })
+  const producerNone = createProducer(t, { idempotent: true })
+
+  strictEqual((producerZero[kOptions] as { retries: number }).retries, Number.MAX_SAFE_INTEGER)
+  strictEqual((producerOne[kOptions] as { retries: number }).retries, Number.MAX_SAFE_INTEGER)
+  strictEqual((producerNone[kOptions] as { retries: number }).retries, Number.MAX_SAFE_INTEGER)
 })
 
 test('constructor should emit warnings for experimental APIs', () => {

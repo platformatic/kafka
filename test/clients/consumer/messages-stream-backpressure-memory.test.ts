@@ -129,8 +129,8 @@ test('should respect backpressure and not buffer all messages in memory', { time
   let consumed = 0
   const minConsumed = 500 // Enough to observe multiple fetch cycles
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for await (const _message of consumerStream) {
-    // eslint-disable-line @typescript-eslint/no-unused-vars
     consumed++
     // Simulate slow processing — each message takes 5ms
     await sleep(5)

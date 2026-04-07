@@ -637,6 +637,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     let diagnosticContext: DiagnosticContext<unknown>
 
+    let canPush = true
+
     const messageMetadata = {
       consumer: {
         groupId: this.#consumer.groupId,
@@ -739,7 +741,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
               consumerReceivesChannel.asyncStart.publish(diagnosticContext)
 
-              this.push(message)
+              canPush = this.push(message)
 
               consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
             } catch (error) {
@@ -771,19 +773,27 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this[kAutocommit]()
     }
 
-    // Always schedule the next fetch, even when push() returned false.
+    // Schedule the next fetch only when the readable buffer still has room.
+    // When push() returns false, the buffer is above highWaterMark —
+    // continuing to fetch would defeat Node.js backpressure and cause
+    // unbounded memory growth (see #260).
     //
-    // In pull mode, _read() would restart the loop once the buffer drains.
-    // In flowing mode with pipeline(), however, _read() is not reliably called
-    // again when the buffer is already empty — Node.js considers the stream
-    // "already flowing" and does not re-invoke _read(). The fetch loop dies
-    // and unconsumed messages remain in Kafka.
+    // When canPush is false, the fetch loop restarts via two mechanisms:
+    //  1. _read() — called by Node.js when the buffer drains below
+    //     highWaterMark in both pull and flowing modes.
+    //  2. resume() — when pipeline()/pipe() transitions from paused to
+    //     unpaused after downstream backpressure releases, resume()
+    //     explicitly schedules process.nextTick(#fetch) (see #254).
     //
-    // Unconditionally scheduling is safe because #fetch() checks #paused,
-    // #closed, and other guards before issuing a Kafka fetch request.
-    process.nextTick(() => {
-      this.#fetch()
-    })
+    // process.nextTick yields control back to the event loop between fetch
+    // cycles, ensuring heartbeats, commits, and other I/O are not starved
+    // by a tight fetch loop. It also avoids growing the call stack if
+    // metadata/fetch callbacks fire synchronously.
+    if (canPush) {
+      process.nextTick(() => {
+        this.#fetch()
+      })
+    }
 
     if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
       this.push(null)

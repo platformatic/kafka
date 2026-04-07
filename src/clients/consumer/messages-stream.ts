@@ -774,17 +774,21 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     // Schedule the next fetch only when the readable buffer still has room.
-    //
     // When push() returns false, the buffer is above highWaterMark —
     // continuing to fetch would defeat Node.js backpressure and cause
     // unbounded memory growth (see #260).
     //
-    // The fetch loop restarts via two mechanisms:
+    // When canPush is false, the fetch loop restarts via two mechanisms:
     //  1. _read() — called by Node.js when the buffer drains below
     //     highWaterMark in both pull and flowing modes.
     //  2. resume() — when pipeline()/pipe() transitions from paused to
     //     unpaused after downstream backpressure releases, resume()
     //     explicitly schedules process.nextTick(#fetch) (see #254).
+    //
+    // process.nextTick yields control back to the event loop between fetch
+    // cycles, ensuring heartbeats, commits, and other I/O are not starved
+    // by a tight fetch loop. It also avoids growing the call stack if
+    // metadata/fetch callbacks fire synchronously.
     if (canPush) {
       process.nextTick(() => {
         this.#fetch()

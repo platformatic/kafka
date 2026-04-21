@@ -95,6 +95,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #metricsConsumedMessages: Counter | undefined
   #corruptedMessageHandler: CorruptedMessageHandler
   #context: unknown
+  #onConsumerGroupJoin: () => void
+  #onBrokerDisconnect: () => void
   #pushRecordsOperation: (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
@@ -183,6 +185,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
     this.#context = context
 
+    this.#onConsumerGroupJoin = () => {
+      this.#offsetsCommitted.clear()
+      this.#partitionsEpochs.clear()
+      this.#scheduleRefreshOffsetsAndFetch()
+    }
+
+    this.#onBrokerDisconnect = () => {
+      this.#partitionsEpochs.clear()
+    }
+
     if (registry) {
       this.#pushRecordsOperation = this.#beforeDeserialization.bind(this, registry.getBeforeDeserializationHook())
     } else if (beforeDeserialization) {
@@ -212,11 +224,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // When the consumer joins a group, we need to fetch again as the assignments
     // will have changed so we may have gone from last  with no assignments to
     // having some.
-    this.#consumer.on('consumer:group:join', () => {
-      this.#offsetsCommitted.clear()
-      this.#partitionsEpochs.clear()
-      this.#scheduleRefreshOffsetsAndFetch()
-    })
+    this.#consumer.on('consumer:group:join', this.#onConsumerGroupJoin)
 
     if (consumer[kPrometheus]) {
       this.#metricsConsumedMessages = ensureMetric<Counter>(
@@ -228,9 +236,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     // Whenever the consumer loses a connection, reset all the partitions epochs
-    consumer.on('client:broker:disconnect', () => {
-      this.#partitionsEpochs.clear()
-    })
+    consumer.on('client:broker:disconnect', this.#onBrokerDisconnect)
 
     notifyCreation('messages-stream', this)
   }
@@ -479,6 +485,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     if (this.#autocommitInterval) {
       clearInterval(this.#autocommitInterval)
     }
+
+    this.#consumer.removeListener('consumer:group:join', this.#onConsumerGroupJoin)
+    this.#consumer.removeListener('client:broker:disconnect', this.#onBrokerDisconnect)
 
     this[kConnections].close(closeError => {
       callback(closeError ?? error)
@@ -849,7 +858,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       if (error) {
         this.emit('autocommit', error)
-        this.destroy(error)
+        // Only destroy the stream when the broker requires a group rejoin
+        // (ILLEGAL_GENERATION, UNKNOWN_MEMBER_ID, REBALANCE_IN_PROGRESS).
+        // Transient coordinator errors must not tear down the consumption loop.
+        if ((error as { findBy?: Function }).findBy?.('needsRejoin', true)) {
+          this.destroy(error)
+        }
         return
       }
 

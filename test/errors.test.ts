@@ -183,6 +183,12 @@ test('ProtocolError with response containing memberId', () => {
   deepStrictEqual(error.memberId, 'test-member-id')
 })
 
+test('ProtocolError ILLEGAL_GENERATION has needsRejoin set to true', () => {
+  const error = new ProtocolError('ILLEGAL_GENERATION', null, {}, {})
+  ok(error.needsRejoin, 'ILLEGAL_GENERATION requires a group rejoin')
+  deepStrictEqual(error.apiId, 'ILLEGAL_GENERATION')
+})
+
 test('ResponseError', () => {
   const apiName = 3 // Metadata
   const apiVersion = 1

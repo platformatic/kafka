@@ -14,7 +14,8 @@ import {
   notifyCreation,
   type DiagnosticContext
 } from '../../diagnostic.ts'
-import { UserError, GenericError } from '../../errors.ts'
+import { UserError } from '../../errors.ts'
+import type { GenericError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'

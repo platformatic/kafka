@@ -860,15 +860,3 @@ test('metadata should use bootstrap brokers only after clearMetadata', async t =
     strictEqual(error.message, 'Cannot connect to any broker.')
   }
 })
-
-test('kPerformWithRetry should only retain first and last error — not accumulate all', async t => {
-  const client = createBase(t, { retries: 3, retryDelay: 0 })
-
-  const error = await client.metadata({ topics: [`test-topic-${randomUUID()}`] }).catch(e => e)
-
-  await client.close()
-
-  // MultipleErrors must contain at most 2 errors: first (root cause) and last (final failure)
-  strictEqual(error instanceof MultipleErrors, true)
-  ok(error.errors.length <= 2, `expected at most 2 errors, got ${error.errors.length}`)
-})

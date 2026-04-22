@@ -14,7 +14,7 @@ import {
   notifyCreation,
   type DiagnosticContext
 } from '../../diagnostic.ts'
-import { UserError } from '../../errors.ts'
+import { UserError, GenericError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
@@ -861,7 +861,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // Only destroy the stream when the broker requires a group rejoin
         // (ILLEGAL_GENERATION, UNKNOWN_MEMBER_ID, REBALANCE_IN_PROGRESS).
         // Transient coordinator errors must not tear down the consumption loop.
-        if ((error as { findBy?: Function }).findBy?.('needsRejoin', true)) {
+        if ((error as GenericError).findBy?.('needsRejoin', true)) {
           this.destroy(error)
         }
         return

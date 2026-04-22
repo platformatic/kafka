@@ -372,7 +372,7 @@ export class Base<
     operation: (callback: Callback<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>,
     attempt: number = 0,
-    firstError?: Error,
+    errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean
   ): void | Promise<ReturnType> {
     const retries = this[kOptions].retries! as number
@@ -385,12 +385,13 @@ export class Base<
         const retriable = !genericError.findBy?.('canRetry', false)
         // Keep only the first error (root cause) — avoid accumulating Error objects
         // across retries which retains stack frames (CallSiteInfo) in heap indefinitely.
-        const initial = firstError ?? error
+        const initial = errors[0] ?? error
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
           function onClose () {
             clearTimeout(timeout)
-            callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, [initial, new UserError(`Client closed while retrying ${operationId}.`)]))
+            errors.push(new UserError(`Client closed while retrying ${operationId}.`))
+            callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
           }
 
           let delay = this[kOptions].retryDelay
@@ -401,7 +402,7 @@ export class Base<
           this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
-            this[kPerformWithRetry](operationId, operation, callback, attempt + 1, initial, shouldSkipRetry)
+            this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
           }, delay)
 
           this.once('client:close', onClose)
@@ -411,7 +412,7 @@ export class Base<
             return
           }
 
-          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, [initial, error]))
+          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
         }
 
         return

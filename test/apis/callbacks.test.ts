@@ -29,9 +29,10 @@ test('runConcurrentCallbacks - all operations fail', (_, done) => {
     (item, cb) => {
       cb(new GenericError('PLT_KFK_USER', `failed: ${item}`))
     },
-    error => {
+    (error, results) => {
       ok(error)
       ok(MultipleErrors.isMultipleErrors(error))
+      deepStrictEqual(results, [undefined, undefined])
       const multi = error as MultipleErrors
       deepStrictEqual(multi.errors.length, 2)
       deepStrictEqual(multi.errors[0].message, 'failed: a')

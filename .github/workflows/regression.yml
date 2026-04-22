@@ -2,12 +2,124 @@
 name: Regression Tests
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: kafka-regression-linux
+  cancel-in-progress: false
+
 jobs:
-  placeholder:
-    name: Placeholder
-    runs-on: ubuntu-latest
+  regression:
+    name: Regression Suite
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, kafka-regression]
+    environment: regression
+    timeout-minutes: 60
+    env:
+      KAFKA_VERSION: 8.1.0
+      REGRESSION_LANE: linux-kafka-8.1-node-24
+      REGRESSION_BASELINE_DIR: regression/artifacts/baselines
+      REGRESSION_BASELINE_S3_PREFIX: kafka/regression-baselines
+      REGRESSION_PERFORMANCE_MESSAGES: 5000
+      REGRESSION_PERFORMANCE_SAMPLES: 5
+      REGRESSION_PERFORMANCE_WARMUPS: 2
     steps:
-      - name: Placeholder
-        run: 'true'
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clean stale Docker artifacts
+        run: sudo rm -rf tmp
+
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Restore cached dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: node-modules-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.REGRESSION_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.REGRESSION_AWS_REGION }}
+
+      - name: Download regression baseline
+        run: |
+          mkdir -p "$REGRESSION_BASELINE_DIR"
+          baseline_key="${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/latest.json"
+          head_output=$(aws s3api head-object --bucket "${{ secrets.REGRESSION_BASELINE_BUCKET }}" --key "$baseline_key" 2>&1) || head_status=$?
+
+          if [ "${head_status:-0}" -eq 0 ]; then
+            aws s3 cp \
+              "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${baseline_key}" \
+              "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json"
+          elif [[ "$head_output" == *"Not Found"* || "$head_output" == *"404"* || "$head_output" == *"NoSuchKey"* ]]; then
+            echo "::warning::No previous regression baseline found for ${REGRESSION_LANE}; skipping comparison."
+          else
+            printf '%s\n' "$head_output"
+            exit "$head_status"
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install kinit for Kerberos
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
+
+      - name: Start Kafka Cluster
+        run: docker compose up --build --force-recreate -d --wait
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run integrity regressions
+        run: pnpm run test:integrity
+
+      - name: Run memory regressions
+        run: pnpm run test:memory
+
+      - name: Compare and update performance baseline
+        run: pnpm run regression:baseline:update
+
+      - name: Upload regression baseline
+        run: |
+          aws s3 cp \
+            "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json" \
+            "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/latest.json"
+          aws s3 cp \
+            "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json" \
+            "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/history/${GITHUB_SHA}.json"
+
+      - name: Upload regression artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-artifacts-${{ github.run_id }}
+          path: regression/artifacts
+          if-no-files-found: ignore
+
+      - name: Stop Kafka Cluster
+        if: always()
+        run: docker compose down --volumes
+
+      - name: Clean Docker artifacts
+        if: always()
+        run: sudo rm -rf tmp

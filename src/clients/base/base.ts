@@ -383,9 +383,7 @@ export class Base<
         const genericError = error as GenericError
         // Only retry if all the errors in the chain are retriable
         const retriable = !genericError.findBy?.('canRetry', false)
-        // Keep only the first error (root cause) — avoid accumulating Error objects
-        // across retries which retains stack frames (CallSiteInfo) in heap indefinitely.
-        const initial = errors[0] ?? error
+        errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
           function onClose () {

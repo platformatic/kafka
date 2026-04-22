@@ -1129,7 +1129,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           callback(error, results)
         },
         0,
-        [],
+        undefined,
         error => {
           if (!repeatOnStaleMetadata || !GenericError.isGenericError(error)) {
             return false

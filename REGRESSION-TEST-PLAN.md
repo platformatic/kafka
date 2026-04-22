@@ -66,12 +66,17 @@ Create a separate workflow, for example `.github/workflows/regression.yml`.
 Trigger it on:
 
 - `push` to `main`
+- `workflow_dispatch`
 
-Use two tiers:
+Run it only:
 
-1. merge gate tier
-   - fast enough to run on every PR or every merge to `main`
-   - validates correctness, backpressure, and a small perf smoke suite
+1. when code is merged to `main`
+2. when manually triggered via GitHub Actions
+
+Scope of each run:
+
+- execute correctness, backpressure, memory, performance, compatibility, and issue-driven regression coverage as configured for this workflow
+- compare results against the stored baseline for the same lane
 
 ## Infrastructure Strategy
 
@@ -106,6 +111,9 @@ Runner requirement:
 - label the runner specifically for regression jobs, for example `self-hosted`, `linux`, `x64`, `kafka-regression`
 - avoid sharing that runner with unrelated CI workloads
 - keep background services on the host to a minimum
+- allow only one workflow instance at a time on that dedicated runner
+- queue later runs until the current run completes
+- configure GitHub Actions concurrency so runs are serialized instead of cancelled
 
 ## Required Jobs
 
@@ -182,7 +190,7 @@ Pass criteria:
 
 Implementation note:
 
-- because memory tests are currently excluded from CI, this job should initially run on merge to `main` and nightly, not necessarily on every PR update
+- because memory tests are currently excluded from CI, this job should run in this dedicated regression workflow on merge to `main` and on manual dispatch, not on every PR update
 
 ### 4. Performance Benchmark Job
 
@@ -198,7 +206,7 @@ Actions:
    - batched produce
    - stream/evented consume
 3. normalize output into machine-readable JSON
-4. store benchmark results as artifacts and optionally commit them to GitHub Actions summaries
+4. store benchmark results in S3 or a compatible object store and optionally expose a short summary in GitHub Actions
 5. compare against the latest `main` baseline, not against raw historical averages
 
 Metrics to track:
@@ -233,7 +241,7 @@ Actions:
 3. run auth-focused smoke coverage for:
    - SASL/OAUTHBEARER
    - SCRAM
-   - GSSAPI when practical in nightly runs
+   - GSSAPI when practical in this workflow
 4. upload broker and client logs for any failed auth or protocol lane
 
 Pass criteria:
@@ -290,15 +298,27 @@ The workflow needs a stable baseline source.
 
 Recommended approach:
 
-1. on every successful `main` run, upload JSON results as versioned artifacts
-2. keep a lightweight `regression-baseline` artifact containing the latest accepted benchmark and resource metrics
-3. let PR or post-merge jobs download that artifact and compare against it
+1. on every successful run, store JSON results, logs, and resource samples in S3 or a compatible object store
+2. keep a lightweight `regression-baseline` object containing the latest accepted benchmark and resource metrics for each lane
+3. let later runs download those stored results and compare against the latest accepted baseline
+4. keep GitHub Actions artifacts only as short-lived convenience attachments for the current run
 
-If artifact-based history becomes awkward, move the baseline to:
+Stored objects should be organized by:
 
-- a small JSON file in a dedicated branch, or
-- GitHub Releases assets, or
-- an external metrics store
+- workflow name
+- commit SHA
+- branch
+- runner label
+- Kafka version
+- Node.js version
+- timestamp
+
+This storage strategy supports:
+
+- historical retrieval
+- baseline comparison
+- regression triage
+- re-running comparisons without depending on GitHub artifact retention windows
 
 ## Noise Control
 
@@ -311,48 +331,7 @@ Performance results in GitHub-hosted environments can be noisy. Reduce noise by:
 5. avoiding version matrices in the main performance comparison job
 6. separating the main perf lane from compatibility and auth lanes
 
-## Suggested Rollout
-
-### Phase 1
-
-1. keep existing CI as the correctness gate
-2. add `PLAN.md`
-3. create `regression.yml` with:
-   - correctness smoke
-   - existing backpressure tests
-   - existing memory test on merge to `main`
-   - explicit invariant checks for duplicates, gaps, and committed offsets
-
-### Phase 2
-
-1. convert `benchmarks/*` into JSON-producing scripts
-2. add baseline download and comparison logic
-3. publish GitHub Actions job summaries with trend deltas
-4. add reduced oldest/newest Kafka compatibility lanes
-
-### Phase 3
-
-1. add the missing issue-driven regression tests listed above
-2. add scheduled nightly full-suite runs
-3. move perf jobs to self-hosted hardware if hosted runners remain too noisy
-4. add auth-heavy and schema-registry-heavy soak coverage to nightly runs
-
-## Concrete Deliverables
-
-1. `.github/workflows/regression.yml`
-2. benchmark result schema such as `artifacts/regression/*.json`
-3. baseline compare script
-4. resource sampler script
-5. new regression tests for issues `#223`, `#226`, `#227`, `#228`, `#232`, `#248`, `#260`, `#267`, and open enhancement `#128`
-6. invariant helpers for duplicate, gap, and committed-offset assertions
-7. reduced compatibility suite for oldest and newest supported Kafka versions
-8. auth-focused regression suite
-9. schema-registry load regression suite
-10. shutdown and leaked-handle regression suite
-
-## Bottom Line
-
-Your original scope is correct, but it is missing a few important reliability scenarios already seen in production-like use:
+This plan explicitly covers the main production-like failure classes already seen in repository history:
 
 - rebalance offset races
 - stale epoch handling
@@ -370,9 +349,40 @@ Your original scope is correct, but it is missing a few important reliability sc
 - heavy-load deserialization failures
 - long-running batch-consumer stalls
 
-The safest approach is:
+## Suggested Rollout
 
-1. keep correctness as a strict gate
-2. run backpressure and memory checks on every merge to `main`
-3. run full performance comparison against a stored `main` baseline
-4. expand the suite using the concrete regressions already captured in repo history
+### Phase 1
+
+1. keep existing CI as the correctness gate
+2. keep this regression plan document as the implementation reference
+3. create `regression.yml` with:
+   - correctness smoke
+   - existing backpressure tests
+   - existing memory test on merge to `main`
+   - explicit invariant checks for duplicates, gaps, and committed offsets
+
+### Phase 2
+
+1. convert `benchmarks/*` into JSON-producing scripts
+2. add baseline download and comparison logic against the stored S3-compatible results
+3. publish GitHub Actions job summaries with trend deltas
+4. add reduced oldest/newest Kafka compatibility lanes
+
+### Phase 3
+
+1. add the missing issue-driven regression tests listed above
+2. expand this workflow with the remaining issue-driven scenarios
+3. add auth-heavy and schema-registry-heavy soak coverage to this workflow
+
+## Concrete Deliverables
+
+1. `.github/workflows/regression.yml`
+2. benchmark result schema such as `artifacts/regression/*.json`
+3. baseline compare script
+4. resource sampler script
+5. new regression tests for issues `#223`, `#226`, `#227`, `#228`, `#232`, `#248`, `#260`, `#267`, and open enhancement `#128`
+6. invariant helpers for duplicate, gap, and committed-offset assertions
+7. reduced compatibility suite for oldest and newest supported Kafka versions
+8. auth-focused regression suite
+9. schema-registry load regression suite
+10. shutdown and leaked-handle regression suite

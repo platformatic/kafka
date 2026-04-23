@@ -64,6 +64,10 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
     return this.#context
   }
 
+  [Symbol.iterator] () {
+    return this.#connections[Symbol.iterator]()
+  }
+
   get (broker: Broker, callback: CallbackWithPromise<Connection>): void
   get (broker: Broker): Promise<Connection>
   get (broker: Broker, callback?: CallbackWithPromise<Connection>): void | Promise<Connection> {
@@ -102,6 +106,10 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
     )
 
     return callback[kCallbackPromise]
+  }
+
+  getEstablishedConnection (broker: Broker): Connection | undefined {
+    return this.#connections.get(`${broker.host}:${broker.port}`)
   }
 
   close (callback: CallbackWithPromise<void>): void
@@ -152,6 +160,10 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
     }
 
     return true
+  }
+
+  has (broker: Broker): boolean {
+    return this.#connections.has(`${broker.host}:${broker.port}`)
   }
 
   #get (broker: Broker, callback: Callback<Connection>): void {

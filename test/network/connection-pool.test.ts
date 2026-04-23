@@ -90,6 +90,68 @@ test('get should return the same connection for the same broker', async t => {
   deepStrictEqual(connection1, connection2)
 })
 
+test('getEstablishedConnection should return an existing connection for a broker', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  strictEqual(connectionPool.getEstablishedConnection(broker), undefined)
+
+  const connection = await connectionPool.get(broker)
+
+  strictEqual(connectionPool.getEstablishedConnection(broker), connection)
+})
+
+test('has should track whether a broker connection exists in the pool', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  strictEqual(connectionPool.has(broker), false)
+
+  const connection = await connectionPool.get(broker)
+
+  strictEqual(connectionPool.has(broker), true)
+
+  await connection.close()
+
+  strictEqual(connectionPool.has(broker), false)
+})
+
+test('iterator protocol should yield pooled broker connection entries', async t => {
+  const server1 = await createServer(t)
+  const server2 = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker1 = { host: 'localhost', port: server1.port }
+  const broker2 = { host: 'localhost', port: server2.port }
+
+  const connection1 = await connectionPool.get(broker1)
+  const connection2 = await connectionPool.get(broker2)
+
+  const entries = Array.from(connectionPool)
+  const iteratedEntries: Array<[string, Connection]> = []
+
+  for (const entry of connectionPool) {
+    iteratedEntries.push(entry)
+  }
+
+  strictEqual(entries.length, 2)
+  deepStrictEqual(entries, [
+    [`${broker1.host}:${broker1.port}`, connection1],
+    [`${broker2.host}:${broker2.port}`, connection2]
+  ])
+  deepStrictEqual(iteratedEntries, entries)
+})
+
 test('get should handle connecting status and return same connection', async t => {
   const { port } = await createServer(t)
 

@@ -157,6 +157,10 @@ export class Base<
     return this[kContext]
   }
 
+  get connections (): ConnectionPool {
+    return this[kConnections]
+  }
+
   emitWithDebug (section: string | null, name: string, ...args: any[]): boolean {
     if (!section) {
       return this.emit(name, ...args)
@@ -405,12 +409,13 @@ export class Base<
 
           this.once('client:close', onClose)
         } else {
-          if (attempt === 0) {
-            callback(error)
-            return
+          if (attempt > 0) {
+            error = new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors)
           }
 
-          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
+          this.emitWithDebug('client', 'performWithRetry:failed', operationId, retries, errors)
+          callback(error)
+          return
         }
 
         return

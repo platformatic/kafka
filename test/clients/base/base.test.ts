@@ -13,9 +13,9 @@ import {
   sleep,
   TimeoutError,
   UnsupportedApiError,
+  UserError,
   type Broker,
   type CallbackWithPromise,
-  UserError,
   type ClientDiagnosticEvent,
   type ClusterMetadata
 } from '../../../src/index.ts'
@@ -51,6 +51,12 @@ test('constructor should expose context and forward it to the default pool', () 
 
   strictEqual(base.context, context)
   strictEqual(base[kConnections].context, context)
+})
+
+test('constructor should expose the connections getter', () => {
+  const base = new Base({ clientId: 'clientId', bootstrapBrokers: ['localhost:9092'], retries: false, strict: true })
+
+  strictEqual(base.connections, base[kConnections])
 })
 
 test('constructor should throw on invalid options when strict mode is enabled', () => {
@@ -738,7 +744,6 @@ test('kPerformWithRetry should not leak timers', async t => {
 
   // Wait for the first request to fail
   await once(client, 'client:performWithRetry:retry')
-
   // Forcefully close the client to ensure all operations are aborted
   await client.close()
 
@@ -760,11 +765,13 @@ test('kPerformWithRetry should accept a custom function', async t => {
   const promise = client.metadata({ topics: [`test-topic-${randomUUID()}`] }).catch(e => e)
 
   // Wait for the first two attempts to fail
+  const failedPromise = once(client, 'client:performWithRetry:failed')
   const [, , , first] = await once(client, 'client:performWithRetry:retry')
   const [, , , second] = await once(client, 'client:performWithRetry:retry')
 
   // If the timeout was already resolved, the test runner would complain
   await promise
+  await failedPromise
 
   // Forcefully close the client to ensure all operations are aborted
   await client.close()

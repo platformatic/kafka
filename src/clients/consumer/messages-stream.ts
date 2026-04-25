@@ -265,6 +265,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return this.#offsetsCommitted
   }
 
+  /* c8 ignore next 3 - Simple getter */
+  get connections (): ConnectionPool {
+    return this[kConnections]
+  }
+
   close (callback: CallbackWithPromise<void>): void
   close (): Promise<void>
   close (callback?: CallbackWithPromise<void>): void | Promise<void> {

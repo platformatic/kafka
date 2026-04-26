@@ -70,11 +70,13 @@ Options:
 
 It also accepts all options of the constructor except `serializers`.
 
-### `getBrokersForMessages<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
+### `getSendTopicPartitions<Key, Value, HeaderKey, HeaderValue>(options)`
 
-Returns the brokers that would receive the provided messages without sending them.
+Synchronously returns the topic partitions that would be used for the provided messages without sending them.
 
-The return value is a record keyed by `topic:partition`, where each value is the broker responsible for that topic partition.
+The return value is a `Map<string, Set<number>>`, where each key is a topic name and each value is the set of partitions selected for that topic.
+
+This method only computes the topic-partition mapping from the provided messages. It does not fetch broker metadata, open connections, or send messages.
 
 This method serializes message keys and headers as needed to resolve partitions, so serializer errors are reported the same way as `send()`.
 
@@ -83,14 +85,34 @@ Options: accepts the same options as `send()`.
 Example:
 
 ```typescript
-const brokers = await producer.getBrokersForMessages({
+const topicPartitions = producer.getSendTopicPartitions({
+  messages: [{ topic: 'events', key: Buffer.from('user-1'), value: Buffer.from('login') }]
+})
+
+console.log(topicPartitions.get('events'))
+```
+
+### `getSendBrokers<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
+
+Returns the brokers that would receive the provided messages without sending them.
+
+The return value is a record keyed by `topic:partition`, where each value is the broker responsible for that topic partition.
+
+This method uses `getSendTopicPartitions()` to resolve the topic partitions before looking up their leaders.
+
+Options: accepts the same options as `send()`.
+
+Example:
+
+```typescript
+const brokers = await producer.getSendBrokers({
   messages: [{ topic: 'events', key: Buffer.from('user-1'), value: Buffer.from('login') }]
 })
 
 console.log(brokers['events:0'])
 ```
 
-### `prepareSendConnections<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
+### `getSendConnections<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
 
 Prepares the broker connections needed to send the provided messages.
 
@@ -103,7 +125,7 @@ Options: accepts the same options as `send()`.
 Example:
 
 ```typescript
-const connections = await producer.prepareSendConnections({
+const connections = await producer.getSendConnections({
   messages: [{ topic: 'events', key: Buffer.from('user-1'), value: Buffer.from('login') }]
 })
 

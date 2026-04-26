@@ -449,12 +449,101 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return callback[kCallbackPromise]
   }
 
-  prepareSendConnections (
+  getSendTopicPartitions (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Map<string, Set<number>> {
+    const topicsPartitions = new Map<string, Set<number>>()
+    const partitioner = options.partitioner ?? this[kOptions].partitioner
+
+    for (const message of options.messages) {
+      const topic = message.topic
+      let key: Buffer | undefined
+      let headers = new Map<HeaderKey, HeaderValue>()
+
+      try {
+        if (message.headers) {
+          headers =
+            message.headers instanceof Map
+              ? (message.headers as Map<HeaderKey, HeaderValue>)
+              : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
+        }
+
+        key = this.#keySerializer(message.key, headers, message)
+      } catch (error) {
+        throw new UserError('Failed to serialize a message.', { cause: error })
+      }
+
+      const partition = this.#assignPartition(message, partitioner, key, topic)
+
+      let partitions = topicsPartitions.get(topic)
+      if (!partitions) {
+        partitions = new Set()
+        topicsPartitions.set(topic, partitions)
+      }
+
+      partitions.add(partition)
+    }
+
+    return topicsPartitions
+  }
+
+  getSendBrokers (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<Record<string, Broker>>
+  ): void
+  getSendBrokers (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Broker>>
+  getSendBrokers (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback?: CallbackWithPromise<Record<string, Broker>>
+  ): void | Promise<Record<string, Broker>> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Record<string, Broker>>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    let topicsPartitions
+
+    try {
+      topicsPartitions = this.getSendTopicPartitions(options)
+    } catch (error) {
+      callback(error)
+      return callback[kCallbackPromise]
+    }
+
+    this[kMetadata]({ topics: Array.from(topicsPartitions!.keys()), autocreateTopics: options.autocreateTopics }, (
+      error,
+      metadata
+    ) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      const brokers: Record<string, Broker> = {}
+
+      for (const [topic, partitions] of topicsPartitions!) {
+        for (const rawPartition of partitions) {
+          const partition = rawPartition & metadata!.topics.get(topic)!.partitionsCount
+          const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
+          const broker = metadata!.brokers.get(leader)
+
+          brokers[`${topic}:${partition}`] = broker!
+        }
+      }
+
+      callback(null, brokers)
+    })
+
+    return callback[kCallbackPromise]
+  }
+
+  getSendConnections (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<Record<string, Connection>>
   ): void
-  prepareSendConnections (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Connection>>
-  prepareSendConnections (
+  getSendConnections (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Connection>>
+  getSendConnections (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback?: CallbackWithPromise<Record<string, Connection>>
   ): void | Promise<Record<string, Connection>> {
@@ -466,7 +555,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.getBrokersForMessages(options, (error, brokers) => {
+    this.getSendBrokers(options, (error, brokers) => {
       if (error) {
         callback(error)
         return
@@ -494,83 +583,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           callback(null, Object.fromEntries(results!))
         }
       )
-    })
-
-    return callback[kCallbackPromise]
-  }
-
-  getBrokersForMessages (
-    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback: CallbackWithPromise<Record<string, Broker>>
-  ): void
-  getBrokersForMessages (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Broker>>
-  getBrokersForMessages (
-    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback?: CallbackWithPromise<Record<string, Broker>>
-  ): void | Promise<Record<string, Broker>> {
-    if (!callback) {
-      callback = createPromisifiedCallback<Record<string, Broker>>()
-    }
-
-    if (this[kCheckNotClosed](callback)) {
-      return callback[kCallbackPromise]
-    }
-
-    const topicsPartitions = new Map<string, Set<number>>()
-    const partitioner = options.partitioner ?? this[kOptions].partitioner
-
-    for (const message of options.messages) {
-      const topic = message.topic
-      let key: Buffer | undefined
-      let headers = new Map<HeaderKey, HeaderValue>()
-
-      try {
-        if (message.headers) {
-          headers =
-            message.headers instanceof Map
-              ? (message.headers as Map<HeaderKey, HeaderValue>)
-              : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
-        }
-
-        key = this.#keySerializer(message.key, headers, message)
-      } catch (error) {
-        callback(new UserError('Failed to serialize a message.', { cause: error }))
-        return
-      }
-
-      const partition = this.#assignPartition(message, partitioner, key, topic)
-
-      let messages = topicsPartitions.get(topic)
-      if (!messages) {
-        messages = new Set()
-        topicsPartitions.set(topic, messages)
-      }
-
-      messages.add(partition)
-    }
-
-    this[kMetadata]({ topics: Array.from(topicsPartitions.keys()), autocreateTopics: options.autocreateTopics }, (
-      error,
-      metadata
-    ) => {
-      if (error) {
-        callback(error)
-        return
-      }
-
-      const brokers: Record<string, Broker> = {}
-
-      for (const [topic, partitions] of topicsPartitions) {
-        for (const rawPartition of partitions) {
-          const partition = rawPartition & metadata!.topics.get(topic)!.partitionsCount
-          const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
-          const broker = metadata!.brokers.get(leader)
-
-          brokers[`${topic}:${partition}`] = broker!
-        }
-      }
-
-      callback(null, brokers)
     })
 
     return callback[kCallbackPromise]

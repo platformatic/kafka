@@ -189,7 +189,7 @@ export function mockMethod (
 
 export function mockConnectionPoolGet (
   pool: ConnectionPool,
-  callToMock: number = 1,
+  callToMock: number | ((current: number) => boolean) = 1,
   errorToMock?: Error | null,
   returnValue?: unknown,
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
@@ -199,7 +199,7 @@ export function mockConnectionPoolGet (
 
 export function mockConnectionPoolGetFirstAvailable (
   pool: ConnectionPool,
-  callToMock: number = 1,
+  callToMock: number | ((current: number) => boolean) = 1,
   errorToMock?: Error | null,
   returnValue?: unknown,
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void
@@ -209,7 +209,7 @@ export function mockConnectionPoolGetFirstAvailable (
 
 export function mockMetadata (
   client: Base<BaseOptions>,
-  callToMock: number = 1,
+  callToMock: number | ((current: number) => boolean) = 1,
   errorToMock?: Error | null,
   returnValue?: unknown,
   fn?: (original: (...args: any[]) => void, ...args: any[]) => boolean | void

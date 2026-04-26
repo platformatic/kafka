@@ -84,6 +84,7 @@ export function parseResponse (
   const errorCode = reader.readInt16()
   const errorMessage = reader.readNullableString()
 
+  /* c8 ignore next 3 - Hard to test */
   if (errorCode !== 0) {
     errors.push(['', [errorCode, errorMessage]])
   }

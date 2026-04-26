@@ -60,6 +60,8 @@ When `acks` is not `ProduceAcks.NO_RESPONSE`, then the return value is an object
 
 When `acks` is `ProduceAcks.NO_RESPONSE`, then the return value is an object with the property `unwritableNodes` containing a list of nodes which are currently busy and should wait for a `client:broker:drain` event before continuing.
 
+If a send operation fails after producing some messages, the thrown error includes a `produced` property with the same shape as `ProduceResult`. Use `error.produced.offsets` to inspect successfully acknowledged messages, or `error.produced.unwritableNodes` when `acks` is `ProduceAcks.NO_RESPONSE`.
+
 Options:
 
 | Property   | Type                                                     | Description           |
@@ -67,6 +69,46 @@ Options:
 | `messages` | `MessageToProduce<Key, Value, HeaderKey, HeaderValue>[]` | The messages to send. |
 
 It also accepts all options of the constructor except `serializers`.
+
+### `getBrokersForMessages<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
+
+Returns the brokers that would receive the provided messages without sending them.
+
+The return value is a record keyed by `topic:partition`, where each value is the broker responsible for that topic partition.
+
+This method serializes message keys and headers as needed to resolve partitions, so serializer errors are reported the same way as `send()`.
+
+Options: accepts the same options as `send()`.
+
+Example:
+
+```typescript
+const brokers = await producer.getBrokersForMessages({
+  messages: [{ topic: 'events', key: Buffer.from('user-1'), value: Buffer.from('login') }]
+})
+
+console.log(brokers['events:0'])
+```
+
+### `prepareSendConnections<Key, Value, HeaderKey, HeaderValue>(options[, callback])`
+
+Prepares the broker connections needed to send the provided messages.
+
+The return value is a record keyed by `topic:partition`, where each value is the open connection to the broker responsible for that topic partition.
+
+Use this method to warm up the producer connections for a set of messages before calling `send()`.
+
+Options: accepts the same options as `send()`.
+
+Example:
+
+```typescript
+const connections = await producer.prepareSendConnections({
+  messages: [{ topic: 'events', key: Buffer.from('user-1'), value: Buffer.from('login') }]
+})
+
+console.log(connections['events:0'])
+```
 
 ### `asStream<Key, Value, HeaderKey, HeaderValue>([options])`
 

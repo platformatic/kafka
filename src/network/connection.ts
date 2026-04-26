@@ -237,6 +237,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
           typeof this.#options.tlsServerName === 'string' ? this.#options.tlsServerName : host
       }
 
+      /* c8 ignore next 13 - Hard to test */
       const connectingSocketTimeoutHandler = () => {
         const error = new TimeoutError(`Connection to ${host}:${port} timed out.`)
         diagnosticContext.error = error

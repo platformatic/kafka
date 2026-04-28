@@ -7,6 +7,7 @@ import {
   type ClientDiagnosticEvent,
   compressionsAlgorithms,
   ConfluentSchemaRegistry,
+  Connection,
   GenericError,
   initProducerIdV5,
   instancesChannel,
@@ -23,6 +24,7 @@ import {
   stringDeserializers,
   stringSerializer,
   stringSerializers,
+  type TopicWithPartitionAndOffset,
   UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
@@ -310,6 +312,32 @@ test('all operations should fail when producer is closed', async t => {
   await rejects(
     async () => {
       await producer.send({
+        messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
+      })
+    },
+    error => {
+      strictEqual(error instanceof NetworkError, true)
+      strictEqual((error as Error).message, 'Client is closed.')
+      return true
+    }
+  )
+
+  await rejects(
+    async () => {
+      await producer.getSendConnections({
+        messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
+      })
+    },
+    error => {
+      strictEqual(error instanceof NetworkError, true)
+      strictEqual((error as Error).message, 'Client is closed.')
+      return true
+    }
+  )
+
+  await rejects(
+    async () => {
+      await producer.getSendBrokers({
         messages: [{ topic: testTopic, value: Buffer.from('test-message') }]
       })
     },
@@ -1150,6 +1178,59 @@ test('send should handle errors from Base.metadata in internal calls', async t =
   )
 })
 
+test('send should return produced messages when another destination fails', async t => {
+  const producer = createProducer(t, { retries: 0 })
+  const testTopic = await createTopic(t, true, 3)
+
+  let partition = -1
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (
+    originalSend,
+    apiKey,
+    apiVersion,
+    payload,
+    responseParser,
+    hasRequestHeaderTaggedFields,
+    hasResponseHeaderTaggedFields,
+    callback
+  ) => {
+    partition++
+
+    if (partition === 0) {
+      callback(new GenericError('PLT_KFK_NETWORK', 'Produce failed.', { canRetry: false }))
+    } else {
+      originalSend(
+        apiKey,
+        apiVersion,
+        payload,
+        responseParser,
+        hasRequestHeaderTaggedFields,
+        hasResponseHeaderTaggedFields,
+        callback
+      )
+    }
+
+    return true
+  })
+
+  await rejects(
+    async () => {
+      await producer.send({
+        messages: [
+          { topic: testTopic, value: Buffer.from('produced-message'), partition: 0 },
+          { topic: testTopic, value: Buffer.from('failed-message'), partition: 1 }
+        ]
+      })
+    },
+    error => {
+      const produced = (error as MultipleErrors).produced?.offsets?.[0] as TopicWithPartitionAndOffset
+
+      deepStrictEqual((error as MultipleErrors).produced, { offsets: [produced] })
+      deepStrictEqual(produced.topic, testTopic)
+      return true
+    }
+  )
+})
+
 test('send should handle errors from ConnectionPool.get', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
@@ -1608,4 +1689,223 @@ test('asStream should validate options', t => {
     strictEqual(error instanceof UserError, true)
     strictEqual((error as Error).message.includes('/options/batchSize'), true)
   }
+})
+
+test('getSendTopicPartitions should return the topic partitions for messages', async t => {
+  const producer = createProducer(t)
+  const testTopic1 = await createTopic(t)
+  const testTopic2 = await createTopic(t)
+
+  const topicPartitions = producer.getSendTopicPartitions({
+    messages: [
+      { topic: testTopic1, value: Buffer.from('message1'), partition: 1 },
+      { topic: testTopic1, value: Buffer.from('message2') },
+      { topic: testTopic1, value: Buffer.from('message3'), partition: 1 },
+      { topic: testTopic2, value: Buffer.from('message1'), partition: 2 }
+    ]
+  })
+
+  deepStrictEqual(
+    topicPartitions,
+    new Map([
+      [testTopic1, new Set([1, 0])],
+      [testTopic2, new Set([2])]
+    ])
+  )
+})
+
+test('getSendTopicPartitions should support custom partitioner', async t => {
+  const producer = createProducer<string, Buffer, string, string>(t)
+  const testTopic = await createTopic(t)
+
+  const topicPartitions = producer.getSendTopicPartitions({
+    messages: [
+      { topic: testTopic, value: Buffer.from('message1') },
+      { topic: testTopic, value: Buffer.from('message2') }
+    ],
+    partitioner: () => 2
+  })
+
+  deepStrictEqual(topicPartitions, new Map([[testTopic, new Set([2])]]))
+})
+
+test('getSendTopicPartitions should handle serializer errors', async t => {
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      ...stringSerializers,
+      key () {
+        throw new Error('boom')
+      }
+    }
+  })
+
+  try {
+    producer.getSendTopicPartitions({
+      messages: [{ topic: 'test-topic', key: 'key', value: 'value' }]
+    })
+
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof UserError, true)
+    strictEqual((error as Error).message, 'Failed to serialize a message.')
+  }
+})
+
+test('getSendBrokers should return the correct brokers for messages (no partitioner)', async t => {
+  const producer = createProducer(t)
+  const testTopic1 = await createTopic(t, true, 3)
+  const testTopic2 = await createTopic(t, true, 3)
+
+  const messages = [
+    { topic: testTopic1, value: Buffer.from('message1'), partition: 1 },
+    { topic: testTopic1, value: Buffer.from('message2') },
+    { topic: testTopic1, value: Buffer.from('message3'), partition: 2 },
+    { topic: testTopic2, value: Buffer.from('message1'), partition: 1 },
+    { topic: testTopic2, value: Buffer.from('message2') },
+    { topic: testTopic2, value: Buffer.from('message3'), partition: 2 }
+  ]
+
+  const brokers = await producer.getSendBrokers({ messages })
+
+  deepStrictEqual(Object.keys(brokers), [
+    `${testTopic1}:1`,
+    `${testTopic1}:0`,
+    `${testTopic1}:2`,
+    `${testTopic2}:1`,
+    `${testTopic2}:0`,
+    `${testTopic2}:2`
+  ])
+
+  deepStrictEqual(Object.keys(brokers[`${testTopic1}:1`]), ['host', 'port', 'rack'])
+})
+
+test('getSendBrokers should return the correct brokers for messages (with partitioner)', async t => {
+  const producer = createProducer<string, Buffer, string, string>(t)
+  const testTopic1 = await createTopic(t, true, 3)
+  const testTopic2 = await createTopic(t, true, 3)
+
+  const messages = [
+    { topic: testTopic1, value: Buffer.from('message1'), headers: { header1: 'value1' } },
+    {
+      topic: testTopic1,
+      value: Buffer.from('message2'),
+      headers: new Map<string, string>([['header1', 'value1']])
+    },
+    { topic: testTopic1, value: Buffer.from('message3') },
+    { topic: testTopic2, value: Buffer.from('message1') },
+    { topic: testTopic2, value: Buffer.from('message2') },
+    { topic: testTopic2, value: Buffer.from('message3') }
+  ]
+
+  await new Promise<void>(resolve => {
+    producer.getSendBrokers({ messages, partitioner: () => 0 }, (_, brokers) => {
+      deepStrictEqual(Object.keys(brokers!), [`${testTopic1}:0`, `${testTopic2}:0`])
+
+      resolve()
+    })
+  })
+})
+
+test('getSendBrokers should handle serializer errors', async t => {
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      ...stringSerializers,
+      key () {
+        throw new Error('boom')
+      }
+    }
+  })
+
+  await new Promise<void>(resolve => {
+    producer.getSendBrokers(
+      {
+        messages: [{ topic: 'test-topic', key: 'key', value: 'value' }]
+      },
+      error => {
+        strictEqual(error instanceof UserError, true)
+        strictEqual((error as Error).message, 'Failed to serialize a message.')
+        resolve()
+      }
+    )
+  })
+})
+
+test('getSendBrokers should handle errors from Base.metadata', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
+
+  mockMetadata(producer)
+
+  await rejects(
+    async () => {
+      await producer.getSendBrokers({
+        messages: [{ topic: testTopic, value: Buffer.from('message-value') }]
+      })
+    },
+    error => {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
+      return true
+    }
+  )
+})
+
+test('getSendConnections should return the correct connections for messages', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t, true, 3)
+
+  const connections = await producer.getSendConnections({
+    messages: [
+      { topic: testTopic, value: Buffer.from('message1'), partition: 0 },
+      { topic: testTopic, value: Buffer.from('message2'), partition: 1 }
+    ]
+  })
+
+  deepStrictEqual(Object.keys(connections), [`${testTopic}:0`, `${testTopic}:1`])
+  strictEqual(connections[`${testTopic}:0`] instanceof Connection, true)
+  strictEqual(connections[`${testTopic}:1`] instanceof Connection, true)
+})
+
+test('getSendConnections should handle errors from Base.metadata', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
+
+  mockMetadata(producer)
+
+  await rejects(
+    async () => {
+      await producer.getSendConnections({
+        messages: [{ topic: testTopic, value: Buffer.from('message-value') }]
+      })
+    },
+    error => {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual((error as Error).message.includes(mockedErrorMessage), true)
+      return true
+    }
+  )
+})
+
+test('getSendConnections should handle errors from ConnectionPool.get', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t, true, 2)
+
+  await producer.getSendBrokers({
+    messages: [{ topic: testTopic, value: Buffer.from('message-value'), partition: 0 }]
+  })
+
+  mockConnectionPoolGet(producer[kConnections])
+
+  await rejects(
+    async () => {
+      await producer.getSendConnections({
+        messages: [{ topic: testTopic, value: Buffer.from('message-value'), partition: 0 }]
+      })
+    },
+    error => {
+      strictEqual(error instanceof MultipleErrors, true)
+      strictEqual((error as Error).message.includes('Preparing producer connections failed.'), true)
+      return true
+    }
+  )
 })

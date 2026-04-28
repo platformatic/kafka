@@ -157,6 +157,10 @@ export class Base<
     return this[kContext]
   }
 
+  get connections (): ConnectionPool {
+    return this[kConnections]
+  }
+
   emitWithDebug (section: string | null, name: string, ...args: any[]): boolean {
     if (!section) {
       return this.emit(name, ...args)
@@ -405,12 +409,13 @@ export class Base<
 
           this.once('client:close', onClose)
         } else {
-          if (attempt === 0) {
-            callback(error)
-            return
+          if (attempt > 0) {
+            error = new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors)
           }
 
-          callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
+          this.emitWithDebug('client', 'performWithRetry:failed', operationId, retries, errors)
+          callback(error)
+          return
         }
 
         return
@@ -610,6 +615,7 @@ export class Base<
               const unknownTopicError = (error as GenericError).findBy('apiCode', 3)
               if (unknownTopicError) {
                 const topicIndexMatch = unknownTopicError.path?.match(/\/topics\/(\d+)/)
+                /* c8 ignore next 3 - Hard to test  */
                 const topicIndex = topicIndexMatch ? parseInt(topicIndexMatch[1]) : -1
                 const topicName =
                   topicIndex >= 0 && topicIndex < topicsToFetch.length ? topicsToFetch[topicIndex] : 'unknown'
@@ -620,6 +626,7 @@ export class Base<
               const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again
+              /* c8 ignore next 4 - Hard to test */
               if (hasStaleMetadata) {
                 this.clearMetadata()
                 topicsToFetch = topics

@@ -84,6 +84,10 @@ Returns `true` if the client is not closed.
 
 Returns `true` if all client's connections are currently connected and the client is connected to at least one broker.
 
+### `connections`
+
+Returns the client's default broker connection pool.
+
 ### `clearMetadata`
 
 Clear the current metadata.
@@ -210,7 +214,7 @@ const producer = new Producer({
 The `authenticate` function receives the following parameters:
 
 - `mechanism`: The SASL mechanism being used (e.g., 'PLAIN', 'SCRAM-SHA-256')
-- `connection`: The Connection instance being authenticated
+- `connection`: The broker connection being authenticated
 - `authenticate`: The SASL authentication API function to send auth bytes to the server
 - `usernameProvider`: The username (string or async function) from the sasl options
 - `passwordProvider`: The password (string or async function) from the sasl options

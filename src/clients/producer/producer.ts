@@ -23,7 +23,7 @@ import {
   producerTransactionsChannel
 } from '../../diagnostic.ts'
 import { GenericError, type ProtocolError, UserError } from '../../errors.ts'
-import { type Connection } from '../../network/connection.ts'
+import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   type CreateRecordsBatchOptions,
   type Message,
@@ -76,6 +76,7 @@ import { defaultPartitioner } from './partitioners.ts'
 import { ProducerStream } from './producer-stream.ts'
 import { Transaction } from './transaction.ts'
 import {
+  type Partitioner,
   type ProduceOptions,
   type ProduceResult,
   type ProducerInfo,
@@ -444,6 +445,145 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       options,
       callback
     )
+
+    return callback[kCallbackPromise]
+  }
+
+  getSendTopicPartitions (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Map<string, Set<number>> {
+    const topicsPartitions = new Map<string, Set<number>>()
+    const partitioner = options.partitioner ?? this[kOptions].partitioner
+
+    for (const message of options.messages) {
+      const topic = message.topic
+      let key: Buffer | undefined
+      let headers = new Map<HeaderKey, HeaderValue>()
+
+      try {
+        if (message.headers) {
+          headers =
+            message.headers instanceof Map
+              ? (message.headers as Map<HeaderKey, HeaderValue>)
+              : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
+        }
+
+        key = this.#keySerializer(message.key, headers, message)
+      } catch (error) {
+        throw new UserError('Failed to serialize a message.', { cause: error })
+      }
+
+      const partition = this.#assignPartition(message, partitioner, key, topic)
+
+      let partitions = topicsPartitions.get(topic)
+      if (!partitions) {
+        partitions = new Set()
+        topicsPartitions.set(topic, partitions)
+      }
+
+      partitions.add(partition)
+    }
+
+    return topicsPartitions
+  }
+
+  getSendBrokers (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<Record<string, Broker>>
+  ): void
+  getSendBrokers (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Broker>>
+  getSendBrokers (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback?: CallbackWithPromise<Record<string, Broker>>
+  ): void | Promise<Record<string, Broker>> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Record<string, Broker>>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    let topicsPartitions
+
+    try {
+      topicsPartitions = this.getSendTopicPartitions(options)
+    } catch (error) {
+      callback(error)
+      return callback[kCallbackPromise]
+    }
+
+    this[kMetadata]({ topics: Array.from(topicsPartitions!.keys()), autocreateTopics: options.autocreateTopics }, (
+      error,
+      metadata
+    ) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      const brokers: Record<string, Broker> = {}
+
+      for (const [topic, partitions] of topicsPartitions!) {
+        for (const rawPartition of partitions) {
+          const partition = rawPartition & metadata!.topics.get(topic)!.partitionsCount
+          const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
+          const broker = metadata!.brokers.get(leader)
+
+          brokers[`${topic}:${partition}`] = broker!
+        }
+      }
+
+      callback(null, brokers)
+    })
+
+    return callback[kCallbackPromise]
+  }
+
+  getSendConnections (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<Record<string, Connection>>
+  ): void
+  getSendConnections (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): Promise<Record<string, Connection>>
+  getSendConnections (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback?: CallbackWithPromise<Record<string, Connection>>
+  ): void | Promise<Record<string, Connection>> {
+    if (!callback) {
+      callback = createPromisifiedCallback<Record<string, Connection>>()
+    }
+
+    if (this[kCheckNotClosed](callback)) {
+      return callback[kCallbackPromise]
+    }
+
+    this.getSendBrokers(options, (error, brokers) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      runConcurrentCallbacks<[string, Connection], [string, Broker]>(
+        'Preparing producer connections failed.',
+        Object.entries(brokers!),
+        ([topicPartition, broker], concurrentCallback) => {
+          this[kGetConnection](broker, (error, connection) => {
+            if (error) {
+              concurrentCallback(error)
+              return
+            }
+
+            concurrentCallback(null, [topicPartition, connection!])
+          })
+        },
+        (error, results) => {
+          if (error) {
+            callback(error)
+            return
+          }
+
+          callback(null, Object.fromEntries(results!))
+        }
+      )
+    })
 
     return callback[kCallbackPromise]
   }
@@ -895,20 +1035,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      let partition: number = 0
-
-      if (typeof message.partition !== 'number') {
-        if (partitioner) {
-          partition = partitioner(message, key)
-        } else if (key) {
-          partition = defaultPartitioner(message, key)
-        } else {
-          // Use the roundrobin
-          partition = this.#partitionsRoundRobin.postIncrement(topic, 1, 0)
-        }
-      } else {
-        partition = message.partition
-      }
+      const partition = this.#assignPartition(message, partitioner, key, topic)
 
       topics.add(topic)
       messages.push({
@@ -1014,11 +1141,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         },
         (error, apiResults) => {
-          if (error) {
-            callback(error)
-            return
-          }
-
           this.#metricsProducedMessages?.inc(messages.length)
           const results: ProduceResult = {}
 
@@ -1026,7 +1148,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             const unwritableNodes = []
 
             for (let i = 0; i < apiResults!.length; i++) {
-              if (apiResults![i] === false) {
+              if (typeof apiResults![i] === 'undefined' || apiResults![i] === false) {
                 unwritableNodes.push(nodes[i])
               }
             }
@@ -1036,7 +1158,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             const topics: ProduceResult['offsets'] = []
 
             for (const result of apiResults!) {
-              for (const { name, partitionResponses } of (result as ProduceResponse).responses) {
+              for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
                 for (const partitionResponse of partitionResponses) {
                   topics.push({
                     topic: name,
@@ -1053,7 +1175,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             }
           }
 
-          callback(null, results)
+          if (error) {
+            ;(error as GenericError).produced = results
+            callback(error)
+          } else {
+            callback(null, results)
+          }
         }
       )
     })
@@ -1102,6 +1229,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (error) {
             // If the last error was due to stale metadata, we retry the operation with this set of messages
             // since the partition is already set, it should attempt on the new destination
+            /* c8 ignore next 3 - Hard to test */
             const kafkaError = GenericError.isGenericError(error)
               ? (error as GenericError & { findBy: (property: string, value: unknown) => GenericError | null })
               : null
@@ -1122,7 +1250,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            callback(error)
+            callback(error, results)
             return
           }
 
@@ -1131,6 +1259,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         0,
         [],
         error => {
+          /* c8 ignore next 3 - Hard to test */
           if (!repeatOnStaleMetadata || !GenericError.isGenericError(error)) {
             return false
           }
@@ -1226,5 +1355,29 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.#send(options, callback)
       }
     )
+  }
+
+  #assignPartition (
+    message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
+    partitioner: Partitioner<Key, Value, HeaderKey, HeaderValue> | undefined,
+    key: Buffer<ArrayBufferLike> | undefined,
+    topic: string
+  ) {
+    let partition: number = 0
+
+    if (typeof message.partition !== 'number') {
+      if (partitioner) {
+        partition = partitioner(message, key)
+      } else if (key) {
+        partition = defaultPartitioner(message, key)
+      } else {
+        // Use the roundrobin
+        partition = this.#partitionsRoundRobin.postIncrement(topic, 1, 0)
+      }
+    } else {
+      partition = message.partition
+    }
+
+    return partition
   }
 }

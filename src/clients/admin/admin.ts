@@ -124,8 +124,8 @@ import {
   createTopicsOptionsValidator,
   deleteAclsOptionsValidator,
   deleteConsumerGroupOffsetsOptionsValidator,
-  deleteRecordsOptionsValidator,
   deleteGroupsOptionsValidator,
+  deleteRecordsOptionsValidator,
   deleteTopicsOptionsValidator,
   describeAclsOptionsValidator,
   describeClientQuotasOptionsValidator,
@@ -153,10 +153,10 @@ import {
   type CreateTopicsOptions,
   type DeleteAclsOptions,
   type DeleteConsumerGroupOffsetsOptions,
-  type DeleteRecordsOptions,
-  type DeleteGroupsOptions,
-  type DeleteTopicsOptions,
   type DeletedRecordsTopic,
+  type DeleteGroupsOptions,
+  type DeleteRecordsOptions,
+  type DeleteTopicsOptions,
   type DescribeAclsOptions,
   type DescribeClientQuotasOptions,
   type DescribeConfigsOptions,
@@ -2413,6 +2413,7 @@ export class Admin extends Base<AdminOptions> {
           const topicData = topics.get(topic.name)!
 
           const targetPartitionData = topicData.partitions[partition.partitionIndex]
+          /* c8 ignore next 4 - Hard to test */
           if (!targetPartitionData) {
             callback(new UserError(`Unknown partition ${partition.partitionIndex} for topic ${topic.name}.`))
             return

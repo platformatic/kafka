@@ -46,8 +46,8 @@ import {
   Consumer,
   createAclsV3,
   createPartitionsV3,
-  deleteRecordsV2,
   deleteAclsV3,
+  deleteRecordsV2,
   describeAclsV3,
   describeClientQuotasV0,
   describeConfigsV4,
@@ -74,6 +74,7 @@ import {
   createAdmin,
   createConsumer,
   createCreationChannelVerifier,
+  createGroupId,
   createProducer,
   createTopic,
   createTracingChannelVerifier,
@@ -138,6 +139,15 @@ test('all operations should fail when admin is closed', async t => {
 
   // Close the admin first
   await admin.close()
+
+  // Attempt to call findCoordinator on closed admin
+  try {
+    await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [createGroupId()] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    // Error should be about admin being closed
+    strictEqual(error.message, 'Client is closed.')
+  }
 
   // Attempt to call listTopics on closed admin
   try {

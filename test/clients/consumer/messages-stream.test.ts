@@ -1229,11 +1229,16 @@ test('should handle errors from Consumer.commit', async t => {
     autocommit: 300
   })
 
+  const autocommitPromise = once(stream, 'autocommit')
   stream.resume()
 
-  const [error] = await once(stream, 'error')
+  const [error] = await autocommitPromise
+  stream.pause()
+
   strictEqual(error instanceof MultipleErrors, true)
   strictEqual(error.message.includes(mockedErrorMessage), true)
+
+  await stream.close()
 })
 
 test('should handle errors from Consumer.listOffsets', async t => {

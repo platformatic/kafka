@@ -839,7 +839,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #commit (options: CommitOptions, callback: CallbackWithPromise<void>): void {
+  #commit (options: CommitOptions, callback: CallbackWithPromise<void>, rejoinAttempts: number = 0): void {
     this.#performGroupOperation<OffsetCommitResponse>(
       'commit',
       (connection, groupCallback) => {
@@ -878,6 +878,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         })
       },
       error => {
+        if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error)) {
+          this.joinGroup({}, joinError => {
+            if (joinError) {
+              callback(joinError)
+              return
+            }
+
+            this.#commit(options, callback, rejoinAttempts + 1)
+          })
+          return
+        }
+
         callback(error)
       }
     )

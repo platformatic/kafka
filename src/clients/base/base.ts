@@ -416,6 +416,8 @@ export class Base<
         return
       }
 
+      // Make sure all previous errors are deleted
+      errors.splice(0, errors.length)
       callback(null, result!)
     })
 

@@ -2,7 +2,8 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
-import { kConnections, kGetApi } from '../../../src/clients/base/base.ts'
+import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
+import { kConnections, kGetApi, kPerformWithRetry } from '../../../src/clients/base/base.ts'
 import {
   apiVersionsV3,
   Base,
@@ -13,9 +14,9 @@ import {
   sleep,
   TimeoutError,
   UnsupportedApiError,
+  UserError,
   type Broker,
   type CallbackWithPromise,
-  UserError,
   type ClientDiagnosticEvent,
   type ClusterMetadata
 } from '../../../src/index.ts'
@@ -771,6 +772,36 @@ test('kPerformWithRetry should accept a custom function', async t => {
 
   deepStrictEqual(first, 1000)
   deepStrictEqual(second, 2000)
+})
+
+test('kPerformWithRetry should clear retry errors after eventual success', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0 })
+  const errors: Error[] = []
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = await client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+
+      if (attempts < 3) {
+        retryCallback(new Error(`failed ${attempts}`))
+        return
+      }
+
+      retryCallback(null, 'ok')
+    },
+    callback,
+    0,
+    errors
+  )
+
+  strictEqual(result, 'ok')
+  strictEqual(attempts, 3)
+  deepStrictEqual(errors, [])
+
+  await client.close()
 })
 
 test('initialization should not fail when maxInflights is specifically set to undefined', async t => {

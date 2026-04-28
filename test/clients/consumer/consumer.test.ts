@@ -2326,50 +2326,58 @@ test('getLag should return the consumer lag', async t => {
   const consumer1 = createConsumer(t, { groupId })
   const consumer2 = createConsumer(t, { groupId })
   const consumer3 = createConsumer(t, { groupId })
+  const consumers = [consumer1, consumer2, consumer3]
 
-  await Promise.all([consumer1, consumer2, consumer3].map(consumer => consumer.joinGroup()))
+  await Promise.all(consumers.map(consumer => consumer.topics.trackAll(topic)))
+  await Promise.all(consumers.map(consumer => consumer.joinGroup()))
 
-  async function setup (consumer: Consumer, maxFetches: number) {
+  async function setup (
+    consumer: Consumer,
+    offset: bigint
+  ): Promise<[number, MessagesStream<Buffer, Buffer, Buffer, Buffer>]> {
+    const assignment = consumer.assignments!.find(assignment => assignment.topic === topic)!
+    const partition = assignment.partitions[0]
+
     const stream = await consumer.consume({
       topics: [topic],
-      autocommit: true,
-      mode: 'earliest',
+      autocommit: false,
+      mode: MessagesStreamModes.MANUAL,
+      offsets: [{ topic, partition, offset }],
       maxWaitTime: 1000,
       maxBytes: 10
     })
 
-    let fetches = 0
-    stream.on('fetch', () => {
-      fetches++
-      if (fetches >= maxFetches) {
-        stream.pause()
-      }
-    })
+    if (stream.offsetsCommitted.size === 0) {
+      await once(stream, 'offsets')
+    }
 
-    return stream
+    return [partition, stream]
   }
 
-  const stream1 = await setup(consumer1, 1)
-  const stream2 = await setup(consumer2, 2)
-  const stream3 = await setup(consumer3, 3)
+  // Create one stream for each consumer
+  const [consumerPartition1, stream1] = await setup(consumer1, 1n)
+  const [consumerPartition2, stream2] = await setup(consumer2, 2n)
+  const [consumerPartition3, stream3] = await setup(consumer3, 3n)
 
-  const paused1 = once(stream1, 'pause')
-  const paused2 = once(stream2, 'pause')
-  const paused3 = once(stream3, 'pause')
+  try {
+    const lag1 = (await consumer1.getLag({ topics: [topic] })).get(topic)!
+    const lag2 = (await consumer2.getLag({ topics: [topic] })).get(topic)!
+    const lag3 = (await consumer3.getLag({ topics: [topic] })).get(topic)!
 
-  stream1.resume()
-  stream2.resume()
-  stream3.resume()
+    deepStrictEqual(lag1[consumerPartition1], 4n)
+    deepStrictEqual(lag1[(consumerPartition1 + 1) % 3], -1n)
+    deepStrictEqual(lag1[(consumerPartition1 + 2) % 3], -1n)
 
-  await Promise.all([paused1, paused2, paused3])
+    deepStrictEqual(lag2[consumerPartition2], 3n)
+    deepStrictEqual(lag2[(consumerPartition2 + 1) % 3], -1n)
+    deepStrictEqual(lag2[(consumerPartition2 + 2) % 3], -1n)
 
-  const lag1 = await consumer1.getLag({ topics: [topic] })
-  const lag2 = await consumer2.getLag({ topics: [topic] })
-  const lag3 = await consumer3.getLag({ topics: [topic] })
-
-  ok(lag1.get(topic)!.includes(4n))
-  ok(lag2.get(topic)!.includes(3n))
-  ok(lag3.get(topic)!.includes(2n))
+    deepStrictEqual(lag3[consumerPartition3], 2n)
+    deepStrictEqual(lag3[(consumerPartition3 + 1) % 3], -1n)
+    deepStrictEqual(lag3[(consumerPartition3 + 2) % 3], -1n)
+  } finally {
+    await Promise.all([stream1.close(), stream2.close(), stream3.close()])
+  }
 })
 
 test('getLag should allow to filter out topics and partitions', async t => {

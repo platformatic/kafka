@@ -4,8 +4,7 @@ import generate from '@babel/generator'
 import { parse } from '@babel/parser'
 import traverse from '@babel/traverse'
 import { type ExportAllDeclaration, type Identifier } from '@babel/types'
-import { glob } from 'glob' // We can't use Node.js native one until we support Node 20.
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { glob, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 async function generateVersion () {
@@ -23,7 +22,7 @@ async function dropTsExtensionsInDeclarations () {
   const distDir = resolve(process.cwd(), 'dist')
 
   // First of all, gather all .d.ts files
-  const dtsFiles = await glob('**/*.d.ts', { cwd: distDir, root: distDir })
+  const dtsFiles = await Array.fromAsync(glob('**/*.d.ts', { cwd: distDir }))
 
   for (const file of dtsFiles) {
     const source = await readFile(resolve(distDir, file), 'utf-8')

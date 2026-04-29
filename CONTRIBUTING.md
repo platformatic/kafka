@@ -8,7 +8,7 @@ Platformatic is an open-source, modern, high-performance, pure TypeScript/JavaSc
 
 ## Prerequisites
 
-- **Node.js**: Version 20.19.4, 22.18.0 or 24.6.0 or higher
+- **Node.js**: Version 22.22.0 or 24.6.0 or higher
 - **pnpm**: Package manager (follow the [pnpm installation guide](https://pnpm.io/installation))
 - **Docker** (optional): Only required for running tests locally.
 

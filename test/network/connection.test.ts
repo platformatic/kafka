@@ -23,7 +23,6 @@ import {
   metadataV12,
   NetworkError,
   parseBroker,
-  promiseWithResolvers,
   type Reader,
   saslHandshakeV1,
   SASLMechanisms,
@@ -54,7 +53,7 @@ before(() => createScramUsers(saslBroker))
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
-  const { promise, resolve, reject } = promiseWithResolvers<{ server: Server; port: number }>()
+  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
@@ -85,7 +84,7 @@ async function createTLSServer (t: TestContext): Promise<{ server: Server; port:
     key: await readFile(new URL(tlsFolder + 'tls-key.pem', import.meta.url)),
     cert: await readFile(new URL(tlsFolder + 'tls-cert.pem', import.meta.url))
   })
-  const { promise, resolve, reject } = promiseWithResolvers<{ server: Server; port: number }>()
+  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
@@ -817,7 +816,7 @@ test('Connection should handle close with in-flight and after-drain requests', a
   t.after(() => connection.close())
 
   // Create a mock server that never responds
-  const { promise: receivePromise, resolve } = promiseWithResolvers()
+  const { promise: receivePromise, resolve } = Promise.withResolvers()
   server.on('connection', socket => {
     socket.once('data', resolve)
   })
@@ -1274,7 +1273,7 @@ test('Connection.connect should handle authentication errors', async t => {
 test('Connection.connect should connect to a TLS host without forwarding the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = promiseWithResolvers()
+  const hostPromise = Promise.withResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1298,7 +1297,7 @@ test('Connection.connect should connect to a TLS host without forwarding the ser
 test('Connection.connect should connect to a TLS host without forwarding the host as the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = promiseWithResolvers()
+  const hostPromise = Promise.withResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1323,7 +1322,7 @@ test('Connection.connect should connect to a TLS host without forwarding the hos
 test('Connection.connect should connect to a TLS host without using a custom host as the servername', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = promiseWithResolvers()
+  const hostPromise = Promise.withResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1348,7 +1347,7 @@ test('Connection.connect should connect to a TLS host without using a custom hos
 test('Connection.connect should support ssl as an alias for tls', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = promiseWithResolvers()
+  const hostPromise = Promise.withResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })
@@ -1373,7 +1372,7 @@ test('Connection.connect should support ssl as an alias for tls', async t => {
 test('Connection.connect should prefer tls over ssl when both are provided', async t => {
   const { server, port } = await createTLSServer(t)
 
-  const hostPromise = promiseWithResolvers()
+  const hostPromise = Promise.withResolvers()
   server.on('secureConnection', socket => {
     hostPromise.resolve(socket.servername)
   })

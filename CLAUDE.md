@@ -41,4 +41,4 @@ backpressure handling. Use the `.memory-test.ts` suffix for new memory tests.
 
 ## Node Requirements
 
-- Node.js >= 20.19.4 or >= 22.18.0 or >= 24.6.0
+- Node.js >= 22.22.0 or >= 24.6.0

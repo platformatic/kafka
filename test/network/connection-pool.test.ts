@@ -9,8 +9,7 @@ import {
   type ConnectionPoolDiagnosticEvent,
   connectionsPoolGetsChannel,
   ConnectionStatuses,
-  instancesChannel,
-  promiseWithResolvers
+  instancesChannel
 } from '../../src/index.ts'
 import {
   createCreationChannelVerifier,
@@ -22,7 +21,7 @@ import {
 
 function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
-  const { promise, resolve, reject } = promiseWithResolvers<{ server: Server; port: number }>()
+  const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
 
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))

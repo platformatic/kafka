@@ -353,8 +353,7 @@ Many of the methods accept the same options as the client's constructors. The co
 
 Node.js LTS versions:
 
-- `20.19.4` or above
-- `22.18.0` or above
+- `22.22.0` or above
 - `24.6.0` or above
 
 ## Testing

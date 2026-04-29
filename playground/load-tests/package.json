@@ -21,6 +21,6 @@
     "load:backpressure:heavy": "node ./run-backpressure-stall.ts --topics 15 --messages-per-topic 5000 --handler-delay 10 --timeout 120"
   },
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.22.0"
   }
 }

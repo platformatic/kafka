@@ -153,6 +153,7 @@ test('constructor should initialize properly with default options', t => {
   strictEqual(consumer.memberId, null)
   deepStrictEqual(consumer.assignments, null)
   strictEqual(consumer.topics instanceof TopicsMap, true)
+  strictEqual(defaultConsumerOptions.maxBytes, 1_048_576 * 50)
 })
 
 test('constructor should initialize with custom options', t => {

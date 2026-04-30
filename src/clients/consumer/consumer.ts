@@ -1034,7 +1034,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #listCommittedOffsets (options: ListCommitsOptions, callback: CallbackWithPromise<Offsets>): void {
+  #listCommittedOffsets (
+    options: ListCommitsOptions,
+    callback: CallbackWithPromise<Offsets>,
+    staleMemberEpochRetries = 0
+  ): void {
     const topics: OffsetFetchRequestTopic[] = []
 
     for (const { topic: name, partitions } of options.topics) {
@@ -1067,6 +1071,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, response) => {
         if (error) {
+          if (
+            this.#useConsumerGroupProtocol &&
+            staleMemberEpochRetries < (this[kOptions].retries as number) &&
+            (error as GenericError).findBy?.('apiId', 'STALE_MEMBER_EPOCH')
+          ) {
+            this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, heartbeatError => {
+              if (heartbeatError) {
+                callback(this.#handleMetadataError(heartbeatError))
+                return
+              }
+
+              this.#listCommittedOffsets(options, callback, staleMemberEpochRetries + 1)
+            })
+            return
+          }
+
           callback(this.#handleMetadataError(error))
           return
         }

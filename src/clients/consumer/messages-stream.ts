@@ -588,7 +588,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               {
                 partition,
                 fetchOffset,
-                partitionMaxBytes: this.#options.maxBytes!,
+                partitionMaxBytes: this.#options.maxBytesPerPartition!,
                 currentLeaderEpoch: leaderEpoch,
                 lastFetchedEpoch: leaderEpoch
               }

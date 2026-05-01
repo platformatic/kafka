@@ -7,7 +7,7 @@ const connection = new Connection('123')
 await connection.connect('localhost', 9092)
 
 await performAPICallWithRetry('AlterPartitionReassignments', () =>
-  alterPartitionReassignmentsV0.async(connection, 1000, [
+  alterPartitionReassignmentsV0.async(connection, 1000, false, [
     {
       name: 'temp',
       partitions: [

@@ -69,7 +69,7 @@ if (performUnregisterBroker) {
 
 await performAPICallWithRetry('DescribeTransactions', () => describeTransactionsV0.async(connection, ['11']))
 
-await performAPICallWithRetry('ListTransactions', () => listTransactionsV0.async(connection, ['EMPTY'], [], -1n))
+await performAPICallWithRetry('ListTransactions', () => listTransactionsV0.async(connection, ['EMPTY'], [], -1n, null))
 
 if (performConsumerGroupDescribe) {
   await performAPICallWithRetry('ConsumerGroupDescribe', () => consumerGroupDescribeV0.async(connection, ['g2'], true))

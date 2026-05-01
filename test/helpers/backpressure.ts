@@ -34,7 +34,6 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
   private readonly timeout: number
 
   private messages: TMessage[]
-  private pendingBatches: TMessage[][]
   private existingTimeout: NodeJS.Timeout | undefined
 
   private pendingCallback: CallbackFunction | undefined
@@ -45,7 +44,6 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
     this.batchSize = options.batchSize
     this.timeout = options.timeoutMilliseconds
     this.messages = []
-    this.pendingBatches = []
   }
 
   override _read (): void {
@@ -89,7 +87,6 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
     this.existingTimeout = undefined
     // Remaining messages are not committed, next consumer will process them
     this.messages = []
-    this.pendingBatches = []
     this.push(null)
     callback()
   }

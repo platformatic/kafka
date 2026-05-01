@@ -26,7 +26,7 @@ await performAPICallWithRetry('Heartbeat', () =>
 
 if (performConsumerHeartbeat) {
   await performAPICallWithRetry('ConsumerHeartbeat', () =>
-    consumerGroupHeartbeatV0.async(connection, groupId, memberId, 0, null, null, 60000, [topicName], null, []))
+    consumerGroupHeartbeatV0.async(connection, groupId, memberId, 0, null, null, 60000, [topicName], null, null, []))
 }
 
 await performAPICallWithRetry('SyncGroup', () =>

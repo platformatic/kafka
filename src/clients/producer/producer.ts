@@ -1367,7 +1367,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (typeof message.partition !== 'number') {
       if (partitioner) {
-        partition = partitioner(message, key)
+        partition = partitioner(message, key, { metadata: this.currentMetadata })
       } else if (key) {
         partition = defaultPartitioner(message, key)
       } else {

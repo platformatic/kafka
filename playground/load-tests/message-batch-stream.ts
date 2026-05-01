@@ -27,14 +27,12 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
 
   private messages: TMessage[]
   private existingTimeout: NodeJS.Timeout | undefined
-  private pendingBatches: TMessage[][]
 
   constructor (options: MessageBatchOptions) {
     super({ objectMode: true, readableHighWaterMark: options.readableHighWaterMark })
     this.batchSize = options.batchSize
     this.timeout = options.timeoutMilliseconds
     this.messages = []
-    this.pendingBatches = []
   }
 
   private pendingCallback: CallbackFunction | undefined
@@ -81,7 +79,6 @@ export class MessageBatchStream<TMessage extends MessageWithTopicAndPartition> e
     this.existingTimeout = undefined
     // Remaining messages are not committed, next consumer will process them
     this.messages = []
-    this.pendingBatches = []
     this.push(null)
     callback()
   }

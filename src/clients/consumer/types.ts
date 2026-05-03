@@ -79,6 +79,7 @@ export interface GroupOptions {
   heartbeatInterval?: number
   protocols?: GroupProtocolSubscription[]
   partitionAssigner?: GroupPartitionsAssigner
+  assignmentUserData?: Buffer
 }
 
 export interface ConsumerGroupOptions {
@@ -86,6 +87,7 @@ export interface ConsumerGroupOptions {
   groupInstanceId?: string
   groupRemoteAssignor?: string
   rebalanceTimeout?: number
+  assignmentUserData?: Buffer
 }
 
 export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {

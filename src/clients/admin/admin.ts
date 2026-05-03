@@ -1332,7 +1332,7 @@ export class Admin extends Base<AdminOptions> {
                       false
                     )
 
-                    reader.readBytes() // Ignore the user data
+                    // Ignore the user data
                   }
 
                   group.members.set(member.memberId, {

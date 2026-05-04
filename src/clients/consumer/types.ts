@@ -92,6 +92,7 @@ export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   autocommit?: boolean | number
   minBytes?: number
   maxBytes?: number
+  maxBytesPerPartition?: number
   maxWaitTime?: number
   isolationLevel?: number
   deserializers?: Partial<Deserializers<Key, Value, HeaderKey, HeaderValue>>

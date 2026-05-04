@@ -61,6 +61,7 @@ export const consumeOptionsProperties = {
   autocommit: { oneOf: [{ type: 'boolean' }, { type: 'number', minimum: 100 }] },
   minBytes: { type: 'number', minimum: 0 },
   maxBytes: { type: 'number', minimum: 0 },
+  maxBytesPerPartition: { type: 'number', minimum: 0 },
   maxWaitTime: { type: 'number', minimum: 0 },
   isolationLevel: { type: 'number', enum: allowedFetchIsolationLevels },
   deserializers: serdeProperties,

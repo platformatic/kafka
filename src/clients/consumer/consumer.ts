@@ -353,6 +353,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     options.autocommit ??= this[kOptions].autocommit! ?? true
     options.maxBytes ??= this[kOptions].maxBytes!
+    options.maxBytesPerPartition ??= this[kOptions].maxBytesPerPartition ?? options.maxBytes
     options.highWaterMark ??= this[kOptions].highWaterMark!
     options.registry ??= this[kOptions].registry
     options.beforeDeserialization ??= this[kOptions].beforeDeserialization

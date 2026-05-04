@@ -166,6 +166,7 @@ test('constructor should initialize with custom options', t => {
     protocols: [{ name: 'customprotocol', version: 2 }],
     minBytes: 100,
     maxBytes: 5242880, // 5MB
+    maxBytesPerPartition: 1048576, // 1MB
     maxWaitTime: 3000,
     isolationLevel: FetchIsolationLevels.READ_UNCOMMITTED,
     highWaterMark: 512
@@ -693,7 +694,8 @@ test('consume should return a MessagesStream instance and support diagnostic cha
           autocommit: true,
           deserializers: {},
           highWaterMark: defaultConsumerOptions.highWaterMark,
-          maxBytes: defaultConsumerOptions.maxBytes
+          maxBytes: defaultConsumerOptions.maxBytes,
+          maxBytesPerPartition: defaultConsumerOptions.maxBytes
         },
         operationId: mockedOperationId
       })
@@ -825,6 +827,19 @@ test('consume should validate the supplied options', async t => {
     } catch (error) {
       strictEqual(error instanceof UserError, true)
       strictEqual(error.message.includes('maxBytes'), true)
+    }
+
+    // Test with invalid maxBytesPerPartition type
+    try {
+      await consumer.consume({
+        topics: [],
+        // @ts-expect-error - Intentionally passing invalid option
+        maxBytesPerPartition: 'not-a-number'
+      })
+      throw new Error('Expected error not thrown')
+    } catch (error) {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message.includes('maxBytesPerPartition'), true)
     }
 
     try {
@@ -1018,6 +1033,54 @@ test('consumer should properly consume messages with maxBytes limit', async t =>
     mode: 'earliest',
     maxWaitTime: 1000,
     maxBytes: 1024 // magic number that will make the stream receive messages in more "onData" calls
+  })
+
+  let receivedMessages = 0
+
+  for await (const message of stream) {
+    strictEqual(JSON.parse(message.value.toString()).id, receivedMessages)
+    if (++receivedMessages === publishMessages) {
+      break
+    }
+  }
+
+  strictEqual(receivedMessages, publishMessages)
+})
+
+test('consumer should properly consume messages with maxBytesPerPartition limit', async t => {
+  const topic = await createTopic(t, true)
+  const producer = await createProducer(t)
+
+  const publishMessages = 100
+  const batchSize = 10
+
+  const batch: MessageToProduce[] = []
+  for (let i = 0; i < publishMessages; i++) {
+    const message = JSON.stringify({ id: i })
+
+    batch.push({
+      key: Buffer.from('customer_id'),
+      value: Buffer.from(message),
+      topic
+    })
+
+    if (batch.length >= batchSize) {
+      await producer.send({ messages: batch })
+      batch.length = 0
+    }
+  }
+  if (batch.length > 0) {
+    await producer.send({ messages: batch })
+  }
+
+  const consumer = createConsumer(t, {})
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    autocommit: true,
+    mode: 'earliest',
+    maxWaitTime: 1000,
+    maxBytesPerPartition: 1024 // magic number that will make the stream receive messages in more "onData" calls
   })
 
   let receivedMessages = 0

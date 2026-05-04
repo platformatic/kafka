@@ -3,7 +3,7 @@ import RDKafka from '@platformatic/rdkafka'
 import { printResults, Tracker, type Result } from 'cronometro'
 import { Kafka as KafkaJS } from 'kafkajs'
 import { once } from 'node:events'
-import { ProduceAcks, Producer, promiseWithResolvers, stringSerializers } from '../src/index.ts'
+import { ProduceAcks, Producer, stringSerializers } from '../src/index.ts'
 import { brokers, topic } from './utils/definitions.ts'
 
 const batchSize = 100
@@ -11,7 +11,7 @@ const iterations = batchSize * 1000
 const batches = Math.ceil(iterations / batchSize)
 
 async function rdkafka (): Promise<Result> {
-  const { promise, resolve, reject } = promiseWithResolvers<Result>()
+  const { promise, resolve, reject } = Promise.withResolvers<Result>()
   const tracker = new Tracker()
 
   const producer = new RDKafka.Producer(
@@ -62,7 +62,7 @@ async function rdkafka (): Promise<Result> {
 
       producer.produce(topic, 0, Buffer.from('222'), key, 0, null, [{ a: '123', b: '456' }])
 
-      const { promise, resolve } = promiseWithResolvers<void>()
+      const { promise, resolve } = Promise.withResolvers<void>()
 
       pendingDeliveryReports[key] = resolve
       promises.push(promise)
@@ -81,7 +81,7 @@ async function rdkafka (): Promise<Result> {
 }
 
 async function confluentRdKafka (): Promise<Result> {
-  const { promise, resolve, reject } = promiseWithResolvers<Result>()
+  const { promise, resolve, reject } = Promise.withResolvers<Result>()
   const tracker = new Tracker()
 
   const producer = new ConfluentRDKafka.Producer(
@@ -131,7 +131,7 @@ async function confluentRdKafka (): Promise<Result> {
 
       producer.produce(topic, 0, Buffer.from('222'), key, 0, null, [{ a: '123', b: '456' }])
 
-      const { promise, resolve } = promiseWithResolvers<void>()
+      const { promise, resolve } = Promise.withResolvers<void>()
 
       pendingDeliveryReports[key] = resolve
       promises.push(promise)

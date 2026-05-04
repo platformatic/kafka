@@ -14,8 +14,8 @@ import {
   notifyCreation,
   type DiagnosticContext
 } from '../../diagnostic.ts'
-import { UserError } from '../../errors.ts'
 import type { GenericError } from '../../errors.ts'
+import { UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
@@ -263,12 +263,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
   /* c8 ignore next 3 - Simple getter */
   get offsetsCommitted (): Map<string, bigint> {
-    return this.#offsetsCommitted
-  }
-
-  // TODO: This is deprecated alias, remove in future major version
-  /* c8 ignore next 3 - Simple getter */
-  get committedOffsets (): Map<string, bigint> {
     return this.#offsetsCommitted
   }
 

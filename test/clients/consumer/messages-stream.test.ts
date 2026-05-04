@@ -27,7 +27,6 @@ import {
   ProduceAcks,
   Producer,
   type ProducerOptions,
-  promiseWithResolvers,
   type Serializers,
   sleep,
   type StreamOptions,
@@ -158,7 +157,7 @@ async function consumeMessages<K = string, V = string, HK = string, HV = string>
   })
 
   const messages: Message<K, V, HK, HV>[] = []
-  const { promise, resolve, reject } = promiseWithResolvers<void>()
+  const { promise, resolve, reject } = Promise.withResolvers<void>()
 
   function onData (message: Message<K, V, HK, HV>) {
     messages.push(message)
@@ -474,7 +473,7 @@ test('should consume messages with LATEST mode', async t => {
   // Verify no messages are returned initially
   strictEqual(messages.length, 0, 'Should consume 0 messages')
 
-  const { promise, resolve } = promiseWithResolvers<void>()
+  const { promise, resolve } = Promise.withResolvers<void>()
   function onData (message: Message<string, string, string, string>) {
     messages.push(message)
 
@@ -625,7 +624,7 @@ test('should consume messages from committed transaction, filtering out control 
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)
   let i = 0
-  const { promise, resolve } = promiseWithResolvers<void>()
+  const { promise, resolve } = Promise.withResolvers<void>()
 
   // Create a consumer
   const producer = createProducer(t, {
@@ -758,7 +757,7 @@ test('should support consume-transform-produce patterns', async t => {
   await consumer.close(true)
 
   // Now consume again to verify all messages were committed
-  const { promise, resolve } = promiseWithResolvers<string>()
+  const { promise, resolve } = Promise.withResolvers<string>()
   const consumer2 = createConsumer(t, groupId, { autocommit: false })
   const stream2 = await consumer2.consume({
     topics: [topic],
@@ -1463,9 +1462,9 @@ test('should report correct isConnected status', async t => {
 })
 
 test('should automatically reconnect and resume operations when retries=true', async t => {
-  const disconnectPromise = promiseWithResolvers<void>()
-  const endPromise = promiseWithResolvers<void>()
-  const reconnectionPromise = promiseWithResolvers<void>()
+  const disconnectPromise = Promise.withResolvers<void>()
+  const endPromise = Promise.withResolvers<void>()
+  const reconnectionPromise = Promise.withResolvers<void>()
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true, 1, kafkaSingleBootstrapServers)
 

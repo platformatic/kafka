@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok } from 'assert'
 import { test } from 'node:test'
-import { GenericError, MultipleErrors } from '../../src/errors.ts'
 import { runConcurrentCallbacks } from '../../src/apis/callbacks.ts'
+import { GenericError, MultipleErrors } from '../../src/errors.ts'
 
 test('runConcurrentCallbacks - all operations succeed', (_, done) => {
   const collection = ['a', 'b', 'c']
@@ -29,7 +29,7 @@ test('runConcurrentCallbacks - all operations fail', (_, done) => {
     (item, cb) => {
       cb(new GenericError('PLT_KFK_USER', `failed: ${item}`))
     },
-    (error, results) => {
+    error => {
       ok(error)
       ok(MultipleErrors.isMultipleErrors(error))
       const multi = error as MultipleErrors
@@ -69,8 +69,8 @@ test('runConcurrentCallbacks - partial failures should not contain undefined in 
       }
 
       // Successful results should still be available
-      deepStrictEqual(results[0], 'A')
-      deepStrictEqual(results[2], 'C')
+      deepStrictEqual(results![0], 'A')
+      deepStrictEqual(results![2], 'C')
       done()
     }
   )

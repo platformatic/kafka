@@ -1,7 +1,7 @@
 import { type CompressionAlgorithmValue } from '../../protocol/compression.ts'
 import { type MessageToProduce } from '../../protocol/records.ts'
 import { type SchemaRegistry } from '../../registries/abstract.ts'
-import { type BaseOptions, type TopicWithPartitionAndOffset } from '../base/types.ts'
+import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type BeforeSerializationHook, type Serializers } from '../serde.ts'
 
 export interface ProducerInfo {
@@ -17,9 +17,14 @@ export interface ProduceResult {
   unwritableNodes?: number[]
 }
 
+export interface PartitionerContext {
+  metadata: ClusterMetadata | undefined
+}
+
 export type Partitioner<Key, Value, HeaderKey, HeaderValue> = (
   message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
-  key?: Buffer | undefined
+  key: Buffer | undefined,
+  context: PartitionerContext
 ) => number
 
 export interface ProducerStreamReport {

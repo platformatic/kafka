@@ -45,6 +45,8 @@ Creates a new base client.
 
 The readonly `context` getter exposes the same opaque value on the client instance.
 
+The readonly `currentMetadata` getter exposes the currently cached [`ClusterMetadata`](./other.md#clustermetadata), or `undefined` if metadata has not been loaded yet. It does not fetch or refresh metadata.
+
 ## Methods
 
 ### `connectToBrokers([nodeIds][, callback])`

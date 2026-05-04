@@ -157,6 +157,10 @@ export class Base<
     return this[kContext]
   }
 
+  get currentMetadata (): ClusterMetadata | undefined {
+    return this.#metadata
+  }
+
   get connections (): ConnectionPool {
     return this[kConnections]
   }

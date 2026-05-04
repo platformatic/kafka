@@ -261,7 +261,7 @@ export const defaultConsumerOptions = {
   heartbeatInterval: 3000,
   protocols: [{ name: 'roundrobin', version: 1 }],
   minBytes: 1,
-  maxBytes: 1_048_576 * 10, // 10 MB
+  maxBytes: 1_048_576 * 50, // 50 MB
   maxWaitTime: 5_000,
   isolationLevel: FetchIsolationLevels.READ_COMMITTED,
   highWaterMark: 1024

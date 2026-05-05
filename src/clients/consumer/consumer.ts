@@ -1952,7 +1952,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     https://github.com/apache/kafka/blob/trunk/clients/src/main/resources/common/message/ConsumerProtocolAssignment.json
   */
   #encodeProtocolAssignment (assignments: GroupAssignment[]): Buffer {
-    return Writer.create()
+    const userData = this[kOptions].assignmentUserData
+    const writer = Writer.create()
       .appendInt16(0) // Version information
       .appendArray(
         assignments,
@@ -1962,7 +1963,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         false,
         false
       )
-      .appendInt32(0).buffer // No user data
+
+    if (userData) {
+      writer.append(userData)
+    }
+
+    return writer.buffer
   }
 
   #decodeProtocolAssignment (buffer: Buffer): GroupAssignment[] {

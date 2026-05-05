@@ -1714,6 +1714,32 @@ test('describeGroups should handle includeAuthorizedOperations option', async t 
   strictEqual(typeof group2.authorizedOperations, 'number')
 })
 
+test('describeGroups should handle memberAssignment with single user data byte with high bit set', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const testTopic = `test-topic-${randomUUID()}`
+  const admin = createAdmin(t)
+  const assignmentUserData = Buffer.from([0x80])
+
+  await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
+
+  const consumer = new Consumer({
+    clientId: `test-client-${randomUUID()}`,
+    groupId,
+    bootstrapBrokers: kafkaBootstrapServers,
+    assignmentUserData
+  })
+  t.after(() => consumer.close())
+
+  await consumer.topics.trackAll(testTopic)
+  await consumer.joinGroup()
+
+  const groups = await admin.describeGroups({ groups: [groupId] })
+  const group = groups.get(groupId)!
+
+  strictEqual(group.state, 'STABLE')
+  strictEqual(group.members.size, 1)
+})
+
 test('describeGroups should validate options in strict mode', async t => {
   const admin = createAdmin(t, { strict: true })
 

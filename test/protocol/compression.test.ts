@@ -54,6 +54,16 @@ test('snappy compression works correctly', () => {
   strictEqual(decompressed.toString(), 'test data for compression')
 })
 
+test('snappy decompresses xerial/snappy-java streams', () => {
+  const compressed = Buffer.from(
+    '82534e415050590000000001000000010000000d0b2868656c6c6f20776f726c64',
+    'hex'
+  )
+
+  const decompressed = compressionsAlgorithms.snappy.decompressSync(compressed)
+  strictEqual(decompressed.toString(), 'hello world')
+})
+
 test('lz4 compression works correctly', () => {
   const input = Buffer.from('test data for compression')
   const validCompressed = '04224d186040821900008074657374206461746120666f7220636f6d7072657373696f6e00000000'

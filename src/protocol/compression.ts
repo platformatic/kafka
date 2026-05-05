@@ -35,9 +35,38 @@ function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
 }
 
 const snappyCompressSync: CompressionOperation = snappyCompress
-const snappyDecompressSync: CompressionOperation = snappyDecompress
 const lz4CompressFrameSync: CompressionOperation = lz4Compress
 const lz4DecompressFrameSync: CompressionOperation = lz4Decompress
+const xerialSnappyHeader = Buffer.from([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00])
+
+function snappyDecompressSync (data: Buffer): Buffer {
+  if (!data.subarray(0, xerialSnappyHeader.length).equals(xerialSnappyHeader)) {
+    return snappyDecompress(data)
+  }
+
+  const decompressed = new DynamicBuffer()
+  let offset = 16
+
+  while (offset < data.length) {
+    /* c8 ignore next 3 - Hard to test */
+    if (offset + 4 > data.length) {
+      throw new Error('Invalid xerial snappy chunk length')
+    }
+
+    const chunkLength = data.readUInt32BE(offset)
+    offset += 4
+
+    /* c8 ignore next 3 - Hard to test */
+    if (offset + chunkLength > data.length) {
+      throw new Error('Invalid xerial snappy chunk data')
+    }
+
+    decompressed.append(snappyDecompress(data.subarray(offset, offset + chunkLength)))
+    offset += chunkLength
+  }
+
+  return decompressed.buffer
+}
 
 export const compressionsAlgorithms = {
   /* c8 ignore next 8 - 'none' is actually never used but this is to please Typescript */

@@ -5,8 +5,9 @@ import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import zlib from 'node:zlib'
 import * as Prometheus from 'prom-client'
+import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import { kConnections, kCreateConnectionPool, kOptions } from '../../../src/clients/base/base.ts'
+import { kConnections, kCreateConnectionPool, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
   type ClientDiagnosticEvent,
@@ -18,6 +19,7 @@ import {
   consumerConsumesChannel,
   consumerFetchesChannel,
   consumerGroupChannel,
+  consumerGroupHeartbeatV1,
   consumerHeartbeatChannel,
   consumerLagChannel,
   consumerOffsetsChannel,
@@ -2348,6 +2350,117 @@ test('listCommittedOffsets should handle errors from the API', async t => {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes(mockedErrorMessage), true)
   }
+})
+
+test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EPOCH with consumer group protocol', async t => {
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2 })
+  const topic = 'test-topic'
+  const groupId = consumer.groupId
+  const connection = { instanceId: 1, send () {} }
+  const broker = { nodeId: 1, host: 'localhost', port: 9092, rack: null }
+  let offsetFetchCalls = 0
+  let heartbeatCalls = 0
+
+  consumer.memberId = 'test-member'
+
+  mockConnectionPoolGet(
+    consumer[kConnections],
+    () => true,
+    null,
+    null,
+    (_original, _broker: any, callback: CallbackWithPromise<any>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options: any, callback: CallbackWithPromise<any>) => {
+      callback(null, { brokers: new Map([[1, broker]]), topics: new Map() })
+      return true
+    }
+  )
+
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, name: string, callback: CallbackWithPromise<any>) => {
+      if (name === 'FindCoordinator') {
+        callback(null, function (_connection: any, _keyType: any, _keys: any, apiCallback: CallbackWithPromise<any>) {
+          apiCallback(null, { coordinators: [{ key: groupId, nodeId: 1 }] })
+        })
+        return true
+      }
+
+      if (name === 'OffsetFetch') {
+        callback(null, offsetFetchV9.api)
+        return true
+      }
+
+      if (name === 'ConsumerGroupHeartbeat') {
+        callback(null, consumerGroupHeartbeatV1.api)
+        return true
+      }
+
+      callback(new Error(`Unexpected API ${name}`), undefined)
+      return true
+    }
+  )
+
+  mockAPI(
+    consumer[kConnections],
+    apiKey => apiKey === offsetFetchV9.api.key || apiKey === consumerGroupHeartbeatV1.api.key,
+    null,
+    null,
+    (_original, apiKey, _apiVersion, _payload, _responseParser, _requestTags, _responseTags, callback) => {
+      if (apiKey === consumerGroupHeartbeatV1.api.key) {
+        heartbeatCalls++
+        callback(null, { memberId: 'test-member', memberEpoch: 2, heartbeatIntervalMs: 0 })
+        return true
+      }
+
+      if (apiKey === offsetFetchV9.api.key) {
+        offsetFetchCalls++
+
+        if (offsetFetchCalls === 1) {
+          callback(new ProtocolError('STALE_MEMBER_EPOCH'), undefined)
+          return true
+        }
+
+        callback(null, {
+          groups: [
+            {
+              topics: [
+                {
+                  name: topic,
+                  partitions: [
+                    { partitionIndex: 0, committedOffset: 90n },
+                    { partitionIndex: 1, committedOffset: 91n }
+                  ]
+                }
+              ]
+            }
+          ]
+        })
+        return true
+      }
+
+      return false
+    }
+  )
+
+  const committed = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0, 1] }] })
+
+  deepStrictEqual(committed.get(topic), [90n, 91n])
+  strictEqual(offsetFetchCalls, 2)
+  strictEqual(heartbeatCalls, 1)
 })
 
 test('listCommittedOffsets should handle unavailable API errors', async t => {

@@ -22,7 +22,8 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetApi, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { type Connection } from '../../../src/network/connection.ts'
 import { Reader } from '../../../src/protocol/reader.ts'
 import {
   AclOperations,
@@ -43,7 +44,6 @@ import {
   type ClientDiagnosticEvent,
   ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
-  type Connection,
   Consumer,
   createAclsV3,
   createPartitionsV3,
@@ -1748,12 +1748,6 @@ test('describeGroups memberAssignment should include user data field when no ass
 
   await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
 
-  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
-    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
-  })
-  const coordResponse = await findCoordinatorV6.api.async(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId])
-  const { host, port } = coordResponse.coordinators[0]
-
   const consumer = new Consumer({
     clientId: `test-client-${randomUUID()}`,
     groupId,
@@ -1764,11 +1758,24 @@ test('describeGroups memberAssignment should include user data field when no ass
   await consumer.topics.trackAll(testTopic)
   await consumer.joinGroup()
 
-  // Warm up the coordinator connection and assert stable state before the raw read.
   const groups = await admin.describeGroups({ groups: [groupId] })
   strictEqual(groups.get(groupId)!.state, 'STABLE')
   strictEqual(groups.get(groupId)!.members.size, 1)
 
+  // Use kGetApi so FindCoordinator uses the broker-negotiated version.
+  // Hardcoded v6 causes Confluent Kafka 7.x to close the connection (version mismatch).
+  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
+    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+  const coordResponse = await new Promise<{ coordinators: Array<{ host: string, port: number }> }>((resolve, reject) => {
+    admin[kGetApi]('FindCoordinator', (error: Error | null, api: any) => {
+      if (error) { reject(error); return }
+      api(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId], (err: Error | null, res: any) => {
+        err ? reject(err) : resolve(res)
+      })
+    })
+  })
+  const { host, port } = coordResponse.coordinators[0]
   const coordinatorConn = await new Promise<Connection>((resolve, reject) => {
     admin[kConnections].get({ host, port }, (error, conn) => (error ? reject(error) : resolve(conn!)))
   })

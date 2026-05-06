@@ -22,7 +22,7 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetBootstrapConnection, kGetConnection } from '../../../src/clients/base/base.ts'
 import { Reader } from '../../../src/protocol/reader.ts'
 import {
   AclOperations,
@@ -1758,11 +1758,18 @@ test('describeGroups memberAssignment should include user data field when no ass
   await consumer.topics.trackAll(testTopic)
   await consumer.joinGroup()
 
-  const connection = await new Promise<Connection>((resolve, reject) => {
+  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
     admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
   })
 
-  const rawResponse = await describeGroupsV5.api.async(connection, [groupId], false)
+  // Route to the group coordinator so DescribeGroups returns members
+  const coordResponse = await findCoordinatorV6.api.async(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId])
+  const { host, port } = coordResponse.coordinators[0]
+  const coordinatorConn = await new Promise<Connection>((resolve, reject) => {
+    admin[kGetConnection]({ host, port }, (error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+
+  const rawResponse = await describeGroupsV5.api.async(coordinatorConn, [groupId], false)
   const rawMember = rawResponse.groups[0].members[0]
 
   // Parse the raw memberAssignment bytes following Java ConsumerProtocolAssignment format:

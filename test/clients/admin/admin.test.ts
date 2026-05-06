@@ -1748,6 +1748,12 @@ test('describeGroups memberAssignment should include user data field when no ass
 
   await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
 
+  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
+    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+  const coordResponse = await findCoordinatorV6.api.async(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId])
+  const { host, port } = coordResponse.coordinators[0]
+
   const consumer = new Consumer({
     clientId: `test-client-${randomUUID()}`,
     groupId,
@@ -1758,23 +1764,17 @@ test('describeGroups memberAssignment should include user data field when no ass
   await consumer.topics.trackAll(testTopic)
   await consumer.joinGroup()
 
+  // Warm up the coordinator connection and assert stable state before the raw read.
   const groups = await admin.describeGroups({ groups: [groupId] })
   strictEqual(groups.get(groupId)!.state, 'STABLE')
   strictEqual(groups.get(groupId)!.members.size, 1)
 
-  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
-    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
-  })
-
-  // Route to the group coordinator so DescribeGroups returns members
-  const coordResponse = await findCoordinatorV6.api.async(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId])
-  const { host, port } = coordResponse.coordinators[0]
   const coordinatorConn = await new Promise<Connection>((resolve, reject) => {
     admin[kConnections].get({ host, port }, (error, conn) => (error ? reject(error) : resolve(conn!)))
   })
-
   const rawResponse = await describeGroupsV5.api.async(coordinatorConn, [groupId], false)
-  const rawMember = rawResponse.groups[0].members[0]
+  const rawMember = rawResponse.groups[0]?.members[0]
+  ok(rawMember, 'expected group member to be present')
 
   // Parse the raw memberAssignment bytes following Java ConsumerProtocolAssignment format:
   // int16 version | int32-prefixed topics array | int32 user data length

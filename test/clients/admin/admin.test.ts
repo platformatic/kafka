@@ -22,7 +22,7 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections, kGetBootstrapConnection, kGetConnection } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
 import { Reader } from '../../../src/protocol/reader.ts'
 import {
   AclOperations,

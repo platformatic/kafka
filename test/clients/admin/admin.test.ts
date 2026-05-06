@@ -22,7 +22,8 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { Reader } from '../../../src/protocol/reader.ts'
 import {
   AclOperations,
   AclPermissionTypes,
@@ -1738,6 +1739,45 @@ test('describeGroups should handle memberAssignment with single user data byte w
 
   strictEqual(group.state, 'STABLE')
   strictEqual(group.members.size, 1)
+})
+
+test('describeGroups memberAssignment should include user data field when no assignmentUserData configured', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const testTopic = `test-topic-${randomUUID()}`
+  const admin = createAdmin(t)
+
+  await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
+
+  const consumer = new Consumer({
+    clientId: `test-client-${randomUUID()}`,
+    groupId,
+    bootstrapBrokers: kafkaBootstrapServers
+  })
+  t.after(() => consumer.close())
+
+  await consumer.topics.trackAll(testTopic)
+  await consumer.joinGroup()
+
+  const connection = await new Promise<Connection>((resolve, reject) => {
+    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+
+  const rawResponse = await describeGroupsV5.api.async(connection, [groupId], false)
+  const rawMember = rawResponse.groups[0].members[0]
+
+  // Parse the raw memberAssignment bytes following Java ConsumerProtocolAssignment format:
+  // int16 version | int32-prefixed topics array | int32 user data length
+  const reader = Reader.from(rawMember.memberAssignment)
+  reader.readInt16() // version
+  reader.readArray(r => {
+    r.readString(false) // topic name
+    r.readArray(r => r.readInt32(), false, false) // partitions
+  }, false, false)
+
+  // Without the fix, readInt32() here throws BufferUnderflowException in Java
+  // because the user data length field is missing entirely
+  const userDataLength = reader.readInt32()
+  strictEqual(userDataLength, -1) // null bytes = int32(-1)
 })
 
 test('describeGroups should validate options in strict mode', async t => {

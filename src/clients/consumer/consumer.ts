@@ -1964,9 +1964,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         false
       )
 
-    if (userData) {
-      writer.append(userData)
-    }
+    writer.appendBytes(userData ?? null, false)
 
     return writer.buffer
   }

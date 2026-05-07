@@ -27,6 +27,7 @@ import {
   ProduceAcks,
   Producer,
   type ProducerOptions,
+  ResponseError,
   type Serializers,
   sleep,
   type StreamOptions,
@@ -1201,6 +1202,77 @@ test('should handle errors from Consumer.fetch', async t => {
 
   strictEqual(dataOrError instanceof MultipleErrors, true)
   strictEqual((dataOrError as Error).message.includes(mockedErrorMessage), true)
+})
+
+test('should apply fallback mode after offset out of range fetch errors', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const consumer = createConsumer(t, groupId, { deserializers: stringDeserializers })
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup()
+
+  const recoveredOffsets: bigint[] = []
+  let calls = 0
+
+  mockMethod(
+    consumer,
+    'fetch',
+    () => true,
+    null,
+    undefined,
+    (original, options: any, callback: CallbackWithPromise<any>) => {
+      calls++
+
+      if (calls !== 1) {
+        recoveredOffsets.push(options.topics[0].partitions[0].fetchOffset)
+        original(options, callback)
+        return true
+      }
+
+      const topicId = options.topics[0].topicId
+      const partition = options.topics[0].partitions[0].partition
+      const response = {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: [
+          {
+            topicId,
+            partitions: [
+              {
+                partitionIndex: partition,
+                errorCode: 1,
+                highWatermark: 3n,
+                lastStableOffset: 3n,
+                logStartOffset: 0n,
+                abortedTransactions: [],
+                preferredReadReplica: -1
+              }
+            ]
+          }
+        ]
+      }
+
+      callback(new ResponseError(1, 17, { '/responses/0/partitions/0': [1, null] }, response), undefined)
+      return true
+    }
+  )
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.COMMITTED,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 1000
+  })
+
+  const [message] = await once(stream, 'data')
+
+  strictEqual(message.key, 'key-0')
+  deepStrictEqual(recoveredOffsets, [0n])
+  await stream.close()
 })
 
 test('should handle errors from Consumer.commit', async t => {

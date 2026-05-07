@@ -15,7 +15,7 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
-import { UserError } from '../../errors.ts'
+import { protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
@@ -611,6 +611,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 return
               }
 
+              if (
+                this.#fallbackMode !== MessagesStreamFallbackModes.FAIL &&
+                this.#handleOffsetOutOfRange(error as GenericError, topicIds)
+              ) {
+                process.nextTick(() => {
+                  this.#fetch()
+                })
+                return
+              }
+
               this.destroy(error)
               return
             }
@@ -630,6 +640,54 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         )
       }
     })
+  }
+
+  #handleOffsetOutOfRange (error: GenericError, topicIds: Map<string, string>): boolean {
+    if (!error.findBy?.('apiId', 'OFFSET_OUT_OF_RANGE')) {
+      return false
+    }
+
+    const response = error.response as FetchResponse | undefined
+    if (!response || response.errorCode !== 0) {
+      return false
+    }
+
+    const recoveredOffsets: [string, bigint][] = []
+
+    for (const topicResponse of response.responses) {
+      const topic = topicIds.get(topicResponse.topicId)
+      if (!topic) {
+        return false
+      }
+
+      for (const partitionResponse of topicResponse.partitions) {
+        if (partitionResponse.errorCode === 0) {
+          continue
+        }
+
+        if (partitionResponse.errorCode !== protocolErrors.OFFSET_OUT_OF_RANGE.code) {
+          return false
+        }
+
+        const key = `${topic}:${partitionResponse.partitionIndex}`
+        const offset =
+          this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST
+            ? partitionResponse.logStartOffset
+            : partitionResponse.highWatermark
+        recoveredOffsets.push([key, offset])
+      }
+    }
+
+    for (const [key, offset] of recoveredOffsets) {
+      this.#offsetsToFetch.set(key, offset)
+      this.#offsetsCommitted.set(key, offset)
+    }
+
+    if (recoveredOffsets.length > 0) {
+      this.emit('offsets')
+    }
+
+    return recoveredOffsets.length > 0
   }
 
   #pushRecords (

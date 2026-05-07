@@ -47,6 +47,7 @@ import {
   ProduceAcks,
   type ProducerOptions,
   ProtocolError,
+  Reader,
   type RecordsBatch,
   sleep,
   syncGroupV5,
@@ -1237,6 +1238,85 @@ test('fetch should support both promise and callback API', async t => {
   })
 })
 
+test('fetch should send client.rack as the fetch rack id', async t => {
+  const clientRack = 'rack-1'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { 'client.rack': clientRack })
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  let requestRackId = ''
+
+  t.after(() => pool.close())
+
+  mockMetadata(consumer, 1, null, {
+    brokers: new Map([[0, { nodeId: 0, ...broker }]])
+  })
+  mockConnectionPoolGet(pool, 1, null, connection)
+  mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
+  mockAPI(
+    pool,
+    fetchV17.api.key,
+    null,
+    null,
+    (_original, _apiKey, _apiVersion, payload, _responseParser, _requestTags, _responseTags, callback) => {
+      const reader = Reader.from(payload())
+
+      reader.readInt32()
+      reader.readInt32()
+      reader.readInt32()
+      reader.readInt8()
+      reader.readInt32()
+      reader.readInt32()
+      reader.readArray(r => {
+        r.readUUID()
+        r.readArray(r => {
+          r.readInt32()
+          r.readInt32()
+          r.readInt64()
+          r.readInt32()
+          r.readInt64()
+          r.readInt32()
+        })
+      })
+      reader.readArray(r => {
+        r.readUUID()
+        r.readArray(r => r.readInt32(), true, false)
+      })
+      requestRackId = reader.readString()
+
+      callback(null, {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: []
+      })
+
+      return false
+    }
+  )
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(requestRackId, clientRack)
+})
+
 test('fetch should fail when consumer is closed', async t => {
   const consumer = createConsumer(t)
 
@@ -2353,13 +2433,15 @@ test('listCommittedOffsets should handle errors from the API', async t => {
 })
 
 test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EPOCH with consumer group protocol', async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2 })
+  const clientRack = 'rack-2'
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2, clientRack })
   const topic = 'test-topic'
   const groupId = consumer.groupId
   const connection = { instanceId: 1, send () {} }
   const broker = { nodeId: 1, host: 'localhost', port: 9092, rack: null }
   let offsetFetchCalls = 0
   let heartbeatCalls = 0
+  let heartbeatRackId: string | null = null
 
   consumer.memberId = 'test-member'
 
@@ -2419,9 +2501,15 @@ test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EP
     apiKey => apiKey === offsetFetchV9.api.key || apiKey === consumerGroupHeartbeatV1.api.key,
     null,
     null,
-    (_original, apiKey, _apiVersion, _payload, _responseParser, _requestTags, _responseTags, callback) => {
+    (_original, apiKey, _apiVersion, payload, _responseParser, _requestTags, _responseTags, callback) => {
       if (apiKey === consumerGroupHeartbeatV1.api.key) {
         heartbeatCalls++
+        const reader = Reader.from(payload())
+        reader.readString()
+        reader.readString()
+        reader.readInt32()
+        reader.readNullableString()
+        heartbeatRackId = reader.readNullableString()
         callback(null, { memberId: 'test-member', memberEpoch: 2, heartbeatIntervalMs: 0 })
         return true
       }
@@ -2461,6 +2549,7 @@ test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EP
   deepStrictEqual(committed.get(topic), [90n, 91n])
   strictEqual(offsetFetchCalls, 2)
   strictEqual(heartbeatCalls, 1)
+  strictEqual(heartbeatRackId, clientRack)
 })
 
 test('listCommittedOffsets should handle unavailable API errors', async t => {

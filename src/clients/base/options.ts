@@ -19,6 +19,8 @@ export const baseOptionsSchema = {
   type: 'object',
   properties: {
     clientId: idProperty,
+    clientRack: { type: 'string' },
+    'client.rack': { type: 'string' },
     bootstrapBrokers: {
       oneOf: [
         { type: 'array', items: { type: 'string' } },

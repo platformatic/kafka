@@ -159,6 +159,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #useConsumerGroupProtocol: boolean
   #memberEpoch: number
   #groupRemoteAssignor: string | null
+  #clientRack: string
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #lagMonitoring: NodeJS.Timeout | null
   #streamContext: unknown
@@ -210,6 +211,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#memberEpoch = 0
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
+    this.#clientRack = this[kOptions].clientRack ?? this[kOptions]['client.rack'] ?? ''
     this.#streamContext = options.streamContext ?? options.context
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
@@ -801,7 +803,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 0,
                 options.topics,
                 [],
-                '',
+                this.#clientRack,
                 (error, result) => {
                   if (error) {
                     const genericError = error as GenericError
@@ -1272,7 +1274,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             memberId,
             this.#memberEpoch,
             this.groupInstanceId,
-            null, // rackId
+            this.#clientRack || null,
             options.rebalanceTimeout,
             this.topics.current,
             null,
@@ -1464,7 +1466,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             memberId,
             -1, // memberEpoch = -1 signals leave
             this.groupInstanceId,
-            null, // rackId
+            this.#clientRack || null,
             0, // rebalanceTimeout
             [], // subscribedTopicNames
             null, // subscribedTopicRegex

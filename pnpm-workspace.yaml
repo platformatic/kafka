@@ -1,7 +1,7 @@
-onlyBuiltDependencies:
-  - '@confluentinc/kafka-javascript'
-  - '@platformatic/rdkafka'
-  - '@swc/core'
-  - kerberos
-  - protobufjs
-  - unrs-resolver
+allowBuilds:
+  '@confluentinc/kafka-javascript': true
+  '@platformatic/rdkafka': true
+  '@swc/core': true
+  kerberos: true
+  protobufjs: true
+  unrs-resolver: true

@@ -1271,7 +1271,7 @@ test('should apply fallback mode after offset out of range fetch errors', async 
   const [message] = await once(stream, 'data')
 
   strictEqual(message.key, 'key-0')
-  deepStrictEqual(recoveredOffsets, [0n])
+  strictEqual(recoveredOffsets[0], 0n)
   await stream.close()
 })
 

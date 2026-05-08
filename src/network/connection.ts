@@ -151,7 +151,12 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.setMaxListeners(0)
 
     this.#instanceId = currentInstance++
-    this.#options = Object.assign({}, defaultOptions, options)
+    this.#options = Object.assign({}, defaultOptions)
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined) {
+        this.#options[key as keyof ConnectionOptions] = value
+      }
+    }
     this.#options.tls ??= this.#options.ssl
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId

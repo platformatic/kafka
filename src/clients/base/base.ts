@@ -110,7 +110,12 @@ export class Base<
     this[kContext] = options.context
 
     // Validate options
-    this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType, options) as OptionsType
+    this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType) as OptionsType
+    for (const [key, value] of Object.entries(options)) {
+      if (value !== undefined) {
+        this[kOptions][key as keyof OptionsType] = value
+      }
+    }
 
     this[kValidateOptions](this[kOptions], baseOptionsValidator, '/options')
     this[kClientId] = options.clientId

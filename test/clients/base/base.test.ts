@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
-import { kConnections, kGetApi, kPerformWithRetry } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetApi, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
+import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV3,
   Base,
@@ -38,6 +39,22 @@ test('constructor should properly set getters', () => {
   deepStrictEqual(base.clientId, 'clientId')
   deepStrictEqual(base.closed, false)
   deepStrictEqual(base.type, 'base')
+})
+
+test('constructor should preserve defaults when options are explicitly set to undefined', t => {
+  const base = createBase(t, {
+    timeout: undefined,
+    connectTimeout: undefined,
+    retries: undefined,
+    metadataMaxAge: undefined,
+    retryDelay: undefined
+  })
+
+  strictEqual(base[kOptions].timeout, defaultBaseOptions.timeout)
+  strictEqual(base[kOptions].connectTimeout, defaultBaseOptions.connectTimeout)
+  strictEqual(base[kOptions].retries, defaultBaseOptions.retries)
+  strictEqual(base[kOptions].metadataMaxAge, defaultBaseOptions.metadataMaxAge)
+  strictEqual(base[kOptions].retryDelay, defaultBaseOptions.retryDelay)
 })
 
 test('constructor should expose context and forward it to the default pool', () => {

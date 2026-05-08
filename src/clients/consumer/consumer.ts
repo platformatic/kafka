@@ -642,7 +642,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    if (this.#coordinatorId) {
+    if (this.#coordinatorId !== null) {
       callback(null, this.#coordinatorId)
       return callback[kCallbackPromise]
     }
@@ -987,7 +987,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         },
         (error, responses) => {
           if (error) {
-            callback(this.#handleMetadataError(error))
+            callback(this.#handleError(error))
             return
           }
 
@@ -1079,7 +1079,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           ) {
             this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, heartbeatError => {
               if (heartbeatError) {
-                callback(this.#handleMetadataError(heartbeatError))
+                callback(this.#handleError(heartbeatError))
                 return
               }
 
@@ -1088,7 +1088,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          callback(this.#handleMetadataError(error))
+          callback(this.#handleError(error))
           return
         }
 
@@ -1112,7 +1112,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #findGroupCoordinator (callback: CallbackWithPromise<number>): void {
-    if (this.#coordinatorId) {
+    if (this.#coordinatorId !== null) {
       callback(null, this.#coordinatorId)
       return
     }
@@ -1814,7 +1814,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
           if (error) {
-            callback(this.#handleMetadataError(error))
+            callback(this.#handleError(error))
             return
           }
 
@@ -1885,34 +1885,38 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
     callback: CallbackWithPromise<ReturnType>
   ): void | Promise<ReturnType> {
-    this.#findGroupCoordinator((error, coordinatorId) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    this[kPerformWithRetry]<ReturnType>(
+      operationId,
+      retryCallback => {
+        this.#findGroupCoordinator((error, coordinatorId) => {
+          if (error) {
+            retryCallback(error)
+            return
+          }
 
-      this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
-        if (error) {
-          callback(this.#handleMetadataError(error))
-          return
-        }
+          this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+            if (error) {
+              retryCallback(this.#handleError(error))
+              return
+            }
 
-        this[kPerformWithRetry]<ReturnType>(
-          operationId,
-          retryCallback => {
             this[kGetConnection](metadata!.brokers.get(coordinatorId!)!, (error, connection) => {
               if (error) {
-                retryCallback(error)
+                retryCallback(this.#handleError(error))
                 return
               }
 
-              operation(connection!, retryCallback)
+              operation(connection!, (error, result) => {
+                retryCallback(this.#handleError(error), result)
+              })
             })
-          },
-          callback
-        )
-      })
-    })
+          })
+        })
+      },
+      (error, result) => {
+        callback(this.#handleError(error), result)
+      }
+    )
   }
 
   #validateGroupOptions (options: any, validator?: ValidateFunction<unknown>): void {
@@ -2094,9 +2098,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return protocolError
   }
 
-  #handleMetadataError (error: Error | null): Error | null {
-    if (error && (error as GenericError)?.findBy('hasStaleMetadata', true)) {
-      this.clearMetadata()
+  #handleError (error: Error | null): Error | null {
+    const kafkaError = error as GenericError
+
+    if (kafkaError) {
+      if (kafkaError.findBy('hasStaleMetadata', true)) {
+        this.clearMetadata()
+      } else if (
+        kafkaError.findBy('code', 'PLT_KFK_NETWORK') ||
+        kafkaError.findBy('apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
+        kafkaError.findBy('apiId', 'COORDINATOR_NOT_AVAILABLE') ||
+        kafkaError.findBy('apiId', 'NOT_COORDINATOR')
+      ) {
+        this.#coordinatorId = null
+      }
     }
 
     return error

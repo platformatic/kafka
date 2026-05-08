@@ -2,12 +2,19 @@ import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
-import { kConnections } from '../../../src/clients/base/base.ts'
+import {
+  type FindCoordinatorRequest,
+  type FindCoordinatorResponse
+} from '../../../src/apis/metadata/find-coordinator-v6.ts'
+import { kConnections, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
 import { Transaction } from '../../../src/clients/producer/transaction.ts'
 import {
   addOffsetsToTxnV4,
   addPartitionsToTxnV5,
+  type API,
+  type Callback,
   type ClientDiagnosticEvent,
+  type Connection,
   endTxnV4,
   type Message,
   MessagesStreamModes,
@@ -31,8 +38,80 @@ import {
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
+  mockMethod,
   mockUnavailableAPI
 } from '../../helpers.ts'
+
+function mockTransactionCoordinator (producer: any, coordinatorId: number, endError?: Error): void {
+  mockConnectionPoolGetFirstAvailable(producer[kConnections], 1, null, {} as any)
+  mockConnectionPoolGet(
+    producer[kConnections],
+    () => true,
+    null,
+    undefined,
+    (_original, _broker, callback) => {
+      callback(null, {})
+      return true
+    }
+  )
+
+  mockMetadata(
+    producer,
+    () => true,
+    null,
+    undefined,
+    (_original, _options, callback) => {
+      callback(null, {
+        id: 'test-cluster',
+        brokers: new Map([[coordinatorId, { host: 'localhost', port: 9092 }]]),
+        topics: new Map(),
+        lastUpdate: Date.now(),
+        controllerId: coordinatorId
+      })
+      return true
+    }
+  )
+
+  mockMethod(
+    producer,
+    kGetApi,
+    () => true,
+    null,
+    undefined,
+    (_original, name, callback: Callback<API<FindCoordinatorRequest, FindCoordinatorResponse>>) => {
+      if (name === 'FindCoordinator') {
+        callback(null, ((
+          _connection: Connection,
+          _keyType: number,
+          keys: string[],
+          apiCallback: Callback<FindCoordinatorResponse>
+        ) => {
+          apiCallback(null, {
+            throttleTimeMs: 0,
+            coordinators: [
+              { key: keys[0], nodeId: coordinatorId, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+            ]
+          })
+        }) as any)
+        return true
+      }
+
+      if (name === 'InitProducerId') {
+        callback(null, ((...args: any[]) =>
+          args.at(-1)(null, { throttleTimeMs: 0, errorCode: 0, producerId: 1n, producerEpoch: 0 })) as any)
+        return true
+      }
+
+      if (endError) {
+        callback(null, ((...args: any[]) => args.at(-1)(endError)) as any)
+      } else {
+        callback(new Error(`Unexpected API ${name}`))
+      }
+
+      return true
+    }
+  )
+}
 
 test('beginTransaction should initialize a transaction', async t => {
   // Create a producer with idempotent=true
@@ -84,6 +163,34 @@ test('beginTransaction should initialize a transaction', async t => {
       return true
     }
   )
+})
+
+test('transaction commit should invalidate cached coordinator on coordinator protocol errors', async t => {
+  const transactionalId = randomUUID()
+  const producer = createProducer(t, {
+    idempotent: true,
+    strict: true,
+    transactionalId
+  })
+  producer[kOptions].retries = 0
+  mockTransactionCoordinator(producer, 1, new ProtocolError('NOT_COORDINATOR'))
+
+  const transaction = await producer.beginTransaction()
+  const coordinatorId = producer.coordinatorId
+
+  strictEqual(typeof coordinatorId, 'number')
+
+  await rejects(
+    async () => {
+      await transaction.commit()
+    },
+    error => {
+      strictEqual((error as Error).message, 'This is not the correct coordinator.')
+      return true
+    }
+  )
+
+  strictEqual(producer.coordinatorId, undefined)
 })
 
 test('beginTransaction should validate options in strict mode', async t => {

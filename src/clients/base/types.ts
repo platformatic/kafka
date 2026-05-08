@@ -46,7 +46,6 @@ export type RetryDelayGetter<Owner = object> = (
 export interface BaseOptions extends ConnectionOptions {
   clientId: string
   clientRack?: string
-  'client.rack'?: string
   bootstrapBrokers: Broker[] | string[]
   context?: unknown
   timeout?: number

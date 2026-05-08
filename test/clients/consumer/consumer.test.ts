@@ -1238,10 +1238,10 @@ test('fetch should support both promise and callback API', async t => {
   })
 })
 
-test('fetch should send client.rack as the fetch rack id', async t => {
+test('fetch should send clientRack as the fetch rack id', async t => {
   const clientRack = 'rack-1'
   const topicId = '00000000-0000-0000-0000-000000000001'
-  const consumer = createConsumer(t, { 'client.rack': clientRack })
+  const consumer = createConsumer(t, { clientRack })
   const pool = consumer[kCreateConnectionPool]()
   const connection = { instanceId: 1, send () {} }
   let requestRackId = ''

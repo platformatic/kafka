@@ -20,7 +20,6 @@ export const baseOptionsSchema = {
   properties: {
     clientId: idProperty,
     clientRack: { type: 'string' },
-    'client.rack': { type: 'string' },
     bootstrapBrokers: {
       oneOf: [
         { type: 'array', items: { type: 'string' } },

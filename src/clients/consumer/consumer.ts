@@ -211,7 +211,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#memberEpoch = 0
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
-    this.#clientRack = this[kOptions].clientRack ?? this[kOptions]['client.rack'] ?? ''
+    this.#clientRack = this[kOptions].clientRack ?? ''
     this.#streamContext = options.streamContext ?? options.context
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)

@@ -104,7 +104,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
   #metricsProducedMessages: Counter | undefined
-  #coordinatorId!: number
+  #coordinatorId: number | undefined
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
   #streams: Set<ProducerStream<Key, Value, HeaderKey, HeaderValue>>
   #sendOperation: (
@@ -191,7 +191,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return this.#transaction
   }
 
-  get coordinatorId (): number {
+  get coordinatorId (): number | undefined {
     return this.#coordinatorId
   }
 
@@ -663,13 +663,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           retryCallback => {
             this.#getCoordinatorConnection((error, connection) => {
               if (error) {
-                retryCallback(error)
+                retryCallback(this.#handleError(error))
                 return
               }
 
               this[kGetApi]<AddPartitionsToTxnRequest, AddOffsetsToTxnResponse>('AddPartitionsToTxn', (error, api) => {
                 if (error) {
-                  retryCallback(error)
+                  retryCallback(this.#handleError(error))
                   return
                 }
 
@@ -686,7 +686,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   ],
                   error => {
                     if (error) {
-                      retryCallback(error)
+                      retryCallback(this.#handleError(error))
                       return
                     }
 
@@ -717,13 +717,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           retryCallback => {
             this.#getCoordinatorConnection((error, connection) => {
               if (error) {
-                retryCallback(error)
+                retryCallback(this.#handleError(error))
                 return
               }
 
               this[kGetApi]<AddOffsetsToTxnRequest, AddOffsetsToTxnResponse>('AddOffsetsToTxn', (error, api) => {
                 if (error) {
-                  retryCallback(error)
+                  retryCallback(this.#handleError(error))
                   return
                 }
 
@@ -735,7 +735,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   groupId,
                   error => {
                     if (error) {
-                      retryCallback(error)
+                      retryCallback(this.#handleError(error))
                       return
                     }
 
@@ -851,13 +851,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           retryCallback => {
             this.#getCoordinatorConnection((error, connection) => {
               if (error) {
-                retryCallback(error)
+                retryCallback(this.#handleError(error))
                 return
               }
 
               this[kGetApi]<EndTxnRequest, EndTxnResponse>('EndTxn', (error, api) => {
                 if (error) {
-                  retryCallback(error)
+                  retryCallback(this.#handleError(error))
                   return
                 }
 
@@ -870,7 +870,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   error => {
                     if (error) {
                       this.#handleFencingError(error)
-                      retryCallback(error)
+                      retryCallback(this.#handleError(error))
                       return
                     }
 
@@ -932,7 +932,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   this[kOptions].timeout!,
                   options.producerId ?? this[kOptions].producerId ?? 0n,
                   options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
-                  retryCallback
+                  (error, response) => {
+                    retryCallback(this.#handleError(error), response)
+                  }
                 )
               })
             })
@@ -940,7 +942,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           (error, response) => {
             if (error) {
               this.#handleFencingError(error)
-              deduplicateCallback(error)
+              deduplicateCallback(this.#handleError(error))
               return
             }
 
@@ -1273,6 +1275,18 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #getCoordinatorConnection (callback: CallbackWithPromise<Connection>): void {
+    if (this.#coordinatorId === undefined) {
+      this[kTransactionFindCoordinator](error => {
+        if (error) {
+          callback(error)
+          return
+        }
+
+        this.#getCoordinatorConnection(callback)
+      })
+      return
+    }
+
     // Get a connection to the coordinator
     this[kMetadata]({}, (error, metadata) => {
       if (error) {
@@ -1280,20 +1294,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      this[kPerformWithRetry](
-        'getCoordinatorConnection',
-        retryCallback => {
-          this[kGetConnection](metadata!.brokers.get(this.#coordinatorId)!, (error, connection) => {
-            if (error) {
-              retryCallback(error)
-              return
-            }
+      this[kGetConnection](metadata!.brokers.get(this.#coordinatorId!)!, (error, connection) => {
+        if (error) {
+          callback(this.#handleError(error))
+          return
+        }
 
-            retryCallback(null, connection)
-          })
-        },
-        callback
-      )
+        callback(null, connection)
+      })
     })
   }
 
@@ -1302,6 +1310,23 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.#producerInfo = undefined
       this.#transaction = undefined
     }
+  }
+
+  #handleError (error: Error | null): Error | null {
+    const kafkaError = error as GenericError
+
+    if (kafkaError) {
+      if (
+        kafkaError.findBy('code', 'PLT_KFK_NETWORK') ||
+        kafkaError.findBy('apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
+        kafkaError.findBy('apiId', 'COORDINATOR_NOT_AVAILABLE') ||
+        kafkaError.findBy('apiId', 'NOT_COORDINATOR')
+      ) {
+        this.#coordinatorId = undefined
+      }
+    }
+
+    return error
   }
 
   #beforeSerialization (

@@ -1,19 +1,26 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { type ChannelListener, subscribe, unsubscribe } from 'node:diagnostics_channel'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import zlib from 'node:zlib'
 import * as Prometheus from 'prom-client'
-import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
+import {
+  type FindCoordinatorRequest,
+  type FindCoordinatorResponse
+} from '../../../src/apis/metadata/find-coordinator-v6.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
+  type API,
+  type Callback,
+  type CallbackWithPromise,
   type ClientDiagnosticEvent,
   type ClusterMetadata,
   CompressionAlgorithms,
   ConfluentSchemaRegistry,
+  type Connection,
   Consumer,
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -138,6 +145,71 @@ async function fetchFromOffset ({
 }
 
 const broker = parseBroker(kafkaBootstrapServers[0])
+
+function mockConsumerGroupCoordinator (
+  consumer: Consumer<Buffer, Buffer, Buffer, Buffer>,
+  coordinatorId: number,
+  operationError?: Error
+): void {
+  mockConnectionPoolGetFirstAvailable(consumer[kConnections], 1, null, {} as any)
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    undefined,
+    (_original, _options, callback) => {
+      callback(null, {
+        id: 'test-cluster',
+        brokers: new Map([[coordinatorId, broker]]),
+        topics: new Map(),
+        lastUpdate: Date.now(),
+        controllerId: coordinatorId
+      })
+      return true
+    }
+  )
+
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    undefined,
+    (_original, name, callback: Callback<API<FindCoordinatorRequest, FindCoordinatorResponse>>) => {
+      if (name === 'FindCoordinator') {
+        callback(null, ((
+          _connection: Connection,
+          _keyType: number,
+          keys: string[],
+          apiCallback: Callback<FindCoordinatorResponse>
+        ) => {
+          apiCallback(null, {
+            throttleTimeMs: 0,
+            coordinators: [
+              {
+                key: keys[0],
+                nodeId: coordinatorId,
+                host: broker.host,
+                port: broker.port,
+                errorCode: 0,
+                errorMessage: null
+              }
+            ]
+          })
+        }) as any)
+        return true
+      }
+
+      if (name === 'OffsetCommit' && operationError) {
+        callback(null, ((...args: any[]) => args.at(-1)(operationError)) as any)
+        return true
+      }
+
+      return true
+    }
+  )
+}
 
 test('constructor should initialize properly with default options', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -2829,6 +2901,49 @@ test('findGroupCoordinator should return the coordinator nodeId and support diag
   strictEqual(cachedCoordinatorId, coordinatorId)
 
   verifyTracingChannel()
+})
+
+test('commit should invalidate cached coordinator on coordinator protocol errors', async t => {
+  const consumer = createConsumer(t, { retries: 0 })
+  mockConsumerGroupCoordinator(consumer, 1, new ProtocolError('NOT_COORDINATOR'))
+
+  const coordinatorId = await consumer.findGroupCoordinator()
+
+  strictEqual(consumer.coordinatorId, coordinatorId)
+
+  mockConnectionPoolGet(consumer[kConnections], 1, null, {} as any)
+
+  await rejects(
+    async () => {
+      await consumer.commit({ offsets: [{ topic: 'test-topic', partition: 0, offset: 100n, leaderEpoch: 0 }] })
+    },
+    () => true
+  )
+
+  strictEqual(consumer.coordinatorId, null)
+})
+
+test('commit should invalidate cached coordinator on coordinator connection errors', async t => {
+  const consumer = createConsumer(t, { retries: 0 })
+  mockConsumerGroupCoordinator(consumer, 1)
+
+  const coordinatorId = await consumer.findGroupCoordinator()
+
+  strictEqual(consumer.coordinatorId, coordinatorId)
+
+  mockConnectionPoolGet(consumer[kConnections], 1, new NetworkError('Cannot connect to coordinator.'))
+
+  await rejects(
+    async () => {
+      await consumer.commit({ offsets: [{ topic: 'test-topic', partition: 0, offset: 100n, leaderEpoch: 0 }] })
+    },
+    error => {
+      strictEqual(error instanceof NetworkError, true)
+      return true
+    }
+  )
+
+  strictEqual(consumer.coordinatorId, null)
 })
 
 test('findGroupCoordinator should support both promise and callback API', t => {

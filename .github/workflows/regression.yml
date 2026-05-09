@@ -1,0 +1,13 @@
+---
+name: Regression Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    name: Placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: 'true'

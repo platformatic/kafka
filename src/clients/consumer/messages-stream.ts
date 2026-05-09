@@ -38,7 +38,8 @@ import {
   type ConsumeOptions,
   type CorruptedMessageHandler,
   type GroupAssignment,
-  type Offsets
+  type Offsets,
+  partitionKey
 } from './types.ts'
 
 // Don't move this function as being in the same file will enable V8 to remove.
@@ -63,10 +64,6 @@ function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, V
     offset: this.offset.toString(),
     metadata: this.metadata
   }
-}
-
-function partitionKey (topic: string, partition: number): string {
-  return `${topic}:${partition}`
 }
 
 let currentInstance = 0
@@ -725,6 +722,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       const topic = topicIds.get(topicResponse.topicId)!
 
       for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+        const key = partitionKey(topic, partition)
+
         if (!recordsBatches) {
           continue
         }
@@ -734,17 +733,17 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const firstOffset = batch.firstOffset
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
-          this.#partitionsEpochs.set(partitionKey(topic, partition), leaderEpoch)
+          this.#partitionsEpochs.set(key, leaderEpoch)
 
           // Track offsets
           if (batch === recordsBatches[recordsBatches.length - 1]) {
             // Track the last read offset
             const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
-            this.#offsetsToFetch.set(partitionKey(topic, partition), lastOffset + 1n)
+            this.#offsetsToFetch.set(key, lastOffset + 1n)
 
             // Autocommit if needed
             if (autocommit) {
-              this.#offsetsToCommit.set(partitionKey(topic, partition), {
+              this.#offsetsToCommit.set(key, {
                 topic,
                 partition,
                 offset: lastOffset + 1n,
@@ -763,7 +762,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             const messageToConsume: MessageToConsume = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
-            if (offset < requestedOffsets.get(partitionKey(topic, partition))!) {
+            if (offset < requestedOffsets.get(key)!) {
               // Thi is a duplicate message, ignore it
               continue
             }

@@ -59,11 +59,8 @@ import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import {
   kAutocommit,
-  kClearPreferredReadReplicas,
   kGetFetchNode,
-  kRefreshOffsetsAndFetch,
-  kSyncPreferredReadReplicas,
-  kUpdatePreferredReadReplicas
+  kRefreshOffsetsAndFetch
 } from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
@@ -122,21 +119,14 @@ import {
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets,
-  type OffsetsWithTimestamps
+  type OffsetsWithTimestamps,
+  type PreferredReadReplica,
+  partitionKey
 } from './types.ts'
 
 interface TopicPartition {
   topicId: string
   partitions: number[]
-}
-
-interface PreferredReadReplica {
-  node: number
-  expiresAt: number
-}
-
-function partitionKey (topic: string, partition: number): string {
-  return `${topic}:${partition}`
 }
 
 export interface ConsumerEvents extends BaseEvents {
@@ -793,92 +783,6 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return partitionMetadata.leader
   }
 
-  [kUpdatePreferredReadReplicas] (
-    metadata: ClusterMetadata,
-    topicIds: Map<string, string>,
-    response: FetchResponse
-  ): void {
-    for (const topicResponse of response.responses) {
-      const topic = topicIds.get(topicResponse.topicId)
-
-      if (!topic) {
-        continue
-      }
-
-      for (const { partitionIndex: partition, preferredReadReplica } of topicResponse.partitions) {
-        if (preferredReadReplica < 0) {
-          continue
-        }
-
-        const partitionMetadata = metadata.topics.get(topic)!.partitions[partition]
-        const key = partitionKey(topic, partition)
-
-        if (
-          metadata.brokers.has(preferredReadReplica) &&
-          partitionMetadata.replicas.includes(preferredReadReplica) &&
-          !partitionMetadata.offlineReplicas.includes(preferredReadReplica)
-        ) {
-          const cachedPreferredReadReplica = this.#preferredReadReplicas.get(key)
-
-          if (cachedPreferredReadReplica?.node !== preferredReadReplica) {
-            this.#preferredReadReplicas.set(key, {
-              node: preferredReadReplica,
-              expiresAt: Date.now() + this[kOptions].metadataMaxAge!
-            })
-          }
-        } else {
-          this.#preferredReadReplicas.delete(key)
-          this.clearMetadata()
-        }
-      }
-    }
-  }
-
-  [kClearPreferredReadReplicas] (topics: FetchRequestTopic[], topicIds: Map<string, string>): boolean {
-    let cleared = false
-
-    for (const topicRequest of topics) {
-      const topic = topicIds.get(topicRequest.topicId)
-
-      if (!topic) {
-        continue
-      }
-
-      for (const { partition } of topicRequest.partitions) {
-        cleared = this.#preferredReadReplicas.delete(partitionKey(topic, partition)) || cleared
-      }
-    }
-
-    return cleared
-  }
-
-  // Drops cached preferred replicas for partitions that are no longer assigned.
-  // Called whenever `this.assignments` changes so the cache does not retain
-  // entries for partitions the consumer has lost during a rebalance.
-  [kSyncPreferredReadReplicas] (): void {
-    if (this.#preferredReadReplicas.size === 0) {
-      return
-    }
-
-    if (!this.assignments?.length) {
-      this.#preferredReadReplicas.clear()
-      return
-    }
-
-    const assignedKeys = new Set<string>()
-    for (const { topic, partitions } of this.assignments) {
-      for (const partition of partitions) {
-        assignedKeys.add(partitionKey(topic, partition))
-      }
-    }
-
-    for (const key of this.#preferredReadReplicas.keys()) {
-      if (!assignedKeys.has(key)) {
-        this.#preferredReadReplicas.delete(key)
-      }
-    }
-  }
-
   #topicIdsById (metadata: ClusterMetadata): Map<string, string> {
     const topicIds = new Map<string, string>()
 
@@ -947,7 +851,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           pool.get(broker, (error, connection) => {
             if (error) {
-              this[kClearPreferredReadReplicas](options.topics, topicIds)
+              this.#clearPreferredReadReplicas(options.topics, topicIds)
 
               // When a connection was not available (either interrupted or not available) we
               // reset the leader epoch in the options so that when connection is re-established again we can continue
@@ -981,7 +885,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 this.#clientRack,
                 (error, result) => {
                   if (error) {
-                    this[kClearPreferredReadReplicas](options.topics, topicIds)
+                    this.#clearPreferredReadReplicas(options.topics, topicIds)
 
                     const genericError = error as GenericError
                     if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
@@ -994,7 +898,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                       }
                     }
                   } else {
-                    this[kUpdatePreferredReadReplicas](metadata!, topicIds, result!)
+                    this.#updatePreferredReadReplicas(metadata!, topicIds, result!)
                   }
 
                   retryCallback(error, result)
@@ -1478,7 +1382,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (fenced) {
             this.#assignments = []
             this.assignments = []
-            this[kSyncPreferredReadReplicas]()
+            this.#syncPreferredReadReplicas()
             this.#memberEpoch = 0
             this.#consumerGroupHeartbeat(options, () => {})
             callback(error)
@@ -1607,7 +1511,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }))
       this.#assignments = newAssignments
       this.assignments = assignments
-      this[kSyncPreferredReadReplicas]()
+      this.#syncPreferredReadReplicas()
       callback(null)
     })
   }
@@ -1663,7 +1567,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.#memberEpoch = -1
         this.#assignments = []
         this.assignments = []
-        this[kSyncPreferredReadReplicas]()
+        this.#syncPreferredReadReplicas()
 
         callback(null)
       }
@@ -1869,7 +1773,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           this.assignments = response!
-          this[kSyncPreferredReadReplicas]()
+          this.#syncPreferredReadReplicas()
 
           this.#cancelHeartbeat()
           this.#heartbeatInterval = setTimeout(() => {
@@ -1963,7 +1867,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.memberId = null
         this.generationId = 0
         this.assignments = null
-        this[kSyncPreferredReadReplicas]()
+        this.#syncPreferredReadReplicas()
 
         callback(null)
       }
@@ -2282,6 +2186,92 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return protocolError
+  }
+
+  #updatePreferredReadReplicas (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse
+  ): void {
+    for (const topicResponse of response.responses) {
+      const topic = topicIds.get(topicResponse.topicId)
+
+      if (!topic) {
+        continue
+      }
+
+      for (const { partitionIndex: partition, preferredReadReplica } of topicResponse.partitions) {
+        if (preferredReadReplica < 0) {
+          continue
+        }
+
+        const partitionMetadata = metadata.topics.get(topic)!.partitions[partition]
+        const key = partitionKey(topic, partition)
+
+        if (
+          metadata.brokers.has(preferredReadReplica) &&
+          partitionMetadata.replicas.includes(preferredReadReplica) &&
+          !partitionMetadata.offlineReplicas.includes(preferredReadReplica)
+        ) {
+          const cachedPreferredReadReplica = this.#preferredReadReplicas.get(key)
+
+          if (cachedPreferredReadReplica?.node !== preferredReadReplica) {
+            this.#preferredReadReplicas.set(key, {
+              node: preferredReadReplica,
+              expiresAt: Date.now() + this[kOptions].metadataMaxAge!
+            })
+          }
+        } else {
+          this.#preferredReadReplicas.delete(key)
+          this.clearMetadata()
+        }
+      }
+    }
+  }
+
+  #clearPreferredReadReplicas (topics: FetchRequestTopic[], topicIds: Map<string, string>): boolean {
+    let cleared = false
+
+    for (const topicRequest of topics) {
+      const topic = topicIds.get(topicRequest.topicId)
+
+      if (!topic) {
+        continue
+      }
+
+      for (const { partition } of topicRequest.partitions) {
+        cleared = this.#preferredReadReplicas.delete(partitionKey(topic, partition)) || cleared
+      }
+    }
+
+    return cleared
+  }
+
+  // Drops cached preferred replicas for partitions that are no longer assigned.
+  // Called whenever `this.assignments` changes so the cache does not retain
+  // entries for partitions the consumer has lost during a rebalance.
+  #syncPreferredReadReplicas (): void {
+    if (this.#preferredReadReplicas.size === 0) {
+      return
+    }
+
+    if (!this.assignments?.length) {
+      this.#preferredReadReplicas.clear()
+      return
+    }
+
+    const assignedKeys = new Set<string>()
+    for (const { topic, partitions } of this.assignments) {
+      for (const partition of partitions) {
+        assignedKeys.add(partitionKey(topic, partition))
+      }
+    }
+
+    for (const key of this.#preferredReadReplicas.keys()) {
+      if (!assignedKeys.has(key)) {
+        this.#preferredReadReplicas.delete(key)
+      }
+    }
   }
 
   #handleError (error: Error | null): Error | null {

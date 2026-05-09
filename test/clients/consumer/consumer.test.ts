@@ -78,11 +78,7 @@ import {
   mockMethod,
   mockUnavailableAPI
 } from '../../helpers.ts'
-import {
-  kGetFetchNode,
-  kSyncPreferredReadReplicas,
-  kUpdatePreferredReadReplicas
-} from '../../../src/symbols.ts'
+import { kGetFetchNode } from '../../../src/symbols.ts'
 
 // This function produces sample messages to a topic for testing the consumer
 async function produceTestMessages ({
@@ -252,6 +248,64 @@ function mockConsumerGroupCoordinator (
       return true
     }
   )
+}
+
+async function seedPreferredReadReplicas (
+  t: TestContext,
+  consumer: Consumer,
+  metadata: ClusterMetadata,
+  response: FetchResponse
+): Promise<void> {
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 0, send () {} }
+
+  t.after(() => pool.close())
+
+  mockMetadata(consumer, 1, null, metadata)
+  mockConnectionPoolGet(pool, 1, null, connection)
+  mockMethod(
+    consumer,
+    kGetApi,
+    1,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<typeof fetchV17.api>) => {
+      callback(null, ((
+        _connection,
+        _maxWaitMs,
+        _minBytes,
+        _maxBytes,
+        _isolationLevel,
+        _sessionId,
+        _sessionEpoch,
+        _topics,
+        _forgottenTopicsData,
+        _rackId,
+        callback
+      ) => {
+        callback!(null, response)
+      }) as typeof fetchV17.api)
+    }
+  )
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: response.responses.map(topicResponse => {
+      return {
+        topicId: topicResponse.topicId,
+        partitions: topicResponse.partitions.map(({ partitionIndex }) => {
+          return {
+            partition: partitionIndex,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        })
+      }
+    })
+  })
 }
 
 test('constructor should initialize properly with default options', t => {
@@ -1453,7 +1507,7 @@ test('fetch should route direct requests to cached preferred read replicas', asy
 
   t.after(() => pool.close())
 
-  consumer[kUpdatePreferredReadReplicas](metadata, new Map([[topicId, topic]]), {
+  await seedPreferredReadReplicas(t, consumer, metadata, {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
@@ -1563,10 +1617,9 @@ test('fetch should clear preferred read replicas for all partitions in a failed 
       }
     ]
   }
-  const topicIds = new Map([[topicId, topic]])
   let fetchedNode: number | undefined
 
-  consumer[kUpdatePreferredReadReplicas](metadata, topicIds, preferredResponse)
+  await seedPreferredReadReplicas(t, consumer, metadata, preferredResponse)
   mockMetadata(consumer, () => true, null, metadata)
   mockMethod(consumer, kGetApi, () => true, null, fetchV17.api)
 
@@ -1622,7 +1675,7 @@ test('preferred read replica should expire and fall back to leader', async t => 
   let now = 1000
   t.mock.method(Date, 'now', () => now)
 
-  consumer[kUpdatePreferredReadReplicas](metadata, new Map([[topicId, topic]]), {
+  await seedPreferredReadReplicas(t, consumer, metadata, {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
@@ -1662,7 +1715,7 @@ test('preferred read replica should clear and refresh metadata when cached node 
     metadataCleared = true
   })
 
-  consumer[kUpdatePreferredReadReplicas](metadata, new Map([[topicId, topic]]), {
+  await seedPreferredReadReplicas(t, consumer, metadata, {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
@@ -1711,7 +1764,7 @@ test('fetch should fall back to requested node when partitions prefer different 
 
   t.after(() => pool.close())
 
-  consumer[kUpdatePreferredReadReplicas](metadata, new Map([[topicId, topic]]), {
+  await seedPreferredReadReplicas(t, consumer, metadata, {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
@@ -1778,103 +1831,6 @@ test('fetch should fall back to requested node when partitions prefer different 
   })
 
   strictEqual(fetchedNode, 0)
-})
-
-test('preferred read replicas should be pruned for partitions no longer assigned', async t => {
-  const topic = 'test-topic'
-  const otherTopic = 'other-topic'
-  const topicId = '00000000-0000-0000-0000-000000000001'
-  const otherTopicId = '00000000-0000-0000-0000-000000000002'
-  const consumer = createConsumer(t)
-  const metadata = {
-    id: 'cluster-id',
-    controllerId: 0,
-    brokers: new Map([
-      [0, { nodeId: 0, ...broker, rack: 'rack-a' }],
-      [1, { nodeId: 1, host: 'preferred-broker-1', port: 9092, rack: 'rack-b' }]
-    ]),
-    topics: new Map([
-      [
-        topic,
-        {
-          id: topicId,
-          partitions: [{ leader: 0, leaderEpoch: 0, replicas: [0, 1], isr: [0, 1], offlineReplicas: [] }],
-          partitionsCount: 1,
-          lastUpdate: Date.now()
-        }
-      ],
-      [
-        otherTopic,
-        {
-          id: otherTopicId,
-          partitions: [{ leader: 0, leaderEpoch: 0, replicas: [0, 1], isr: [0, 1], offlineReplicas: [] }],
-          partitionsCount: 1,
-          lastUpdate: Date.now()
-        }
-      ]
-    ]),
-    lastUpdate: Date.now()
-  } as ClusterMetadata
-  const topicIds = new Map([
-    [topicId, topic],
-    [otherTopicId, otherTopic]
-  ])
-
-  // Seed two cached preferred replicas
-  consumer[kUpdatePreferredReadReplicas](metadata, topicIds, {
-    throttleTimeMs: 0,
-    errorCode: 0,
-    sessionId: 0,
-    responses: [
-      {
-        topicId,
-        partitions: [
-          {
-            partitionIndex: 0,
-            errorCode: 0,
-            highWatermark: 0n,
-            lastStableOffset: 0n,
-            logStartOffset: 0n,
-            abortedTransactions: [],
-            preferredReadReplica: 1,
-            records: []
-          }
-        ]
-      },
-      {
-        topicId: otherTopicId,
-        partitions: [
-          {
-            partitionIndex: 0,
-            errorCode: 0,
-            highWatermark: 0n,
-            lastStableOffset: 0n,
-            logStartOffset: 0n,
-            abortedTransactions: [],
-            preferredReadReplica: 1,
-            records: []
-          }
-        ]
-      }
-    ]
-  })
-
-  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, Date.now()), 1)
-  strictEqual(consumer[kGetFetchNode](metadata, otherTopic, 0, Date.now()), 1)
-
-  // Drop the other topic from this consumer's assignments and prune
-  consumer.assignments = [{ topic, partitions: [0] }]
-  consumer[kSyncPreferredReadReplicas]()
-
-  // The retained topic still has its preferred replica
-  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, Date.now()), 1)
-  // The dropped topic falls back to leader (cache was pruned)
-  strictEqual(consumer[kGetFetchNode](metadata, otherTopic, 0, Date.now()), 0)
-
-  // Clearing all assignments empties the cache
-  consumer.assignments = null
-  consumer[kSyncPreferredReadReplicas]()
-  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, Date.now()), 0)
 })
 
 test('fetch should fail when consumer is closed', async t => {

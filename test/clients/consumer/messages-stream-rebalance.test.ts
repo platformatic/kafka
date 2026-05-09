@@ -2,11 +2,11 @@ import { strictEqual } from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
-import type { FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import { kCreateConnectionPool, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
+import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
+import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import { type Consumer, MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
-import { kClearPreferredReadReplicas, kGetFetchNode, kUpdatePreferredReadReplicas } from '../../../src/symbols.ts'
-import { createConsumer } from '../../helpers.ts'
+import { kGetFetchNode } from '../../../src/symbols.ts'
+import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
 
 const topic = 'test-topic'
 const topicId = 'test-topic-id'
@@ -64,17 +64,15 @@ function createFetchResponse (preferredReadReplica: number): FetchResponse {
   }
 }
 
-// Wraps a real `Consumer` so we can drive `MessagesStream` against the real
-// rack-aware routing methods (`kGetFetchNode`, `kUpdatePreferredReadReplicas`,
-// `kClearPreferredReadReplicas`) without a live cluster. Only the network-facing
-// methods (`metadata`, `listOffsets`, `fetch`) are stubbed; the preferred-replica
-// algorithm is the same one used in production.
+// Wraps a real `Consumer` so `MessagesStream` exercises the production
+// rack-aware routing logic without a live cluster. Only network-facing methods
+// are mocked using the standard test helpers.
 function createConsumerMock (
   t: TestContext,
   fetch: (options: any, callback: CallbackWithPromise<FetchResponse>) => void,
   initialMetadata: ReturnType<typeof createMetadata> = createMetadata()
 ): Consumer {
-  const consumer = createConsumer(t)
+  const consumer = createConsumer(t, { retryDelay: 0 })
 
   consumer.assignments = [{ topic, partitions: [0] }]
   consumer.topics.track(topic)
@@ -90,41 +88,43 @@ function createConsumerMock (
     }
   })
 
-  ;(consumer as any).metadata = (_: object, callback: CallbackWithPromise<any>) => {
+  mockMetadata(consumer, () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
     callback(null, testMetadata)
-  }
+    return true
+  })
 
-  ;(consumer as any).listOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+  mockMethod(consumer, 'listOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
     callback(null, new Map([[topic, [0n]]]))
-  }
+    return true
+  })
 
-  ;(consumer as any).fetch = (options: any, callback: CallbackWithPromise<FetchResponse>) => {
-    const topicIds = new Map([[topicId, topic]])
-    const partition = options.topics[0].partitions[0].partition
-    const node = consumer[kGetFetchNode](testMetadata as any, topic, partition, Date.now())
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<any>) => {
+    const api = (
+      connection: { instanceId: number },
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      _sessionId: number,
+      _sessionEpoch: number,
+      topics: FetchRequestTopic[],
+      _forgottenTopicsData: unknown[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetch({ node: connection.instanceId, topics }, callback)
+    }
 
-    fetch({ ...options, node }, (error, response) => {
-      if (error) {
-        const cleared = consumer[kClearPreferredReadReplicas](options.topics, topicIds)
+    callback(null, api)
 
-        if (cleared) {
-          const retryNode = consumer[kGetFetchNode](testMetadata as any, topic, partition, Date.now())
-          fetch({ ...options, node: retryNode }, callback)
-          return
-        }
-      } else {
-        consumer[kUpdatePreferredReadReplicas](testMetadata as any, topicIds, response!)
-      }
-
-      callback(error, response)
-    })
-  }
+    return true
+  })
 
   return consumer
 }
 
 function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
-  return new MessagesStream(consumer, {
+  const stream = new MessagesStream(consumer, {
     topics: [topic],
     mode: MessagesStreamModes.EARLIEST,
     fallbackMode: MessagesStreamFallbackModes.EARLIEST,
@@ -132,6 +132,13 @@ function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffe
     maxBytes: 1024,
     autocommit: false
   })
+
+  mockConnectionPoolGet(stream[kConnections], () => true, null, null, (_original, broker, callback) => {
+    callback(null, { instanceId: (broker as { nodeId: number }).nodeId, send () {} } as any)
+    return true
+  })
+
+  return stream
 }
 
 test('should not fetch while offsets are refreshing after a group rejoin', async () => {

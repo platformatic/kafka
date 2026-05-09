@@ -38,9 +38,9 @@ import {
   type ConsumeOptions,
   type CorruptedMessageHandler,
   type GroupAssignment,
-  type Offsets,
-  partitionKey
+  type Offsets
 } from './types.ts'
+import { partitionKey } from './utils.ts'
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.

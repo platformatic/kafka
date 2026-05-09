@@ -36,10 +36,6 @@ export interface PreferredReadReplica {
   expiresAt: number
 }
 
-export function partitionKey (topic: string, partition: number): string {
-  return `${topic}:${partition}`
-}
-
 export type CorruptedMessageHandler = (
   record: KafkaRecord,
   topic: string,

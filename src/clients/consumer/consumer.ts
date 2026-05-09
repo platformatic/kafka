@@ -120,9 +120,9 @@ import {
   type ListOffsetsOptions,
   type Offsets,
   type OffsetsWithTimestamps,
-  type PreferredReadReplica,
-  partitionKey
+  type PreferredReadReplica
 } from './types.ts'
+import { partitionKey } from './utils.ts'
 
 interface TopicPartition {
   topicId: string

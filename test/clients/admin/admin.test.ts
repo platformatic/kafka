@@ -22,7 +22,9 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetApi, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { type Connection } from '../../../src/network/connection.ts'
+import { Reader } from '../../../src/protocol/reader.ts'
 import {
   AclOperations,
   AclPermissionTypes,
@@ -42,7 +44,6 @@ import {
   type ClientDiagnosticEvent,
   ClientQuotaMatchTypes,
   type ClusterPartitionMetadata,
-  type Connection,
   Consumer,
   createAclsV3,
   createPartitionsV3,
@@ -1738,6 +1739,63 @@ test('describeGroups should handle memberAssignment with single user data byte w
 
   strictEqual(group.state, 'STABLE')
   strictEqual(group.members.size, 1)
+})
+
+test('describeGroups memberAssignment should include user data field when no assignmentUserData configured', async t => {
+  const groupId = `test-group-${randomUUID()}`
+  const testTopic = `test-topic-${randomUUID()}`
+  const admin = createAdmin(t)
+
+  await admin.createTopics({ topics: [testTopic], partitions: 1, replicas: 1 })
+
+  const consumer = new Consumer({
+    clientId: `test-client-${randomUUID()}`,
+    groupId,
+    bootstrapBrokers: kafkaBootstrapServers
+  })
+  t.after(() => consumer.close())
+
+  await consumer.topics.trackAll(testTopic)
+  await consumer.joinGroup()
+
+  const groups = await admin.describeGroups({ groups: [groupId] })
+  strictEqual(groups.get(groupId)!.state, 'STABLE')
+  strictEqual(groups.get(groupId)!.members.size, 1)
+
+  // Use kGetApi so FindCoordinator uses the broker-negotiated version.
+  // Hardcoded v6 causes Confluent Kafka 7.x to close the connection (version mismatch).
+  const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
+    admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+  const coordResponse = await new Promise<{ coordinators: Array<{ host: string, port: number }> }>((resolve, reject) => {
+    admin[kGetApi]('FindCoordinator', (error: Error | null, api: any) => {
+      if (error) { reject(error); return }
+      api(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId], (err: Error | null, res: any) => {
+        err ? reject(err) : resolve(res)
+      })
+    })
+  })
+  const { host, port } = coordResponse.coordinators[0]
+  const coordinatorConn = await new Promise<Connection>((resolve, reject) => {
+    admin[kConnections].get({ host, port }, (error, conn) => (error ? reject(error) : resolve(conn!)))
+  })
+  const rawResponse = await describeGroupsV5.api.async(coordinatorConn, [groupId], false)
+  const rawMember = rawResponse.groups[0]?.members[0]
+  ok(rawMember, 'expected group member to be present')
+
+  // Parse the raw memberAssignment bytes following Java ConsumerProtocolAssignment format:
+  // int16 version | int32-prefixed topics array | int32 user data length
+  const reader = Reader.from(rawMember.memberAssignment)
+  reader.readInt16() // version
+  reader.readArray(r => {
+    r.readString(false) // topic name
+    r.readArray(r => r.readInt32(), false, false) // partitions
+  }, false, false)
+
+  // Without the fix, readInt32() here throws BufferUnderflowException in Java
+  // because the user data length field is missing entirely
+  const userDataLength = reader.readInt32()
+  strictEqual(userDataLength, -1) // null bytes = int32(-1)
 })
 
 test('describeGroups should validate options in strict mode', async t => {

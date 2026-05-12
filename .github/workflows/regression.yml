@@ -18,7 +18,7 @@ concurrency:
 jobs:
   regression:
     name: Regression Suite
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, kafka-regression]
     environment: regression
     timeout-minutes: 60
@@ -32,29 +32,41 @@ jobs:
       REGRESSION_PERFORMANCE_WARMUPS: 2
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Clean stale Docker artifacts
-        run: sudo rm -rf tmp
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Use supported Node.js Version
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24.x
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
-          version: latest
+          version: 10.23.0
 
       - name: Restore cached dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.pnpm-store
           key: node-modules-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Kafka Cluster
+        run: docker compose up --build --force-recreate -d --wait
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run integrity regressions
+        run: pnpm run test:integrity
+
+      - name: Run memory regressions
+        run: pnpm run test:memory
+
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         with:
           role-to-assume: ${{ secrets.REGRESSION_AWS_ROLE_ARN }}
           aws-region: ${{ vars.REGRESSION_AWS_REGION }}
@@ -76,28 +88,24 @@ jobs:
             exit "$head_status"
           fi
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install kinit for Kerberos
+      - name: Clear AWS credentials
         run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
-
-      - name: Start Kafka Cluster
-        run: docker compose up --build --force-recreate -d --wait
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Run integrity regressions
-        run: pnpm run test:integrity
-
-      - name: Run memory regressions
-        run: pnpm run test:memory
+          {
+            printf 'AWS_ACCESS_KEY_ID=\n'
+            printf 'AWS_SECRET_ACCESS_KEY=\n'
+            printf 'AWS_SESSION_TOKEN=\n'
+            printf 'AWS_REGION=\n'
+            printf 'AWS_DEFAULT_REGION=\n'
+          } >> "$GITHUB_ENV"
 
       - name: Compare and update performance baseline
         run: pnpm run regression:baseline:update
+
+      - name: Configure AWS credentials for upload
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: ${{ secrets.REGRESSION_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.REGRESSION_AWS_REGION }}
 
       - name: Upload regression baseline
         run: |
@@ -110,7 +118,7 @@ jobs:
 
       - name: Upload regression artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: regression-artifacts-${{ github.run_id }}
           path: regression/artifacts
@@ -119,7 +127,3 @@ jobs:
       - name: Stop Kafka Cluster
         if: always()
         run: docker compose down --volumes
-
-      - name: Clean Docker artifacts
-        if: always()
-        run: sudo rm -rf tmp

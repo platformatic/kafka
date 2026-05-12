@@ -54,6 +54,7 @@ import {
   ProduceAcks,
   type ProducerOptions,
   ProtocolError,
+  Reader,
   type RecordsBatch,
   sleep,
   syncGroupV5,
@@ -77,6 +78,7 @@ import {
   mockMethod,
   mockUnavailableAPI
 } from '../../helpers.ts'
+import { kGetFetchNode } from '../../../src/symbols.ts'
 
 // This function produces sample messages to a topic for testing the consumer
 async function produceTestMessages ({
@@ -146,6 +148,43 @@ async function fetchFromOffset ({
 
 const broker = parseBroker(kafkaBootstrapServers[0])
 
+function createPreferredReplicaMetadata (
+  topic: string,
+  topicId: string,
+  partitions = 1,
+  preferredReplicaOffline = false
+): ClusterMetadata {
+  return {
+    id: 'cluster-id',
+    controllerId: 0,
+    brokers: new Map([
+      [0, { nodeId: 0, ...broker, rack: 'rack-a' }],
+      [1, { nodeId: 1, host: 'preferred-broker-1', port: 9092, rack: 'rack-b' }],
+      [2, { nodeId: 2, host: 'preferred-broker-2', port: 9092, rack: 'rack-c' }]
+    ]),
+    topics: new Map([
+      [
+        topic,
+        {
+          id: topicId,
+          partitions: Array.from({ length: partitions }, () => {
+            return {
+              leader: 0,
+              leaderEpoch: 0,
+              replicas: [0, 1, 2],
+              isr: [0, 1, 2],
+              offlineReplicas: preferredReplicaOffline ? [1] : []
+            }
+          }),
+          partitionsCount: partitions,
+          lastUpdate: Date.now()
+        }
+      ]
+    ]),
+    lastUpdate: Date.now()
+  }
+}
+
 function mockConsumerGroupCoordinator (
   consumer: Consumer<Buffer, Buffer, Buffer, Buffer>,
   coordinatorId: number,
@@ -209,6 +248,64 @@ function mockConsumerGroupCoordinator (
       return true
     }
   )
+}
+
+async function seedPreferredReadReplicas (
+  t: TestContext,
+  consumer: Consumer,
+  metadata: ClusterMetadata,
+  response: FetchResponse
+): Promise<void> {
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 0, send () {} }
+
+  t.after(() => pool.close())
+
+  mockMetadata(consumer, 1, null, metadata)
+  mockConnectionPoolGet(pool, 1, null, connection)
+  mockMethod(
+    consumer,
+    kGetApi,
+    1,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<typeof fetchV17.api>) => {
+      callback(null, ((
+        _connection,
+        _maxWaitMs,
+        _minBytes,
+        _maxBytes,
+        _isolationLevel,
+        _sessionId,
+        _sessionEpoch,
+        _topics,
+        _forgottenTopicsData,
+        _rackId,
+        callback
+      ) => {
+        callback!(null, response)
+      }) as typeof fetchV17.api)
+    }
+  )
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: response.responses.map(topicResponse => {
+      return {
+        topicId: topicResponse.topicId,
+        partitions: topicResponse.partitions.map(({ partitionIndex }) => {
+          return {
+            partition: partitionIndex,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        })
+      }
+    })
+  })
 }
 
 test('constructor should initialize properly with default options', t => {
@@ -1309,6 +1406,433 @@ test('fetch should support both promise and callback API', async t => {
   })
 })
 
+test('fetch should send clientRack as the fetch rack id', async t => {
+  const clientRack = 'rack-1'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { clientRack })
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  let requestRackId = ''
+
+  t.after(() => pool.close())
+
+  mockMetadata(consumer, 1, null, {
+    brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+    topics: new Map()
+  })
+  mockConnectionPoolGet(pool, 1, null, connection)
+  mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
+  mockAPI(
+    pool,
+    fetchV17.api.key,
+    null,
+    null,
+    (_original, _apiKey, _apiVersion, payload, _responseParser, _requestTags, _responseTags, callback) => {
+      const reader = Reader.from(payload())
+
+      reader.readInt32()
+      reader.readInt32()
+      reader.readInt32()
+      reader.readInt8()
+      reader.readInt32()
+      reader.readInt32()
+      reader.readArray(r => {
+        r.readUUID()
+        r.readArray(r => {
+          r.readInt32()
+          r.readInt32()
+          r.readInt64()
+          r.readInt32()
+          r.readInt64()
+          r.readInt32()
+        })
+      })
+      reader.readArray(r => {
+        r.readUUID()
+        r.readArray(r => r.readInt32(), true, false)
+      })
+      requestRackId = reader.readString()
+
+      callback(null, {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: []
+      })
+
+      return false
+    }
+  )
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(requestRackId, clientRack)
+})
+
+test('fetch should route direct requests to cached preferred read replicas', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = {
+    instanceId: 1,
+    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+      callback(null, {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: []
+      })
+    }
+  }
+  const metadata = createPreferredReplicaMetadata(topic, topicId)
+  let fetchedNode: number | undefined
+
+  t.after(() => pool.close())
+
+  await seedPreferredReadReplicas(t, consumer, metadata, {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          }
+        ]
+      }
+    ]
+  })
+
+  mockMetadata(consumer, 1, null, metadata)
+  mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
+  pool.get = ((broker, callback) => {
+    fetchedNode = (broker as { nodeId?: number }).nodeId
+    callback(null, connection as any)
+  }) as typeof pool.get
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(fetchedNode, 1)
+})
+
+test('fetch should clear preferred read replicas for all partitions in a failed request', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { retries: false })
+  const metadata = createPreferredReplicaMetadata(topic, topicId, 2)
+  const topics = [
+    {
+      topicId,
+      partitions: [
+        {
+          partition: 0,
+          currentLeaderEpoch: 0,
+          fetchOffset: 0n,
+          lastFetchedEpoch: 0,
+          partitionMaxBytes: 1048576
+        },
+        {
+          partition: 1,
+          currentLeaderEpoch: 0,
+          fetchOffset: 0n,
+          lastFetchedEpoch: 0,
+          partitionMaxBytes: 1048576
+        }
+      ]
+    }
+  ]
+  const preferredResponse: FetchResponse = {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          },
+          {
+            partitionIndex: 1,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          }
+        ]
+      }
+    ]
+  }
+  let fetchedNode: number | undefined
+
+  await seedPreferredReadReplicas(t, consumer, metadata, preferredResponse)
+  mockMetadata(consumer, () => true, null, metadata)
+  mockMethod(consumer, kGetApi, () => true, null, fetchV17.api)
+
+  const failingPool = consumer[kCreateConnectionPool]()
+  t.after(() => failingPool.close())
+  failingPool.get = ((broker, callback) => {
+    fetchedNode = (broker as { nodeId?: number }).nodeId
+    callback(new Error('preferred replica unavailable'))
+  }) as typeof failingPool.get
+
+  await rejects(
+    consumer.fetch({
+      connectionPool: failingPool,
+      node: 0,
+      topics: structuredClone(topics)
+    })
+  )
+  strictEqual(fetchedNode, 1)
+  mockMetadata(consumer, 1, null, metadata)
+
+  const successfulPool = consumer[kCreateConnectionPool]()
+  const connection = {
+    instanceId: 1,
+    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+      callback(null, {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: []
+      })
+    }
+  }
+  t.after(() => successfulPool.close())
+  successfulPool.get = ((broker, callback) => {
+    fetchedNode = (broker as { nodeId?: number }).nodeId
+    callback(null, connection as any)
+  }) as typeof successfulPool.get
+
+  await consumer.fetch({
+    connectionPool: successfulPool,
+    node: 0,
+    topics
+  })
+
+  strictEqual(fetchedNode, 0)
+})
+
+test('preferred read replica should expire and fall back to leader', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const metadata = createPreferredReplicaMetadata(topic, topicId)
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+
+  await seedPreferredReadReplicas(t, consumer, metadata, {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, now), 1)
+
+  now += consumer[kOptions].metadataMaxAge! + 1
+  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, now), 0)
+})
+
+test('preferred read replica should clear and refresh metadata when cached node is offline', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const metadata = createPreferredReplicaMetadata(topic, topicId)
+  const offlineMetadata = createPreferredReplicaMetadata(topic, topicId, 1, true)
+  let metadataCleared = false
+  t.mock.method(consumer, 'clearMetadata', () => {
+    metadataCleared = true
+  })
+
+  await seedPreferredReadReplicas(t, consumer, metadata, {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(consumer[kGetFetchNode](offlineMetadata, topic, 0, Date.now()), 0)
+  strictEqual(metadataCleared, true)
+  strictEqual(consumer[kGetFetchNode](metadata, topic, 0, Date.now()), 0)
+})
+
+test('fetch should fall back to requested node when partitions prefer different replicas', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const metadata = createPreferredReplicaMetadata(topic, topicId, 2)
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = {
+    instanceId: 1,
+    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+      callback(null, {
+        throttleTimeMs: 0,
+        errorCode: 0,
+        sessionId: 0,
+        responses: []
+      })
+    }
+  }
+  let fetchedNode: number | undefined
+
+  t.after(() => pool.close())
+
+  await seedPreferredReadReplicas(t, consumer, metadata, {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          },
+          {
+            partitionIndex: 1,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica: 2,
+            records: []
+          }
+        ]
+      }
+    ]
+  })
+
+  mockMetadata(consumer, 1, null, metadata)
+  mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
+  pool.get = ((broker, callback) => {
+    fetchedNode = (broker as { nodeId?: number }).nodeId
+    callback(null, connection as any)
+  }) as typeof pool.get
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          },
+          {
+            partition: 1,
+            currentLeaderEpoch: 0,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  strictEqual(fetchedNode, 0)
+})
+
 test('fetch should fail when consumer is closed', async t => {
   const consumer = createConsumer(t)
 
@@ -1395,7 +1919,8 @@ test('fetch should handle errors from Connection.get', async t => {
   const topic = await createTopic(t, true)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, ...broker }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+    topics: new Map()
   })
 
   const pool = consumer[kCreateConnectionPool]()
@@ -1466,7 +1991,8 @@ test('fetch should handle missing nodes from Base.metadata', async t => {
 
   // Mock metadata to fail
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, ...broker }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+    topics: new Map()
   })
 
   // Attempt to fetch with mocked metadata
@@ -1499,7 +2025,8 @@ test('fetch should handle errors from the API', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, ...broker }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+    topics: new Map()
   })
 
   const pool = consumer[kCreateConnectionPool]()
@@ -1537,7 +2064,8 @@ test('fetch should handle unavailable API errors', async t => {
   const consumer = createConsumer(t)
 
   mockMetadata(consumer, 1, null, {
-    brokers: new Map([[0, { nodeId: 0, ...broker }]])
+    brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+    topics: new Map()
   })
 
   mockUnavailableAPI(consumer, 'Fetch')
@@ -2425,13 +2953,15 @@ test('listCommittedOffsets should handle errors from the API', async t => {
 })
 
 test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EPOCH with consumer group protocol', async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2 })
+  const clientRack = 'rack-2'
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2, clientRack })
   const topic = 'test-topic'
   const groupId = consumer.groupId
   const connection = { instanceId: 1, send () {} }
   const broker = { nodeId: 1, host: 'localhost', port: 9092, rack: null }
   let offsetFetchCalls = 0
   let heartbeatCalls = 0
+  let heartbeatRackId: string | null = null
 
   consumer.memberId = 'test-member'
 
@@ -2491,9 +3021,15 @@ test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EP
     apiKey => apiKey === offsetFetchV9.api.key || apiKey === consumerGroupHeartbeatV1.api.key,
     null,
     null,
-    (_original, apiKey, _apiVersion, _payload, _responseParser, _requestTags, _responseTags, callback) => {
+    (_original, apiKey, _apiVersion, payload, _responseParser, _requestTags, _responseTags, callback) => {
       if (apiKey === consumerGroupHeartbeatV1.api.key) {
         heartbeatCalls++
+        const reader = Reader.from(payload())
+        reader.readString()
+        reader.readString()
+        reader.readInt32()
+        reader.readNullableString()
+        heartbeatRackId = reader.readNullableString()
         callback(null, { memberId: 'test-member', memberEpoch: 2, heartbeatIntervalMs: 0 })
         return true
       }
@@ -2533,6 +3069,7 @@ test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EP
   deepStrictEqual(committed.get(topic), [90n, 91n])
   strictEqual(offsetFetchCalls, 2)
   strictEqual(heartbeatCalls, 1)
+  strictEqual(heartbeatRackId, clientRack)
 })
 
 test('listCommittedOffsets should handle unavailable API errors', async t => {

@@ -173,6 +173,19 @@ When using a schema registry:
 
 For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
+## Rack-aware fetching
+
+When you set the [`clientRack`](./base.md) option, the consumer sends it as the Fetch request `rack_id` and honors any `preferred_read_replica` the broker returns. Subsequent fetches for that partition route to the preferred replica until the lease expires, the metadata changes, or the preferred fetch fails. This applies to both the `MessagesStream` fetch loop and direct `Consumer.fetch` calls when every requested partition resolves to the same target broker. Otherwise, the original `node` is used as a fallback.
+
+The lease length matches the consumer's `metadataMaxAge`. Cached preferred replicas are also dropped when:
+
+- the broker returns `preferred_read_replica = -1` is treated as "no new hint"; an existing cached value is kept until it expires
+- the cached node is no longer in the partition replicas, is offline, or is missing from cluster metadata (also triggers a metadata refresh)
+- the partition is no longer assigned to this consumer after a rebalance
+- a fetch request fails (the cache is cleared for every partition in the failed request, mirroring the Apache Kafka Java client)
+
+For closest-replica fetching to actually pick a same-rack follower, the cluster must support [KIP-392](https://cwiki.apache.org/confluence/display/KAFKA/KIP-392%3A+Allow+consumers+to+fetch+from+closest+replica) (Apache Kafka 2.4+) and have a replica selector configured (for example, `replica.selector.class=org.apache.kafka.common.replica.RackAwareReplicaSelector`). Without this, the broker will not advertise a preferred replica and the consumer will continue to read from partition leaders.
+
 ## Advanced Methods
 
 The consumer manages group participation automatically. Some of the APIs are exposed to allow for advanced uses.

@@ -3,6 +3,7 @@
 export const kInstance = Symbol('plt.kafka.base.instance')
 export const kRefreshOffsetsAndFetch = Symbol('plt.kafka.messagesStream.refreshOffsetsAndFetch')
 export const kAutocommit = Symbol('plt.kafka.messagesStream.autocommit')
+export const kGetFetchNode = Symbol('plt.kafka.consumer.getFetchNode')
 
 export const kTransaction = Symbol('plt.kafka.producer.transactions')
 export const kTransactionPrepare = Symbol('plt.kafka.producer.transactions.prepare')

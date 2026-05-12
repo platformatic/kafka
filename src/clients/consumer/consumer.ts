@@ -10,7 +10,7 @@ import {
   type ConsumerGroupHeartbeatRequest,
   type ConsumerGroupHeartbeatResponse
 } from '../../apis/consumer/consumer-group-heartbeat-v1.ts'
-import { type FetchRequest, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import { type FetchRequest, type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
   type JoinGroupRequest,
@@ -57,7 +57,11 @@ import { INT32_SIZE } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { kAutocommit, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import {
+  kAutocommit,
+  kGetFetchNode,
+  kRefreshOffsetsAndFetch
+} from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
@@ -115,8 +119,10 @@ import {
   type ListCommitsOptions,
   type ListOffsetsOptions,
   type Offsets,
-  type OffsetsWithTimestamps
+  type OffsetsWithTimestamps,
+  type PreferredReadReplica
 } from './types.ts'
+import { partitionKey } from './utils.ts'
 
 interface TopicPartition {
   topicId: string
@@ -159,6 +165,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #useConsumerGroupProtocol: boolean
   #memberEpoch: number
   #groupRemoteAssignor: string | null
+  #clientRack: string
+  #preferredReadReplicas: Map<string, PreferredReadReplica>
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #lagMonitoring: NodeJS.Timeout | null
   #streamContext: unknown
@@ -210,6 +218,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#memberEpoch = 0
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
+    this.#clientRack = this[kOptions].clientRack ?? ''
+    this.#preferredReadReplicas = new Map()
     this.#streamContext = options.streamContext ?? options.context
 
     this.#validateGroupOptions(this[kOptions], groupIdAndOptionsValidator)
@@ -746,6 +756,73 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
+  [kGetFetchNode] (metadata: ClusterMetadata, topic: string, partition: number, now: number): number {
+    const partitionMetadata = metadata.topics.get(topic)!.partitions[partition]
+    const key = partitionKey(topic, partition)
+    const preferredReadReplica = this.#preferredReadReplicas.get(key)
+
+    if (preferredReadReplica === undefined) {
+      return partitionMetadata.leader
+    }
+
+    if (now > preferredReadReplica.expiresAt) {
+      this.#preferredReadReplicas.delete(key)
+      return partitionMetadata.leader
+    }
+
+    if (
+      metadata.brokers.has(preferredReadReplica.node) &&
+      partitionMetadata.replicas.includes(preferredReadReplica.node) &&
+      !partitionMetadata.offlineReplicas.includes(preferredReadReplica.node)
+    ) {
+      return preferredReadReplica.node
+    }
+
+    this.#preferredReadReplicas.delete(key)
+    this.clearMetadata()
+    return partitionMetadata.leader
+  }
+
+  #topicIdsById (metadata: ClusterMetadata): Map<string, string> {
+    const topicIds = new Map<string, string>()
+
+    for (const [topic, { id }] of metadata.topics) {
+      topicIds.set(id, topic)
+    }
+
+    return topicIds
+  }
+
+  #fetchNodeForRequest (
+    metadata: ClusterMetadata,
+    fallbackNode: number,
+    topics: FetchRequestTopic[],
+    topicIds: Map<string, string>,
+    now: number
+  ): number {
+    let requestNode: number | undefined
+
+    for (const topicRequest of topics) {
+      const topic = topicIds.get(topicRequest.topicId)
+
+      if (!topic) {
+        return fallbackNode
+      }
+
+      for (const { partition } of topicRequest.partitions) {
+        const node = this[kGetFetchNode](metadata, topic, partition, now)
+
+        if (requestNode === undefined) {
+          requestNode = node
+        } else if (requestNode !== node) {
+          return fallbackNode
+        }
+      }
+    }
+
+    return requestNode ?? fallbackNode
+  }
+
   #fetch (
     options: FetchOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<FetchResponse>
@@ -761,10 +838,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          const broker = metadata!.brokers.get(options.node)
+          const topicIds = this.#topicIdsById(metadata!)
+          const node = this.#fetchNodeForRequest(metadata!, options.node, options.topics, topicIds, Date.now())
+          const broker = metadata!.brokers.get(node)
 
           if (!broker) {
-            retryCallback(new UserError(`Cannot find broker with node id ${options.node}`))
+            retryCallback(new UserError(`Cannot find broker with node id ${node}`))
             return
           }
 
@@ -772,6 +851,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           pool.get(broker, (error, connection) => {
             if (error) {
+              this.#clearPreferredReadReplicas(options.topics, topicIds)
+
               // When a connection was not available (either interrupted or not available) we
               // reset the leader epoch in the options so that when connection is re-established again we can continue
               for (const topic of options.topics) {
@@ -801,9 +882,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 0,
                 options.topics,
                 [],
-                '',
+                this.#clientRack,
                 (error, result) => {
                   if (error) {
+                    this.#clearPreferredReadReplicas(options.topics, topicIds)
+
                     const genericError = error as GenericError
                     if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
                       this.clearMetadata()
@@ -814,6 +897,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                         }
                       }
                     }
+                  } else {
+                    this.#updatePreferredReadReplicas(metadata!, topicIds, result!)
                   }
 
                   retryCallback(error, result)
@@ -1272,7 +1357,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             memberId,
             this.#memberEpoch,
             this.groupInstanceId,
-            null, // rackId
+            this.#clientRack || null,
             options.rebalanceTimeout,
             this.topics.current,
             null,
@@ -1297,6 +1382,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (fenced) {
             this.#assignments = []
             this.assignments = []
+            this.#syncPreferredReadReplicas()
             this.#memberEpoch = 0
             this.#consumerGroupHeartbeat(options, () => {})
             callback(error)
@@ -1425,6 +1511,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }))
       this.#assignments = newAssignments
       this.assignments = assignments
+      this.#syncPreferredReadReplicas()
       callback(null)
     })
   }
@@ -1464,7 +1551,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             memberId,
             -1, // memberEpoch = -1 signals leave
             this.groupInstanceId,
-            null, // rackId
+            this.#clientRack || null,
             0, // rebalanceTimeout
             [], // subscribedTopicNames
             null, // subscribedTopicRegex
@@ -1480,6 +1567,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.#memberEpoch = -1
         this.#assignments = []
         this.assignments = []
+        this.#syncPreferredReadReplicas()
 
         callback(null)
       }
@@ -1685,6 +1773,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           this.assignments = response!
+          this.#syncPreferredReadReplicas()
 
           this.#cancelHeartbeat()
           this.#heartbeatInterval = setTimeout(() => {
@@ -1778,6 +1867,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.memberId = null
         this.generationId = 0
         this.assignments = null
+        this.#syncPreferredReadReplicas()
 
         callback(null)
       }
@@ -2096,6 +2186,92 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return protocolError
+  }
+
+  #updatePreferredReadReplicas (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse
+  ): void {
+    for (const topicResponse of response.responses) {
+      const topic = topicIds.get(topicResponse.topicId)
+
+      if (!topic) {
+        continue
+      }
+
+      for (const { partitionIndex: partition, preferredReadReplica } of topicResponse.partitions) {
+        if (preferredReadReplica < 0) {
+          continue
+        }
+
+        const partitionMetadata = metadata.topics.get(topic)!.partitions[partition]
+        const key = partitionKey(topic, partition)
+
+        if (
+          metadata.brokers.has(preferredReadReplica) &&
+          partitionMetadata.replicas.includes(preferredReadReplica) &&
+          !partitionMetadata.offlineReplicas.includes(preferredReadReplica)
+        ) {
+          const cachedPreferredReadReplica = this.#preferredReadReplicas.get(key)
+
+          if (cachedPreferredReadReplica?.node !== preferredReadReplica) {
+            this.#preferredReadReplicas.set(key, {
+              node: preferredReadReplica,
+              expiresAt: Date.now() + this[kOptions].metadataMaxAge!
+            })
+          }
+        } else {
+          this.#preferredReadReplicas.delete(key)
+          this.clearMetadata()
+        }
+      }
+    }
+  }
+
+  #clearPreferredReadReplicas (topics: FetchRequestTopic[], topicIds: Map<string, string>): boolean {
+    let cleared = false
+
+    for (const topicRequest of topics) {
+      const topic = topicIds.get(topicRequest.topicId)
+
+      if (!topic) {
+        continue
+      }
+
+      for (const { partition } of topicRequest.partitions) {
+        cleared = this.#preferredReadReplicas.delete(partitionKey(topic, partition)) || cleared
+      }
+    }
+
+    return cleared
+  }
+
+  // Drops cached preferred replicas for partitions that are no longer assigned.
+  // Called whenever `this.assignments` changes so the cache does not retain
+  // entries for partitions the consumer has lost during a rebalance.
+  #syncPreferredReadReplicas (): void {
+    if (this.#preferredReadReplicas.size === 0) {
+      return
+    }
+
+    if (!this.assignments?.length) {
+      this.#preferredReadReplicas.clear()
+      return
+    }
+
+    const assignedKeys = new Set<string>()
+    for (const { topic, partitions } of this.assignments) {
+      for (const partition of partitions) {
+        assignedKeys.add(partitionKey(topic, partition))
+      }
+    }
+
+    for (const key of this.#preferredReadReplicas.keys()) {
+      if (!assignedKeys.has(key)) {
+        this.#preferredReadReplicas.delete(key)
+      }
+    }
   }
 
   #handleError (error: Error | null): Error | null {

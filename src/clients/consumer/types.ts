@@ -31,6 +31,11 @@ export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSub
 export type Offsets = Map<string, bigint[]>
 export type OffsetsWithTimestamps = Map<string, Map<number, { offset: bigint; timestamp: bigint }>>
 
+export interface PreferredReadReplica {
+  node: number
+  expiresAt: number
+}
+
 export type CorruptedMessageHandler = (
   record: KafkaRecord,
   topic: string,

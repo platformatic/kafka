@@ -1,9 +1,145 @@
 import { strictEqual } from 'node:assert'
 import { EventEmitter } from 'node:events'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
-import { kCreateConnectionPool, kPrometheus } from '../../../src/clients/base/base.ts'
-import { MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
+import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
+import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
+import { type Consumer, MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
+import { kGetFetchNode } from '../../../src/symbols.ts'
+import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
+
+const topic = 'test-topic'
+const topicId = 'test-topic-id'
+
+function createMetadata (replicas = [1, 2]) {
+  return {
+    brokers: new Map([
+      [1, { nodeId: 1, host: 'broker-1', port: 9092, rack: 'rack-a' }],
+      [2, { nodeId: 2, host: 'broker-2', port: 9092, rack: 'rack-b' }]
+    ]),
+    topics: new Map([
+      [
+        topic,
+        {
+          id: topicId,
+          partitions: [
+            {
+              leader: 1,
+              leaderEpoch: 0,
+              replicas,
+              isr: replicas,
+              offlineReplicas: []
+            }
+          ],
+          partitionsCount: 1,
+          lastUpdate: Date.now()
+        }
+      ]
+    ])
+  }
+}
+
+function createFetchResponse (preferredReadReplica: number): FetchResponse {
+  return {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            abortedTransactions: [],
+            preferredReadReplica,
+            records: []
+          }
+        ]
+      }
+    ]
+  }
+}
+
+// Wraps a real `Consumer` so `MessagesStream` exercises the production
+// rack-aware routing logic without a live cluster. Only network-facing methods
+// are mocked using the standard test helpers.
+function createConsumerMock (
+  t: TestContext,
+  fetch: (options: any, callback: CallbackWithPromise<FetchResponse>) => void,
+  initialMetadata: ReturnType<typeof createMetadata> = createMetadata()
+): Consumer {
+  const consumer = createConsumer(t, { retryDelay: 0 })
+
+  consumer.assignments = [{ topic, partitions: [0] }]
+  consumer.topics.track(topic)
+  consumer.memberId = 'test-member'
+  consumer.generationId = 1
+
+  let testMetadata = initialMetadata
+  Object.defineProperty(consumer, 'testMetadata', {
+    configurable: true,
+    get: () => testMetadata,
+    set: value => {
+      testMetadata = value
+    }
+  })
+
+  mockMetadata(consumer, () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, testMetadata)
+    return true
+  })
+
+  mockMethod(consumer, 'listOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map([[topic, [0n]]]))
+    return true
+  })
+
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<any>) => {
+    const api = (
+      connection: { instanceId: number },
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      _sessionId: number,
+      _sessionEpoch: number,
+      topics: FetchRequestTopic[],
+      _forgottenTopicsData: unknown[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetch({ node: connection.instanceId, topics }, callback)
+    }
+
+    callback(null, api)
+
+    return true
+  })
+
+  return consumer
+}
+
+function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
+  const stream = new MessagesStream(consumer, {
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+    maxWaitTime: 1000,
+    maxBytes: 1024,
+    autocommit: false
+  })
+
+  mockConnectionPoolGet(stream[kConnections], () => true, null, null, (_original, broker, callback) => {
+    callback(null, { instanceId: (broker as { nodeId: number }).nodeId, send () {} } as any)
+    return true
+  })
+
+  return stream
+}
 
 test('should not fetch while offsets are refreshing after a group rejoin', async () => {
   // Minimal in-memory consumer mock used to isolate MessagesStream scheduling logic
@@ -17,6 +153,9 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
   consumer.memberId = 'test-member'
   consumer.generationId = 1
   consumer.coordinatorId = 1
+  consumer[kGetFetchNode] = (metadata: any, topic: string, partition: number) => {
+    return metadata.topics.get(topic).partitions[partition].leader
+  }
 
   // Test-only counters/flags to observe sequencing.
   consumer.metadataCalls = 0
@@ -115,6 +254,229 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
   await new Promise(resolve => setTimeout(resolve, 70))
 
   strictEqual(consumer.metadataCalls > baselineMetadataCalls, true)
+
+  stream.destroy()
+})
+
+test('should route follow-up fetches to preferred read replicas', async t => {
+  const nodes: number[] = []
+  let resolveSecondFetch!: () => void
+  const secondFetch = new Promise<void>(resolve => {
+    resolveSecondFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      return
+    }
+
+    resolveSecondFetch()
+  })
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await secondFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 2)
+
+  stream.destroy()
+})
+
+test('should keep preferred read replicas when Kafka returns no preference before the lease expires', async t => {
+  const nodes: number[] = []
+  let resolveThirdFetch!: () => void
+  const thirdFetch = new Promise<void>(resolve => {
+    resolveThirdFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      return
+    }
+
+    if (nodes.length === 2) {
+      callback(null, createFetchResponse(-1))
+      return
+    }
+
+    resolveThirdFetch()
+  })
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await thirdFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 2)
+  strictEqual(nodes[2], 2)
+
+  stream.destroy()
+})
+
+test('should fall back to leader when the preferred read replica lease expires', async t => {
+  let now = 1000
+  t.mock.method(Date, 'now', () => now)
+
+  const nodes: number[] = []
+  let resolveSecondFetch!: () => void
+  const secondFetch = new Promise<void>(resolve => {
+    resolveSecondFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      now += consumer[kOptions].metadataMaxAge! + 1
+      return
+    }
+
+    resolveSecondFetch()
+  })
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await secondFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 1)
+
+  stream.destroy()
+})
+
+test('should ignore unknown preferred read replicas', async t => {
+  const nodes: number[] = []
+  let resolveSecondFetch!: () => void
+  const secondFetch = new Promise<void>(resolve => {
+    resolveSecondFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(3))
+      return
+    }
+
+    resolveSecondFetch()
+  })
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await secondFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 1)
+
+  stream.destroy()
+})
+
+test('should ignore non-replica preferred read replicas', async t => {
+  const nodes: number[] = []
+  let resolveSecondFetch!: () => void
+  const secondFetch = new Promise<void>(resolve => {
+    resolveSecondFetch = resolve
+  })
+  const metadata = createMetadata([1])
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      return
+    }
+
+    resolveSecondFetch()
+  }, metadata)
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await secondFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 1)
+
+  stream.destroy()
+})
+
+test('should fall back to leader when cached preferred read replica stops matching metadata', async t => {
+  const nodes: number[] = []
+  const validMetadata = createMetadata([1, 2])
+  const leaderOnlyMetadata = createMetadata([1])
+  let resolveThirdFetch!: () => void
+  const thirdFetch = new Promise<void>(resolve => {
+    resolveThirdFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      ;(consumer as any).testMetadata = leaderOnlyMetadata
+      return
+    }
+
+    if (nodes.length === 2) {
+      callback(null, createFetchResponse(2))
+      return
+    }
+
+    resolveThirdFetch()
+  }, validMetadata)
+
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await thirdFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 1)
+  strictEqual(nodes[2], 1)
+
+  stream.destroy()
+})
+
+test('should fall back to leader when preferred read replica fetch fails', async t => {
+  const nodes: number[] = []
+  let resolveThirdFetch!: () => void
+  const thirdFetch = new Promise<void>(resolve => {
+    resolveThirdFetch = resolve
+  })
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    nodes.push(options.node)
+
+    if (nodes.length === 1) {
+      callback(null, createFetchResponse(2))
+      return
+    }
+
+    if (nodes.length === 2) {
+      callback(new Error('preferred replica unavailable'))
+      return
+    }
+
+    resolveThirdFetch()
+  })
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await thirdFetch
+
+  strictEqual(nodes[0], 1)
+  strictEqual(nodes[1], 2)
+  strictEqual(nodes[2], 1)
 
   stream.destroy()
 })

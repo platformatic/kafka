@@ -19,7 +19,7 @@ import { protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
-import { kAutocommit, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import { kAutocommit, kGetFetchNode, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
@@ -40,6 +40,7 @@ import {
   type GroupAssignment,
   type Offsets
 } from './types.ts'
+import { partitionKey } from './utils.ts'
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
@@ -208,7 +209,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#offsetsToFetch = new Map()
     if (offsets) {
       for (const { topic, partition, offset } of offsets) {
-        this.#offsetsToFetch.set(`${topic}:${partition}`, offset)
+        this.#offsetsToFetch.set(partitionKey(topic, partition), offset)
       }
     }
 
@@ -557,26 +558,27 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         const partitions = assignment.partitions
 
         for (const partition of partitions) {
-          const leader = metadata!.topics.get(topic)!.partitions[partition].leader
+          const targetNode = this.#consumer[kGetFetchNode](metadata!, topic, partition, now)
+          const key = partitionKey(topic, partition)
 
-          if (this.#inflightNodes.has(leader)) {
+          if (this.#inflightNodes.has(targetNode)) {
             continue
           }
 
-          let leaderRequests = requests.get(leader)
-          if (!leaderRequests) {
-            leaderRequests = []
-            requests.set(leader, leaderRequests)
+          let nodeRequests = requests.get(targetNode)
+          if (!nodeRequests) {
+            nodeRequests = []
+            requests.set(targetNode, nodeRequests)
           }
 
           const topicId = metadata!.topics.get(topic)!.id
           topicIds.set(topicId, topic)
 
-          const fetchOffset = this.#offsetsToFetch.get(`${topic}:${partition}`)!
-          requestedOffsets.set(`${topic}:${partition}`, fetchOffset)
+          const fetchOffset = this.#offsetsToFetch.get(key)!
+          requestedOffsets.set(key, fetchOffset)
 
-          const leaderEpoch = this.#partitionsEpochs.get(`${topic}:${partition}`) ?? -1
-          leaderRequests.push({
+          const leaderEpoch = this.#partitionsEpochs.get(key) ?? -1
+          nodeRequests.push({
             topicId,
             partitions: [
               {
@@ -595,12 +597,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
-      for (const [leader, leaderRequests] of requests) {
-        this.#inflightNodes.set(leader, Date.now())
+      for (const [node, nodeRequests] of requests) {
+        this.#inflightNodes.set(node, Date.now())
         this.#consumer.fetch(
-          { ...this.#options, node: leader, topics: leaderRequests, connectionPool: this[kConnections] },
+          { ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] },
           (error, response) => {
-            this.#inflightNodes.delete(leader)
+            this.#inflightNodes.delete(node)
             this.emit('fetch')
 
             if (error) {
@@ -720,6 +722,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       const topic = topicIds.get(topicResponse.topicId)!
 
       for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+        const key = partitionKey(topic, partition)
+
         if (!recordsBatches) {
           continue
         }
@@ -729,17 +733,17 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           const firstOffset = batch.firstOffset
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
-          this.#partitionsEpochs.set(`${topic}:${partition}`, leaderEpoch)
+          this.#partitionsEpochs.set(key, leaderEpoch)
 
           // Track offsets
           if (batch === recordsBatches[recordsBatches.length - 1]) {
             // Track the last read offset
             const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
-            this.#offsetsToFetch.set(`${topic}:${partition}`, lastOffset + 1n)
+            this.#offsetsToFetch.set(key, lastOffset + 1n)
 
             // Autocommit if needed
             if (autocommit) {
-              this.#offsetsToCommit.set(`${topic}:${partition}`, {
+              this.#offsetsToCommit.set(key, {
                 topic,
                 partition,
                 offset: lastOffset + 1n,
@@ -758,7 +762,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             const messageToConsume: MessageToConsume = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
-            if (offset < requestedOffsets.get(`${topic}:${partition}`)!) {
+            if (offset < requestedOffsets.get(key)!) {
               // Thi is a duplicate message, ignore it
               continue
             }
@@ -868,7 +872,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #updateCommittedOffset (topic: string, partition: number, offset: bigint): void {
-    const key = `${topic}:${partition}`
+    const key = partitionKey(topic, partition)
     const previous = this.#offsetsCommitted.get(key)
 
     if (typeof previous === 'undefined' || previous < offset) {
@@ -1082,8 +1086,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       const partitions = assignment.partitions
 
       for (const partition of partitions) {
-        const committed = this.#offsetsToFetch.get(`${topic}:${partition}`)!
-        this.#offsetsCommitted.set(`${topic}:${partition}`, committed)
+        const key = partitionKey(topic, partition)
+        const committed = this.#offsetsToFetch.get(key)!
+        this.#offsetsCommitted.set(key, committed)
       }
     }
 

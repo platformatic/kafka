@@ -17,8 +17,7 @@ concurrency:
 
 jobs:
   regression:
-    name: Regression Suite
-    if: github.ref == 'refs/heads/main'
+    name: Regression Suite    
     runs-on: [self-hosted, kafka-regression]
     environment: regression
     timeout-minutes: 60

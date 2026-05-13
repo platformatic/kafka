@@ -41,7 +41,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
-          version: 10.23.0
+          version: 11.1.0
 
       - name: Restore cached dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830

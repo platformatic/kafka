@@ -27,7 +27,7 @@ jobs:
       REGRESSION_BASELINE_DIR: regression/artifacts/baselines
       REGRESSION_BASELINE_S3_PREFIX: kafka/regression-baselines
       REGRESSION_PERFORMANCE_MESSAGES: 5000
-      REGRESSION_PERFORMANCE_SAMPLES: 5
+      REGRESSION_PERFORMANCE_SAMPLES: 15
       REGRESSION_PERFORMANCE_WARMUPS: 2
     steps:
       - name: Checkout

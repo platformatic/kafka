@@ -52,6 +52,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install kinit for Kerberos
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
+
       - name: Start Kafka Cluster
         run: docker compose up --build --force-recreate -d --wait
 

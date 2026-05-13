@@ -49,13 +49,13 @@ jobs:
           path: ~/.pnpm-store
           key: node-modules-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install kinit for Kerberos
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user awscli
+
+      - name: Install NPM Dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Start Kafka Cluster
         run: docker compose up --build --force-recreate -d --wait

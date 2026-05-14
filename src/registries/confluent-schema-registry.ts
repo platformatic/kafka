@@ -131,8 +131,9 @@ export class ConfluentSchemaRegistry<
         throw new UserError(`Failed to fetch a schema: [HTTP ${response.status}]`, { response: await response.text() })
       }
 
-      const responseBody = await response.json()
-      const { schema, schemaType } = responseBody as { schemaType: string; schema: string }
+      const responseBody = (await response.json()) as { schemaType?: string; schema: string }
+      const { schema } = responseBody
+      const schemaType = responseBody.schemaType ?? 'AVRO'
 
       switch (schemaType) {
         case 'AVRO':

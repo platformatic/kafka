@@ -596,6 +596,71 @@ test('supports Auth-Basic authentication', async t => {
   strictEqual(res.offsets![0].topic, topic)
 })
 
+test('treats /schemas/ids/{id} responses without schemaType as AVRO', async t => {
+  const topic = await createTopic(t, true)
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const originalFetch = fetch
+  const patchedFetch: typeof fetch = async (input, init) => {
+    const response = await originalFetch(input, init)
+    const url = typeof input === 'string' ? input : (input as URL | Request).toString()
+
+    if (!response.ok || !url.endsWith(`/schemas/ids/${schemaId}`)) {
+      return response
+    }
+
+    const body = (await response.json()) as { schema: string; schemaType?: string }
+    delete body.schemaType
+
+    return new Response(JSON.stringify(body), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    })
+  }
+
+  ;(globalThis as { fetch: typeof fetch }).fetch = patchedFetch
+
+  t.after(() => {
+    ;(globalThis as { fetch: typeof fetch }).fetch = originalFetch
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const producer = await createProducer(t, { registry })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } }
+    ]
+  })
+
+  const consumer = createConsumer(t, { registry })
+  const stream = await consumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  deepStrictEqual(messages[0].key, 'key-1')
+  deepStrictEqual(structuredClone(messages[0].value), { id: 1, name: 'Alice' })
+})
+
 test('supports Bearer token authentication', async t => {
   const topic = await createTopic(t, true)
 

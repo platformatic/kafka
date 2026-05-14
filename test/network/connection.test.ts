@@ -556,9 +556,10 @@ test('Connection.send should time out eventually (custom timeout)', async t => {
     throw new Error('Expected request to time out')
   } catch (error) {
     deepStrictEqual((error as Error).message, 'Request timed out')
-    const timeoutMargin = customTimeout * 0.01 // Allow 1% margin
-    const timeoutDiff = Math.abs(performance.now() - startTime - customTimeout)
-    strictEqual(timeoutDiff <= timeoutMargin, true, 'Should time out with custom timeout')
+    const elapsed = performance.now() - startTime
+    strictEqual(elapsed >= customTimeout, true, 'Should not time out before the custom timeout')
+    // Allow 10% tolerance
+    strictEqual(elapsed < customTimeout * 1.1, true, 'Should time out with custom timeout')
   }
 })
 

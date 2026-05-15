@@ -28,57 +28,50 @@ export function createPromisifiedCallback<ReturnType> (): CallbackWithPromise<Re
   return callback
 }
 
-export function runConcurrentCallbacks<ReturnType, K, V> (
+export function runConcurrentCallbacks<R, V> (
   errorMessage: string,
-  collection: Map<K, V>,
-  operation: (item: [K, V], cb: Callback<ReturnType>) => void,
-  callback: Callback<ReturnType[]>
-): void
-export function runConcurrentCallbacks<ReturnType, V> (
-  errorMessage: string,
-  collection: Set<V>,
-  operation: (item: V, cb: Callback<ReturnType>) => void,
-  callback: Callback<ReturnType[]>
-): void
-export function runConcurrentCallbacks<ReturnType, V> (
-  errorMessage: string,
-  collection: V[],
-  operation: (item: V, cb: Callback<ReturnType>) => void,
-  callback: Callback<ReturnType[]>
-): void
-export function runConcurrentCallbacks<ReturnType> (
-  errorMessage: string,
-  collection: Map<any, any> | Set<any> | any[],
-  operation: (item: any, cb: Callback<ReturnType>) => void,
-  callback: Callback<ReturnType[]>
+  collection: Iterable<V>,
+  operation: (item: V, cb: Callback<R>) => void,
+  callback: Callback<R[]>
 ): void {
-  let remaining = Array.isArray(collection) ? collection.length : collection.size
+  let scheduled = 0
+  let allScheduled = false
+  let completed = 0
+  let callbackCalled = false
   let hasErrors = false
-  const errors: Error[] = Array.from(Array(remaining))
-  const results: ReturnType[] = Array.from(Array(remaining))
+  const errors: Error[] = []
+  const results: R[] = []
 
-  let i = 0
-
-  function operationCallback (index: number, e: Error | null, result?: ReturnType): void {
+  function operationCallback (e: Error | null, result?: R): void {
     if (e) {
       hasErrors = true
-      errors[index] = e
+      errors.push(e)
     } else {
-      results[index] = result!
+      results.push(result!)
     }
 
-    remaining--
+    completed++
 
-    if (remaining === 0) {
-      callback(hasErrors ? new MultipleErrors(errorMessage, errors.filter(Boolean) as Error[]) : null, results)
+    if (allScheduled && completed === scheduled) {
+      callbackCalled = true
+      callback(hasErrors ? new MultipleErrors(errorMessage, errors) : null, results)
     }
-  }
-
-  if (remaining === 0) {
-    callback(null, results)
   }
 
   for (const item of collection) {
-    operation(item, operationCallback.bind(null, i++))
+    scheduled++
+    operation(item, operationCallback)
+  }
+
+  allScheduled = true
+
+  if (allScheduled && scheduled === 0) {
+    callback(null, [])
+  }
+
+  // If all operations were synchronous, allScheduled is not set to true in time for the operation
+  // callback to pick it up. In that case, call the callback here.
+  if (completed === scheduled && !callbackCalled) {
+    callback(hasErrors ? new MultipleErrors(errorMessage, errors) : null, results)
   }
 }

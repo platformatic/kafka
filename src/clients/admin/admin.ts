@@ -952,7 +952,7 @@ export class Admin extends Base<AdminOptions> {
 
   #handleNotControllerError<T> (error: Error | null, value: T, callback: Callback<T>): void {
     if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
-      this.metadata({ topics: [] }, (metadataError, metadata) => {
+      this[kMetadata]({ topics: [], forceUpdate: true }, (metadataError, metadata) => {
         /* c8 ignore next 4 - Hard to test */
         if (metadataError) {
           callback(metadataError)
@@ -994,7 +994,7 @@ export class Admin extends Base<AdminOptions> {
           },
           (error, metadata) => {
             if (error) {
-              deduplicateCallback(error)
+              deduplicateCallback(new MultipleErrors('Listing topics failed.', [error]))
               return
             }
 
@@ -1066,7 +1066,7 @@ export class Admin extends Base<AdminOptions> {
           },
           (error, response) => {
             if (error) {
-              deduplicateCallback(error)
+              deduplicateCallback(new MultipleErrors('Creating topics failed.', [error]))
               return
             }
 
@@ -1123,7 +1123,14 @@ export class Admin extends Base<AdminOptions> {
               })
             })
           },
-          deduplicateCallback,
+          (error, response) => {
+            if (error) {
+              callback(new MultipleErrors('Deleting topics failed.', [error]))
+              return
+            }
+
+            deduplicateCallback(null, response)
+          },
           0
         )
       },
@@ -1174,8 +1181,7 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #listGroups (options: ListGroupsOptions, callback: CallbackWithPromise<Map<string, GroupBase>>): void {
-    // Find all the brokers in the cluster
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [], forceUpdate: true }, (error, metadata) => {
       if (error) {
         callback(error)
         return
@@ -1183,6 +1189,7 @@ export class Admin extends Base<AdminOptions> {
 
       runConcurrentCallbacks(
         'Listing groups failed.',
+        // metadata must be defined as error was undefined
         metadata!.brokers,
         ([, broker], concurrentCallback) => {
           this[kGetConnection](broker, (error, connection) => {
@@ -1237,181 +1244,193 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #describeGroups (options: DescribeGroupsOptions, callback: CallbackWithPromise<Map<string, Group>>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
-
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (error, coordinators) => {
-        if (error) {
-          callback(error)
-          return
-        }
-
-        // Group the groups by coordinator
-        const coordinatorsMap: Map<number, string[]> = new Map()
-        for (const { key: group, nodeId: node } of coordinators!) {
-          let coordinator = coordinatorsMap.get(node)
-          if (!coordinator) {
-            coordinator = []
-            coordinatorsMap.set(node, coordinator)
+    this[kPerformWithRetry](
+      'describeGroups',
+      retryCallback => {
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (
+          error,
+          coordinators
+        ) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors('Describing groups failed.', error instanceof MultipleErrors ? error.errors : [error])
+            )
+            return
           }
 
-          coordinator.push(group)
-        }
+          const coordinatorsMap: Map<number, { host: string; port: number; groups: string[] }> = new Map()
+          // coordinators must be defined as error was undefined
+          for (const coordinator of coordinators!) {
+            let coordinatorAggregate = coordinatorsMap.get(coordinator.nodeId)
+            if (!coordinatorAggregate) {
+              coordinatorAggregate = { host: coordinator.host, port: coordinator.port, groups: [] }
+              coordinatorsMap.set(coordinator.nodeId, coordinatorAggregate)
+            }
 
-        runConcurrentCallbacks(
-          'Describing groups failed.',
-          coordinatorsMap,
-          ([node, groups], concurrentCallback) => {
-            this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
-              if (error) {
-                concurrentCallback(error)
-                return
-              }
+            coordinatorAggregate.groups.push(coordinator.key)
+          }
 
+          runConcurrentCallbacks(
+            'Describing groups failed.',
+            coordinatorsMap.values(),
+            (coordinator, concurrentCallback: Callback<DescribeGroupsResponse>) => {
               this[kPerformWithRetry]<DescribeGroupsResponse>(
-                'describeGroups',
+                'describeGroupsOnCoordinator',
                 retryCallback => {
-                  this[kGetApi]<DescribeGroupsRequest, DescribeGroupsResponse>('DescribeGroups', (error, api) => {
+                  this[kGetConnection](coordinator, (error, connection) => {
                     if (error) {
                       retryCallback(error)
                       return
                     }
 
-                    api!(connection!, groups, options.includeAuthorizedOperations ?? false, retryCallback)
+                    this[kGetApi]<DescribeGroupsRequest, DescribeGroupsResponse>('DescribeGroups', (error, api) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      api!(connection!, coordinator.groups, options.includeAuthorizedOperations ?? false, retryCallback)
+                    })
                   })
                 },
                 concurrentCallback,
                 0
               )
-            })
-          },
-          (error, results) => {
-            if (error) {
-              callback(error)
-              return
-            }
+            },
+            (error, results) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
 
-            const groups: Map<string, Group> = new Map()
-            for (const result of results! as DescribeGroupsResponse[]) {
-              for (const raw of result.groups) {
-                const group: Group = {
-                  id: raw.groupId,
-                  state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
-                  protocolType: raw.protocolType,
-                  protocol: raw.protocolData,
-                  members: new Map(),
-                  authorizedOperations: raw.authorizedOperations
-                }
-
-                for (const member of raw.members) {
-                  const reader = Reader.from(member.memberMetadata)
-
-                  let memberMetadata: GroupMember['metadata'] | undefined
-                  let memberAssignments: Map<string, GroupAssignment> | undefined
-
-                  if (reader.remaining > 0) {
-                    memberMetadata = {
-                      version: reader.readInt16(),
-                      topics: reader.readArray(r => r.readString(false), false, false),
-                      metadata: reader.readBytes(false)
-                    }
-
-                    reader.reset(member.memberAssignment)
-                    reader.skip(2) // Ignore Version information
-
-                    memberAssignments = reader.readMap(
-                      r => {
-                        const topic = r.readString(false)
-
-                        return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
-                      },
-                      false,
-                      false
-                    )
-
-                    // Ignore the user data
+              const groups: Map<string, Group> = new Map()
+              for (const result of results! as DescribeGroupsResponse[]) {
+                for (const raw of result.groups) {
+                  const group: Group = {
+                    id: raw.groupId,
+                    state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
+                    protocolType: raw.protocolType,
+                    protocol: raw.protocolData,
+                    members: new Map(),
+                    authorizedOperations: raw.authorizedOperations
                   }
 
-                  group.members.set(member.memberId, {
-                    id: member.memberId,
-                    groupInstanceId: member.groupInstanceId,
-                    clientId: member.clientId,
-                    clientHost: member.clientHost,
-                    metadata: memberMetadata,
-                    assignments: memberAssignments
-                  })
+                  for (const member of raw.members) {
+                    const reader = Reader.from(member.memberMetadata)
+
+                    let memberMetadata: GroupMember['metadata'] | undefined
+                    let memberAssignments: Map<string, GroupAssignment> | undefined
+
+                    if (reader.remaining > 0) {
+                      memberMetadata = {
+                        version: reader.readInt16(),
+                        topics: reader.readArray(r => r.readString(false), false, false),
+                        metadata: reader.readBytes(false)
+                      }
+
+                      reader.reset(member.memberAssignment)
+                      reader.skip(2) // Ignore Version information
+
+                      memberAssignments = reader.readMap(
+                        r => {
+                          const topic = r.readString(false)
+
+                          return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
+                        },
+                        false,
+                        false
+                      )
+
+                      // Ignore the user data
+                    }
+
+                    group.members.set(member.memberId, {
+                      id: member.memberId,
+                      groupInstanceId: member.groupInstanceId,
+                      clientId: member.clientId,
+                      clientHost: member.clientHost,
+                      metadata: memberMetadata,
+                      assignments: memberAssignments
+                    })
+                  }
+
+                  groups.set(group.id, group)
                 }
-
-                groups.set(group.id, group)
               }
-            }
 
-            callback(null, groups)
-          }
-        )
-      })
-    })
+              retryCallback(null, groups)
+            }
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 
   #deleteGroups (options: DeleteGroupsOptions, callback: CallbackWithPromise<void>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
-
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (error, coordinators) => {
-        if (error) {
-          callback(error)
-          return
-        }
-
-        // Group the groups by coordinator
-        const coordinatorsMap: Map<number, string[]> = new Map()
-        for (const { key: group, nodeId: node } of coordinators!) {
-          let coordinator = coordinatorsMap.get(node)
-          if (!coordinator) {
-            coordinator = []
-            coordinatorsMap.set(node, coordinator)
+    this[kPerformWithRetry](
+      'deleteGroups',
+      retryCallback => {
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: options.groups }, (
+          error,
+          coordinators
+        ) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors('Deleting groups failed.', error instanceof MultipleErrors ? error.errors : [error])
+            )
+            return
           }
 
-          coordinator.push(group)
-        }
+          const coordinatorsMap: Map<number, { host: string; port: number; groups: string[] }> = new Map()
+          // coordinators must be defined as error was undefined
+          for (const coordinator of coordinators!) {
+            let coordinatorAggregate = coordinatorsMap.get(coordinator.nodeId)
+            if (!coordinatorAggregate) {
+              coordinatorAggregate = { host: coordinator.host, port: coordinator.port, groups: [] }
+              coordinatorsMap.set(coordinator.nodeId, coordinatorAggregate)
+            }
 
-        runConcurrentCallbacks(
-          'Deleting groups failed.',
-          coordinatorsMap,
-          ([node, groups], concurrentCallback) => {
-            this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
-              if (error) {
-                concurrentCallback(error)
-                return
-              }
+            coordinatorAggregate.groups.push(coordinator.key)
+          }
 
-              this[kPerformWithRetry]<DeleteGroupsResponse>(
-                'deleteGroups',
+          runConcurrentCallbacks(
+            'Deleting groups failed.',
+            coordinatorsMap.values(),
+            (coordinator, concurrentCallback: Callback<DeleteGroupsResponse>) => {
+              this[kPerformWithRetry](
+                'deleteGroupsOnCoordinator',
                 retryCallback => {
-                  this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (error, api) => {
+                  this[kGetConnection](coordinator, (error, connection) => {
                     if (error) {
                       retryCallback(error)
                       return
                     }
 
-                    api!(connection!, groups, retryCallback)
+                    this[kGetApi]<DeleteGroupsRequest, DeleteGroupsResponse>('DeleteGroups', (error, api) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      api!(connection!, coordinator.groups, retryCallback)
+                    })
                   })
                 },
                 concurrentCallback,
                 0
               )
-            })
-          },
-          error => callback(error)
-        )
-      })
-    })
+            },
+            retryCallback as Callback<unknown> as Callback<DeleteGroupsResponse[]>
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 
   #removeMembersFromConsumerGroup (
@@ -1419,12 +1438,14 @@ export class Admin extends Base<AdminOptions> {
     callback: CallbackWithPromise<void>
   ): void {
     if (!options.members || options.members.length === 0) {
+      // Remove all members if none are specified
       this.#describeGroups({ groups: [options.groupId] }, (error, groupsMap) => {
         if (error) {
           callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
           return
         }
 
+        // groupsMap must be defined as error was undefined
         const group = groupsMap!.get(options.groupId)
         /* c8 ignore next 4 - Hard to test */
         if (!group) {
@@ -1447,81 +1468,70 @@ export class Admin extends Base<AdminOptions> {
       return
     }
 
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error, undefined)
-        return
-      }
+    this[kPerformWithRetry]<void>(
+      'removeMembersFromConsumerGroup',
+      retryCallback => {
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+          error,
+          coordinators
+        ) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors(
+                'Removing members from consumer group failed.',
+                error instanceof MultipleErrors ? error.errors : [error]
+              )
+            )
+            return
+          }
 
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
-        error,
-        coordinators
-      ) => {
+          const coordinator = coordinators!.find(c => c.key === options.groupId)
+          /* c8 ignore next 8 - Hard to test */
+          if (!coordinator) {
+            retryCallback(new Error('Group coordinator not found'))
+            return
+          }
+
+          this[kGetConnection](coordinator, (error, connection) => {
+            if (error) {
+              retryCallback(error)
+              return
+            }
+
+            this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              /* c8 ignore next 5 - Hard to test */
+              const members: LeaveGroupRequestMember[] = options.members!.map(member => ({
+                memberId: typeof member === 'string' ? member : member.memberId,
+                groupInstanceId: null,
+                reason: typeof member === 'string' ? 'Not specified' : member.reason
+              }))
+
+              api!(
+                connection!,
+                options.groupId,
+                members,
+                retryCallback as Callback<unknown> as Callback<LeaveGroupResponse>
+              )
+            })
+          })
+        })
+      },
+      error => {
         if (error) {
           callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
           return
         }
 
-        const coordinator = coordinators!.find(c => c.key === options.groupId)
-        /* c8 ignore next 8 - Hard to test */
-        if (!coordinator) {
-          callback(
-            new MultipleErrors('Removing members from consumer group failed.', [
-              new Error(`No coordinator found for group ${options.groupId}`)
-            ])
-          )
-          return
-        }
-
-        const broker = metadata!.brokers.get(coordinator.nodeId)
-        /* c8 ignore next 8 - Hard to test */
-        if (!broker) {
-          callback(
-            new MultipleErrors('Removing members from consumer group failed.', [
-              new Error(`Broker ${coordinator.nodeId} not found`)
-            ])
-          )
-          return
-        }
-
-        this[kGetConnection](broker, (error, connection) => {
-          if (error) {
-            callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
-            return
-          }
-
-          this[kPerformWithRetry]<LeaveGroupResponse>(
-            'removeMembersFromConsumerGroup',
-            retryCallback => {
-              this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
-                if (error) {
-                  retryCallback(error)
-                  return
-                }
-
-                /* c8 ignore next 5 - Hard to test */
-                const members: LeaveGroupRequestMember[] = options.members!.map(member => ({
-                  memberId: typeof member === 'string' ? member : member.memberId,
-                  groupInstanceId: null,
-                  reason: typeof member === 'string' ? 'Not specified' : member.reason
-                }))
-
-                api!(connection!, options.groupId, members, retryCallback)
-              })
-            },
-            error => {
-              if (error) {
-                callback(new MultipleErrors('Removing members from consumer group failed.', [error]))
-                return
-              }
-
-              callback(null)
-            },
-            0
-          )
-        })
-      })
-    })
+        callback(null)
+      },
+      0
+    )
   }
 
   #findCoordinator (options: FindCoordinatorOptions, callback: CallbackWithPromise<FindCoordinatorResult[]>): void {
@@ -1546,7 +1556,7 @@ export class Admin extends Base<AdminOptions> {
       },
       (error, response) => {
         if (error) {
-          callback(error)
+          callback(new MultipleErrors('Finding coordinator failed.', [error]))
           return
         }
 
@@ -1638,7 +1648,7 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #describeLogDirs (options: DescribeLogDirsOptions, callback: CallbackWithPromise<BrokerLogDirDescription[]>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [], forceUpdate: true }, (error, metadata) => {
       /* c8 ignore next 4 - Hard to test */
       if (error) {
         callback(error)
@@ -1647,17 +1657,18 @@ export class Admin extends Base<AdminOptions> {
 
       runConcurrentCallbacks(
         'Describing log dirs failed.',
+        // metadata must be defined as error was undefined
         metadata!.brokers,
         ([id, broker], concurrentCallback) => {
-          this[kGetConnection](broker, (error, connection) => {
-            if (error) {
-              concurrentCallback(error)
-              return
-            }
+          this[kPerformWithRetry]<DescribeLogDirsResponse>(
+            'describeLogDirs',
+            retryCallback => {
+              this[kGetConnection](broker, (error, connection) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
 
-            this[kPerformWithRetry]<DescribeLogDirsResponse>(
-              'describeLogDirs',
-              retryCallback => {
                 this[kGetApi]<DescribeLogDirsRequest, DescribeLogDirsResponse>('DescribeLogDirs', (error, api) => {
                   if (error) {
                     retryCallback(error)
@@ -1666,27 +1677,27 @@ export class Admin extends Base<AdminOptions> {
 
                   api!(connection!, options.topics, retryCallback)
                 })
-              },
-              (error, response) => {
-                if (error) {
-                  concurrentCallback(error)
-                  return
-                }
+              })
+            },
+            (error, response) => {
+              if (error) {
+                concurrentCallback(error)
+                return
+              }
 
-                concurrentCallback(null, {
-                  broker: id,
-                  throttleTimeMs: response!.throttleTimeMs,
-                  results: response!.results.map(result => ({
-                    logDir: result.logDir,
-                    topics: result.topics,
-                    totalBytes: result.totalBytes,
-                    usableBytes: result.usableBytes
-                  }))
-                })
-              },
-              0
-            )
-          })
+              concurrentCallback(null, {
+                broker: id,
+                throttleTimeMs: response!.throttleTimeMs,
+                results: response!.results.map(result => ({
+                  logDir: result.logDir,
+                  topics: result.topics,
+                  totalBytes: result.totalBytes,
+                  usableBytes: result.usableBytes
+                }))
+              })
+            },
+            0
+          )
         },
         callback
       )
@@ -1697,269 +1708,265 @@ export class Admin extends Base<AdminOptions> {
     options: ListConsumerGroupOffsetsOptions,
     callback: CallbackWithPromise<ListConsumerGroupOffsetsGroup[]>
   ): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    this[kPerformWithRetry](
+      'listConsumerGroupOffsets',
+      retryCallback => {
+        /* c8 ignore next - Hard to test */
+        const groupIds = options.groups.map(group => (typeof group === 'string' ? group : group.groupId))
 
-      /* c8 ignore next - Hard to test */
-      const groupIds = options.groups.map(group => (typeof group === 'string' ? group : group.groupId))
-
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: groupIds }, (error, coordinators) => {
-        if (error) {
-          callback(new MultipleErrors('Listing consumer group offsets failed.', [error]))
-          return
-        }
-
-        const coordinatorsMap: Map<number, OffsetFetchRequestGroup[]> = new Map()
-        for (const { key: groupId, nodeId: node } of coordinators!) {
-          const groupRequest: OffsetFetchRequestGroup = {
-            groupId,
-            memberId: null,
-            memberEpoch: -1
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: groupIds }, (error, coordinators) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors(
+                'Listing consumer group offsets failed.',
+                error instanceof MultipleErrors ? error.errors : [error]
+              )
+            )
+            return
           }
 
-          for (const group of options.groups) {
-            if (typeof group !== 'string' && group.groupId === groupId && !!group.topics && group.topics.length > 0) {
-              groupRequest.topics = group.topics
-              break
+          const coordinatorsMap: Map<number, { coordinator: Broker; groupRequests: OffsetFetchRequestGroup[] }> =
+            new Map()
+          for (const coordinator of coordinators!) {
+            const groupRequest: OffsetFetchRequestGroup = {
+              groupId: coordinator.key,
+              memberId: null,
+              memberEpoch: -1
             }
-          }
 
-          let coordinator = coordinatorsMap.get(node)
-          if (!coordinator) {
-            coordinator = []
-            coordinatorsMap.set(node, coordinator)
-          }
-
-          coordinator.push(groupRequest)
-        }
-
-        runConcurrentCallbacks(
-          'Listing consumer group offsets failed.',
-          coordinatorsMap,
-          ([node, groups], concurrentCallback) => {
-            this[kGetConnection](metadata!.brokers.get(node)!, (error, connection) => {
-              if (error) {
-                concurrentCallback(error)
-                return
+            for (const group of options.groups) {
+              if (
+                typeof group !== 'string' &&
+                group.groupId === coordinator.key &&
+                !!group.topics &&
+                group.topics.length > 0
+              ) {
+                groupRequest.topics = group.topics
+                break
               }
+            }
 
+            let offsetFetchRequestGroups = coordinatorsMap.get(coordinator.nodeId)
+            if (!offsetFetchRequestGroups) {
+              offsetFetchRequestGroups = { coordinator, groupRequests: [] }
+              coordinatorsMap.set(coordinator.nodeId, offsetFetchRequestGroups)
+            }
+
+            offsetFetchRequestGroups.groupRequests.push(groupRequest)
+          }
+
+          runConcurrentCallbacks(
+            'Listing consumer group offsets failed.',
+            coordinatorsMap.values(),
+            ({ coordinator, groupRequests }, concurrentCallback: Callback<OffsetFetchResponse>) => {
               this[kPerformWithRetry]<OffsetFetchResponse>(
                 'offsetFetch',
                 retryCallback => {
-                  this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (error, api) => {
+                  this[kGetConnection](coordinator, (error, connection) => {
                     if (error) {
                       retryCallback(error)
                       return
                     }
 
-                    /* c8 ignore next - Hard to test */
-                    api!(connection!, groups, options.requireStable ?? false, retryCallback)
+                    this[kGetApi]<OffsetFetchRequest, OffsetFetchResponse>('OffsetFetch', (error, api) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      /* c8 ignore next - Hard to test */
+                      api!(connection!, groupRequests, options.requireStable ?? false, retryCallback)
+                    })
                   })
                 },
                 concurrentCallback,
                 0
               )
-            })
-          },
-          (error, responses) => {
-            if (error) {
-              callback(error)
-              return
-            }
+            },
+            (error, responses) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
 
-            callback(
-              null,
-              (responses as OffsetFetchResponse[]).flatMap(r =>
-                r.groups.map(group => ({
-                  groupId: group.groupId,
-                  topics: group.topics.map(topic => ({
-                    name: topic.name,
-                    partitions: topic.partitions.map(p => ({
-                      partitionIndex: p.partitionIndex,
-                      committedOffset: p.committedOffset,
-                      committedLeaderEpoch: p.committedLeaderEpoch,
-                      metadata: p.metadata
+              retryCallback(
+                null,
+                // responses must be defined as error was undefined
+                responses!.flatMap(r =>
+                  r.groups.map(group => ({
+                    groupId: group.groupId,
+                    topics: group.topics.map(topic => ({
+                      name: topic.name,
+                      partitions: topic.partitions.map(p => ({
+                        partitionIndex: p.partitionIndex,
+                        committedOffset: p.committedOffset,
+                        committedLeaderEpoch: p.committedLeaderEpoch,
+                        metadata: p.metadata
+                      }))
                     }))
-                  }))
-                })))
-            )
-          }
-        )
-      })
-    })
+                  })))
+              )
+            }
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 
   #alterConsumerGroupOffsets (options: AlterConsumerGroupOffsetsOptions, callback: CallbackWithPromise<void>): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error, undefined)
-        return
-      }
+    this[kPerformWithRetry](
+      'alterConsumerGroupOffsets',
+      retryCallback => {
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+          error,
+          coordinators
+        ) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors(
+                'Altering consumer group offsets failed.',
+                error instanceof MultipleErrors ? error.errors : [error]
+              )
+            )
+            return
+          }
 
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
-        error,
-        coordinators
-      ) => {
+          const coordinator = coordinators!.find(c => c.key === options.groupId)
+          /* c8 ignore next 9 - Hard to test */
+          if (!coordinator) {
+            retryCallback(new Error('Group coordinator not found'))
+            return
+          }
+
+          this[kGetConnection](coordinator, (error, connection) => {
+            if (error) {
+              retryCallback(error)
+              return
+            }
+
+            this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (error, api) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              const topics: OffsetCommitRequestTopic[] = []
+              for (const topic of options.topics) {
+                const partitions = topic.partitionOffsets.map(p => ({
+                  partitionIndex: p.partition,
+                  committedOffset: p.offset,
+                  committedLeaderEpoch: -1,
+                  committedMetadata: null
+                }))
+                topics.push({ name: topic.name, partitions })
+              }
+
+              api!(
+                connection!,
+                options.groupId,
+                -1,
+                '',
+                null,
+                topics,
+                retryCallback as Callback<unknown> as Callback<OffsetCommitResponse>
+              )
+            })
+          })
+        })
+      },
+      error => {
         if (error) {
           callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
           return
         }
 
-        const coordinator = coordinators!.find(c => c.key === options.groupId)
-        /* c8 ignore next 9 - Hard to test */
-        if (!coordinator) {
-          callback(
-            new MultipleErrors('Altering consumer group offsets failed.', [
-              new Error(`No coordinator found for group ${options.groupId}`)
-            ])
-          )
-          return
-        }
-
-        const broker = metadata!.brokers.get(coordinator.nodeId)
-        /* c8 ignore next 9 - Hard to test */
-        if (!broker) {
-          callback(
-            new MultipleErrors('Altering consumer group offsets failed.', [
-              new Error(`Broker ${coordinator.nodeId} not found`)
-            ])
-          )
-          return
-        }
-
-        this[kGetConnection](broker, (error, connection) => {
-          if (error) {
-            callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
-            return
-          }
-
-          this[kPerformWithRetry]<OffsetCommitResponse>(
-            'alterConsumerGroupOffsets',
-            retryCallback => {
-              this[kGetApi]<OffsetCommitRequest, OffsetCommitResponse>('OffsetCommit', (error, api) => {
-                if (error) {
-                  retryCallback(error)
-                  return
-                }
-
-                const topics: OffsetCommitRequestTopic[] = []
-                for (const topic of options.topics) {
-                  const partitions = topic.partitionOffsets.map(p => ({
-                    partitionIndex: p.partition,
-                    committedOffset: p.offset,
-                    committedLeaderEpoch: -1,
-                    committedMetadata: null
-                  }))
-                  topics.push({ name: topic.name, partitions })
-                }
-
-                api!(connection!, options.groupId, -1, '', null, topics, retryCallback)
-              })
-            },
-            error => {
-              if (error) {
-                callback(new MultipleErrors('Altering consumer group offsets failed.', [error]))
-                return
-              }
-
-              callback(null)
-            },
-            0
-          )
-        })
-      })
-    })
+        callback(null)
+      },
+      0
+    )
   }
 
   #deleteConsumerGroupOffsets (
     options: DeleteConsumerGroupOffsetsOptions,
     callback: CallbackWithPromise<{ name: string; partitionIndexes: number[] }[]>
   ): void {
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    this[kPerformWithRetry]<{ name: string; partitionIndexes: number[] }[]>(
+      'deleteConsumerGroupOffsets',
+      retryCallback => {
+        this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
+          error,
+          coordinators
+        ) => {
+          if (error) {
+            // FindCoordinator already retried some times so no retry again
+            callback(
+              new MultipleErrors(
+                'Deleting consumer group offsets failed.',
+                error instanceof MultipleErrors ? error.errors : [error]
+              )
+            )
+            return
+          }
 
-      this.#findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys: [options.groupId] }, (
-        error,
-        coordinators
-      ) => {
+          const coordinator = coordinators!.find(c => c.key === options.groupId)
+          /* c8 ignore next 9 - Hard to test */
+          if (!coordinator) {
+            retryCallback(new Error('Group coordinator not found'))
+            return
+          }
+
+          this[kGetConnection](coordinator, (error, connection) => {
+            if (error) {
+              retryCallback(error)
+              return
+            }
+
+            this[kGetApi]<OffsetDeleteRequest, OffsetDeleteResponse>('OffsetDelete', (error, api) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              api!(
+                connection!,
+                options.groupId,
+                options.topics.map(t => ({
+                  name: t.name,
+                  partitions: t.partitionIndexes.map(p => ({ partitionIndex: p }))
+                })),
+                (error, response) => {
+                  if (error) {
+                    retryCallback(error)
+                    return
+                  }
+
+                  retryCallback(
+                    null,
+                    (response as OffsetDeleteResponse).topics.map(topic => ({
+                      name: topic.name,
+                      partitionIndexes: topic.partitions.map(p => p.partitionIndex)
+                    }))
+                  )
+                }
+              )
+            })
+          })
+        })
+      },
+      (error, results) => {
         if (error) {
           callback(new MultipleErrors('Deleting consumer group offsets failed.', [error]))
           return
         }
 
-        const coordinator = coordinators!.find(c => c.key === options.groupId)
-        /* c8 ignore next 9 - Hard to test */
-        if (!coordinator) {
-          callback(
-            new MultipleErrors('Deleting consumer group offsets failed.', [
-              new Error(`No coordinator found for group ${options.groupId}`)
-            ])
-          )
-          return
-        }
-
-        const broker = metadata!.brokers.get(coordinator.nodeId)
-        /* c8 ignore next 9 - Hard to test */
-        if (!broker) {
-          callback(
-            new MultipleErrors('Deleting consumer group offsets failed.', [
-              new Error(`Broker ${coordinator.nodeId} not found`)
-            ])
-          )
-          return
-        }
-
-        this[kGetConnection](broker, (error, connection) => {
-          if (error) {
-            callback(new MultipleErrors('Deleting consumer group offsets failed.', [error]))
-            return
-          }
-
-          this[kPerformWithRetry]<OffsetDeleteResponse>(
-            'deleteOffset',
-            retryCallback => {
-              this[kGetApi]<OffsetDeleteRequest, OffsetDeleteResponse>('OffsetDelete', (error, api) => {
-                if (error) {
-                  retryCallback(error)
-                  return
-                }
-
-                api!(
-                  connection!,
-                  options.groupId,
-                  options.topics.map(t => ({
-                    name: t.name,
-                    partitions: t.partitionIndexes.map(p => ({ partitionIndex: p }))
-                  })),
-                  retryCallback
-                )
-              })
-            },
-            (error, response) => {
-              if (error) {
-                callback(new MultipleErrors('Deleting consumer group offsets failed.', [error]))
-                return
-              }
-
-              callback(
-                null,
-                (response as OffsetDeleteResponse).topics.map(topic => ({
-                  name: topic.name,
-                  partitionIndexes: topic.partitions.map(p => p.partitionIndex)
-                }))
-              )
-            },
-            0
-          )
-        })
-      })
-    })
+        callback(null, results!)
+      },
+      0
+    )
   }
 
   #getConfigRequestsDistributedToBrokers<T extends { resourceType: ConfigResourceTypeValue; resourceName: string }> (
@@ -1991,7 +1998,7 @@ export class Admin extends Base<AdminOptions> {
       return
     }
 
-    this[kMetadata]({ topics: [] }, (error, metadata) => {
+    this[kMetadata]({ topics: [], forceUpdate: true }, (error, metadata) => {
       /* c8 ignore next 4 - Hard to test */
       if (error) {
         callback(error)
@@ -2013,18 +2020,11 @@ export class Admin extends Base<AdminOptions> {
     runConcurrentCallbacks(
       'Describing configs failed.',
       this.#getConfigRequestsDistributedToBrokers(options.resources),
-      ([brokerId, resources], concurrentCallback) => {
-        this.#describeConfigsOnBroker({ ...options, resources }, brokerId, (error, response) => {
-          if (error) {
-            concurrentCallback(error)
-            return
-          }
-
-          concurrentCallback(null, response)
-        })
+      ([brokerId, resources], concurrentCallback: Callback<ConfigDescription[]>) => {
+        this.#describeConfigsOnBroker({ ...options, resources }, brokerId, concurrentCallback)
       },
       (error, results) => {
-        callback(error, (results as ConfigDescription[])?.flat())
+        callback(error, results?.flat())
       }
     )
   }
@@ -2302,205 +2302,229 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #deleteRecords (options: DeleteRecordsOptions, callback: CallbackWithPromise<DeletedRecordsTopic[]>): void {
-    this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
-
-      const requestsByLeader = new Map<number, Map<string, DeleteRecordsRequestTopics>>()
-
-      for (const topic of options.topics) {
-        for (const partition of topic.partitions) {
-          const { leader } = metadata!.topics.get(topic.name)!.partitions[partition.partition]
-          let leaderRequests = requestsByLeader.get(leader)
-          if (!leaderRequests) {
-            leaderRequests = new Map()
-            requestsByLeader.set(leader, leaderRequests)
-          }
-
-          let topicRequest = leaderRequests.get(topic.name)
-          if (!topicRequest) {
-            topicRequest = { name: topic.name, partitions: [] }
-            leaderRequests.set(topic.name, topicRequest)
-          }
-
-          topicRequest.partitions.push({
-            partitionIndex: partition.partition,
-            offset: partition.offset
-          })
-        }
-      }
-
-      const requests = new Map<number, DeleteRecordsRequestTopics[]>()
-      for (const [leader, topics] of requestsByLeader) {
-        requests.set(leader, Array.from(topics.values()))
-      }
-
-      runConcurrentCallbacks(
-        'Deleting records failed.',
-        requests,
-        ([leader, requests], concurrentCallback) => {
-          this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
-            if (error) {
-              concurrentCallback(error)
-              return
-            }
-
-            this[kPerformWithRetry](
-              'deleteRecords',
-              retryCallback => {
-                this[kGetApi]<DeleteRecordsRequest, DeleteRecordsResponse>('DeleteRecords', (error, api) => {
-                  if (error) {
-                    retryCallback(error)
-                    return
-                  }
-
-                  api!(connection!, Array.from(requests.values()), this[kOptions].timeout!, retryCallback)
-                })
-              },
-              concurrentCallback,
-              0
-            )
-          })
-        },
-        (error, responses) => {
+    this[kPerformWithRetry](
+      'deleteRecords',
+      retryCallback => {
+        this[kMetadata]({ topics: options.topics.map(topic => topic.name), forceUpdate: true }, (error, metadata) => {
           if (error) {
+            // Metadata request already retried some times so no retry again
             callback(error)
             return
           }
 
-          const deletedRecordsByTopic = new Map<string, DeletedRecordsTopic>()
+          const requests = new Map<Broker, DeleteRecordsRequestTopics[]>()
 
-          for (const response of responses as DeleteRecordsResponse[]) {
-            for (const topic of response.topics) {
-              let topicDeletedRecords = deletedRecordsByTopic.get(topic.name)
-              if (!topicDeletedRecords) {
-                topicDeletedRecords = { name: topic.name, partitions: [] }
-                deletedRecordsByTopic.set(topic.name, topicDeletedRecords)
+          for (const topic of options.topics) {
+            for (const partition of topic.partitions) {
+              // metadata!.topics.get(topic.name) must be defined as the metadata request was successful
+              const topicData = metadata!.topics.get(topic.name)!
+
+              const targetPartitionData = topicData.partitions[partition.partition]
+              /* c8 ignore next 4 - Hard to test */
+              if (!targetPartitionData) {
+                retryCallback(new UserError('Unknown partition.'))
+                return
               }
 
-              for (const partition of topic.partitions) {
-                topicDeletedRecords.partitions.push({
-                  partition: partition.partitionIndex,
-                  lowWatermark: partition.lowWatermark
-                })
+              const broker = metadata!.brokers.get(targetPartitionData.leader)!
+
+              let leaderRequests = requests.get(broker)
+              if (!leaderRequests) {
+                leaderRequests = []
+                requests.set(broker, leaderRequests)
               }
+
+              let topicRequest = leaderRequests.find(tr => tr.name === topic.name)
+              if (!topicRequest) {
+                topicRequest = { name: topic.name, partitions: [] }
+                leaderRequests.push(topicRequest)
+              }
+
+              topicRequest.partitions.push({
+                partitionIndex: partition.partition,
+                offset: partition.offset
+              })
             }
           }
 
-          callback(null, Array.from(deletedRecordsByTopic.values()))
-        }
-      )
-    })
+          runConcurrentCallbacks(
+            'Deleting records failed.',
+            requests,
+            ([leader, requests], concurrentCallback: Callback<DeleteRecordsResponse>) => {
+              this[kPerformWithRetry](
+                'deleteRecordsOnLeader',
+                retryCallback => {
+                  this[kGetConnection](leader, (error, connection) => {
+                    if (error) {
+                      retryCallback(error)
+                      return
+                    }
+                    this[kGetApi]<DeleteRecordsRequest, DeleteRecordsResponse>('DeleteRecords', (error, api) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      api!(connection!, requests, this[kOptions].timeout!, retryCallback)
+                    })
+                  })
+                },
+                concurrentCallback,
+                0
+              )
+            },
+            (error, responses) => {
+              if (error) {
+                // Do not retry failed deletion requests
+                callback(error)
+                return
+              }
+
+              const deletedRecordsByTopic = new Map<string, DeletedRecordsTopic>()
+
+              for (const response of responses as DeleteRecordsResponse[]) {
+                for (const topic of response.topics) {
+                  let topicDeletedRecords = deletedRecordsByTopic.get(topic.name)
+                  if (!topicDeletedRecords) {
+                    topicDeletedRecords = { name: topic.name, partitions: [] }
+                    deletedRecordsByTopic.set(topic.name, topicDeletedRecords)
+                  }
+
+                  for (const partition of topic.partitions) {
+                    topicDeletedRecords.partitions.push({
+                      partition: partition.partitionIndex,
+                      lowWatermark: partition.lowWatermark
+                    })
+                  }
+                }
+              }
+
+              retryCallback(null, Array.from(deletedRecordsByTopic.values()))
+            }
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 
   #listOffsets (options: AdminListOffsetsOptions, callback: CallbackWithPromise<ListedOffsetsTopic[]>): void {
-    this[kMetadata]({ topics: options.topics.map(topic => topic.name) }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
-
-      // metadata must be defined at this point
-      const { topics, brokers } = metadata!
-
-      const requests = new Map<number, ListOffsetsRequestTopic[]>()
-
-      for (const topic of options.topics) {
-        for (const partition of topic.partitions) {
-          // topics.get(topic.name) must be defined as the metadata request was successful
-          const topicData = topics.get(topic.name)!
-
-          const targetPartitionData = topicData.partitions[partition.partitionIndex]
-          /* c8 ignore next 4 - Hard to test */
-          if (!targetPartitionData) {
-            callback(new UserError(`Unknown partition ${partition.partitionIndex} for topic ${topic.name}.`))
-            return
-          }
-
-          let leaderRequests = requests.get(targetPartitionData.leader)
-          if (!leaderRequests) {
-            leaderRequests = []
-            requests.set(targetPartitionData.leader, leaderRequests)
-          }
-
-          let topicRequest = leaderRequests.find(t => t.name === topic.name)
-          if (!topicRequest) {
-            topicRequest = { name: topic.name, partitions: [] }
-            leaderRequests.push(topicRequest)
-          }
-
-          topicRequest.partitions.push({
-            partitionIndex: partition.partitionIndex,
-            currentLeaderEpoch: targetPartitionData.leaderEpoch,
-            /* c8 ignore next - Hard to test */
-            timestamp: partition.timestamp ?? -1n
-          })
-        }
-      }
-
-      runConcurrentCallbacks(
-        'Listing offsets failed.',
-        requests,
-        ([leader, requests], concurrentCallback) => {
-          this[kGetConnection](brokers.get(leader)!, (error, connection) => {
-            if (error) {
-              concurrentCallback(error)
-              return
-            }
-            this[kPerformWithRetry](
-              'listOffsets',
-              retryCallback => {
-                this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
-                  if (error) {
-                    retryCallback(error)
-                    return
-                  }
-
-                  api!(
-                    connection!,
-                    -1,
-                    options.isolationLevel ?? FetchIsolationLevels.READ_UNCOMMITTED,
-                    Array.from(requests.values()),
-                    retryCallback
-                  )
-                })
-              },
-              concurrentCallback,
-              0
-            )
-          })
-        },
-        (error, responses) => {
+    this[kPerformWithRetry](
+      'listOffsets',
+      retryCallback => {
+        this[kMetadata]({ topics: options.topics.map(topic => topic.name), forceUpdate: true }, (error, metadata) => {
           if (error) {
+            // Metadata request already retried some times so no retry again
             callback(error)
             return
           }
 
-          const ret: ListedOffsetsTopic[] = []
+          // metadata must be defined at this point
+          const { topics, brokers } = metadata!
 
-          for (const response of responses as ListOffsetsResponse[]) {
-            for (const topic of response.topics) {
-              let topicOffsets = ret.find(t => t.name === topic.name)
-              if (!topicOffsets) {
-                topicOffsets = { name: topic.name, partitions: [] }
-                ret.push(topicOffsets)
+          const requests = new Map<Broker, ListOffsetsRequestTopic[]>()
+
+          for (const topic of options.topics) {
+            for (const partition of topic.partitions) {
+              // topics.get(topic.name) must be defined as the metadata request was successful
+              const topicData = topics.get(topic.name)!
+
+              const targetPartitionData = topicData.partitions[partition.partitionIndex]
+              /* c8 ignore next 4 - Hard to test */
+              if (!targetPartitionData) {
+                retryCallback(new UserError('Unknown partition.'))
+                return
               }
-              for (const partition of topic.partitions) {
-                topicOffsets.partitions.push({
-                  offset: partition.offset,
-                  timestamp: partition.timestamp,
-                  partitionIndex: partition.partitionIndex,
-                  leaderEpoch: partition.leaderEpoch
-                })
+
+              const broker = brokers.get(targetPartitionData.leader)!
+
+              let leaderRequests = requests.get(broker)
+              if (!leaderRequests) {
+                leaderRequests = []
+                requests.set(broker, leaderRequests)
               }
+
+              let topicRequest = leaderRequests.find(t => t.name === topic.name)
+              if (!topicRequest) {
+                topicRequest = { name: topic.name, partitions: [] }
+                leaderRequests.push(topicRequest)
+              }
+
+              topicRequest.partitions.push({
+                partitionIndex: partition.partitionIndex,
+                currentLeaderEpoch: targetPartitionData.leaderEpoch,
+                /* c8 ignore next - Hard to test */
+                timestamp: partition.timestamp ?? -1n
+              })
             }
           }
 
-          callback(null, ret)
-        }
-      )
-    })
+          runConcurrentCallbacks(
+            'Listing offsets failed.',
+            requests,
+            ([leader, requests], concurrentCallback: Callback<ListOffsetsResponse>) => {
+              this[kPerformWithRetry](
+                'listOffsets',
+                retryCallback => {
+                  this[kGetConnection](leader, (error, connection) => {
+                    if (error) {
+                      retryCallback(error)
+                      return
+                    }
+                    this[kGetApi]<ListOffsetsRequest, ListOffsetsResponse>('ListOffsets', (error, api) => {
+                      if (error) {
+                        retryCallback(error)
+                        return
+                      }
+
+                      api!(
+                        connection!,
+                        -1,
+                        options.isolationLevel ?? FetchIsolationLevels.READ_UNCOMMITTED,
+                        requests,
+                        retryCallback
+                      )
+                    })
+                  })
+                },
+                concurrentCallback,
+                0
+              )
+            },
+            (error, responses) => {
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              const ret: ListedOffsetsTopic[] = []
+
+              for (const response of responses as ListOffsetsResponse[]) {
+                for (const topic of response.topics) {
+                  let topicOffsets = ret.find(t => t.name === topic.name)
+                  if (!topicOffsets) {
+                    topicOffsets = { name: topic.name, partitions: [] }
+                    ret.push(topicOffsets)
+                  }
+                  for (const partition of topic.partitions) {
+                    topicOffsets.partitions.push({
+                      offset: partition.offset,
+                      timestamp: partition.timestamp,
+                      partitionIndex: partition.partitionIndex,
+                      leaderEpoch: partition.leaderEpoch
+                    })
+                  }
+                }
+              }
+
+              retryCallback(null, ret)
+            }
+          )
+        })
+      },
+      callback,
+      0
+    )
   }
 }

@@ -434,7 +434,10 @@ test('listTopics should handle errors from Connection.getFirstAvailable', async 
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    strictEqual(error.message, 'Listing topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -448,9 +451,12 @@ test('listTopics should handle unavailable API errors', async t => {
     await admin.listTopics({})
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API Metadata.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Listing topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API Metadata.')
   }
 })
 
@@ -835,7 +841,10 @@ test('createTopics should handle errors from Connection.getFirstAvailable', asyn
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    strictEqual(error.message, 'Creating topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -853,9 +862,12 @@ test('createTopics should handle unavailable API errors', async t => {
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API CreateTopics.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Creating topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API CreateTopics.')
   }
 })
 
@@ -1071,7 +1083,10 @@ test('deleteTopics should handle errors from Connection.getFirstAvailable', asyn
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
+    strictEqual(error.message, 'Deleting topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -1088,8 +1103,12 @@ test('deleteTopics should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API DeleteTopics.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Deleting topics failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DeleteTopics.')
   }
 })
 
@@ -1356,9 +1375,11 @@ test('createPartitions should handle errors from the API', async t => {
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should be about connection failure
-    strictEqual(error instanceof Error, true)
+    strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message, 'Creating partitions failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -1376,9 +1397,12 @@ test('listGroups should handle unavailable API errors', async t => {
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should be about connection failure
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API CreatePartitions.'), true)
+    strictEqual(error.message, 'Creating partitions failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API CreatePartitions.')
   }
 })
 
@@ -1566,8 +1590,11 @@ test('listGroups should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should be about connection failure
-    strictEqual(error instanceof Error, true)
+    strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message, 'Listing groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -1581,9 +1608,12 @@ test('listGroups should handle unavailable API errors', async t => {
     await admin.listGroups()
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should be about connection failure
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API ListGroups.'), true)
+    strictEqual(error.message, 'Listing groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API ListGroups.')
   }
 })
 
@@ -1767,9 +1797,15 @@ test('describeGroups memberAssignment should include user data field when no ass
   const bootstrapConn = await new Promise<Connection>((resolve, reject) => {
     admin[kGetBootstrapConnection]((error, conn) => (error ? reject(error) : resolve(conn!)))
   })
-  const coordResponse = await new Promise<{ coordinators: Array<{ host: string, port: number }> }>((resolve, reject) => {
+  const coordResponse = await new Promise<{ coordinators: Array<{ host: string; port: number }> }>((
+    resolve,
+    reject
+  ) => {
     admin[kGetApi]('FindCoordinator', (error: Error | null, api: any) => {
-      if (error) { reject(error); return }
+      if (error) {
+        reject(error)
+        return
+      }
       api(bootstrapConn, FindCoordinatorKeyTypes.GROUP, [groupId], (err: Error | null, res: any) => {
         err ? reject(err) : resolve(res)
       })
@@ -1787,10 +1823,14 @@ test('describeGroups memberAssignment should include user data field when no ass
   // int16 version | int32-prefixed topics array | int32 user data length
   const reader = Reader.from(rawMember.memberAssignment)
   reader.readInt16() // version
-  reader.readArray(r => {
-    r.readString(false) // topic name
-    r.readArray(r => r.readInt32(), false, false) // partitions
-  }, false, false)
+  reader.readArray(
+    r => {
+      r.readString(false) // topic name
+      r.readArray(r => r.readInt32(), false, false) // partitions
+    },
+    false,
+    false
+  )
 
   // Without the fix, readInt32() here throws BufferUnderflowException in Java
   // because the user data length field is missing entirely
@@ -1855,46 +1895,10 @@ test('describeGroups should validate options in strict mode', async t => {
   }
 })
 
-test('describeGroups should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    // Attempt to describe groups - should fail with connection error
-    await admin.describeGroups({
-      groups: ['test-group']
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('describeGroups should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
-
-  try {
-    // Attempt to describe groups - should fail with connection error
-    await admin.describeGroups({
-      groups: ['test-group']
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
 test('describeGroups should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 4)
+  mockConnectionPoolGet(admin[kConnections], () => true)
 
   try {
     // Attempt to describe groups - should fail with connection error
@@ -1923,14 +1927,17 @@ test('describeGroups should handle errors from the API', async t => {
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing groups failed.'), true)
+    strictEqual(error.message, 'Describing groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
 test('describeGroups should handle unavailable API errors (FindCoordinator)', async t => {
   const admin = createAdmin(t)
 
-  mockUnavailableAPI(admin, 'FindCoordinator')
+  mockUnavailableAPI(admin, 'FindCoordinator', () => false)
 
   try {
     // Attempt to describe groups - should fail with connection error
@@ -1940,8 +1947,12 @@ test('describeGroups should handle unavailable API errors (FindCoordinator)', as
     throw new Error('Expected error not thrown')
   } catch (error) {
     // Error should contain our mock error message
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Describing groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -1959,7 +1970,11 @@ test('describeGroups should handle unavailable API errors (DescribeGroups)', asy
   } catch (error) {
     // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DescribeGroups.'), true)
+    strictEqual(error.message, 'Describing groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DescribeGroups.')
   }
 })
 
@@ -2066,40 +2081,6 @@ test('deleteGroups should validate options in strict mode', async t => {
   }
 })
 
-test('deleteGroups should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    // Attempt to delete groups - should fail with connection error
-    await admin.deleteGroups({ groups: ['non-existent'] })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('deleteGroups should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
-
-  try {
-    // Attempt to delete groups - should fail with connection error
-    await admin.deleteGroups({
-      groups: ['test-group']
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
 test('deleteGroups should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
@@ -2126,25 +2107,31 @@ test('deleteGroups should handle unavailable API errors (DeleteGroups)', async t
     await admin.deleteGroups({ groups: ['non-existent'] })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should contain our mock error message
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DeleteGroups.'), true)
+    strictEqual(error.message, 'Deleting groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DeleteGroups.')
   }
 })
 
 test('deleteGroups should handle unavailable API errors (FindCoordinator)', async t => {
   const admin = createAdmin(t)
 
-  mockUnavailableAPI(admin, 'FindCoordinator')
+  mockUnavailableAPI(admin, 'FindCoordinator', () => false)
 
   try {
     // Attempt to delete groups - should fail with connection error
     await admin.deleteGroups({ groups: ['non-existent'] })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    // Error should contain our mock error message
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Deleting groups failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -2355,41 +2342,10 @@ test('removeMembersFromConsumerGroup should validate options in strict mode', as
   }
 })
 
-test('removeMembersFromConsumerGroup should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('removeMembersFromConsumerGroup should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 2)
-
-  try {
-    await admin.removeMembersFromConsumerGroup({
-      groupId: 'test-group',
-      members: [{ memberId: 'fake-member' }]
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
 test('removeMembersFromConsumerGroup should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 4)
+  mockConnectionPoolGet(admin[kConnections], () => true)
 
   try {
     await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
@@ -2403,14 +2359,18 @@ test('removeMembersFromConsumerGroup should handle errors from Connection.get', 
 test('removeMembersFromConsumerGroup should handle unavailable API errors (LeaveGroup)', async t => {
   const admin = createAdmin(t)
 
-  mockUnavailableAPI(admin, 'LeaveGroup')
+  mockUnavailableAPI(admin, 'LeaveGroup', () => false)
 
   try {
     await admin.removeMembersFromConsumerGroup({ groupId: 'non-existent', members: [{ memberId: 'fake-member' }] })
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API LeaveGroup.'), true)
+    strictEqual(error.message, 'Removing members from consumer group failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API LeaveGroup.')
   }
 })
 
@@ -2428,7 +2388,7 @@ test('removeMembersFromConsumerGroup should handle unavailable API errors (FindC
     const subError = error.errors[0]
     ok(subError)
     strictEqual(subError instanceof UnsupportedApiError, true)
-    strictEqual(subError.message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -2712,7 +2672,10 @@ test('alterClientQuotas should handle errors from Connection.getFirstAvailable',
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Altering client quotas failed.'), true)
+    strictEqual(error.message, 'Altering client quotas failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -2754,7 +2717,10 @@ test('alterClientQuotas should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Altering client quotas failed.'), true)
+    strictEqual(error.message, 'Altering client quotas failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -2775,7 +2741,11 @@ test('alterClientQuotas should handle unavailable API errors (AlterClientQuotas)
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API AlterClientQuotas.'), true)
+    strictEqual(error.message, 'Altering client quotas failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API AlterClientQuotas.')
   }
 })
 
@@ -3144,7 +3114,10 @@ test('describeClientQuotas should handle errors from Connection.getFirstAvailabl
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing client quotas failed.'), true)
+    strictEqual(error.message, 'Describing client quotas failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -3180,7 +3153,10 @@ test('describeClientQuotas should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing client quotas failed.'), true)
+    strictEqual(error.message, 'Describing client quotas failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -3198,7 +3174,10 @@ test('describeClientQuotas should handle unavailable API errors (DescribeClientQ
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DescribeClientQuotas.'), true)
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DescribeClientQuotas.')
   }
 })
 
@@ -3467,7 +3446,10 @@ test('describeLogDirs should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing log dirs failed.'), true)
+    strictEqual(error.message, 'Describing log dirs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -3483,7 +3465,10 @@ test('describeLogDirs should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DescribeLogDirs.'), true)
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DescribeLogDirs.')
   }
 })
 
@@ -4536,112 +4521,10 @@ test('deleteConsumerGroupOffsets should validate options in strict mode', async 
   }
 })
 
-test('listConsumerGroupOffsets should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    await admin.listConsumerGroupOffsets({
-      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
-      requireStable: false
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('alterConsumerGroupOffsets should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    await admin.alterConsumerGroupOffsets({
-      groupId: 'test-group',
-      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('deleteConsumerGroupOffsets should handle errors from Base.metadata', async t => {
-  const admin = createAdmin(t)
-
-  mockMetadata(admin)
-
-  try {
-    await admin.deleteConsumerGroupOffsets({
-      groupId: 'test-group',
-      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes(mockedErrorMessage), true)
-  }
-})
-
-test('listConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
-
-  try {
-    await admin.listConsumerGroupOffsets({
-      groups: [{ groupId: 'test-group', topics: [{ name: 'test-topic', partitionIndexes: [0] }] }],
-      requireStable: false
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
-  }
-})
-
-test('alterConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
-
-  try {
-    await admin.alterConsumerGroupOffsets({
-      groupId: 'test-group',
-      topics: [{ name: 'test-topic', partitionOffsets: [{ partition: 0, offset: BigInt(10) }] }]
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
-  }
-})
-
-test('deleteConsumerGroupOffsets should handle errors from Connection.getFirstAvailable', async t => {
-  const admin = createAdmin(t)
-
-  mockConnectionPoolGetFirstAvailable(admin[kConnections], 3)
-
-  try {
-    await admin.deleteConsumerGroupOffsets({
-      groupId: 'test-group',
-      topics: [{ name: 'test-topic', partitionIndexes: [0] }]
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
-  }
-})
-
 test('listConsumerGroupOffsets should handle errors from Connection.get', async t => {
   const admin = createAdmin(t)
 
-  mockConnectionPoolGet(admin[kConnections], 4)
+  mockConnectionPoolGet(admin[kConnections], () => true)
 
   try {
     await admin.listConsumerGroupOffsets({
@@ -4702,9 +4585,11 @@ test('listConsumerGroupOffsets should handle unavailable API errors (FindCoordin
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error.message, 'Listing consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -4721,9 +4606,11 @@ test('alterConsumerGroupOffsets should handle unavailable API errors (FindCoordi
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error.message, 'Altering consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -4740,9 +4627,11 @@ test('deleteConsumerGroupOffsets should handle unavailable API errors (FindCoord
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error.message, 'Deleting consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })
 
@@ -4759,9 +4648,11 @@ test('listConsumerGroupOffsets should handle unavailable API errors (OffsetFetch
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Listing consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API OffsetFetch.'), true)
+    strictEqual(error.message, 'Listing consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API OffsetFetch.')
   }
 })
 
@@ -4778,9 +4669,11 @@ test('alterConsumerGroupOffsets should handle unavailable API errors (OffsetComm
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Altering consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API OffsetCommit.'), true)
+    strictEqual(error.message, 'Altering consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API OffsetCommit.')
   }
 })
 
@@ -4797,9 +4690,11 @@ test('deleteConsumerGroupOffsets should handle unavailable API errors (OffsetDel
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0] instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Deleting consumer group offsets failed.'), true)
-    strictEqual(error.errors[0].message.includes('Unsupported API OffsetDelete.'), true)
+    strictEqual(error.message, 'Deleting consumer group offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API OffsetDelete.')
   }
 })
 
@@ -4963,6 +4858,7 @@ test('describeConfigs should properly describe broker configs', async t => {
     result.every(r => r.resourceType === ConfigResourceTypes.BROKER),
     true
   )
+  result.sort((a, b) => a.resourceName.localeCompare(b.resourceName))
   strictEqual(result[0].resourceName, '1')
   strictEqual(Array.isArray(result[0].configs), true)
   strictEqual(result[1].resourceName, '2')
@@ -5256,7 +5152,10 @@ test('describeConfigs should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing configs failed.'), true)
+    strictEqual(error.message, 'Describing configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -5276,7 +5175,11 @@ test('describeConfigs should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DescribeConfigs.'), true)
+    strictEqual(error.message, 'Describing configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(error.errors[0].message, 'Unsupported API DescribeConfigs.')
   }
 })
 
@@ -5392,6 +5295,8 @@ test('alterConfigs should properly update broker configs', async t => {
     includeSynonyms: false,
     includeDocumentation: false
   })
+
+  result.sort((a, b) => a.resourceName.localeCompare(b.resourceName))
 
   deepStrictEqual(result, [
     {
@@ -5886,7 +5791,10 @@ test('alterConfigs should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Altering configs failed.'), true)
+    strictEqual(error.message, 'Altering configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -5906,7 +5814,11 @@ test('alterConfigs should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API AlterConfigs.'), true)
+    strictEqual(error.message, 'Altering configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API AlterConfigs.')
   }
 })
 
@@ -6167,6 +6079,8 @@ test('incrementalAlterConfigs should properly update broker configs', async t =>
     includeSynonyms: false,
     includeDocumentation: false
   })
+
+  result.sort((a, b) => a.resourceName.localeCompare(b.resourceName))
 
   deepStrictEqual(result, [
     {
@@ -6806,7 +6720,10 @@ test('incrementalAlterConfigs should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Incrementally altering configs failed.'), true)
+    strictEqual(error.message, 'Incrementally altering configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -6832,7 +6749,11 @@ test('incrementalAlterConfigs should handle unavailable API errors', async t => 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API IncrementalAlterConfigs.'), true)
+    strictEqual(error.message, 'Incrementally altering configs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API IncrementalAlterConfigs.')
   }
 })
 
@@ -7483,7 +7404,10 @@ test('createAcls should handle errors from Connection.getFirstAvailable', async 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Creating ACLs failed.'), true)
+    strictEqual(error.message, 'Creating ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7507,7 +7431,10 @@ test('describeAcls should handle errors from Connection.getFirstAvailable', asyn
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing ACLs failed.'), true)
+    strictEqual(error.message, 'Describing ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7533,7 +7460,10 @@ test('deleteAcls should handle errors from Connection.getFirstAvailable', async 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Deleting ACLs failed.'), true)
+    strictEqual(error.message, 'Deleting ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7635,7 +7565,10 @@ test('createAcls should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Creating ACLs failed.'), true)
+    strictEqual(error.message, 'Creating ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7659,7 +7592,10 @@ test('describeAcls should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Describing ACLs failed.'), true)
+    strictEqual(error.message, 'Describing ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7685,7 +7621,10 @@ test('deleteAcls should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Deleting ACLs failed.'), true)
+    strictEqual(error.message, 'Deleting ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -7711,6 +7650,10 @@ test('createAcls should handle unavailable API errors (CreateAcls)', async t => 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Creating ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
     strictEqual(error.errors[0].message.includes('Unsupported API CreateAcls.'), true)
   }
 })
@@ -7735,7 +7678,11 @@ test('describeAcls should handle unavailable API errors (DescribeAcls)', async t
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DescribeAcls.'), true)
+    strictEqual(error.message, 'Describing ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DescribeAcls.')
   }
 })
 
@@ -7761,7 +7708,11 @@ test('deleteAcls should handle unavailable API errors (DeleteAcls)', async t => 
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DeleteAcls.'), true)
+    strictEqual(error.message, 'Deleting ACLs failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DeleteAcls.')
   }
 })
 
@@ -7801,6 +7752,11 @@ test('listOffsets should list offsets for topics and partitions', async t => {
         ]
       }
     ]
+  })
+
+  listOffsetsResult.sort((a, b) => a.name.localeCompare(b.name))
+  listOffsetsResult.forEach(topic => {
+    topic.partitions.sort((a, b) => a.partitionIndex - b.partitionIndex)
   })
 
   strictEqual(Array.isArray(listOffsetsResult), true)
@@ -8203,7 +8159,10 @@ test('listOffsets should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Listing offsets failed.'), true)
+    strictEqual(error.message, 'Listing offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -8233,7 +8192,11 @@ test('listOffsets should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API ListOffsets.'), true)
+    strictEqual(error.message, 'Listing offsets failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API ListOffsets.')
   }
 })
 
@@ -8285,6 +8248,8 @@ test('deleteRecords should delete records for topic partitions', async t => {
       }
     ]
   })
+
+  deleted[0].partitions.sort((a, b) => a.partition - b.partition)
 
   deepStrictEqual(deleted, [
     {
@@ -8479,7 +8444,10 @@ test('deleteRecords should handle errors from the API', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message.includes('Deleting records failed.'), true)
+    strictEqual(error.message, 'Deleting records failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -8495,7 +8463,7 @@ test('deleteRecords should handle unavailable API errors', async t => {
 
   await scheduler.wait(1000)
 
-  mockUnavailableAPI(admin, 'DeleteRecords')
+  mockUnavailableAPI(admin, 'DeleteRecords', false)
 
   try {
     await admin.deleteRecords({
@@ -8509,7 +8477,11 @@ test('deleteRecords should handle unavailable API errors', async t => {
     throw new Error('Expected error not thrown')
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.errors[0].message.includes('Unsupported API DeleteRecords.'), true)
+    strictEqual(error.message, 'Deleting records failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API DeleteRecords.')
   }
 })
 
@@ -8636,7 +8608,11 @@ test('findCoordinator should handle errors from the API', async t => {
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error.message, mockedErrorMessage)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Finding coordinator failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError.message, mockedErrorMessage)
   }
 })
 
@@ -8652,7 +8628,11 @@ test('findCoordinator should handle unavailable API errors', async t => {
     })
     throw new Error('Expected error not thrown')
   } catch (error) {
-    strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error.message.includes('Unsupported API FindCoordinator.'), true)
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Finding coordinator failed.')
+    const subError = error.errors[0]
+    ok(subError)
+    strictEqual(subError instanceof UnsupportedApiError, true)
+    strictEqual(subError.message, 'Unsupported API FindCoordinator.')
   }
 })

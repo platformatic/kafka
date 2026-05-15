@@ -657,6 +657,7 @@ export class Base<
               }
             } else {
               this.#metadata.lastUpdate = lastUpdate
+              this.#metadata.controllerId = metadata!.controllerId
             }
 
             const brokers: ClusterMetadata['brokers'] = new Map()

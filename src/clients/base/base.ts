@@ -413,7 +413,12 @@ export class Base<
           this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
-            this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+            try {
+              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+            } catch (error) {
+              errors.push(error)
+              callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
+            }
           }, delay)
 
           this.once('client:close', onClose)

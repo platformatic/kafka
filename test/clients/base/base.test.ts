@@ -798,6 +798,32 @@ test('kPerformWithRetry should accept a custom function', async t => {
   deepStrictEqual(second, 2000)
 })
 
+test('kPerformWithRetry should route synchronous exceptions thrown on retry to callback', async t => {
+  const client = createBase(t, { retries: 1, retryDelay: 0 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+      if (attempts === 1) {
+        retryCallback(new Error('first attempt failed'))
+        return
+      }
+      throw new Error('synchronous throw on retry')
+    },
+    callback,
+    0,
+    []
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 2)
+  strictEqual(error instanceof MultipleErrors, true)
+  strictEqual(error.errors.at(-1).message, 'synchronous throw on retry')
+})
+
 test('kPerformWithRetry should clear retry errors after eventual success', async t => {
   const client = createBase(t, { retries: 3, retryDelay: 0 })
   const errors: Error[] = []

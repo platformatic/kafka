@@ -5,7 +5,7 @@ import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import { type Consumer, MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
-import { kGetFetchNode } from '../../../src/symbols.ts'
+import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
 import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
 
 const topic = 'test-topic'
@@ -254,6 +254,41 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
   await new Promise(resolve => setTimeout(resolve, 70))
 
   strictEqual(consumer.metadataCalls > baselineMetadataCalls, true)
+
+  stream.destroy()
+})
+
+test('autocommit callback should wait for commit completion', async t => {
+  const consumer = createConsumerMock(t, (_options, _callback) => {})
+  const stream = createStream(consumer)
+  let commitFinished = false
+  let callbackCalled = false
+
+  t.mock.method(consumer, 'commit', (_options: unknown, callback: CallbackWithPromise<void>) => {
+    setTimeout(() => {
+      commitFinished = true
+      callback(null)
+    }, 20)
+  })
+
+  stream.offsetsToCommit.set(`${topic}:0`, { topic, partition: 0, offset: 10n, leaderEpoch: 0 })
+
+  const autocommitFinished = new Promise<void>((resolve, reject) => {
+    stream[kAutocommit](error => {
+      callbackCalled = true
+      if (error) {
+        reject(error)
+        return
+      }
+
+      strictEqual(commitFinished, true)
+      resolve()
+    })
+  })
+
+  strictEqual(callbackCalled, false)
+  await autocommitFinished
+  strictEqual(callbackCalled, true)
 
   stream.destroy()
 })

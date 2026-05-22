@@ -26,6 +26,7 @@ Other KIPs up to Kafka 4.1.0 are likely supported, or at least have protocol/API
 | [KIP-339](https://cwiki.apache.org/confluence/display/KAFKA/KIP-339%3A+Create+a+new+IncrementalAlterConfigs+API)                                                     | Supported |
 | [KIP-345](https://cwiki.apache.org/confluence/display/KAFKA/KIP-345%3A+Introduce+static+membership+protocol+to+reduce+consumer+rebalances)                           | Supported |
 | [KIP-368](https://cwiki.apache.org/confluence/display/KAFKA/KIP-368%3A+Allow+SASL+Connections+to+Periodically+Re-Authenticate)                                       | Supported |
+| [KIP-429](https://cwiki.apache.org/confluence/display/KAFKA/KIP-429%3A+Kafka+Consumer+Incremental+Rebalance+Protocol)                                               | Supported |
 | [KIP-430](https://cwiki.apache.org/confluence/display/KAFKA/KIP-430%3A+Return+Authorized+Operations+in+Metadata%2C+Describe+Topics%2C+and+Describe+Groups+Responses) | Supported |
 | [KIP-455](https://cwiki.apache.org/confluence/display/KAFKA/KIP-455%3A+Create+an+Administrative+API+for+Replica+Reassignment)                                        | Supported |
 | [KIP-482](https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields)                                     | Supported |

@@ -906,8 +906,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  [kAutocommit] (): void {
+  [kAutocommit] (callback?: Callback<void>): void {
+    if (this.#autocommitInflight) {
+      callback && this.once('autocommit', error => callback(error))
+      return
+    }
+
     if (this.#offsetsToCommit.size === 0) {
+      callback?.(null)
       return
     }
 
@@ -926,6 +932,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         if ((error as GenericError).findBy?.('needsRejoin', true)) {
           this.destroy(error)
         }
+        callback?.(error)
         return
       }
 
@@ -934,6 +941,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       this.emit('autocommit', null, offsets)
+      callback?.(null)
     })
   }
 

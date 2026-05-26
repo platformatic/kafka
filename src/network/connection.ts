@@ -423,7 +423,9 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     hasResponseHeaderTaggedFields: boolean,
     callback: Callback<ReturnType>
   ) {
-    const correlationId = ++this.#correlationId
+    // Correlation ID is a 32-bit integer in the protocol, so we need to wrap around after 2^31 - 1
+    const correlationId = (this.#correlationId + 1) & 0x7FFFFFFF
+    this.#correlationId = correlationId
 
     const diagnostic = createDiagnosticContext({
       connection: this,

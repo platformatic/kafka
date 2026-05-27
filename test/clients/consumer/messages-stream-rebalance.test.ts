@@ -4,7 +4,14 @@ import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
-import { type Consumer, MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
+import {
+  type Consumer,
+  ListOffsetTimestamps,
+  MessagesStream,
+  MessagesStreamFallbackModes,
+  MessagesStreamModes,
+  ResponseError
+} from '../../../src/index.ts'
 import { kGetFetchNode } from '../../../src/symbols.ts'
 import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
 
@@ -254,6 +261,66 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
   await new Promise(resolve => setTimeout(resolve, 70))
 
   strictEqual(consumer.metadataCalls > baselineMetadataCalls, true)
+
+  stream.destroy()
+})
+
+test('should refresh fallback offsets when offset out of range fetch errors omit log start offset', async t => {
+  const recoveredOffsets: bigint[] = []
+  const listOffsetRequests: any[] = []
+  let resolveRecoveredFetch!: () => void
+  const recoveredFetch = new Promise<void>(resolve => {
+    resolveRecoveredFetch = resolve
+  })
+  let fetchCalls = 0
+
+  const consumer = createConsumerMock(t, (options, callback) => {
+    fetchCalls++
+
+    if (fetchCalls !== 1) {
+      recoveredOffsets.push(options.topics[0].partitions[0].fetchOffset)
+      resolveRecoveredFetch()
+      return
+    }
+
+    const response: FetchResponse = {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      sessionId: 0,
+      responses: [
+        {
+          topicId,
+          partitions: [
+            {
+              partitionIndex: 0,
+              errorCode: 1,
+              highWatermark: 3n,
+              lastStableOffset: 3n,
+              logStartOffset: -1n,
+              abortedTransactions: [],
+              preferredReadReplica: -1
+            }
+          ]
+        }
+      ]
+    }
+
+    callback(new ResponseError(1, 17, { '/responses/0/partitions/0': [1, null] }, response), undefined)
+  })
+
+  consumer.listOffsets = ((options: object, callback: CallbackWithPromise<any>) => {
+    listOffsetRequests.push(options)
+    callback(null, new Map([[topic, [5n]]]))
+  }) as typeof consumer.listOffsets
+
+  const stream = createStream(consumer)
+
+  stream.resume()
+  await recoveredFetch
+
+  strictEqual(recoveredOffsets[0], 5n)
+  strictEqual(listOffsetRequests.at(-1).timestamp, ListOffsetTimestamps.EARLIEST)
+  strictEqual(listOffsetRequests.at(-1).partitions[topic][0], 0)
 
   stream.destroy()
 })

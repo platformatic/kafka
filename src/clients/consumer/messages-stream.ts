@@ -613,12 +613,25 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 return
               }
 
-              if (
-                this.#fallbackMode !== MessagesStreamFallbackModes.FAIL &&
-                this.#handleOffsetOutOfRange(error as GenericError, topicIds)
-              ) {
-                process.nextTick(() => {
-                  this.#fetch()
+              if (this.#fallbackMode !== MessagesStreamFallbackModes.FAIL) {
+                this.#handleOffsetOutOfRange(error as GenericError, topicIds, (recoveryError, recovered) => {
+                  if (this.#closed || this.closed || this.destroyed) {
+                    return
+                  }
+
+                  if (recoveryError) {
+                    this.destroy(recoveryError)
+                    return
+                  }
+
+                  if (recovered) {
+                    process.nextTick(() => {
+                      this.#fetch()
+                    })
+                    return
+                  }
+
+                  this.destroy(error)
                 })
                 return
               }
@@ -644,22 +657,30 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     })
   }
 
-  #handleOffsetOutOfRange (error: GenericError, topicIds: Map<string, string>): boolean {
+  #handleOffsetOutOfRange (
+    error: GenericError,
+    topicIds: Map<string, string>,
+    callback: Callback<boolean>
+  ): void {
     if (!error.findBy?.('apiId', 'OFFSET_OUT_OF_RANGE')) {
-      return false
+      callback(null, false)
+      return
     }
 
     const response = error.response as FetchResponse | undefined
     if (!response || response.errorCode !== 0) {
-      return false
+      callback(null, false)
+      return
     }
 
     const recoveredOffsets: [string, bigint][] = []
+    const partitionsToRefresh = new Map<string, number[]>()
 
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)
       if (!topic) {
-        return false
+        callback(null, false)
+        return
       }
 
       for (const partitionResponse of topicResponse.partitions) {
@@ -668,18 +689,80 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
 
         if (partitionResponse.errorCode !== protocolErrors.OFFSET_OUT_OF_RANGE.code) {
-          return false
+          callback(null, false)
+          return
         }
 
-        const key = `${topic}:${partitionResponse.partitionIndex}`
         const offset =
           this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST
             ? partitionResponse.logStartOffset
             : partitionResponse.highWatermark
-        recoveredOffsets.push([key, offset])
+
+        if (offset >= 0n) {
+          recoveredOffsets.push([partitionKey(topic, partitionResponse.partitionIndex), offset])
+          continue
+        }
+
+        let partitions = partitionsToRefresh.get(topic)
+        if (!partitions) {
+          partitions = []
+          partitionsToRefresh.set(topic, partitions)
+        }
+        partitions.push(partitionResponse.partitionIndex)
       }
     }
 
+    if (partitionsToRefresh.size > 0) {
+      this.#refreshOutOfRangeOffsets(partitionsToRefresh, recoveredOffsets, callback)
+      return
+    }
+
+    callback(null, this.#applyRecoveredOffsets(recoveredOffsets))
+  }
+
+  #refreshOutOfRangeOffsets (
+    partitionsToRefresh: Map<string, number[]>,
+    recoveredOffsets: [string, bigint][],
+    callback: Callback<boolean>
+  ): void {
+    const partitions = Object.fromEntries(partitionsToRefresh)
+
+    this.#consumer.listOffsets(
+      {
+        topics: Array.from(partitionsToRefresh.keys()),
+        partitions,
+        timestamp:
+          this.#fallbackMode === MessagesStreamFallbackModes.EARLIEST
+            ? ListOffsetTimestamps.EARLIEST
+            : ListOffsetTimestamps.LATEST
+      },
+      (error, offsets) => {
+        if (error) {
+          callback(error)
+          return
+        }
+
+        for (const [topic, refreshedPartitions] of partitionsToRefresh) {
+          const topicOffsets = offsets!.get(topic)
+
+          for (const partition of refreshedPartitions) {
+            const offset = topicOffsets?.[partition]
+
+            if (typeof offset !== 'bigint' || offset < 0n) {
+              callback(new UserError(`Cannot recover offset out of range for topic ${topic} partition ${partition}.`))
+              return
+            }
+
+            recoveredOffsets.push([partitionKey(topic, partition), offset])
+          }
+        }
+
+        callback(null, this.#applyRecoveredOffsets(recoveredOffsets))
+      }
+    )
+  }
+
+  #applyRecoveredOffsets (recoveredOffsets: [string, bigint][]): boolean {
     for (const [key, offset] of recoveredOffsets) {
       this.#offsetsToFetch.set(key, offset)
       this.#offsetsCommitted.set(key, offset)

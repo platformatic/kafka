@@ -953,7 +953,7 @@ test('metadata retries on TimeoutError', async t => {
   const pool = client[kConnections]
   pool.getFirstAvailable = function (_brokers: Broker[], callback: CallbackWithPromise<Connection>) {
     callCount++
-    callback(new TimeoutError('Connection timed out'))
+    callback(new TimeoutError('Connection timed out', { canRetry: true }))
   } as typeof pool.getFirstAvailable
 
   try {

@@ -329,7 +329,7 @@ export class Base<
       deduplicateCallback => {
         this[kPerformWithRetry]<ApiVersionsResponse>(
           'listApis',
-          retryCallback => {
+          (retryCallback, attempt) => {
             this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error)
@@ -338,7 +338,7 @@ export class Base<
 
               // We use V3 to be able to get APIS from Kafka 2.4.0+
               apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
-            })
+            }, attempt)
           },
           (error, metadata) => {
             if (error) {
@@ -382,7 +382,7 @@ export class Base<
 
   [kPerformWithRetry]<ReturnType> (
     operationId: string,
-    operation: (callback: Callback<ReturnType>) => void,
+    operation: (callback: Callback<ReturnType>, attempt: number) => void,
     callback: CallbackWithPromise<ReturnType>,
     attempt: number = 0,
     errors: Error[] = [],
@@ -436,7 +436,7 @@ export class Base<
       }
 
       callback(null, result!)
-    })
+    }, attempt)
 
     return callback[kCallbackPromise]
   }
@@ -517,14 +517,21 @@ export class Base<
     this[kConnections].get(broker, callback)
   }
 
-  [kGetBootstrapConnection] (callback: Callback<Connection>): void {
+  [kGetBootstrapConnection] (callback: Callback<Connection>, attempt = 0): void {
+    let brokers: Broker[]
     if (!this.#metadata) {
-      this[kConnections].getFirstAvailable(this[kBootstrapBrokers], callback)
-      return
+      brokers = this[kBootstrapBrokers]
+    } else {
+      const discovered = Array.from(this.#metadata.brokers.values())
+      brokers = [...this[kBootstrapBrokers], ...discovered]
     }
 
-    const discovered = Array.from(this.#metadata.brokers.values())
-    this[kConnections].getFirstAvailable([...this[kBootstrapBrokers], ...discovered], callback)
+    if (attempt > 0 && brokers.length > 1) {
+      const offset = attempt % brokers.length
+      brokers = [...brokers.slice(offset), ...brokers.slice(0, offset)]
+    }
+
+    this[kConnections].getFirstAvailable(brokers, callback)
   }
 
   [kValidateOptions] (
@@ -602,7 +609,7 @@ export class Base<
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
-          retryCallback => {
+          (retryCallback, attempt) => {
             this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error)
@@ -617,7 +624,7 @@ export class Base<
 
                 api!(connection!, topicsToFetch, autocreateTopics, true, retryCallback)
               })
-            })
+            }, attempt)
           },
           (error, metadata) => {
             if (error) {

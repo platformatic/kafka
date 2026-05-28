@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
-import { kConnections, kGetApi, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
+import { kConnections, kGetApi, kGetBootstrapConnection, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV3,
@@ -572,14 +572,20 @@ test('metadata should handle connection failures to non-existent broker', async 
     // Should be a MultipleErrors or AggregateError instance since we use performWithRetry
     strictEqual(['MultipleErrors', 'AggregateError'].includes(error.name), true)
 
-    // Error message should indicate failure
-    strictEqual(error.message, 'Cannot connect to any broker.')
+    // Timeout errors are retryable, so all 3 attempts are exhausted before giving up
+    strictEqual(error.message, 'metadata failed 3 times.')
 
-    // Should contain nested errors
+    // Should contain one nested error per attempt
     strictEqual(Array.isArray(error.errors), true)
-    strictEqual(error.errors.length, 1)
-    strictEqual(error.errors[0] instanceof TimeoutError, true)
-    strictEqual(error.errors[0].message, 'Connection to 192.0.2.1:9092 timed out.')
+    strictEqual(error.errors.length, 3)
+
+    // Each attempt's error wraps the underlying TimeoutError from getFirstAvailable
+    for (const attempt of error.errors) {
+      strictEqual(attempt instanceof MultipleErrors, true)
+      strictEqual(attempt.message, 'Cannot connect to any broker.')
+      strictEqual(attempt.errors[0] instanceof TimeoutError, true)
+      strictEqual(attempt.errors[0].message, 'Connection to 192.0.2.1:9092 timed out.')
+    }
   }
 })
 
@@ -913,5 +919,49 @@ test('metadata should use bootstrap brokers only after clearMetadata', async t =
   } catch (error) {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message, 'Cannot connect to any broker.')
+  }
+})
+
+test('kGetBootstrapConnection rotates broker list based on retry attempt', t => {
+  const client = createBase(t, {
+    bootstrapBrokers: ['broker-a:9092', 'broker-b:9093', 'broker-c:9094'],
+    retries: 0
+  })
+
+  const pool = client[kConnections]
+  const capturedLists: Broker[][] = []
+  pool.getFirstAvailable = function (brokers: Broker[], callback: CallbackWithPromise<Connection>) {
+    capturedLists.push([...brokers])
+    callback(new Error('test'))
+  } as typeof pool.getFirstAvailable
+
+  client[kGetBootstrapConnection](() => {}, 0)
+  client[kGetBootstrapConnection](() => {}, 1)
+  client[kGetBootstrapConnection](() => {}, 2)
+  client[kGetBootstrapConnection](() => {}, 3) // wraps around
+
+  strictEqual(capturedLists[0][0].host, 'broker-a') // attempt 0: no rotation
+  strictEqual(capturedLists[1][0].host, 'broker-b') // attempt 1: offset by 1
+  strictEqual(capturedLists[2][0].host, 'broker-c') // attempt 2: offset by 2
+  strictEqual(capturedLists[3][0].host, 'broker-a') // attempt 3: wraps around (3 % 3 = 0)
+})
+
+test('metadata retries on TimeoutError', async t => {
+  const client = createBase(t, { retries: 2, retryDelay: 0 })
+
+  let callCount = 0
+  const pool = client[kConnections]
+  pool.getFirstAvailable = function (_brokers: Broker[], callback: CallbackWithPromise<Connection>) {
+    callCount++
+    callback(new TimeoutError('Connection timed out'))
+  } as typeof pool.getFirstAvailable
+
+  try {
+    await client.metadata({ topics: [] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'metadata failed 3 times.')
+    strictEqual(callCount, 3)
   }
 })

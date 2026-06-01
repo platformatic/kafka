@@ -482,7 +482,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#refreshOffsetsInflight = true
     this.#refreshOffsets(error => {
       this.#refreshOffsetsInflight = false
-      callback(error)
+      callback(error ?? undefined)
     })
   }
 

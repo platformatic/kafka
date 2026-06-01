@@ -97,7 +97,6 @@ import {
 } from '../../diagnostic.ts'
 import { MultipleErrors, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
-import { Reader } from '../../protocol/reader.ts'
 import {
   Base,
   kAfterCreate,
@@ -113,6 +112,7 @@ import {
   kValidateOptions
 } from '../base/base.ts'
 import { type BaseOptions } from '../base/types.ts'
+import { decodeConsumerProtocolAssignment, decodeConsumerProtocolSubscription } from '../consumer/consumer-protocol.ts'
 import { type GroupAssignment } from '../consumer/types.ts'
 import {
   adminListOffsetsOptionsValidator,
@@ -1307,32 +1307,26 @@ export class Admin extends Base<AdminOptions> {
                 }
 
                 for (const member of raw.members) {
-                  const reader = Reader.from(member.memberMetadata)
-
                   let memberMetadata: GroupMember['metadata'] | undefined
                   let memberAssignments: Map<string, GroupAssignment> | undefined
 
-                  if (reader.remaining > 0) {
+                  if (member.memberMetadata.length > 0) {
+                    const subscription = decodeConsumerProtocolSubscription(member.memberMetadata)
                     memberMetadata = {
-                      version: reader.readInt16(),
-                      topics: reader.readArray(r => r.readString(false), false, false),
-                      metadata: reader.readBytes(false)
+                      version: subscription.version,
+                      topics: subscription.topics,
+                      metadata: subscription.userData,
+                      ownedPartitions: subscription.ownedPartitions,
+                      generationId: subscription.generationId,
+                      rackId: subscription.rackId
                     }
 
-                    reader.reset(member.memberAssignment)
-                    reader.skip(2) // Ignore Version information
-
-                    memberAssignments = reader.readMap(
-                      r => {
-                        const topic = r.readString(false)
-
-                        return [topic, { topic, partitions: reader.readArray(r => r.readInt32(), false, false) }]
-                      },
-                      false,
-                      false
+                    memberAssignments = new Map(
+                      decodeConsumerProtocolAssignment(member.memberAssignment).assignedPartitions.map(assignment => [
+                        assignment.topic,
+                        assignment
+                      ])
                     )
-
-                    // Ignore the user data
                   }
 
                   group.members.set(member.memberId, {

@@ -20,6 +20,7 @@ import {
   type ClusterMetadata,
   CompressionAlgorithms,
   ConfluentSchemaRegistry,
+  COOPERATIVE_STICKY_ASSIGNOR,
   type Connection,
   Consumer,
   consumerCommitsChannel,
@@ -76,7 +77,8 @@ import {
   mockedOperationId,
   mockMetadata,
   mockMethod,
-  mockUnavailableAPI
+  mockUnavailableAPI,
+  waitFor
 } from '../../helpers.ts'
 import { kGetFetchNode } from '../../../src/symbols.ts'
 
@@ -3677,6 +3679,285 @@ test('joinGroup should setup assignment with a round robin policy', async t => {
     deepStrictEqual(consumer1.assignments, [{ topic, partitions: [1] }])
     deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 2] }])
   }
+})
+
+test('joinGroup should setup assignment with a cooperative sticky policy', async t => {
+  const topic = await createTopic(t, true, 4)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  const consumer2 = createConsumer(t, { groupId, protocols })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+
+  await consumer1.joinGroup()
+  deepStrictEqual(consumer1.assignments, [{ topic, partitions: [0, 1, 2, 3] }])
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  await waitFor(() => {
+    const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
+    const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
+    deepStrictEqual([...assignments1, ...assignments2].sort((a, b) => a - b), [0, 1, 2, 3])
+    strictEqual(assignments1.length, 2)
+    strictEqual(assignments2.length, 2)
+  }, { timeout: 10_000 })
+})
+
+test('cooperative sticky rebalance should keep consuming after a second member joins', async t => {
+  const topic = await createTopic(t, true, 4)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  await produceTestMessages({
+    t,
+    messages: Array.from({ length: 8 }, (_, i) => ({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      partition: i % 4
+    }))
+  })
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  const consumer2 = createConsumer(t, { groupId, protocols })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+  await consumer1.joinGroup()
+
+  const stream1 = await consumer1.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+
+  const receivedByMember = new Map<string, Set<string>>([
+    ['consumer-1', new Set()],
+    ['consumer-2', new Set()]
+  ])
+
+  stream1.on('data', message => {
+    receivedByMember.get('consumer-1')!.add(`${message.partition}:${message.offset}`)
+  })
+
+  await waitFor(() => strictEqual(receivedByMember.get('consumer-1')!.size >= 4, true), { timeout: 15_000 })
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  const stream2 = await consumer2.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+  stream2.on('data', message => {
+    receivedByMember.get('consumer-2')!.add(`${message.partition}:${message.offset}`)
+  })
+
+  await rejoinPromise
+
+  await waitFor(() => {
+    const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
+    const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
+    strictEqual(assignments1.length, 2)
+    strictEqual(assignments2.length, 2)
+    deepStrictEqual([...assignments1, ...assignments2].sort((a, b) => a - b), [0, 1, 2, 3])
+  }, { timeout: 15_000 })
+
+  await waitFor(() => {
+    const total =
+      receivedByMember.get('consumer-1')!.size + receivedByMember.get('consumer-2')!.size
+    strictEqual(total >= 8, true)
+  }, { timeout: 20_000 })
+
+  await stream1.close()
+  await stream2.close()
+})
+
+test('cooperative sticky rebalance should autocommit revoked partition offsets before rejoin', async t => {
+  const topic = await createTopic(t, true, 4)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  await produceTestMessages({
+    t,
+    messages: Array.from({ length: 4 }, (_, i) => ({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      partition: i
+    }))
+  })
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  await consumer1.topics.trackAll(topic)
+  await consumer1.joinGroup()
+
+  const stream1 = await consumer1.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+
+  let consumed = 0
+  const consumedAll = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for messages')), 15_000)
+    stream1.on('data', () => {
+      consumed++
+      if (consumed >= 4) {
+        clearTimeout(timer)
+        resolve()
+      }
+    })
+  })
+  await consumedAll
+  strictEqual(consumed, 4)
+
+  const consumer2 = createConsumer(t, { groupId, protocols })
+  await consumer2.topics.trackAll(topic)
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  await waitFor(() => {
+    strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
+    strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
+  }, { timeout: 15_000 })
+
+  await stream1.close()
+
+  const commits = await consumer1.listCommittedOffsets({
+    topics: [{ topic, partitions: [0, 1, 2, 3] }]
+  })
+  const topicCommits = commits.get(topic)!
+
+  strictEqual(topicCommits[0], 1n)
+  strictEqual(topicCommits[1], 1n)
+  strictEqual(topicCommits[2], 1n)
+  strictEqual(topicCommits[3], 1n)
+
+  await consumer2.leaveGroup()
+})
+
+test('cooperative sticky rebalance should continue when autocommit fails', async t => {
+  const topic = await createTopic(t, true, 4)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  await produceTestMessages({
+    t,
+    messages: Array.from({ length: 4 }, (_, i) => ({
+      topic,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      partition: i
+    }))
+  })
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  await consumer1.topics.trackAll(topic)
+  await consumer1.joinGroup()
+
+  const stream1 = await consumer1.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+
+  let consumed = 0
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timed out waiting for messages')), 15_000)
+    stream1.on('data', () => {
+      consumed++
+      if (consumed >= 4) {
+        clearTimeout(timer)
+        resolve()
+      }
+    })
+  })
+
+  // Force the very next commit (the one issued during the cooperative revoke) to fail.
+  const originalCommit = consumer1.commit.bind(consumer1)
+  let commitFailures = 0
+  t.mock.method(consumer1, 'commit', (options: any, callback?: any) => {
+    if (commitFailures === 0) {
+      commitFailures++
+      const error = new UserError('Simulated autocommit failure during rebalance.')
+      if (typeof callback === 'function') {
+        callback(error)
+        return
+      }
+      return Promise.reject(error)
+    }
+    return originalCommit(options, callback)
+  })
+
+  const autocommitErrorPromise = once(consumer1, 'consumer:group:autocommit:error')
+  const consumer2 = createConsumer(t, { groupId, protocols })
+  await consumer2.topics.trackAll(topic)
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  // The rebalance must have continued despite the autocommit failure.
+  await waitFor(() => {
+    strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
+    strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
+  }, { timeout: 15_000 })
+
+  const [{ groupId: payloadGroupId, error: autocommitError }] =
+    (await autocommitErrorPromise) as [{ groupId: string; error: Error }]
+  strictEqual(payloadGroupId, groupId)
+  strictEqual(autocommitError instanceof Error, true)
+  strictEqual(commitFailures, 1)
+
+  await stream1.close()
+  await consumer2.leaveGroup()
+})
+
+test('cooperative sticky rebalance should redistribute partitions when a member leaves', async t => {
+  const topic = await createTopic(t, true, 6)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  const consumer2 = createConsumer(t, { groupId, protocols })
+  const consumer3 = createConsumer(t, { groupId, protocols })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+  await consumer3.topics.trackAll(topic)
+
+  await consumer1.joinGroup()
+  await consumer2.joinGroup()
+  await consumer3.joinGroup()
+
+  await waitFor(() => {
+    const total =
+      (consumer1.assignments?.[0]?.partitions.length ?? 0) +
+      (consumer2.assignments?.[0]?.partitions.length ?? 0) +
+      (consumer3.assignments?.[0]?.partitions.length ?? 0)
+    strictEqual(total, 6)
+  }, { timeout: 15_000 })
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer3.leaveGroup()
+  await rejoinPromise
+
+  await waitFor(() => {
+    strictEqual(consumer1.assignments?.[0]?.partitions.length, 3)
+    strictEqual(consumer2.assignments?.[0]?.partitions.length, 3)
+  }, { timeout: 15_000 })
 })
 
 test('joinGroup should setup assignment with a custom policy', async t => {

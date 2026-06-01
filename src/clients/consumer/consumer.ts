@@ -53,8 +53,6 @@ import {
 import { type GenericError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
-import { INT32_SIZE } from '../../protocol/definitions.ts'
-import { Reader } from '../../protocol/reader.ts'
 import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import {
@@ -86,6 +84,14 @@ import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Gauge, type Histogram } from '../metrics.ts'
 import { MessagesStream } from './messages-stream.ts'
 import {
+  CONSUMER_PROTOCOL_HIGHEST_VERSION,
+  decodeCooperativeStickyGeneration,
+  decodeConsumerProtocolAssignment,
+  decodeConsumerProtocolSubscription,
+  encodeConsumerProtocolAssignment,
+  encodeConsumerProtocolSubscription
+} from './consumer-protocol.ts'
+import {
   commitOptionsValidator,
   consumeOptionsValidator,
   consumerOptionsValidator,
@@ -97,7 +103,11 @@ import {
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
 } from './options.ts'
-import { roundRobinAssigner } from './partitions-assigners.ts'
+import {
+  COOPERATIVE_STICKY_ASSIGNOR,
+  cooperativeStickyAssigner,
+  roundRobinAssigner
+} from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
@@ -105,6 +115,7 @@ import {
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
   type ConsumerGroupOptions,
+  type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupRebalancePayload,
   type ConsumerHeartbeatErrorPayload,
   type ConsumerHeartbeatPayload,
@@ -134,6 +145,7 @@ export interface ConsumerEvents extends BaseEvents {
   'consumer:group:leave': (payload: ConsumerGroupLeavePayload) => void
   'consumer:group:rejoin': () => void
   'consumer:group:rebalance': (payload: ConsumerGroupRebalancePayload) => void
+  'consumer:group:autocommit:error': (payload: ConsumerGroupAutocommitErrorPayload) => void
   'consumer:heartbeat:start': (payload?: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
@@ -1448,6 +1460,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return result
   }
 
+  #diffGroupAssignments (A: GroupAssignment[], B: GroupAssignment[]): GroupAssignment[] {
+    const result: GroupAssignment[] = []
+
+    for (const a of A) {
+      const b = B.find(assignment => assignment.topic === a.topic)
+      if (!b) {
+        result.push({ topic: a.topic, partitions: [...a.partitions] })
+      } else {
+        const diff = a.partitions.filter(partition => !b.partitions.includes(partition))
+        if (diff.length > 0) {
+          result.push({ topic: a.topic, partitions: diff })
+        }
+      }
+    }
+
+    return result
+  }
+
   #revokePartitions (newAssignment: TopicPartition[]): void {
     const toRevoke = this.#diffAssignments(this.#assignments, newAssignment)
     if (toRevoke.length === 0) {
@@ -1772,26 +1802,90 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.assignments = response!
-          this.#syncPreferredReadReplicas()
-
-          this.#cancelHeartbeat()
-          this.#heartbeatInterval = setTimeout(() => {
-            this.#heartbeat(options)
-          }, options.heartbeatInterval)
-
-          this.emitWithDebug('consumer', 'group:join', {
-            groupId: this.groupId,
-            memberId: this.memberId,
-            generationId: this.generationId,
-            isLeader: this.#isLeader,
-            assignments: this.assignments
-          })
-
-          callback(null, this.memberId!)
+          this.#completeClassicSyncGroup(options, response!, callback)
         })
       }
     )
+  }
+
+  #completeClassicSyncGroup (
+    options: Required<GroupOptions>,
+    assignments: GroupAssignment[],
+    callback: CallbackWithPromise<string>
+  ): void {
+    if (this.#isCooperativeProtocol()) {
+      const previousAssignments = this.assignments ?? []
+      const revoked = this.#diffGroupAssignments(previousAssignments, assignments)
+      const addedOnRevokeRound = this.#diffGroupAssignments(assignments, previousAssignments)
+
+      if (revoked.length > 0) {
+        for (const stream of this.#streams) {
+          stream.pause()
+        }
+
+        runConcurrentCallbacks(
+          'Autocommit before cooperative rebalance failed.',
+          this.#streams,
+          (stream, concurrentCallback) => {
+            stream[kAutocommit](concurrentCallback)
+          },
+          autocommitError => {
+            // Mirror Kafka's reference client: capture autocommit errors but
+            // continue the rebalance so the group does not get stuck mid-cycle.
+            // Per-stream autocommit errors are already surfaced through the
+            // `autocommit` event on each MessagesStream.
+            if (autocommitError) {
+              this.emitWithDebug('consumer', 'group:autocommit:error', {
+                groupId: this.groupId,
+                error: autocommitError
+              })
+            }
+
+            this.assignments = assignments
+            this.#syncPreferredReadReplicas()
+
+            for (const stream of this.#streams) {
+              stream.resume()
+            }
+
+            if (addedOnRevokeRound.length > 0) {
+              for (const stream of this.#streams) {
+                stream[kRefreshOffsetsAndFetch]()
+              }
+            }
+
+            this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
+            this.#performJoinGroup(options, callback)
+          }
+        )
+        return
+      }
+    }
+
+    const added = this.#diffGroupAssignments(assignments, this.assignments ?? [])
+    this.assignments = assignments
+    this.#syncPreferredReadReplicas()
+
+    this.#cancelHeartbeat()
+    this.#heartbeatInterval = setTimeout(() => {
+      this.#heartbeat(options)
+    }, options.heartbeatInterval)
+
+    this.emitWithDebug('consumer', 'group:join', {
+      groupId: this.groupId,
+      memberId: this.memberId,
+      generationId: this.generationId,
+      isLeader: this.#isLeader,
+      assignments: this.assignments
+    })
+
+    if (this.#isCooperativeProtocol() && added.length > 0) {
+      for (const stream of this.#streams) {
+        stream[kRefreshOffsetsAndFetch]()
+      }
+    }
+
+    callback(null, this.memberId!)
   }
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
@@ -2023,21 +2117,42 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     https://github.com/apache/kafka/blob/trunk/clients/src/main/resources/common/message/ConsumerProtocolSubscription.json
   */
   #encodeProtocolSubscriptionMetadata (metadata: GroupProtocolSubscription, topics: string[]): Buffer {
-    return Writer.create()
-      .appendInt16(metadata.version)
-      .appendArray(topics, (w, t) => w.appendString(t, false), false, false)
-      .appendBytes(typeof metadata.metadata === 'string' ? Buffer.from(metadata.metadata) : metadata.metadata, false)
-      .buffer
+    const cooperative = metadata.name === COOPERATIVE_STICKY_ASSIGNOR
+    const ownedPartitions = cooperative ? this.#ownedPartitionsForSubscription(topics) : []
+    let userData = typeof metadata.metadata === 'string' ? Buffer.from(metadata.metadata) : metadata.metadata
+
+    if (cooperative && !userData && metadata.version < 2) {
+      userData = Writer.create()
+        .appendInt32(this.memberId && ownedPartitions.length > 0 ? this.generationId : -1)
+        .buffer
+    }
+
+    return encodeConsumerProtocolSubscription({
+      version: metadata.version,
+      topics,
+      userData,
+      ownedPartitions,
+      generationId: cooperative && this.memberId && ownedPartitions.length > 0 ? this.generationId : -1,
+      rackId: cooperative ? this.#clientRack || null : null
+    })
   }
 
   #decodeProtocolSubscriptionMetadata (memberId: string, buffer: Buffer): ExtendedGroupProtocolSubscription {
-    const reader = Reader.from(buffer)
+    const subscription = decodeConsumerProtocolSubscription(buffer)
+    const cooperative = this.#protocol === COOPERATIVE_STICKY_ASSIGNOR
+    const generationId =
+      cooperative && subscription.version < 2
+        ? decodeCooperativeStickyGeneration(subscription.userData)
+        : subscription.generationId
 
     return {
       memberId,
-      version: reader.readInt16(),
-      topics: reader.readArray(r => r.readString(false), false, false),
-      metadata: reader.readBytes(false)
+      version: subscription.version,
+      topics: subscription.topics,
+      metadata: subscription.userData,
+      ownedPartitions: subscription.ownedPartitions,
+      generationId,
+      rackId: subscription.rackId
     }
   }
 
@@ -2046,42 +2161,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     https://github.com/apache/kafka/blob/trunk/clients/src/main/resources/common/message/ConsumerProtocolAssignment.json
   */
   #encodeProtocolAssignment (assignments: GroupAssignment[]): Buffer {
-    const userData = this[kOptions].assignmentUserData
-    const writer = Writer.create()
-      .appendInt16(0) // Version information
-      .appendArray(
-        assignments,
-        (w, { topic, partitions }) => {
-          w.appendString(topic, false).appendArray(partitions, (w, a) => w.appendInt32(a), false, false)
-        },
-        false,
-        false
-      )
-
-    writer.appendBytes(userData ?? null, false)
-
-    return writer.buffer
+    return encodeConsumerProtocolAssignment({
+      version: this.#isCooperativeProtocol() ? CONSUMER_PROTOCOL_HIGHEST_VERSION : 0,
+      assignedPartitions: assignments,
+      userData: this[kOptions].assignmentUserData ?? null
+    })
   }
 
   #decodeProtocolAssignment (buffer: Buffer): GroupAssignment[] {
-    const reader = Reader.from(buffer)
-
-    reader.skip(2) // Ignore Version information
-
-    if (reader.remaining < INT32_SIZE) {
-      return []
-    }
-
-    return reader.readArray(
-      r => {
-        return {
-          topic: r.readString(false),
-          partitions: r.readArray(r => r.readInt32(), false, false)
-        }
-      },
-      false,
-      false
-    )
+    return decodeConsumerProtocolAssignment(buffer).assignedPartitions
   }
 
   #createAssignments (
@@ -2115,7 +2203,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const encodedAssignments: SyncGroupRequestAssignment[] = []
 
-    partitionsAssigner ??= (this[kOptions] as GroupOptions).partitionAssigner ?? roundRobinAssigner
+    partitionsAssigner ??= this.#defaultPartitionsAssigner()
     for (const member of partitionsAssigner(this.memberId!, this.#members, new Set(this.topics.current), metadata)) {
       encodedAssignments.push({
         memberId: member.memberId,
@@ -2124,6 +2212,34 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return encodedAssignments
+  }
+
+  #defaultPartitionsAssigner (): GroupPartitionsAssigner {
+    const configuredAssigner = (this[kOptions] as GroupOptions).partitionAssigner
+    if (configuredAssigner) {
+      return configuredAssigner
+    }
+
+    if (this.#isCooperativeProtocol()) {
+      return cooperativeStickyAssigner
+    }
+
+    return roundRobinAssigner
+  }
+
+  #isCooperativeProtocol (): boolean {
+    return this.#protocol === COOPERATIVE_STICKY_ASSIGNOR
+  }
+
+  #ownedPartitionsForSubscription (topics: string[]): GroupAssignment[] {
+    if (!this.assignments) {
+      return []
+    }
+
+    const currentTopics = new Set(topics)
+    return this.assignments
+      .filter(assignment => currentTopics.has(assignment.topic))
+      .map(assignment => ({ topic: assignment.topic, partitions: [...assignment.partitions] }))
   }
 
   #filterUncommittedMessages (response: FetchResponse) {
@@ -2172,6 +2288,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (protocolError.rebalanceInProgress) {
       this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
+    }
+
+    if (this.#isCooperativeProtocol() && ['UNKNOWN_MEMBER_ID', 'ILLEGAL_GENERATION'].includes(protocolError.apiId)) {
+      this.assignments = []
+      this.#syncPreferredReadReplicas()
     }
 
     if (protocolError.unknownMemberId) {

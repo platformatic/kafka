@@ -244,7 +244,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       /* c8 ignore next 13 - Hard to test */
       const connectingSocketTimeoutHandler = () => {
-        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`)
+        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`, { canRetry: true })
         diagnosticContext.error = error
         this.#socket.destroy()
 
@@ -360,7 +360,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         new TimeoutError(
           this.#host
             ? `Connection to ${this.#host}:${this.#port} timed out.`
-            : `Connection ready timed out after ${this.#options.connectTimeout}ms.`
+            : `Connection ready timed out after ${this.#options.connectTimeout}ms.`,
+          { canRetry: true }
         )
       )
     }, this.#options.connectTimeout)

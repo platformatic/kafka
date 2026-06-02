@@ -479,7 +479,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   _construct (callback: (error?: Error) => void) {
-    this.#refreshOffsets(callback as Callback<void>)
+    this.#refreshOffsetsInflight = true
+    this.#refreshOffsets(error => {
+      this.#refreshOffsetsInflight = false
+      callback(error ?? undefined)
+    })
   }
 
   _destroy (error: Error | null, callback: (error?: Error | null) => void): void {

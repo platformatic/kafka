@@ -4899,31 +4899,36 @@ test('describeConfigs should include documentation and synonyms if requested (TO
     includeSynonyms: true,
     includeDocumentation: true
   })
-  deepStrictEqual(initialResult, [
-    {
-      resourceType: ConfigResourceTypes.TOPIC,
-      resourceName: topicName,
-      configs: [
-        {
-          name: 'cleanup.policy',
-          value: 'delete',
-          readOnly: false,
-          configSource: ConfigSources.DEFAULT_CONFIG,
-          isSensitive: false,
-          synonyms: [
-            {
-              name: 'log.cleanup.policy',
-              source: ConfigSources.DEFAULT_CONFIG,
-              value: 'delete'
-            }
-          ],
-          configType: ConfigTypes.LIST,
-          documentation:
-            'This config designates the retention policy to use on log segments. The "delete" policy (which is the default) will discard old segments when their retention time or size limit has been reached. The "compact" policy will enable <a href="#compaction">log compaction</a>, which retains the latest value for each key. It is also possible to specify both policies in a comma-separated list (e.g. "delete,compact"). In this case, old segments will be discarded per the retention time and size configuration, while retained segments will be compacted.'
-        }
-      ]
-    }
-  ])
+  strictEqual(initialResult.length, 1)
+  strictEqual(initialResult[0].resourceType, ConfigResourceTypes.TOPIC)
+  strictEqual(initialResult[0].resourceName, topicName)
+  strictEqual(initialResult[0].configs.length, 1)
+
+  const config = initialResult[0].configs[0]
+  // The documentation text is provided by the broker and has changed across Kafka
+  // versions (e.g. 4.2.0 appended remote storage / infinite retention notes), so
+  // assert the structure and a stable prefix rather than an exact string.
+  const { documentation, ...rest } = config
+  deepStrictEqual(rest, {
+    name: 'cleanup.policy',
+    value: 'delete',
+    readOnly: false,
+    configSource: ConfigSources.DEFAULT_CONFIG,
+    isSensitive: false,
+    synonyms: [
+      {
+        name: 'log.cleanup.policy',
+        source: ConfigSources.DEFAULT_CONFIG,
+        value: 'delete'
+      }
+    ],
+    configType: ConfigTypes.LIST
+  })
+  strictEqual(typeof documentation, 'string')
+  strictEqual(
+    documentation!.startsWith('This config designates the retention policy to use on log segments.'),
+    true
+  )
 
   // Clean up
   await admin.deleteTopics({ topics: [topicName] })

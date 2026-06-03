@@ -16,7 +16,9 @@ A modern, high-performance, pure TypeScript/JavaScript type safe client for Apac
 
 ## Supported Kafka Version
 
-Supported Kafka version are from **3.5.0** to **4.1.0** and equivalent, edges included.
+Supported Apache Kafka versions are from **3.5.0** to **4.2.0** and equivalent, edges included.
+
+These are tested in CI against the corresponding Confluent Platform releases, from **7.5.0** to **8.2.0** (rule of thumb: Confluent Platform version = Apache Kafka version + 4.0.0).
 
 ## Supported KIPs
 

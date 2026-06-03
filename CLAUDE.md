@@ -13,7 +13,7 @@ npm test
 node --test 'test/path/to/file.test.ts'
 
 # Run a single test file with coverage
-c8 -c test/config/c8-local.json node --test --test 'test/path/to/file.test.ts'
+node --test --experimental-test-coverage --test-coverage-include='src/**' 'test/path/to/file.test.ts'
 
 # Lint the code
 npm run lint

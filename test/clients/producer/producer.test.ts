@@ -1,7 +1,17 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
-import { kConnections, kOptions } from '../../../src/clients/base/base.ts'
+import type { Callback } from '../../../src/apis/definitions.ts'
+import type { ProduceResponse } from '../../../src/apis/producer/produce-v11.ts'
+import {
+  kConnections,
+  kGetApi,
+  kGetBootstrapConnection,
+  kGetConnection,
+  kMetadata,
+  kOptions
+} from '../../../src/clients/base/base.ts'
+import type { ClusterMetadata } from '../../../src/clients/base/types.ts'
 import {
   baseMetadataChannel,
   type ClientDiagnosticEvent,
@@ -28,6 +38,7 @@ import {
   UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
+import type { CreateRecordsBatchOptions, MessageRecord } from '../../../src/protocol/records.ts'
 import {
   createConsumer,
   createCreationChannelVerifier,
@@ -45,6 +56,133 @@ import {
   mockMethod,
   mockUnavailableAPI
 } from '../../helpers.ts'
+
+type ProduceApiCallback = Callback<boolean | ProduceResponse>
+type MockProduceApi = (
+  connection: Connection,
+  acks: number | undefined,
+  timeout: number | undefined,
+  messages: MessageRecord[],
+  produceOptions: Partial<CreateRecordsBatchOptions> | undefined,
+  apiCallback: ProduceApiCallback | undefined
+) => void
+
+function createProducerMetadata (topic: string): ClusterMetadata {
+  return {
+    id: 'test-cluster',
+    brokers: new Map([[0, { host: 'localhost', port: 9092, rack: null }]]),
+    controllerId: 0,
+    topics: new Map([
+      [
+        topic,
+        {
+          id: 'test-topic-id',
+          partitions: [{ leader: 0, leaderEpoch: 0, replicas: [0], isr: [0], offlineReplicas: [] }],
+          partitionsCount: 1,
+          lastUpdate: Date.now()
+        }
+      ]
+    ]),
+    lastUpdate: Date.now()
+  }
+}
+
+function createProduceResponse (topic: string, partition: number, offset: bigint = 0n): ProduceResponse {
+  return {
+    responses: [
+      {
+        name: topic,
+        partitionResponses: [
+          {
+            index: partition,
+            errorCode: 0,
+            baseOffset: offset,
+            logAppendTimeMs: 0n,
+            logStartOffset: 0n,
+            recordErrors: [],
+            errorMessage: null
+          }
+        ]
+      }
+    ],
+    throttleTimeMs: 0
+  }
+}
+
+function mockProducerNetwork (producer: Producer, topic: string): void {
+  const connection = {} as Connection
+
+  mockMethod(
+    producer,
+    kMetadata,
+    () => true,
+    null,
+    undefined,
+    (_original, _options, callback) => {
+      callback(null, createProducerMetadata(topic))
+      return true
+    }
+  )
+
+  mockMethod(
+    producer,
+    kGetConnection,
+    () => true,
+    null,
+    undefined,
+    (_original, _broker, callback) => {
+      callback(null, connection)
+      return true
+    }
+  )
+
+  mockMethod(
+    producer,
+    kGetBootstrapConnection,
+    () => true,
+    null,
+    undefined,
+    (_original, callback) => {
+      callback(null, connection)
+      return true
+    }
+  )
+}
+
+function mockProducerApis (producer: Producer, getProducerId: () => bigint, produceApi: MockProduceApi): void {
+  mockMethod(
+    producer,
+    kGetApi,
+    () => true,
+    null,
+    undefined,
+    (original, name, callback) => {
+      if (name === 'InitProducerId') {
+        const api = (
+          _connection: Connection,
+          _transactionalId: string,
+          _timeout: number,
+          _producerId: bigint,
+          _producerEpoch: number,
+          apiCallback: Callback<unknown>
+        ) => {
+          apiCallback(null, { throttleTimeMs: 0, errorCode: 0, producerId: getProducerId(), producerEpoch: 0 })
+        }
+
+        callback(null, api as any)
+        return true
+      }
+
+      if (name === 'Produce') {
+        callback(null, produceApi as any)
+        return true
+      }
+
+      original(name, callback)
+      return true
+    }
+  )
+}
 
 test('constructor should initialize properly', t => {
   const created = createCreationChannelVerifier(instancesChannel)
@@ -1269,6 +1407,155 @@ test('send should repeat the operation in case of stale metadata', async t => {
     idempotent: true,
     acks: ProduceAcks.ALL
   })
+})
+
+test('send should recover idempotent producer after UNKNOWN_PRODUCER_ID', async t => {
+  const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
+  let produceCalls = 0
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      produceCalls++
+
+      if (produceCalls === 1) {
+        apiCallback!(new ProtocolError('UNKNOWN_PRODUCER_ID'))
+        return
+      }
+
+      apiCallback!(null, createProduceResponse(messages[0].topic, messages[0].partition!))
+    }
+  )
+
+  await producer.send({
+    messages: [{ topic: testTopic, value: Buffer.from('idempotent-message'), partition: 0 }]
+  })
+
+  strictEqual(produceCalls, 2)
+  strictEqual(initCalls, 2)
+})
+
+test('send should recover idempotent producer after OUT_OF_ORDER_SEQUENCE_NUMBER', async t => {
+  const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
+  let produceCalls = 0
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      produceCalls++
+
+      if (produceCalls === 1) {
+        apiCallback!(new ProtocolError('OUT_OF_ORDER_SEQUENCE_NUMBER'))
+        return
+      }
+
+      apiCallback!(null, createProduceResponse(messages[0].topic, messages[0].partition!))
+    }
+  )
+
+  await producer.send({
+    messages: [{ topic: testTopic, value: Buffer.from('idempotent-message'), partition: 0 }]
+  })
+
+  strictEqual(produceCalls, 2)
+  strictEqual(initCalls, 2)
+})
+
+test('send should eagerly assign idempotent sequences for concurrent sends to the same partition', async t => {
+  const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
+  const firstSequences: number[] = []
+  const callbacks: (() => void)[] = []
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+
+      firstSequences.push(produceOptions!.sequences!.get(`${topic}:${partition}`)!)
+      callbacks.push(() => {
+        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(callbacks.length)))
+      })
+
+      if (callbacks.length === 2) {
+        callbacks[1]()
+        callbacks[0]()
+      }
+    }
+  )
+
+  await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(firstSequences, [0, 1])
+  strictEqual(initCalls, 1)
+})
+
+test('send should invalidate idempotent producer after permanent produce failure', async t => {
+  const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
+  const producerIds: bigint[] = []
+  let produceCalls = 0
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      produceCalls++
+      producerIds.push(produceOptions!.producerId!)
+
+      if (produceCalls === 2) {
+        apiCallback!(new ProtocolError('MESSAGE_TOO_LARGE'))
+        return
+      }
+
+      apiCallback!(null, createProduceResponse(messages[0].topic, messages[0].partition!))
+    }
+  )
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] })
+
+  await rejects(
+    async () => {
+      await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+    },
+    error => {
+      strictEqual((error as MultipleErrors).findBy?.('apiId', 'MESSAGE_TOO_LARGE') !== null, true)
+      return true
+    }
+  )
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-3'), partition: 0 }] })
+
+  deepStrictEqual(producerIds, [1n, 1n, 2n])
+  strictEqual(initCalls, 2)
 })
 
 test('metrics should track the number of active producer', async t => {

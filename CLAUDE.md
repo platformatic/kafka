@@ -12,8 +12,11 @@ npm test
 # Run a single test file
 node --test 'test/path/to/file.test.ts'
 
-# Run a single test file with coverage
-c8 -c test/config/c8-local.json node --test --test 'test/path/to/file.test.ts'
+# Run a single test file with coverage (local, c8 — Node 22/24)
+c8 -c test/config/c8-local.json node --test 'test/path/to/file.test.ts'
+
+# CI uses Node's built-in coverage (works on Node 26, where c8/yargs breaks):
+# node --test --experimental-test-coverage --test-coverage-include='src/**' 'test/path/to/file.test.ts'
 
 # Lint the code
 npm run lint

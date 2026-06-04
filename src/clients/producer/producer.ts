@@ -1124,6 +1124,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       // Track nodes so that we can get their ID for delayed write reporting
       const nodes: number[] = []
+      const sequenceSnapshot = produceOptions.sequences ? new NumericMap() : undefined
+
+      if (sequenceSnapshot) {
+        for (const [partitionKey, messagesCount] of messagesPerPartition) {
+          sequenceSnapshot.set(partitionKey, this.#sequences.postIncrement(partitionKey, messagesCount, 0))
+        }
+
+        produceOptions = { ...produceOptions, sequences: sequenceSnapshot }
+      }
 
       runConcurrentCallbacks(
         'Producing messages failed.',
@@ -1139,6 +1148,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             sendOptions.autocreateTopics,
             sendOptions.repeatOnStaleMetadata,
             produceOptions,
+            true,
             concurrentCallback
           )
         },
@@ -1167,9 +1177,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                     partition: partitionResponse.index,
                     offset: partitionResponse.baseOffset
                   })
-
-                  const partitionKey = `${name}:${partitionResponse.index}`
-                  this.#sequences.postIncrement(partitionKey, messagesPerPartition.get(partitionKey)!, 0)
                 }
               }
 
@@ -1178,6 +1185,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           if (error) {
+            if (sendOptions.idempotent && !this.#transaction) {
+              this.#producerInfo = undefined
+              this.#sequences.clear()
+            }
+
             ;(error as GenericError).produced = results
             callback(error)
           } else {
@@ -1196,6 +1208,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     autocreateTopics: boolean,
     repeatOnStaleMetadata: boolean,
     produceOptions: Partial<CreateRecordsBatchOptions>,
+    recoverOnProducerStateLoss: boolean,
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
     // Get the metadata with the topic/partitions informations
@@ -1247,8 +1260,31 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 autocreateTopics,
                 false,
                 produceOptions,
+                recoverOnProducerStateLoss,
                 callback
               )
+              return
+            }
+
+            if (recoverOnProducerStateLoss && !this.#transaction && this.#isProducerStateLost(error)) {
+              this.#recoverIdempotentProducer(messages, produceOptions, (error, recoveredProduceOptions) => {
+                if (error) {
+                  callback(error)
+                  return
+                }
+
+                this.#performSingleDestinationSend(
+                  topics,
+                  messages,
+                  timeout,
+                  acks,
+                  autocreateTopics,
+                  repeatOnStaleMetadata,
+                  recoveredProduceOptions!,
+                  false,
+                  callback
+                )
+              })
               return
             }
 
@@ -1271,6 +1307,49 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           ).findBy('hasStaleMetadata', true)
         }
       )
+    })
+  }
+
+  #isProducerStateLost (error: Error): boolean {
+    const kafkaError = error as GenericError
+
+    return !!(
+      GenericError.isGenericError(error) &&
+      (kafkaError.findBy('apiId', 'UNKNOWN_PRODUCER_ID') || kafkaError.findBy('apiId', 'OUT_OF_ORDER_SEQUENCE_NUMBER'))
+    )
+  }
+
+  #recoverIdempotentProducer (
+    messages: MessageRecord[],
+    produceOptions: Partial<CreateRecordsBatchOptions>,
+    callback: CallbackWithPromise<Partial<CreateRecordsBatchOptions>>
+  ): void {
+    this.#producerInfo = undefined
+    this.#sequences.clear()
+
+    this.initIdempotentProducer({}, (error, producerInfo) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      const sequences = new NumericMap()
+      const messagesPerPartition = new NumericMap()
+
+      for (const { topic, partition } of messages) {
+        messagesPerPartition.postIncrement(`${topic}:${partition}`, 1, 0)
+      }
+
+      for (const [partitionKey, messagesCount] of messagesPerPartition) {
+        sequences.set(partitionKey, this.#sequences.postIncrement(partitionKey, messagesCount, 0))
+      }
+
+      callback(null, {
+        ...produceOptions,
+        producerId: producerInfo!.producerId,
+        producerEpoch: producerInfo!.producerEpoch,
+        sequences
+      })
     })
   }
 

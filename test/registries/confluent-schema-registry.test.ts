@@ -49,6 +49,46 @@ async function registerSchema (url: string, subject: string, schemaType: string,
   return schemaData.id
 }
 
+test('skips null payloads before deserialization', async () => {
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+  let fetches = 0
+
+  registry.fetchSchema = async (_, callback) => {
+    fetches++
+    callback(null)
+  }
+
+  const hook = registry.getBeforeDeserializationHook()
+  const message = {
+    length: 0,
+    attributes: 0,
+    timestampDelta: 0n,
+    offsetDelta: 0,
+    key: null,
+    value: Buffer.from('value'),
+    headers: [],
+    topic: 'topic',
+    partition: 0
+  }
+
+  strictEqual(registry.getSchemaId(null, 'key'), undefined)
+
+  await new Promise<void>((resolve, reject) => {
+    hook(null, 'key', message, error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+
+  strictEqual(fetches, 0)
+})
+
 test('supports producing and consuming messages using Confluent Schema Registry and AVRO', async t => {
   const topic = await createTopic(t, true)
 

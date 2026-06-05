@@ -32,7 +32,7 @@ export interface Deserializers<Key, Value, HeaderKey, HeaderValue> {
 export type BeforeHookPayloadType = 'key' | 'value' | 'headerKey' | 'headerValue'
 
 export type BeforeDeserializationHook = (
-  payload: Buffer,
+  payload: Buffer | null,
   type: BeforeHookPayloadType,
   message: MessageToConsume,
   callback: Callback<void>

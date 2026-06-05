@@ -19,7 +19,7 @@ export interface SchemaRegistry<
   get (id: Id): Schema | undefined
   fetch (id: Id, callback?: (error?: Error) => void): void | Promise<void>
 
-  getSchemaId (payload: Buffer | MessageToProduce<Key, Value, HeaderKey, HeaderValue>, type?: BeforeHookPayloadType): Id
+  getSchemaId (payload: Buffer | null | MessageToProduce<Key, Value, HeaderKey, HeaderValue>, type?: BeforeHookPayloadType): Id
 
   getSerializers (): Serializers<Key, Value, HeaderKey, HeaderValue>
   getDeserializers (): Deserializers<Key, Value, HeaderKey, HeaderValue>
@@ -69,7 +69,7 @@ export class AbstractSchemaRegistry<
     throw new Error('AbstractSchemaRegistry.fetch() should be implemented in subclasses.')
   }
 
-  getSchemaId (_p: Buffer | MessageToProduce<Key, Value, HeaderKey, HeaderValue>, _t?: BeforeHookPayloadType): Id {
+  getSchemaId (_p: Buffer | null | MessageToProduce<Key, Value, HeaderKey, HeaderValue>, _t?: BeforeHookPayloadType): Id {
     throw new Error('AbstractSchemaRegistry.getSchemaId() should be implemented in subclasses.')
   }
 

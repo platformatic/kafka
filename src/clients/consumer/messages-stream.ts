@@ -1209,7 +1209,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     response: FetchResponse,
     requestedOffsets: Map<string, bigint>
   ) {
-    const requests: [Buffer, BeforeHookPayloadType, MessageToConsume][] = []
+    const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsume][] = []
 
     // Create the pre-deserialization requests
     for (const topicResponse of response.responses) {
@@ -1230,8 +1230,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             message.topic = topicIds.get(topicResponse.topicId)!
             message.partition = partition
 
-            requests.push([message.key!, 'key', message])
-            requests.push([message.value!, 'value', message])
+            requests.push([message.key, 'key', message])
+            requests.push([message.value, 'value', message])
 
             for (const [headerKey, headerValue] of message.headers) {
               requests.push([headerKey!, 'headerKey', message])

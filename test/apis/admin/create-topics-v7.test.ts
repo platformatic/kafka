@@ -377,6 +377,118 @@ test('parseResponse correctly processes a successful response', () => {
   )
 })
 
+test('parseResponse correctly processes multiple successful topics', () => {
+  const writer = Writer.create()
+    .appendInt32(0)
+    .appendArray(
+      [
+        {
+          name: 'test-topic-1',
+          topicId: '12345678-1234-1234-1234-123456789abc',
+          errorCode: 0,
+          errorMessage: null,
+          numPartitions: 1,
+          replicationFactor: 1,
+          configs: []
+        },
+        {
+          name: 'test-topic-2',
+          topicId: 'abcdefab-cdef-abcd-efab-cdefabcdefab',
+          errorCode: 0,
+          errorMessage: null,
+          numPartitions: 1,
+          replicationFactor: 1,
+          configs: []
+        }
+      ],
+      (w, topic) => {
+        w.appendString(topic.name)
+          .appendUUID(topic.topicId)
+          .appendInt16(topic.errorCode)
+          .appendString(topic.errorMessage)
+          .appendInt32(topic.numPartitions)
+          .appendInt16(topic.replicationFactor)
+          .appendArray(topic.configs, () => {})
+      }
+    )
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 19, 7, Reader.from(writer))
+
+  deepStrictEqual(response, {
+    throttleTimeMs: 0,
+    topics: [
+      {
+        name: 'test-topic-1',
+        topicId: '12345678-1234-1234-1234-123456789abc',
+        errorCode: 0,
+        errorMessage: null,
+        numPartitions: 1,
+        replicationFactor: 1,
+        configs: []
+      },
+      {
+        name: 'test-topic-2',
+        topicId: 'abcdefab-cdef-abcd-efab-cdefabcdefab',
+        errorCode: 0,
+        errorMessage: null,
+        numPartitions: 1,
+        replicationFactor: 1,
+        configs: []
+      }
+    ]
+  })
+})
+
+test('parseResponse correctly skips tagged fields between multiple topics', () => {
+  const writer = Writer.create()
+    .appendInt32(0)
+    .appendUnsignedVarInt(3)
+    .appendString('test-topic-1')
+    .appendUUID('12345678-1234-1234-1234-123456789abc')
+    .appendInt16(0)
+    .appendString(null)
+    .appendInt32(1)
+    .appendInt16(1)
+    .appendArray([])
+    .appendUnsignedVarInt(1)
+    .appendUnsignedVarInt(0)
+    .appendUnsignedVarInt(2)
+    .appendInt16(0)
+    .appendString('test-topic-2')
+    .appendUUID('abcdefab-cdef-abcd-efab-cdefabcdefab')
+    .appendInt16(0)
+    .appendString(null)
+    .appendInt32(1)
+    .appendInt16(1)
+    .appendArray([])
+    .appendTaggedFields()
+    .appendTaggedFields()
+
+  const response = parseResponse(1, 19, 7, Reader.from(writer))
+
+  deepStrictEqual(response.topics, [
+    {
+      name: 'test-topic-1',
+      topicId: '12345678-1234-1234-1234-123456789abc',
+      errorCode: 0,
+      errorMessage: null,
+      numPartitions: 1,
+      replicationFactor: 1,
+      configs: []
+    },
+    {
+      name: 'test-topic-2',
+      topicId: 'abcdefab-cdef-abcd-efab-cdefabcdefab',
+      errorCode: 0,
+      errorMessage: null,
+      numPartitions: 1,
+      replicationFactor: 1,
+      configs: []
+    }
+  ])
+})
+
 test('parseResponse correctly processes response with config data', () => {
   // Create a response with config data
   const writer = Writer.create()

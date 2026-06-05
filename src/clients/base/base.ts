@@ -627,7 +627,13 @@ export class Base<
                   return
                 }
 
-                api!(connection!, topicsToFetch, autocreateTopics, true, retryCallback)
+                // includeTopicAuthorizedOperations: false. The response's
+                // topic_authorized_operations bitfield is parsed but never read
+                // by the producer/consumer, and requesting it makes IAM brokers
+                // (e.g. MSK) authorize every topic operation and emit a CloudTrail
+                // AccessDenied per denied op (CreateTopic/DeleteTopic/...) — pure
+                // audit-log noise for permissions the client never exercises.
+                api!(connection!, topicsToFetch, autocreateTopics, false, retryCallback)
               })
             }, attempt)
           },

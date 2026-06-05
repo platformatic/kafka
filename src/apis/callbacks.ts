@@ -34,46 +34,48 @@ export function runConcurrentCallbacks<R, V> (
   operation: (item: V, cb: Callback<R>) => void,
   callback: Callback<R[]>
 ): void {
-  let scheduled = 0
   let allScheduled = false
   let completed = 0
   let callbackCalled = false
   let hasErrors = false
-  const errors: Error[] = []
-  const results: R[] = []
+  const errors: [number, Error][] = []
+  const results: [number, R][] = []
 
-  function operationCallback (e: Error | null, result?: R): void {
+  let i = 0
+
+  function operationCallback (index: number, e: Error | null, result?: R): void {
     if (e) {
       hasErrors = true
-      errors.push(e)
-      results.push(undefined as unknown as R)
+      errors.push([index, e])
     } else {
-      errors.push(undefined as unknown as Error)
-      results.push(result!)
+      results.push([index, result!])
     }
 
     completed++
 
-    if (allScheduled && completed === scheduled) {
+    if (allScheduled && completed === i) {
       callbackCalled = true
-      callback(hasErrors ? new MultipleErrors(errorMessage, errors.filter(Boolean)) : null, results.filter(Boolean) as R[])
+      const e = errors.sort((a, b) => a[0] - b[0]).map(([_, error]) => error)
+      const r = results.sort((a, b) => a[0] - b[0]).map(([_, result]) => result)
+      callback(hasErrors ? new MultipleErrors(errorMessage, e) : null, r)
     }
   }
 
   for (const item of collection) {
-    scheduled++
-    operation(item, operationCallback)
+    operation(item, operationCallback.bind(null, i++))
   }
 
   allScheduled = true
 
-  if (allScheduled && scheduled === 0) {
+  if (allScheduled && i === 0) {
     callback(null, [])
   }
 
   // If all operations were synchronous, allScheduled is not set to true in time for the operation
   // callback to pick it up. In that case, call the callback here.
-  if (completed === scheduled && !callbackCalled) {
-    callback(hasErrors ? new MultipleErrors(errorMessage, errors.filter(Boolean)) : null, results.filter(Boolean) as R[])
+  if (completed === i && !callbackCalled) {
+    const e = errors.sort((a, b) => a[0] - b[0]).map(([_, error]) => error)
+    const r = results.sort((a, b) => a[0] - b[0]).map(([_, result]) => result)
+    callback(hasErrors ? new MultipleErrors(errorMessage, e) : null, r)
   }
 }

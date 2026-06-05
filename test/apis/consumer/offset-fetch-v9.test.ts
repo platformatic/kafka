@@ -95,7 +95,10 @@ test('createRequest with specific member ID and epoch', () => {
     const memberEpoch = reader.readInt32()
 
     // Skip topics
-    reader.readArray(() => {})
+    reader.readArray(r => {
+      r.readString()
+      r.readArray(r => r.readInt32(), true, false)
+    })
 
     return { groupId, memberId, memberEpoch }
   })

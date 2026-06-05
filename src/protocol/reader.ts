@@ -418,9 +418,10 @@ export class Reader {
 
   // TODO: Tagged fields are not supported yet
   readTaggedFields (): void {
-    const length = this.readVarInt()
-    if (length > 0) {
-      this.skip(length)
+    const length = this.readUnsignedVarInt()
+    for (let i = 0; i < length; i++) {
+      this.readUnsignedVarInt()
+      this.skip(this.readUnsignedVarInt())
     }
   }
 }

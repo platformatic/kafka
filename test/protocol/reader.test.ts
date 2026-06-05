@@ -921,13 +921,17 @@ test('readVarIntMap', () => {
 
 test('readTaggedFields', () => {
   const buffer = Buffer.from([
-    // Length of tagged fields (0)
+    // Number of tagged fields (0)
     0,
-    // Length of tagged fields (3), using ZigZag encoded value
-    6, // 3 ZigZag encoded as VarInt is 6
+    // Number of tagged fields (1)
     1,
+    // Tag ID (1)
+    1,
+    // Tagged field size (2)
     2,
-    3
+    // Tagged field payload
+    3,
+    4
   ])
 
   const reader = new Reader(new DynamicBuffer(buffer))

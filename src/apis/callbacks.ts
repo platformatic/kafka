@@ -47,6 +47,7 @@ export function runConcurrentCallbacks<R, V> (
     if (e) {
       hasErrors = true
       errors.push([index, e])
+      results.push([index, undefined as unknown as R])
     } else {
       results.push([index, result!])
     }
@@ -65,11 +66,12 @@ export function runConcurrentCallbacks<R, V> (
     operation(item, operationCallback.bind(null, i++))
   }
 
-  allScheduled = true
-
-  if (allScheduled && i === 0) {
+  if (i === 0) {
     callback(null, [])
+    return
   }
+
+  allScheduled = true
 
   // If all operations were synchronous, allScheduled is not set to true in time for the operation
   // callback to pick it up. In that case, call the callback here.

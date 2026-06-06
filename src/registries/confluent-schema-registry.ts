@@ -86,9 +86,13 @@ export class ConfluentSchemaRegistry<
   }
 
   getSchemaId (
-    message: Buffer | MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
+    message: Buffer | null | MessageToProduce<Key, Value, HeaderKey, HeaderValue>,
     type?: BeforeHookPayloadType
   ): number | undefined {
+    if (message === null) {
+      return undefined
+    }
+
     if (Buffer.isBuffer(message)) {
       if (type !== 'value') {
         return undefined
@@ -204,7 +208,7 @@ export class ConfluentSchemaRegistry<
     const registry = this
 
     return function beforeDeserialization (
-      payload: Buffer,
+      payload: Buffer | null,
       type: BeforeHookPayloadType,
       _message: MessageToConsume,
       callback: Callback<void>

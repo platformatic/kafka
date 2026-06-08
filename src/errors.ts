@@ -64,6 +64,10 @@ export class GenericError extends Error {
 
     return null
   }
+
+  toString () {
+    return `Error ${this.code}: ${this.message}`
+  }
 }
 
 export class MultipleErrors extends AggregateError {
@@ -128,6 +132,10 @@ export class MultipleErrors extends AggregateError {
     }
 
     return null
+  }
+
+  toString () {
+    return `Error ${this.code}: ${this.message} (caused by: ${this.errors.map(error => error.toString()).join(', ')})`
   }
 }
 

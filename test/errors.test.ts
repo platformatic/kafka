@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok } from 'assert'
+import { deepStrictEqual, ok, strictEqual } from 'assert'
 import { test } from 'node:test'
 import {
   AuthenticationError,
@@ -133,6 +133,17 @@ test('MultipleErrors.findBy - recursively finds properties in nested errors', ()
 
   // Direct property of the outer error
   deepStrictEqual(outerError.findBy('outerProp', 'outer-value'), outerError)
+})
+
+test('MultipleErrors - conversion to string', () => {
+  const innerError1 = new GenericError('PLT_KFK_USER', 'inner error')
+  const innerError2 = new GenericError('PLT_KFK_NETWORK', 'another inner error')
+  const middleError = new MultipleErrors('middle errors', [innerError1, innerError2])
+  const outerError = new MultipleErrors('outer errors', [middleError])
+  strictEqual(
+    `${outerError}`,
+    'Error PLT_KFK_MULTIPLE: outer errors (caused by: Error PLT_KFK_MULTIPLE: middle errors (caused by: Error PLT_KFK_USER: inner error, Error PLT_KFK_NETWORK: another inner error))'
+  )
 })
 
 test('AuthenticationError', () => {

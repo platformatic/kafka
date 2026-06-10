@@ -122,7 +122,7 @@ import {
   type OffsetsWithTimestamps,
   type PreferredReadReplica
 } from './types.ts'
-import { partitionKey } from './utils.ts'
+import { nextFetchEpoch, partitionKey } from './utils.ts'
 
 interface TopicPartition {
   topicId: string
@@ -166,6 +166,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #memberEpoch: number
   #groupRemoteAssignor: string | null
   #clientRack: string
+  #fetchSessions: Map<number, { id: number; epoch: number }>
   #preferredReadReplicas: Map<string, PreferredReadReplica>
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #lagMonitoring: NodeJS.Timeout | null
@@ -219,6 +220,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
     this.#clientRack = this[kOptions].clientRack ?? ''
+    this.#fetchSessions = new Map()
     this.#preferredReadReplicas = new Map()
     this.#streamContext = options.streamContext ?? options.context
 
@@ -311,6 +313,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.topics.clear()
+        this.#fetchSessions.clear()
 
         if (this[kPrometheus]) {
           ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
@@ -852,6 +855,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           pool.get(broker, (error, connection) => {
             if (error) {
               this.#clearPreferredReadReplicas(options.topics, topicIds)
+              this.#fetchSessions.delete(node)
 
               // When a connection was not available (either interrupted or not available) we
               // reset the leader epoch in the options so that when connection is re-established again we can continue
@@ -871,6 +875,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 retryCallback(error)
                 return
               }
+              const session = this.#fetchSessions.get(node)
+              const sessionId = session?.id ?? 0
+              const sessionEpoch = session?.epoch ?? 0
 
               api!(
                 connection!,
@@ -878,8 +885,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 options.minBytes ?? this[kOptions].minBytes!,
                 options.maxBytes ?? this[kOptions].maxBytes!,
                 isolationLevel,
-                0,
-                0,
+                sessionId,
+                sessionEpoch,
                 options.topics,
                 [],
                 this.#clientRack,
@@ -888,7 +895,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                     this.#clearPreferredReadReplicas(options.topics, topicIds)
 
                     const genericError = error as GenericError
+                    if (
+                      genericError.findBy?.('apiId', 'FETCH_SESSION_ID_NOT_FOUND') ||
+                      genericError.findBy?.('apiId', 'INVALID_FETCH_SESSION_EPOCH') ||
+                      genericError.findBy?.('apiId', 'FETCH_SESSION_TOPIC_ID_ERROR')
+                    ) {
+                      this.#fetchSessions.delete(node)
+                    }
+
                     if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
+                      this.#fetchSessions.delete(node)
                       this.clearMetadata()
                       for (const topic of options.topics) {
                         for (const partition of topic.partitions) {
@@ -899,6 +915,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                     }
                   } else {
                     this.#updatePreferredReadReplicas(metadata!, topicIds, result!)
+                    this.#updateFetchSession(node, sessionEpoch, result!.sessionId)
                   }
 
                   retryCallback(error, result)
@@ -923,6 +940,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       0
     )
+  }
+
+  #updateFetchSession (node: number, sentEpoch: number, responseSessionId: number): void {
+    if (!responseSessionId) {
+      this.#fetchSessions.delete(node)
+      return
+    }
+
+    this.#fetchSessions.set(node, { id: responseSessionId, epoch: nextFetchEpoch(sentEpoch) })
   }
 
   #commit (options: CommitOptions, callback: CallbackWithPromise<void>, rejoinAttempts: number = 0): void {

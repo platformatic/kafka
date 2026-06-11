@@ -318,6 +318,23 @@ test('get fail when the pool is closed', async t => {
   await rejects(() => connectionPool.get(broker) as Promise<unknown>, { message: 'Connection pool is closed.' })
 })
 
+test('get should reject with a retriable error when the broker is missing from stale metadata', async t => {
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  await rejects(() => connectionPool.get(undefined as unknown as Broker) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK',
+    canRetry: true,
+    hasStaleMetadata: true
+  })
+
+  await rejects(() => connectionPool.get({ host: undefined } as unknown as Broker) as Promise<unknown>, {
+    code: 'PLT_KFK_NETWORK',
+    canRetry: true,
+    hasStaleMetadata: true
+  })
+})
+
 test('getFirstAvailable should try multiple brokers until one succeeds', async t => {
   const { port } = await createServer(t)
 

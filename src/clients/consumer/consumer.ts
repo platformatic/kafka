@@ -50,7 +50,7 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { type GenericError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
+import { type GenericError, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -1928,9 +1928,25 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
         }
 
-        this[kMetadata]({ topics: Array.from(topicsSubscriptions.keys()) }, (error, metadata) => {
+        const subscribedTopics = Array.from(topicsSubscriptions.keys())
+
+        this[kMetadata]({ topics: subscribedTopics }, (error, metadata) => {
           if (error) {
             callback(this.#handleError(error))
+            return
+          }
+
+          const missingTopic = subscribedTopics.find(topic => !metadata!.topics.has(topic))
+
+          if (missingTopic) {
+            callback(
+              this.#handleError(
+                new NetworkError(
+                  `Cannot compute group assignments: metadata for subscribed topic "${missingTopic}" is not available in the current cluster metadata.`,
+                  { canRetry: true, hasStaleMetadata: true }
+                )
+              )
+            )
             return
           }
 

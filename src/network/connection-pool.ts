@@ -6,7 +6,7 @@ import {
 } from '../apis/callbacks.ts'
 import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
-import { MultipleErrors } from '../errors.ts'
+import { MultipleErrors, NetworkError } from '../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../events.ts'
 import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
 
@@ -169,6 +169,17 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
   #get (broker: Broker, callback: Callback<Connection>): void {
     if (this.#closed) {
       callback(new Error('Connection pool is closed.'))
+      return
+    }
+
+    if (broker == null || broker.host == null || broker.port == null) {
+      callback(
+        new NetworkError('Cannot get a connection: the broker is not available in the current cluster metadata.', {
+          canRetry: true,
+          hasStaleMetadata: true,
+          broker
+        })
+      )
       return
     }
 

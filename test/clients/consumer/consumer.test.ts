@@ -55,6 +55,7 @@ import {
   type ProducerOptions,
   ProtocolError,
   Reader,
+  ResponseError,
   type RecordsBatch,
   sleep,
   syncGroupV5,
@@ -1486,7 +1487,7 @@ test('fetch should send clientRack as the fetch rack id', async t => {
   strictEqual(requestRackId, clientRack)
 })
 
-test('fetch should reuse incremental fetch sessions and forget partitions no longer requested', async t => {
+test('fetch should send incremental fetch requests and forget partitions no longer requested', async t => {
   const topicId = '00000000-0000-0000-0000-000000000001'
   const otherTopicId = '00000000-0000-0000-0000-000000000002'
   const consumer = createConsumer(t)
@@ -1495,6 +1496,7 @@ test('fetch should reuse incremental fetch sessions and forget partitions no lon
   const fetchRequests: {
     sessionId: number
     sessionEpoch: number
+    topics: { topicId: string; partitions: string[] }[]
     forgottenTopicsData: { topic: string; partitions: number[] }[]
   }[] = []
 
@@ -1533,12 +1535,22 @@ test('fetch should reuse incremental fetch sessions and forget partitions no lon
       _isolationLevel: number,
       sessionId: number,
       sessionEpoch: number,
-      _topics: unknown,
+      topics: { topicId: string; partitions: { partition: number; fetchOffset: bigint }[] }[],
       forgottenTopicsData: { topic: string; partitions: number[] }[],
       _rackId: string,
       callback: CallbackWithPromise<FetchResponse>
     ) => {
-      fetchRequests.push({ sessionId, sessionEpoch, forgottenTopicsData })
+      fetchRequests.push({
+        sessionId,
+        sessionEpoch,
+        topics: topics.map(topic => {
+          return {
+            topicId: topic.topicId,
+            partitions: topic.partitions.map(partition => `${partition.partition}@${partition.fetchOffset}`)
+          }
+        }),
+        forgottenTopicsData
+      })
       callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
     }
 
@@ -1546,18 +1558,18 @@ test('fetch should reuse incremental fetch sessions and forget partitions no lon
     return true
   })
 
-  function fetchOptions (topics: [string, number[]][]) {
+  function fetchOptions (topics: [string, number[], bigint][]) {
     return {
       connectionPool: pool,
       node: 0,
-      topics: topics.map(([topicId, partitions]) => {
+      topics: topics.map(([topicId, partitions, fetchOffset]) => {
         return {
           topicId,
           partitions: partitions.map(partition => {
             return {
               partition,
               currentLeaderEpoch: 0,
-              fetchOffset: 0n,
+              fetchOffset,
               lastFetchedEpoch: 0,
               partitionMaxBytes: 1048576
             }
@@ -1567,21 +1579,233 @@ test('fetch should reuse incremental fetch sessions and forget partitions no lon
     }
   }
 
-  await consumer.fetch(fetchOptions([[topicId, [0, 1]], [otherTopicId, [0]]]))
-  await consumer.fetch(fetchOptions([[topicId, [0]]]))
-  await consumer.fetch(fetchOptions([[topicId, [0]]]))
+  // Full fetch establishing the session
+  await consumer.fetch(fetchOptions([[topicId, [0, 1], 0n], [otherTopicId, [0], 0n]]))
+  // Same state for partition 0, the others are dropped: only forgotten data is sent
+  await consumer.fetch(fetchOptions([[topicId, [0], 0n]]))
+  // The offset of partition 0 advanced: only that partition is sent
+  await consumer.fetch(fetchOptions([[topicId, [0], 5n]]))
+  // Nothing changed: the request is empty and just polls the session
+  await consumer.fetch(fetchOptions([[topicId, [0], 5n]]))
 
   deepStrictEqual(fetchRequests, [
-    { sessionId: 0, sessionEpoch: 0, forgottenTopicsData: [] },
+    {
+      sessionId: 0,
+      sessionEpoch: 0,
+      topics: [
+        { topicId, partitions: ['0@0', '1@0'] },
+        { topicId: otherTopicId, partitions: ['0@0'] }
+      ],
+      forgottenTopicsData: []
+    },
     {
       sessionId: 123,
       sessionEpoch: 1,
+      topics: [],
       forgottenTopicsData: [
         { topic: topicId, partitions: [1] },
         { topic: otherTopicId, partitions: [0] }
       ]
     },
-    { sessionId: 123, sessionEpoch: 2, forgottenTopicsData: [] }
+    {
+      sessionId: 123,
+      sessionEpoch: 2,
+      topics: [{ topicId, partitions: ['0@5'] }],
+      forgottenTopicsData: []
+    },
+    {
+      sessionId: 123,
+      sessionEpoch: 3,
+      topics: [],
+      forgottenTopicsData: []
+    }
+  ])
+})
+
+test('fetch should not share incremental fetch sessions across connection pools', async t => {
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const pool = consumer[kCreateConnectionPool]()
+  const otherPool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  const fetchRequests: { sessionId: number; sessionEpoch: number; partitions: number }[] = []
+
+  t.after(() => pool.close())
+  t.after(() => otherPool.close())
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map()
+      })
+
+      return true
+    }
+  )
+
+  for (const target of [pool, otherPool]) {
+    mockConnectionPoolGet(
+      target,
+      () => true,
+      null,
+      null,
+      (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+        callback(null, connection)
+        return true
+      }
+    )
+  }
+
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
+    const api = (
+      _connection: unknown,
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      sessionId: number,
+      sessionEpoch: number,
+      topics: { partitions: unknown[] }[],
+      _forgottenTopicsData: unknown[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
+      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
+    }
+
+    callback(null, api)
+    return true
+  })
+
+  function fetchOptions (connectionPool: typeof pool) {
+    return {
+      connectionPool,
+      node: 0,
+      topics: [
+        {
+          topicId,
+          partitions: [
+            {
+              partition: 0,
+              currentLeaderEpoch: 0,
+              fetchOffset: 0n,
+              lastFetchedEpoch: 0,
+              partitionMaxBytes: 1048576
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+  await consumer.fetch(fetchOptions(pool))
+  // A different pool must not reuse the session: full fetch with all partitions
+  await consumer.fetch(fetchOptions(otherPool))
+
+  deepStrictEqual(fetchRequests, [
+    { sessionId: 0, sessionEpoch: 0, partitions: 1 },
+    { sessionId: 0, sessionEpoch: 0, partitions: 1 }
+  ])
+})
+
+test('fetch should retry with a full fetch when the broker evicts the session', async t => {
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { retryDelay: 0 })
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  const fetchRequests: { sessionId: number; sessionEpoch: number; partitions: number }[] = []
+
+  t.after(() => pool.close())
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map()
+      })
+
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
+    const api = (
+      _connection: unknown,
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      sessionId: number,
+      sessionEpoch: number,
+      topics: { partitions: unknown[] }[],
+      _forgottenTopicsData: unknown[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
+
+      // The broker evicted the session: fail the second request (the first incremental one)
+      if (fetchRequests.length === 2) {
+        const response = { throttleTimeMs: 0, errorCode: 70, sessionId: 0, responses: [] }
+        callback(new ResponseError(1, 17, { '': [70, null] }, response), undefined)
+        return
+      }
+
+      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
+    }
+
+    callback(null, api)
+    return true
+  })
+
+  function fetchOptions () {
+    return {
+      connectionPool: pool,
+      node: 0,
+      topics: [
+        {
+          topicId,
+          partitions: [
+            {
+              partition: 0,
+              currentLeaderEpoch: 0,
+              fetchOffset: 0n,
+              lastFetchedEpoch: 0,
+              partitionMaxBytes: 1048576
+            }
+          ]
+        }
+      ]
+    }
+  }
+
+  await consumer.fetch(fetchOptions())
+  // The eviction error is retried transparently with a new full fetch
+  await consumer.fetch(fetchOptions())
+
+  deepStrictEqual(fetchRequests, [
+    { sessionId: 0, sessionEpoch: 0, partitions: 1 },
+    { sessionId: 123, sessionEpoch: 1, partitions: 0 },
+    { sessionId: 0, sessionEpoch: 0, partitions: 1 }
   ])
 })
 

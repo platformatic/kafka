@@ -811,6 +811,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
         const key = partitionKey(topic, partition)
 
+        // The broker can return partitions which were not requested when they linger
+        // in an incremental fetch session - their data is stale and must not rewind offsets
+        if (!requestedOffsets.has(key)) {
+          continue
+        }
+
         if (!recordsBatches) {
           continue
         }
@@ -1213,7 +1219,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Create the pre-deserialization requests
     for (const topicResponse of response.responses) {
+      const topic = topicIds.get(topicResponse.topicId)!
+
       for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+        // The broker can return partitions which were not requested when they linger
+        // in an incremental fetch session - do not run hooks on their stale records
+        if (!requestedOffsets.has(partitionKey(topic, partition))) {
+          continue
+        }
+
         /* c8 ignore next 3 - Hard to test */
         if (!recordsBatches) {
           continue
@@ -1227,7 +1241,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           }
 
           for (const message of batch.records as MessageToConsume[]) {
-            message.topic = topicIds.get(topicResponse.topicId)!
+            message.topic = topic
             message.partition = partition
 
             requests.push([message.key, 'key', message])

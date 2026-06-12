@@ -10,7 +10,12 @@ import {
   type ConsumerGroupHeartbeatRequest,
   type ConsumerGroupHeartbeatResponse
 } from '../../apis/consumer/consumer-group-heartbeat-v1.ts'
-import { type FetchRequest, type FetchRequestTopic, type FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import {
+  type FetchRequest,
+  type FetchRequestForgottenTopicsData,
+  type FetchRequestTopic,
+  type FetchResponse
+} from '../../apis/consumer/fetch-v17.ts'
 import { type HeartbeatRequest, type HeartbeatResponse } from '../../apis/consumer/heartbeat-v4.ts'
 import {
   type JoinGroupRequest,
@@ -166,7 +171,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #memberEpoch: number
   #groupRemoteAssignor: string | null
   #clientRack: string
-  #fetchSessions: Map<number, { id: number; epoch: number }>
+  #fetchSessions: Map<number, { id: number; epoch: number; partitions: Map<string, Set<number>> }>
   #preferredReadReplicas: Map<string, PreferredReadReplica>
   #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   #lagMonitoring: NodeJS.Timeout | null
@@ -879,6 +884,39 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               const sessionId = session?.id ?? 0
               const sessionEpoch = session?.epoch ?? 0
 
+              const requestedPartitions = new Map<string, Set<number>>()
+              for (const topic of options.topics) {
+                let partitions = requestedPartitions.get(topic.topicId)
+                if (!partitions) {
+                  partitions = new Set()
+                  requestedPartitions.set(topic.topicId, partitions)
+                }
+
+                for (const partition of topic.partitions) {
+                  partitions.add(partition.partition)
+                }
+              }
+
+              // Ask the broker to remove from the incremental fetch session the partitions
+              // which are no longer requested, otherwise it keeps serving them forever (KIP-227)
+              const forgottenTopicsData: FetchRequestForgottenTopicsData[] = []
+              if (session) {
+                for (const [topicId, partitions] of session.partitions) {
+                  const stillRequested = requestedPartitions.get(topicId)
+                  const forgotten: number[] = []
+
+                  for (const partition of partitions) {
+                    if (!stillRequested?.has(partition)) {
+                      forgotten.push(partition)
+                    }
+                  }
+
+                  if (forgotten.length > 0) {
+                    forgottenTopicsData.push({ topic: topicId, partitions: forgotten })
+                  }
+                }
+              }
+
               api!(
                 connection!,
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
@@ -888,7 +926,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 sessionId,
                 sessionEpoch,
                 options.topics,
-                [],
+                forgottenTopicsData,
                 this.#clientRack,
                 (error, result) => {
                   if (error) {
@@ -915,7 +953,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                     }
                   } else {
                     this.#updatePreferredReadReplicas(metadata!, topicIds, result!)
-                    this.#updateFetchSession(node, sessionEpoch, result!.sessionId)
+                    this.#updateFetchSession(node, sessionEpoch, result!.sessionId, requestedPartitions)
                   }
 
                   retryCallback(error, result)
@@ -942,13 +980,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #updateFetchSession (node: number, sentEpoch: number, responseSessionId: number): void {
+  #updateFetchSession (
+    node: number,
+    sentEpoch: number,
+    responseSessionId: number,
+    requestedPartitions: Map<string, Set<number>>
+  ): void {
     if (!responseSessionId) {
       this.#fetchSessions.delete(node)
       return
     }
 
-    this.#fetchSessions.set(node, { id: responseSessionId, epoch: nextFetchEpoch(sentEpoch) })
+    // After a successful incremental fetch the broker session contains exactly the
+    // requested partitions: previous ones were either re-requested or forgotten
+    this.#fetchSessions.set(node, {
+      id: responseSessionId,
+      epoch: nextFetchEpoch(sentEpoch),
+      partitions: requestedPartitions
+    })
   }
 
   #commit (options: CommitOptions, callback: CallbackWithPromise<void>, rejoinAttempts: number = 0): void {

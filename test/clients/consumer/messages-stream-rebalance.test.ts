@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
+import type { RecordsBatch } from '../../../src/protocol/records.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import {
   type Consumer,
@@ -68,6 +69,34 @@ function createFetchResponse (preferredReadReplica: number): FetchResponse {
         ]
       }
     ]
+  }
+}
+
+function createRecordsBatch (firstOffset: bigint, values: string[]): RecordsBatch {
+  return {
+    firstOffset,
+    length: 0,
+    partitionLeaderEpoch: 0,
+    magic: 2,
+    crc: 0,
+    attributes: 0,
+    lastOffsetDelta: values.length - 1,
+    firstTimestamp: 0n,
+    maxTimestamp: 0n,
+    producerId: -1n,
+    producerEpoch: -1,
+    firstSequence: 0,
+    records: values.map((value, i) => {
+      return {
+        length: 0,
+        attributes: 0,
+        timestampDelta: 0n,
+        offsetDelta: i,
+        key: Buffer.from(`key-${i}`),
+        value: Buffer.from(value),
+        headers: []
+      }
+    })
   }
 }
 
@@ -261,6 +290,72 @@ test('should not fetch while offsets are refreshing after a group rejoin', async
   await new Promise(resolve => setTimeout(resolve, 70))
 
   strictEqual(consumer.metadataCalls > baselineMetadataCalls, true)
+
+  stream.destroy()
+})
+
+test('should ignore data for partitions which were not part of the fetch request', async t => {
+  const fetchedOffsets: bigint[] = []
+  let resolveSecondFetch!: () => void
+  const secondFetch = new Promise<void>(resolve => {
+    resolveSecondFetch = resolve
+  })
+
+  // The topic has two partitions led by the same broker, but only partition 0 is assigned:
+  // partition 1 simulates data lingering in the broker incremental fetch session after a rebalance
+  const metadata = createMetadata()
+  metadata.topics.get(topic)!.partitions.push({
+    leader: 1,
+    leaderEpoch: 0,
+    replicas: [1, 2],
+    isr: [1, 2],
+    offlineReplicas: []
+  })
+  metadata.topics.get(topic)!.partitionsCount = 2
+
+  const consumer = createConsumerMock(
+    t,
+    (options, callback) => {
+      fetchedOffsets.push(options.topics[0].partitions[0].fetchOffset)
+
+      if (fetchedOffsets.length === 1) {
+        const response = createFetchResponse(-1)
+        response.responses[0].partitions[0].records = [createRecordsBatch(0n, ['requested-0', 'requested-1'])]
+        response.responses[0].partitions.push({
+          partitionIndex: 1,
+          errorCode: 0,
+          highWatermark: 100n,
+          lastStableOffset: 100n,
+          logStartOffset: 0n,
+          abortedTransactions: [],
+          preferredReadReplica: -1,
+          records: [createRecordsBatch(40n, ['stale-0', 'stale-1'])]
+        })
+
+        callback(null, response)
+        return
+      }
+
+      resolveSecondFetch()
+    },
+    metadata
+  )
+
+  const stream = createStream(consumer)
+  const messages: { partition: number; value: Buffer }[] = []
+  stream.on('data', message => {
+    messages.push(message)
+  })
+
+  await secondFetch
+
+  strictEqual(messages.length, 2)
+  strictEqual(
+    messages.every(message => message.partition === 0),
+    true
+  )
+  strictEqual(stream.offsetsToFetch.get(`${topic}:1`), undefined)
+  strictEqual(fetchedOffsets[1], 2n)
 
   stream.destroy()
 })

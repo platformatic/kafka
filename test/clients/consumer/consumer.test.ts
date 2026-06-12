@@ -1486,6 +1486,195 @@ test('fetch should send clientRack as the fetch rack id', async t => {
   strictEqual(requestRackId, clientRack)
 })
 
+test('fetch should reuse incremental fetch sessions and forget partitions no longer requested', async t => {
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const otherTopicId = '00000000-0000-0000-0000-000000000002'
+  const consumer = createConsumer(t)
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  const fetchRequests: {
+    sessionId: number
+    sessionEpoch: number
+    forgottenTopicsData: { topic: string; partitions: number[] }[]
+  }[] = []
+
+  t.after(() => pool.close())
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map()
+      })
+
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
+    const api = (
+      _connection: unknown,
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      sessionId: number,
+      sessionEpoch: number,
+      _topics: unknown,
+      forgottenTopicsData: { topic: string; partitions: number[] }[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetchRequests.push({ sessionId, sessionEpoch, forgottenTopicsData })
+      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
+    }
+
+    callback(null, api)
+    return true
+  })
+
+  function fetchOptions (topics: [string, number[]][]) {
+    return {
+      connectionPool: pool,
+      node: 0,
+      topics: topics.map(([topicId, partitions]) => {
+        return {
+          topicId,
+          partitions: partitions.map(partition => {
+            return {
+              partition,
+              currentLeaderEpoch: 0,
+              fetchOffset: 0n,
+              lastFetchedEpoch: 0,
+              partitionMaxBytes: 1048576
+            }
+          })
+        }
+      })
+    }
+  }
+
+  await consumer.fetch(fetchOptions([[topicId, [0, 1]], [otherTopicId, [0]]]))
+  await consumer.fetch(fetchOptions([[topicId, [0]]]))
+  await consumer.fetch(fetchOptions([[topicId, [0]]]))
+
+  deepStrictEqual(fetchRequests, [
+    { sessionId: 0, sessionEpoch: 0, forgottenTopicsData: [] },
+    {
+      sessionId: 123,
+      sessionEpoch: 1,
+      forgottenTopicsData: [
+        { topic: topicId, partitions: [1] },
+        { topic: otherTopicId, partitions: [0] }
+      ]
+    },
+    { sessionId: 123, sessionEpoch: 2, forgottenTopicsData: [] }
+  ])
+})
+
+test('fetch should start a new session with no forgotten partitions when the broker drops the session', async t => {
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  const fetchRequests: {
+    sessionId: number
+    sessionEpoch: number
+    forgottenTopicsData: { topic: string; partitions: number[] }[]
+  }[] = []
+
+  t.after(() => pool.close())
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map()
+      })
+
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
+    const api = (
+      _connection: unknown,
+      _maxWaitMs: number,
+      _minBytes: number,
+      _maxBytes: number,
+      _isolationLevel: number,
+      sessionId: number,
+      sessionEpoch: number,
+      _topics: unknown,
+      forgottenTopicsData: { topic: string; partitions: number[] }[],
+      _rackId: string,
+      callback: CallbackWithPromise<FetchResponse>
+    ) => {
+      fetchRequests.push({ sessionId, sessionEpoch, forgottenTopicsData })
+      // The broker never establishes a session
+      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, responses: [] })
+    }
+
+    callback(null, api)
+    return true
+  })
+
+  function fetchOptions (partitions: number[]) {
+    return {
+      connectionPool: pool,
+      node: 0,
+      topics: [
+        {
+          topicId,
+          partitions: partitions.map(partition => {
+            return {
+              partition,
+              currentLeaderEpoch: 0,
+              fetchOffset: 0n,
+              lastFetchedEpoch: 0,
+              partitionMaxBytes: 1048576
+            }
+          })
+        }
+      ]
+    }
+  }
+
+  await consumer.fetch(fetchOptions([0, 1]))
+  await consumer.fetch(fetchOptions([0]))
+
+  deepStrictEqual(fetchRequests, [
+    { sessionId: 0, sessionEpoch: 0, forgottenTopicsData: [] },
+    { sessionId: 0, sessionEpoch: 0, forgottenTopicsData: [] }
+  ])
+})
+
 test('fetch should route direct requests to cached preferred read replicas', async t => {
   const topic = 'test-topic'
   const topicId = '00000000-0000-0000-0000-000000000001'

@@ -14,8 +14,6 @@ import {
 import type { ClusterMetadata } from '../../../src/clients/base/types.ts'
 import {
   baseMetadataChannel,
-  type Broker,
-  type CallbackWithPromise,
   type ClientDiagnosticEvent,
   compressionsAlgorithms,
   ConfluentSchemaRegistry,
@@ -731,12 +729,12 @@ test('initIdempotentProducer fails over to a healthy broker when the bootstrap b
   // is actually executed against it.
   const hungHost = 'broker-a'
   const triedHeads: string[] = []
-  const pool = producer[kConnections]
-  pool.getFirstAvailable = function (brokers: Broker[], callback: CallbackWithPromise<Connection>) {
+  mockConnectionPoolGetFirstAvailable(producer[kConnections], () => true, null, undefined, (_original, brokers, callback) => {
     const head = brokers[0]
     triedHeads.push(head.host)
     callback(null, { host: head.host } as Connection)
-  } as typeof pool.getFirstAvailable
+    return true
+  })
 
   mockMethod(producer, kGetApi, () => true, null, undefined, (original, name, callback) => {
     if (name === 'InitProducerId') {

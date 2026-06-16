@@ -601,7 +601,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       deduplicateCallback => {
         this[kPerformWithRetry]<FindCoordinatorResponse>(
           'findCoordinator',
-          retryCallback => {
+          (retryCallback, attempt) => {
             this[kGetBootstrapConnection]((error, connection) => {
               if (error) {
                 retryCallback(error)
@@ -616,7 +616,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
                 api!(connection!, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], retryCallback)
               })
-            })
+            }, attempt)
           },
           (error, response) => {
             if (error) {
@@ -909,12 +909,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       deduplicateCallback => {
         this[kPerformWithRetry]<InitProducerIdResponse>(
           'initProducerId',
-          retryCallback => {
-            const connector = transactionalId
-              ? this.#getCoordinatorConnection.bind(this)
-              : this[kGetBootstrapConnection].bind(this)
-
-            connector((error, connection) => {
+          (retryCallback, attempt) => {
+            const onConnection: CallbackWithPromise<Connection> = (error, connection) => {
               if (error) {
                 retryCallback(error)
                 return
@@ -937,7 +933,16 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   }
                 )
               })
-            })
+            }
+
+            // The transactional path fails over inside #getCoordinatorConnection (via
+            // #findCoordinator -> kGetBootstrapConnection). The idempotent path must thread
+            // `attempt` so kGetBootstrapConnection rotates past a reachable-but-hung broker.
+            if (transactionalId) {
+              this.#getCoordinatorConnection(onConnection)
+            } else {
+              this[kGetBootstrapConnection](onConnection, attempt)
+            }
           },
           (error, response) => {
             if (error) {

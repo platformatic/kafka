@@ -711,6 +711,66 @@ test('initIdempotentProducer should handle unavailable API errors', async t => {
   )
 })
 
+test('initIdempotentProducer fails over to a healthy broker when the bootstrap broker is reachable but hung', async t => {
+  // Regression: an idempotent producer running InitProducerId must rotate past a
+  // bootstrap broker that accepts TCP but never serves requests (paused/fenced/GC-stalled).
+  // The rotation in kGetBootstrapConnection only fires when attempt > 0 is threaded
+  // through, which #initIdempotentProducer previously failed to do, so it wedged on the
+  // hung broker for the whole retry budget instead of failing over.
+  const producer = createProducer(t, {
+    idempotent: true,
+    bootstrapBrokers: ['broker-a:9092', 'broker-b:9093', 'broker-c:9094'],
+    retries: 5,
+    retryDelay: 0
+  })
+
+  // Every broker accepts TCP, so getFirstAvailable always returns a connection to whatever
+  // broker sits at the head of the list. The "hung" broker only manifests once InitProducerId
+  // is actually executed against it.
+  const hungHost = 'broker-a'
+  const triedHeads: string[] = []
+  mockConnectionPoolGetFirstAvailable(producer[kConnections], () => true, null, undefined, (_original, brokers, callback) => {
+    const head = brokers[0]
+    triedHeads.push(head.host)
+    callback(null, { host: head.host } as Connection)
+    return true
+  })
+
+  mockMethod(producer, kGetApi, () => true, null, undefined, (original, name, callback) => {
+    if (name === 'InitProducerId') {
+      const api = (
+        connection: Connection,
+        _transactionalId: string | undefined,
+        _timeout: number,
+        _producerId: bigint,
+        _producerEpoch: number,
+        apiCallback: Callback<unknown>
+      ) => {
+        if (connection.host === hungHost) {
+          // TCP-reachable but never responds: surfaces as a retriable connection reset.
+          apiCallback(new NetworkError('Connection closed'))
+          return
+        }
+
+        apiCallback(null, { throttleTimeMs: 0, errorCode: 0, producerId: 42n, producerEpoch: 0 })
+      }
+
+      callback(null, api as any)
+      return true
+    }
+
+    original(name, callback)
+    return true
+  })
+
+  const info = await producer.initIdempotentProducer({})
+
+  strictEqual(info.producerId, 42n)
+  // attempt 0 selected the hung bootstrap broker; attempt 1 rotated past it to a healthy one.
+  strictEqual(triedHeads[0], 'broker-a')
+  strictEqual(triedHeads[1], 'broker-b')
+})
+
 test('send should return ProduceResult with offsets and support diagnostic channels', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)

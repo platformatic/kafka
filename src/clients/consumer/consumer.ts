@@ -1215,13 +1215,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
-    const diagnosticOptions = { ...options }
-    delete diagnosticOptions.protocolsMetadata
-
     consumerGroupChannel.traceCallback(
       this.#performJoinGroup,
       1,
-      createDiagnosticContext({ client: this, operation: 'joinGroup', options: diagnosticOptions }),
+      createDiagnosticContext({ client: this, operation: 'joinGroup', options }),
       this,
       options,
       callback

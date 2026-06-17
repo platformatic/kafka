@@ -3780,6 +3780,130 @@ test('joinGroup should not fail when the partition assigner misses a member', as
   deepStrictEqual(consumer2.assignments, [])
 })
 
+test('joinGroup should expose protocolsMetadata to the partition assigner', async t => {
+  const topic = await createTopic(t, true, 3)
+  const groupId = createGroupId()
+  const seenUserData: Record<string, number[]>[] = []
+
+  function protocolsMetadata (
+    _protocols: unknown,
+    topics: string[],
+    metadata: ClusterMetadata
+  ): Buffer {
+    const userData: Record<string, number[]> = {}
+
+    for (const topic of topics) {
+      userData[topic] = metadata.topics.get(topic)!.partitions.map((_partition, partitionId) => partitionId)
+    }
+
+    return Buffer.from(JSON.stringify(userData), 'utf8')
+  }
+
+  function partitionAssigner (
+    _current: string,
+    members: Map<string, ExtendedGroupProtocolSubscription>,
+    topics: Set<string>,
+    metadata: ClusterMetadata
+  ): GroupPartitionsAssignments[] {
+    const assignments: GroupPartitionsAssignments[] = []
+
+    seenUserData.length = 0
+    for (const [memberId, member] of members) {
+      seenUserData.push(JSON.parse(member.metadata!.toString('utf8')))
+      assignments.push({ memberId, assignments: new Map() })
+    }
+
+    for (const topic of topics) {
+      const partitionsCount = metadata.topics.get(topic)!.partitionsCount
+
+      for (let i = 0; i < partitionsCount; i++) {
+        const member = assignments[i % assignments.length]
+        let topicAssignments = member.assignments.get(topic)
+
+        if (!topicAssignments) {
+          topicAssignments = { topic, partitions: [] }
+          member.assignments.set(topic, topicAssignments)
+        }
+
+        topicAssignments.partitions.push(i)
+      }
+    }
+
+    return assignments
+  }
+
+  const consumer1 = createConsumer(t, { groupId, partitionAssigner, protocolsMetadata })
+  const consumer2 = createConsumer(t, { groupId, partitionAssigner, protocolsMetadata })
+
+  await consumer1.topics.trackAll(topic)
+  await consumer2.topics.trackAll(topic)
+
+  await consumer1.joinGroup()
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  deepStrictEqual(seenUserData, [{ [topic]: [0, 1, 2] }, { [topic]: [0, 1, 2] }])
+})
+
+test('joinGroup should support callback style protocolsMetadata', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+  let sawForceUpdate = false
+
+  await consumer.topics.trackAll(topic)
+
+  mockMetadata(consumer, 1, null, null, (original, options, callback) => {
+    sawForceUpdate = options.forceUpdate === true
+    original(options, callback)
+  })
+
+  await consumer.joinGroup({
+    protocolsMetadata (_protocols, topics, metadata, callback) {
+      strictEqual(topics[0], topic)
+      strictEqual(metadata.topics.get(topic)!.partitionsCount, 3)
+      callback(null, Buffer.from('callback-metadata'))
+    }
+  })
+
+  strictEqual(sawForceUpdate, true)
+  deepStrictEqual(consumer.assignments, [{ topic, partitions: [0, 1, 2] }])
+})
+
+test('joinGroup should support promise style protocolsMetadata', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+
+  await consumer.topics.trackAll(topic)
+
+  await consumer.joinGroup({
+    async protocolsMetadata (_protocols, topics, metadata, callback) {
+      callback(null, Buffer.from('ignored-callback-metadata'))
+      strictEqual(topics[0], topic)
+      strictEqual(metadata.topics.get(topic)!.partitionsCount, 3)
+      return Buffer.from('promise-metadata')
+    }
+  })
+
+  deepStrictEqual(consumer.assignments, [{ topic, partitions: [0, 1, 2] }])
+})
+
+test('joinGroup should fail when protocolsMetadata does not resolve to a buffer', async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t)
+
+  await consumer.topics.trackAll(topic)
+
+  await rejects(
+    consumer.joinGroup({
+      protocolsMetadata () {
+        return 'not-a-buffer' as any
+      }
+    }),
+    /protocolsMetadata must resolve to a Buffer\./
+  )
+})
+
 test('joinGroup might receive no assignment', async t => {
   const topic = await createTopic(t, true)
   const groupId = createGroupId()

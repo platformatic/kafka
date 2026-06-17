@@ -38,6 +38,7 @@ import {
   type SyncGroupRequestAssignment,
   type SyncGroupResponse
 } from '../../apis/consumer/sync-group-v5.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { FetchIsolationLevels, FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import {
@@ -57,11 +58,7 @@ import { INT32_SIZE } from '../../protocol/definitions.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import {
-  kAutocommit,
-  kGetFetchNode,
-  kRefreshOffsetsAndFetch
-} from '../../symbols.ts'
+import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
@@ -115,6 +112,7 @@ import {
   type GroupAssignment,
   type GroupOptions,
   type GroupPartitionsAssigner,
+  type GroupProtocolsMetadataCallback,
   type GroupProtocolSubscription,
   type ListCommitsOptions,
   type ListOffsetsOptions,
@@ -697,6 +695,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options.heartbeatInterval ??= (this[kOptions] as GroupOptions).heartbeatInterval!
     options.protocols ??= (this[kOptions] as GroupOptions).protocols!
 
+    const protocolsMetadata = (this[kOptions] as GroupOptions).protocolsMetadata
+    if (!options.protocolsMetadata && protocolsMetadata) {
+      options.protocolsMetadata = protocolsMetadata
+    }
+
     this.#validateGroupOptions(options)
 
     this.#membershipActive = true
@@ -1212,10 +1215,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
+    const diagnosticOptions = { ...options }
+    delete diagnosticOptions.protocolsMetadata
+
     consumerGroupChannel.traceCallback(
       this.#performJoinGroup,
       1,
-      createDiagnosticContext({ client: this, operation: 'joinGroup', options }),
+      createDiagnosticContext({ client: this, operation: 'joinGroup', options: diagnosticOptions }),
       this,
       options,
       callback
@@ -1694,69 +1700,36 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#cancelHeartbeat()
 
-    const protocols: JoinGroupRequestProtocol[] = []
-    for (const protocol of options.protocols) {
-      protocols.push({
-        name: protocol.name,
-        metadata: this.#encodeProtocolSubscriptionMetadata(protocol, this.topics.current)
-      })
-    }
+    this.#createJoinGroupProtocols(options, (error, protocols) => {
+      if (error) {
+        callback(error)
+        return
+      }
 
-    this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
-      'joinGroup',
-      (connection, groupCallback) => {
-        this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
-          if (error) {
-            groupCallback(error)
-            return
-          }
+      this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
+        'joinGroup',
+        (connection, groupCallback) => {
+          this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
+            if (error) {
+              groupCallback(error)
+              return
+            }
 
-          api!(
-            connection,
-            this.groupId,
-            options.sessionTimeout,
-            options.rebalanceTimeout,
-            this.memberId ?? '',
-            this.groupInstanceId,
-            'consumer',
-            protocols,
-            '',
-            groupCallback
-          )
-        })
-      },
-      (error, response) => {
-        if (!this.#membershipActive) {
-          callback(null)
-          return
-        }
-
-        if (error) {
-          if (this.#getRejoinError(error)) {
-            this.#performJoinGroup(options, callback)
-            return
-          }
-
-          callback(error)
-          return
-        }
-
-        // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
-        this.memberId = response!.memberId!
-        this.generationId = response!.generationId
-        this.#isLeader = response!.leader === this.memberId
-        this.#protocol = response!.protocolName!
-
-        this.#members = new Map()
-        for (const member of response!.members) {
-          this.#members.set(
-            member.memberId,
-            this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
-          )
-        }
-
-        // Send a syncGroup request
-        this.#syncGroup(options.partitionAssigner, (error, response) => {
+            api!(
+              connection,
+              this.groupId,
+              options.sessionTimeout,
+              options.rebalanceTimeout,
+              this.memberId ?? '',
+              this.groupInstanceId,
+              'consumer',
+              protocols!,
+              '',
+              groupCallback
+            )
+          })
+        },
+        (error, response) => {
           if (!this.#membershipActive) {
             callback(null)
             return
@@ -1772,26 +1745,58 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.assignments = response!
-          this.#syncPreferredReadReplicas()
+          // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
+          this.memberId = response!.memberId!
+          this.generationId = response!.generationId
+          this.#isLeader = response!.leader === this.memberId
+          this.#protocol = response!.protocolName!
 
-          this.#cancelHeartbeat()
-          this.#heartbeatInterval = setTimeout(() => {
-            this.#heartbeat(options)
-          }, options.heartbeatInterval)
+          this.#members = new Map()
+          for (const member of response!.members) {
+            this.#members.set(
+              member.memberId,
+              this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
+            )
+          }
 
-          this.emitWithDebug('consumer', 'group:join', {
-            groupId: this.groupId,
-            memberId: this.memberId,
-            generationId: this.generationId,
-            isLeader: this.#isLeader,
-            assignments: this.assignments
+          // Send a syncGroup request
+          this.#syncGroup(options.partitionAssigner, (error, response) => {
+            if (!this.#membershipActive) {
+              callback(null)
+              return
+            }
+
+            if (error) {
+              if (this.#getRejoinError(error)) {
+                this.#performJoinGroup(options, callback)
+                return
+              }
+
+              callback(error)
+              return
+            }
+
+            this.assignments = response!
+            this.#syncPreferredReadReplicas()
+
+            this.#cancelHeartbeat()
+            this.#heartbeatInterval = setTimeout(() => {
+              this.#heartbeat(options)
+            }, options.heartbeatInterval)
+
+            this.emitWithDebug('consumer', 'group:join', {
+              groupId: this.groupId,
+              memberId: this.memberId,
+              generationId: this.generationId,
+              isLeader: this.#isLeader,
+              assignments: this.assignments
+            })
+
+            callback(null, this.memberId!)
           })
-
-          callback(null, this.memberId!)
-        })
-      }
-    )
+        }
+      )
+    })
   }
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
@@ -2015,6 +2020,84 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (!valid) {
       throw new UserError(this[kFormatValidationErrors](validator, '/options'))
+    }
+  }
+
+  #createJoinGroupProtocols (options: Required<GroupOptions>, callback: Callback<JoinGroupRequestProtocol[]>): void {
+    if (typeof options.protocolsMetadata !== 'function') {
+      callback(
+        null,
+        options.protocols.map(protocol => ({
+          name: protocol.name,
+          metadata: this.#encodeProtocolSubscriptionMetadata(protocol, this.topics.current)
+        }))
+      )
+      return
+    }
+
+    this[kMetadata]({ topics: this.topics.current, forceUpdate: true }, (error, metadata) => {
+      if (error) {
+        callback(this.#handleError(error))
+        return
+      }
+
+      this.#resolveProtocolsMetadata(options.protocolsMetadata, options.protocols, this.topics.current, metadata!, (
+        error,
+        userData
+      ) => {
+        if (error) {
+          callback(error)
+          return
+        } else if (!Buffer.isBuffer(userData)) {
+          callback(new UserError('protocolsMetadata must resolve to a Buffer.'))
+          return
+        }
+
+        callback(
+          null,
+          options.protocols.map(protocol => ({
+            name: protocol.name,
+            metadata: this.#encodeProtocolSubscriptionMetadata({ ...protocol, metadata: userData }, this.topics.current)
+          }))
+        )
+      })
+    })
+  }
+
+  #resolveProtocolsMetadata (
+    protocolsMetadata: GroupProtocolsMetadataCallback,
+    protocols: GroupProtocolSubscription[],
+    topics: string[],
+    metadata: ClusterMetadata,
+    callback: Callback<Buffer>
+  ): void {
+    let settled = false
+
+    function resolveCallback (error: Error | null, userData?: Buffer) {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      callback(error, userData)
+    }
+
+    let result: Buffer | Promise<Buffer> | undefined
+    try {
+      result = protocolsMetadata(protocols, topics, metadata, resolveCallback)
+
+      if (typeof result !== 'undefined') {
+        if (typeof (result as Promise<Buffer>).then === 'function') {
+          ;(result as Promise<Buffer>).then(
+            userData => process.nextTick(resolveCallback, null, userData),
+            error => process.nextTick(resolveCallback, error)
+          )
+        } else {
+          resolveCallback(null, result as Buffer)
+        }
+      }
+    } catch (error) {
+      resolveCallback(error as Error)
     }
   }
 

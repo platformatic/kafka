@@ -1125,7 +1125,7 @@ export class Admin extends Base<AdminOptions> {
           },
           (error, response) => {
             if (error) {
-              callback(new MultipleErrors('Deleting topics failed.', [error]))
+              deduplicateCallback(new MultipleErrors('Deleting topics failed.', [error]))
               return
             }
 

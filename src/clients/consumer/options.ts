@@ -26,6 +26,7 @@ export const groupOptionsProperties = {
       }
     }
   },
+  protocolsMetadata: { function: true },
   partitionAssigner: { function: true }
 }
 

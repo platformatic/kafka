@@ -1,3 +1,4 @@
+import { type Callback } from '../../apis/definitions.ts'
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
 import { type GroupProtocols } from '../../apis/enumerations.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
@@ -52,6 +53,13 @@ export type GroupPartitionsAssigner = (
   metadata: ClusterMetadata
 ) => GroupPartitionsAssignments[]
 
+export type GroupProtocolsMetadataCallback = (
+  protocols: GroupProtocolSubscription[],
+  topics: string[],
+  metadata: ClusterMetadata,
+  callback: Callback<Buffer>
+) => Buffer | Promise<Buffer> | undefined
+
 export const MessagesStreamModes = {
   LATEST: 'latest',
   EARLIEST: 'earliest',
@@ -83,6 +91,7 @@ export interface GroupOptions {
   rebalanceTimeout?: number
   heartbeatInterval?: number
   protocols?: GroupProtocolSubscription[]
+  protocolsMetadata?: GroupProtocolsMetadataCallback
   partitionAssigner?: GroupPartitionsAssigner
   assignmentUserData?: Buffer
 }

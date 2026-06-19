@@ -47,12 +47,64 @@ Options:
 | groupProtocol         | `'classic' \| 'consumer'`                                    | `'classic'`               | Group protocol to use. Use `'classic'` for the original consumer group protocol and `'consumer'` for the new protocol introduced in [KIP-848](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol).<br/><br/> The `'consumer'` protocol provides server-side partition assignment and incremental rebalancing behavior.              |
 | groupRemoteAssignor   | `string`                                                     | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`.                                                                                                                                                                                                                   |
 | protocols             | `GroupProtocolSubscription[]`                                | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`.                                                                                                                                                                                       |
+| protocolsMetadata     | `GroupProtocolsMetadataCallback`                             |                           | Callback used to compute opaque protocol metadata before joining or rejoining a classic consumer group. The returned `Buffer` is sent as the subscription `user_data` for every configured protocol. Not supported for `groupProtocol=consumer`.                                                                                                                                                      |
 | partitionAssigner     | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                                                                                                  |
 | streamContext         | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
 
 It also supports all the constructor options of `Base`.
 
 The readonly `streamContext` getters expose the same opaque values on the consumer instance.
+
+### Protocol metadata callback
+
+`protocolsMetadata` lets each member attach fresh, opaque metadata to its `JoinGroup` subscription. Kafka forwards these bytes without interpreting them. The group leader can read the bytes from each member in a custom `partitionAssigner` through `member.metadata`.
+
+The callback is invoked once per join or rebalance, before sending `JoinGroup`. The consumer refreshes metadata for its currently tracked topics before invoking it.
+
+```typescript
+type GroupProtocolsMetadataCallback = (
+  protocols: GroupProtocolSubscription[],
+  topics: string[],
+  metadata: ClusterMetadata,
+  callback: (error: Error | null, metadata?: Buffer) => void
+) => Buffer | Promise<Buffer> | undefined
+```
+
+The callback can be used in three styles:
+
+- Return a `Buffer` directly.
+- Return a `Promise<Buffer>`.
+- Return `undefined` and invoke the callback with a `Buffer`.
+
+If the resolved value is not a `Buffer`, `joinGroup()` fails. Do not mix styles; if multiple paths settle, only the first result is used.
+
+Example:
+
+```typescript
+const consumer = new Consumer({
+  groupId: 'my-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  protocolsMetadata (_protocols, topics, metadata) {
+    const userData: Record<string, number[]> = {}
+
+    for (const topic of topics) {
+      userData[topic] = metadata.topics.get(topic)!.partitions.map((_partition, partitionId) => partitionId)
+    }
+
+    return Buffer.from(JSON.stringify(userData), 'utf8')
+  },
+  partitionAssigner (_current, members, topics, metadata) {
+    for (const member of members.values()) {
+      const userData = JSON.parse(member.metadata!.toString('utf8'))
+      // Use the member-provided opaque metadata while computing assignments.
+    }
+
+    // Return GroupPartitionsAssignments[].
+    return []
+  }
+})
+```
 
 ## Basic Methods
 
@@ -297,12 +349,13 @@ This method is no-op for `groupProtocol=consumer`.
 
 Options:
 
-| Property          | Type                          | Default                   | Description                                                                                                                                                                  |
-| ----------------- | ----------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| sessionTimeout    | `number`                      | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.      |
-| rebalanceTimeout  | `number`                      | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group. |
-| heartbeatInterval | `number`                      | 3 seconds                 | Interval in milliseconds between heartbeats.                                                                                                                                 |
-| protocols         | `GroupProtocolSubscription[]` | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties.                      |
+| Property          | Type                             | Default                   | Description                                                                                                                                                                  |
+| ----------------- | -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sessionTimeout    | `number`                         | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.      |
+| rebalanceTimeout  | `number`                         | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group. |
+| heartbeatInterval | `number`                         | 3 seconds                 | Interval in milliseconds between heartbeats.                                                                                                                                 |
+| protocols         | `GroupProtocolSubscription[]`    | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties.                      |
+| protocolsMetadata | `GroupProtocolsMetadataCallback` |                           | Callback used to compute opaque protocol metadata before joining or rejoining a classic consumer group. See [Protocol metadata callback](#protocol-metadata-callback).        |
 
 ### `leaveGroup([force])`
 

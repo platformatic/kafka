@@ -142,6 +142,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       beforeDeserialization,
       // The options below are only destructured to avoid being part of structuredClone below
       partitionAssigner: _partitionAssigner,
+      protocolsMetadata: _protocolsMetadata,
       ...otherOptions
     } = options
 

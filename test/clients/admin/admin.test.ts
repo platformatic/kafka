@@ -1112,6 +1112,33 @@ test('deleteTopics should handle unavailable API errors', async t => {
   }
 })
 
+test('deleteTopics should clear its deduplication cache after a failure', async t => {
+  const admin = createAdmin(t)
+
+  // Force every connection attempt to fail so deleteTopics goes through its error path.
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], () => true)
+
+  // First attempt fails as expected.
+  try {
+    await admin.deleteTopics({ topics: ['test-topic'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Deleting topics failed.')
+  }
+
+  // Regression: a previous failure must not leave a stale entry in the deduplication
+  // cache, otherwise a subsequent deletion of the same topics would be queued forever
+  // and never resolve. The second attempt must also reject rather than hang.
+  try {
+    await admin.deleteTopics({ topics: ['test-topic'] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Deleting topics failed.')
+  }
+})
+
 test('createPartitions should create additional partitions with manual assignments', async t => {
   const admin = createAdmin(t)
   const topicName = `test-topic-${randomUUID()}`

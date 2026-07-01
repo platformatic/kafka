@@ -218,7 +218,7 @@ test('Connection.connect should handle connection timeout', async t => {
 
   // This IP is not routable due to RFC 5737
   await rejects(() => connection.connect('192.0.2.1', 9092) as Promise<unknown>, {
-    code: 'PLT_KFK_TIMEOUT',
+    code: 'PLT_KFK_NETWORK',
     message: 'Connection to 192.0.2.1:9092 timed out.'
   })
 })

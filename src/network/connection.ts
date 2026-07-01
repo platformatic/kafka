@@ -144,6 +144,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #responseReader: Reader
   #socket!: Socket
   #socketMustBeDrained: boolean
+  #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
 
   constructor (clientId?: string, options: ConnectionOptions = {}) {
@@ -171,6 +172,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#responseBuffer = new DynamicBuffer()
     this.#responseReader = new Reader(this.#responseBuffer)
     this.#socketMustBeDrained = false
+    this.#detectMissingTLS = !this.#options.tls
 
     notifyCreation('connection', this)
   }
@@ -232,6 +234,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
 
       this.#status = ConnectionStatuses.CONNECTING
+      this.#detectMissingTLS = !this.#options.tls
 
       const connectionOptions: Partial<NetConnectOpts & TLSConnectionOptions> = {
         timeout: this.#options.connectTimeout
@@ -425,7 +428,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     callback: Callback<ReturnType>
   ) {
     // Correlation ID is a 32-bit integer in the protocol, so we need to wrap around after 2^31 - 1
-    const correlationId = (this.#correlationId + 1) & 0x7FFFFFFF
+    const correlationId = (this.#correlationId + 1) & 0x7fffffff
     this.#correlationId = correlationId
 
     const diagnostic = createDiagnosticContext({
@@ -720,6 +723,34 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       correlation_id => INT32
   */
   #onData (chunk: Buffer): void {
+    if (this.#detectMissingTLS) {
+      this.#detectMissingTLS = false
+
+      if (this.#isTLSRecord(chunk)) {
+        const error = new UserError('Broker requires TLS.')
+        this.#status = ConnectionStatuses.ERROR
+
+        for (const request of this.#afterDrainRequests) {
+          if (!request.noResponse) {
+            clearTimeout(request.timeoutHandle!)
+            request.callback(error, undefined)
+          }
+        }
+
+        this.#afterDrainRequests = []
+
+        for (const request of this.#inflightRequests.values()) {
+          clearTimeout(request.timeoutHandle!)
+          request.callback(error, undefined)
+        }
+
+        this.#inflightRequests.clear()
+
+        this.#socket.destroy()
+        return
+      }
+    }
+
     this.#responseBuffer.append(chunk)
 
     // There is at least one message size to add
@@ -824,6 +855,15 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     // Start getting requests again
     this.#socketMustBeDrained = false
     this.emit('drain')
+  }
+
+  #isTLSRecord (chunk: Buffer): boolean {
+    return (
+      chunk.length >= 3 &&
+      (chunk[0] === 0x14 || chunk[0] === 0x15 || chunk[0] === 0x16 || chunk[0] === 0x17) &&
+      chunk[1] === 0x03 &&
+      chunk[2] <= 0x04
+    )
   }
 
   #onClose (): void {

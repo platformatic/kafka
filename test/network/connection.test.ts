@@ -32,6 +32,7 @@ import {
   saslPlain,
   saslScramSha,
   UnexpectedCorrelationIdError,
+  UserError,
   Writer
 } from '../../src/index.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../../src/protocol/sasl/scram-sha.ts'
@@ -217,7 +218,7 @@ test('Connection.connect should handle connection timeout', async t => {
 
   // This IP is not routable due to RFC 5737
   await rejects(() => connection.connect('192.0.2.1', 9092) as Promise<unknown>, {
-    code: 'PLT_KFK_NETWORK',
+    code: 'PLT_KFK_TIMEOUT',
     message: 'Connection to 192.0.2.1:9092 timed out.'
   })
 })
@@ -1396,6 +1397,53 @@ test('Connection.connect should prefer tls over ssl when both are provided', asy
   deepStrictEqual(connection.port, port)
   ok(connection.socket instanceof TLSSocket)
   deepStrictEqual(await hostPromise.promise, 'localhost')
+})
+
+test('Connection.send should detect TLS broker when tls is not configured', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { requestTimeout: 1000 })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('data', () => {
+      socket.write(Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x50]))
+    })
+  })
+
+  await connection.connect('localhost', port)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  await rejects(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        connection.send(
+          0,
+          0,
+          payloadFn,
+          function () {
+            return 'Success'
+          },
+          false,
+          false,
+          (err, returnValue) => {
+            if (err) {
+              reject(err)
+            } else {
+              resolve(returnValue!)
+            }
+          }
+        )
+      }),
+    {
+      code: UserError.code,
+      message: 'Broker requires TLS.'
+    }
+  )
 })
 
 test('Connection.isConnected should return false when connection is not connected', () => {

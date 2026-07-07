@@ -145,6 +145,7 @@ import {
   type AlterClientQuotasOptions,
   type AlterConfigsOptions,
   type AlterConsumerGroupOffsetsOptions,
+  type BrokerAssignment,
   type BrokerLogDirDescription,
   type ConfigDescription,
   type CreateAclsOptions,
@@ -1018,30 +1019,41 @@ export class Admin extends Base<AdminOptions> {
     )
   }
 
+  #mapTopicAssignments (assignments?: BrokerAssignment[]): CreateTopicsRequestTopicAssignment[] {
+    const mapped: CreateTopicsRequestTopicAssignment[] = []
+
+    for (const { partition, brokers } of assignments ?? []) {
+      mapped.push({ partitionIndex: partition, brokerIds: brokers })
+    }
+
+    return mapped
+  }
+
   #createTopics (options: CreateTopicsOptions, callback: CallbackWithPromise<CreatedTopic[]>): void {
     // -1 is required if manual assignments are used. If no manual assignments are used, -1 will default to broker settings.
     const numPartitions = options.partitions ?? -1
     const replicationFactor = options.replicas ?? -1
-    const assignments: CreateTopicsRequestTopicAssignment[] = []
+    const assignments = this.#mapTopicAssignments(options.assignments)
     const configs = options.configs ?? []
-
-    for (const { partition, brokers } of options.assignments ?? []) {
-      assignments.push({ partitionIndex: partition, brokerIds: brokers })
-    }
 
     const requests: CreateTopicsRequestTopic[] = []
     for (const topic of options.topics) {
+      if (typeof topic === 'string') {
+        requests.push({ name: topic, numPartitions, replicationFactor, assignments, configs })
+        continue
+      }
+
       requests.push({
-        name: topic,
-        numPartitions,
-        replicationFactor,
-        assignments,
+        name: topic.topic,
+        numPartitions: topic.partitions ?? numPartitions,
+        replicationFactor: topic.replicas ?? replicationFactor,
+        assignments: topic.assignments ? this.#mapTopicAssignments(topic.assignments) : assignments,
         configs
       })
     }
 
     this[kPerformDeduplicated](
-      `createTopics-${options.topics.join(',')}`,
+      `createTopics-${options.topics.map(topic => (typeof topic === 'string' ? topic : topic.topic)).join(',')}`,
       deduplicateCallback => {
         this[kPerformWithRetry](
           'createTopics',

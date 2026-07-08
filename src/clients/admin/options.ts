@@ -59,7 +59,19 @@ export const createTopicOptionsSchema = {
     },
     partitions: { type: 'number' },
     replicas: { type: 'number' },
-    assignments: createTopicAssignmentsSchema
+    assignments: createTopicAssignmentsSchema,
+    configs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          value: { type: ['string', 'null'] }
+        },
+        required: ['name'],
+        additionalProperties: false
+      }
+    }
   },
   required: ['topics'],
   additionalProperties: false

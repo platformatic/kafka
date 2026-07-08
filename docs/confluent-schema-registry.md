@@ -35,15 +35,16 @@ Creates a new schema registry instance with type `ConfluentSchemaRegistry<Key, V
 
 Options:
 
-| Property             | Type                           | Required | Description                                              |
-| -------------------- | ------------------------------ | -------- | -------------------------------------------------------- |
-| `url`                | `string`                       | Yes      | URL of the Confluent Schema Registry                     |
-| `auth`               | `object`                       | No       | Authentication configuration                             |
-| `auth.username`      | `string \| CredentialProvider` | No       | Username for Basic authentication                        |
-| `auth.password`      | `string \| CredentialProvider` | No       | Password for Basic authentication                        |
-| `auth.token`         | `string \| CredentialProvider` | No       | Token for Bearer authentication                          |
-| `protobufTypeMapper` | `function`                     | No       | Custom type mapper for Protocol Buffers                  |
-| `jsonValidateSend`   | `boolean`                      | No       | Enable JSON schema validation on send (default: `false`) |
+| Property             | Type                           | Required | Description                                                                  |
+| -------------------- | ------------------------------ | -------- | ---------------------------------------------------------------------------- |
+| `url`                | `string`                       | Yes      | URL of the Confluent Schema Registry                                         |
+| `auth`               | `object`                       | No       | Authentication configuration                                                 |
+| `auth.username`      | `string \| CredentialProvider` | No       | Username for Basic authentication                                            |
+| `auth.password`      | `string \| CredentialProvider` | No       | Password for Basic authentication                                            |
+| `auth.token`         | `string \| CredentialProvider` | No       | Token for Bearer authentication                                              |
+| `protobufTypeMapper` | `function`                     | No       | Custom type mapper for Protocol Buffers                                      |
+| `jsonValidateSend`   | `boolean`                      | No       | Enable JSON schema validation on send (default: `false`)                     |
+| `jsonAjvOptions`     | `object`                       | No       | AJV options for JSON schemas. Defaults to `{ allErrors: true, coerceTypes: false, strict: true }` |
 
 ## Basic Usage
 
@@ -130,6 +131,17 @@ await producer.send({
       }
     }
   ]
+})
+```
+
+Set `jsonAjvOptions.strict` to `false` if the registry contains JSON schemas with non-standard keywords:
+
+```typescript
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  jsonAjvOptions: {
+    strict: false
+  }
 })
 ```
 

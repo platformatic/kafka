@@ -1,4 +1,5 @@
-import { type ValidateFunction } from 'ajv'
+import { type Options, type ValidateFunction } from 'ajv'
+import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
 import { type parse, type Root } from 'protobufjs'
@@ -16,7 +17,7 @@ import {
   stringDeserializer,
   stringSerializer
 } from '../clients/serde.ts'
-import { ajv, type CredentialProvider, EMPTY_BUFFER, UnsupportedFormatError, UserError } from '../index.ts'
+import { type CredentialProvider, EMPTY_BUFFER, UnsupportedFormatError, UserError } from '../index.ts'
 import { type MessageToConsume, type MessageToProduce } from '../protocol/records.ts'
 import { getCredential } from '../protocol/sasl/utils.ts'
 import { AbstractSchemaRegistry } from './abstract.ts'
@@ -44,6 +45,7 @@ export interface ConfluentSchemaRegistryOptions {
   }
   protobufTypeMapper?: ConfluentSchemaRegistryProtobufTypeMapper
   jsonValidateSend?: boolean
+  jsonAjvOptions?: Options
 }
 
 export interface Schema {
@@ -74,6 +76,7 @@ export class ConfluentSchemaRegistry<
   #protobufParse: typeof parse | undefined
   #protobufTypeMapper: ConfluentSchemaRegistryProtobufTypeMapper
   #jsonValidateSend: boolean
+  #jsonAjv: Ajv2020
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
 
   constructor (options: ConfluentSchemaRegistryOptions) {
@@ -82,6 +85,7 @@ export class ConfluentSchemaRegistry<
     this.#schemas = new Map()
     this.#protobufTypeMapper = options.protobufTypeMapper ?? defaultProtobufTypeMapper
     this.#jsonValidateSend = options.jsonValidateSend ?? false
+    this.#jsonAjv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions })
     this.#auth = options.auth
   }
 
@@ -148,7 +152,7 @@ export class ConfluentSchemaRegistry<
           this.#schemas.set(id, { id, type: 'protobuf', schema: this.#protobufParse!(schema).root })
           break
         case 'JSON':
-          this.#schemas.set(id, { id, type: 'json', schema: ajv.compile(JSON.parse(schema)) })
+          this.#schemas.set(id, { id, type: 'json', schema: this.#jsonAjv.compile(JSON.parse(schema)) })
           break
       }
 
@@ -278,7 +282,7 @@ export class ConfluentSchemaRegistry<
           const valid = validate(data)
           if (!valid) {
             throw new UserError(
-              `JSON Schema validation failed before serialization: ${ajv.errorsText(validate.errors)}`,
+              `JSON Schema validation failed before serialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
               { type, data, headers, validationErrors: validate.errors }
             )
           }
@@ -337,7 +341,7 @@ export class ConfluentSchemaRegistry<
 
         if (!valid) {
           throw new UserError(
-            `JSON Schema validation failed before deserialization: ${ajv.errorsText(validate.errors)}`,
+            `JSON Schema validation failed before deserialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
             { type, data: parsed, headers, validationErrors: validate.errors }
           )
         }

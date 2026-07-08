@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, match, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { UserError } from '../../src/errors.ts'
@@ -308,6 +308,70 @@ test('supports producing and consuming messages using Confluent Schema Registry 
     deepStrictEqual(structuredClone(messages[0].value), { id: 1, name: 'Alice' })
     deepStrictEqual(structuredClone(messages[1].value), { id: 2, name: 'Bob' })
   }
+})
+
+test('uses strict AJV validation for JSON schemas by default', async () => {
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'JSON',
+    JSON.stringify({
+      type: 'object',
+      properties: {
+        id: { type: 'integer', 'x-extension': true }
+      }
+    })
+  )
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const error = await new Promise<Error | undefined>(resolve => {
+    registry.fetchSchema(schemaId, err => {
+      resolve(err as Error | undefined)
+    })
+  })
+
+  strictEqual(error instanceof Error, true)
+  match(error!.message, /unknown keyword: "x-extension"/)
+})
+
+test('supports disabling strict AJV validation for JSON schemas', async () => {
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'JSON',
+    JSON.stringify({
+      type: 'object',
+      properties: {
+        id: { type: 'integer', 'x-extension': true }
+      },
+      required: ['id']
+    })
+  )
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl,
+    jsonAjvOptions: { strict: false }
+  })
+
+  const error = await new Promise<Error | undefined>(resolve => {
+    registry.fetchSchema(schemaId, err => {
+      resolve(err as Error | undefined)
+    })
+  })
+
+  strictEqual(error, undefined)
+
+  const schema = registry.get(schemaId)
+  strictEqual(schema?.type, 'json')
+
+  const validate = schema!.schema as (data: unknown) => boolean
+  strictEqual(validate({ id: 1 }), true)
+  strictEqual(validate({}), false)
 })
 
 test('fails on JSON schema validation when producing', async t => {

@@ -64,7 +64,6 @@ export function defaultProtobufTypeMapper (
   return `${context.topic!}-${type}`
 }
 
-// TODO(ShogunPanda): Authentication support
 export class ConfluentSchemaRegistry<
   Key = Buffer,
   Value = Buffer,
@@ -77,6 +76,7 @@ export class ConfluentSchemaRegistry<
   #protobufTypeMapper: ConfluentSchemaRegistryProtobufTypeMapper
   #jsonValidateSend: boolean
   #jsonAjv: Ajv2020
+  #pendingFetches: Map<number, Promise<void>>
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
 
   constructor (options: ConfluentSchemaRegistryOptions) {
@@ -87,6 +87,7 @@ export class ConfluentSchemaRegistry<
     this.#jsonValidateSend = options.jsonValidateSend ?? false
     this.#jsonAjv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions })
     this.#auth = options.auth
+    this.#pendingFetches = new Map()
   }
 
   getSchemaId (
@@ -113,52 +114,20 @@ export class ConfluentSchemaRegistry<
   }
 
   async fetchSchema (id: number, callback: Callback<void>): Promise<void> {
+    let fetch = this.#pendingFetches.get(id)
+
+    if (!fetch) {
+      fetch = this.#fetchSchema(id).finally(() => {
+        this.#pendingFetches.delete(id)
+      })
+      this.#pendingFetches.set(id, fetch)
+    }
+
     try {
-      const requestInit: RequestInit = {}
-
-      if (this.#auth) {
-        if (this.#auth.token) {
-          const token = await getCredential('token', this.#auth.token)
-
-          requestInit.headers = {
-            Authorization: `Bearer ${token}`
-          }
-        } else {
-          const username = await getCredential('username', this.#auth.username)
-          const password = await getCredential('password', this.#auth.password)
-
-          requestInit.headers = {
-            Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
-          }
-        }
-      }
-
-      const response = await fetch(`${this.#url}/schemas/ids/${id}`, requestInit)
-
-      if (!response.ok) {
-        throw new UserError(`Failed to fetch a schema: [HTTP ${response.status}]`, { response: await response.text() })
-      }
-
-      const responseBody = (await response.json()) as { schemaType?: string; schema: string }
-      const { schema } = responseBody
-      const schemaType = responseBody.schemaType ?? 'AVRO'
-
-      switch (schemaType) {
-        case 'AVRO':
-          this.#schemas.set(id, { id, type: 'avro', schema: avro.Type.forSchema(JSON.parse(schema)) })
-          break
-        case 'PROTOBUF':
-          this.#protobufParse ??= this.#loadProtobuf()
-          this.#schemas.set(id, { id, type: 'protobuf', schema: this.#protobufParse!(schema).root })
-          break
-        case 'JSON':
-          this.#schemas.set(id, { id, type: 'json', schema: this.#jsonAjv.compile(JSON.parse(schema)) })
-          break
-      }
-
+      await fetch
       process.nextTick(callback)
     } catch (err) {
-      process.nextTick(() => callback(err))
+      process.nextTick(() => callback(err as Error))
     }
   }
 
@@ -233,6 +202,50 @@ export class ConfluentSchemaRegistry<
       }
 
       registry.fetchSchema(schemaId, callback)
+    }
+  }
+
+  async #fetchSchema (id: number) {
+    const requestInit: RequestInit = {}
+
+    if (this.#auth) {
+      if (this.#auth.token) {
+        const token = await getCredential('token', this.#auth.token)
+
+        requestInit.headers = {
+          Authorization: `Bearer ${token}`
+        }
+      } else {
+        const username = await getCredential('username', this.#auth.username)
+        const password = await getCredential('password', this.#auth.password)
+
+        requestInit.headers = {
+          Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+        }
+      }
+    }
+
+    const response = await fetch(`${this.#url}/schemas/ids/${id}`, requestInit)
+
+    if (!response.ok) {
+      throw new UserError(`Failed to fetch a schema: [HTTP ${response.status}]`, { response: await response.text() })
+    }
+
+    const responseBody = (await response.json()) as { schemaType?: string; schema: string }
+    const { schema } = responseBody
+    const schemaType = responseBody.schemaType ?? 'AVRO'
+
+    switch (schemaType) {
+      case 'AVRO':
+        this.#schemas.set(id, { id, type: 'avro', schema: avro.Type.forSchema(JSON.parse(schema)) })
+        break
+      case 'PROTOBUF':
+        this.#protobufParse ??= this.#loadProtobuf()
+        this.#schemas.set(id, { id, type: 'protobuf', schema: this.#protobufParse!(schema).root })
+        break
+      case 'JSON':
+        this.#schemas.set(id, { id, type: 'json', schema: this.#jsonAjv.compile(JSON.parse(schema)) })
+        break
     }
   }
 

@@ -310,6 +310,44 @@ test('supports producing and consuming messages using Confluent Schema Registry 
   }
 })
 
+test('deduplicates concurrent fetches for the same JSON schema ID', async () => {
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'JSON',
+    JSON.stringify({
+      $id: 'series.json',
+      type: 'object',
+      properties: {
+        id: { type: 'integer' }
+      },
+      required: ['id']
+    })
+  )
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  function fetchSchema () {
+    return new Promise<void>((resolve, reject) => {
+      registry.fetchSchema(schemaId, err => {
+        if (err) {
+          reject(err)
+          return
+        }
+
+        resolve()
+      })
+    })
+  }
+
+  await Promise.all([fetchSchema(), fetchSchema()])
+
+  strictEqual(registry.get(schemaId)?.type, 'json')
+})
+
 test('uses strict AJV validation for JSON schemas by default', async () => {
   const subject = createSubject()
   const schemaId = await registerSchema(
@@ -749,9 +787,7 @@ test('treats /schemas/ids/{id} responses without schemaType as AVRO', async t =>
 
   const producer = await createProducer(t, { registry })
   await producer.send({
-    messages: [
-      { topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } }
-    ]
+    messages: [{ topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } }]
   })
 
   const consumer = createConsumer(t, { registry })

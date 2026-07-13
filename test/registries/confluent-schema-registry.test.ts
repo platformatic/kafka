@@ -521,6 +521,66 @@ test('fails on JSON schema validation when consuming', async t => {
   }
 })
 
+test('exposes malformed JSON and JSON schema validation errors to onCorruptedMessage', async t => {
+  const topic = await createTopic(t, true)
+  const consumerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'JSON',
+    JSON.stringify({
+      type: 'object',
+      properties: {
+        id: { type: 'integer' },
+        name: { type: 'string' }
+      },
+      required: ['id', 'name'],
+      additionalProperties: false
+    })
+  )
+  const schemaHeader = Buffer.alloc(5)
+  schemaHeader.writeInt32BE(schemaId, 1)
+  const producer = createProducer<string, string>(t, {
+    serializers: {
+      key: stringSerializer,
+      value (value) {
+        return Buffer.concat([schemaHeader, Buffer.from(value!)])
+      }
+    }
+  })
+
+  await producer.send({
+    messages: [
+      { topic, key: 'schema-invalid', value: JSON.stringify({ id: 1, name: 'Alice', foo: 'bar' }) },
+      { topic, key: 'malformed', value: '{"id":' }
+    ]
+  })
+
+  const errors: unknown[] = []
+  const consumer = createConsumer(t, { registry: consumerRegistry })
+  const stream = await consumer.consume({
+    topics: [topic],
+    maxFetches: 1,
+    mode: MessagesStreamModes.EARLIEST,
+    onCorruptedMessage (_record, _topic, _partition, _firstTimestamp, _firstOffset, _commit, error) {
+      errors.push(error)
+      return false
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+  strictEqual(messages.length, 0)
+  strictEqual(errors.length, 2)
+  strictEqual(errors.some(error => error instanceof SyntaxError), true)
+
+  const validationError = errors.find(error => error instanceof UserError)
+  strictEqual(validationError instanceof UserError, true)
+  strictEqual(Array.isArray(validationError?.validationErrors), true)
+})
+
 test('fails on missing schema on the registry when producing', async t => {
   const topic = await createTopic(t, true)
 

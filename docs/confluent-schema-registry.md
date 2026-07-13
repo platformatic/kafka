@@ -283,3 +283,5 @@ JSON schemas are validated using AJV:
   "schema": "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"number\"},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\"]}"
 }
 ```
+
+JSON validation failures produce a `SchemaValidationError`, which extends `UserError`. The error is passed directly to `onDeserializationError`. When serialization or deserialization fails the operation instead, its outer `UserError` exposes the `SchemaValidationError` as `cause`. The validation error includes `schemaId`, `schemaType`, `phase`, `payloadType`, the decoded `data`, and AJV `validationErrors` so applications can distinguish schema-invalid data from malformed JSON.

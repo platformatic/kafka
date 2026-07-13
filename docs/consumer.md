@@ -132,13 +132,46 @@ Options:
 | `mode`               | `string`                        | `LATEST` | Where to start fetching new messages.<br/><br/> The valid values are defined in the `MessagesStreamModes` enumeration (see below).                                                                                                                                                                                                             |
 | `fallbackMode`       | `string`                        | `LATEST` | Where to start fetching new messages when offset information is lacking for the consumer group.<br/><br/> The valid values are defined in the `MessagesStreamFallbackModes` enumeration (see below).                                                                                                                                           |
 | `maxFetches`         | `number`                        | `0`      | The maximum number of fetches to perform on each partition before automatically closing the stream. Setting to zero will disable automating closing. <br/><br/>Note that [`Array.fromAsync`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync) can be used to create an array out of a stream. |
-| `offsets`            | `TopicWithPartitionAndOffset[]` |          | When manual offset mode is specified, a list of topic-partition-offset triplets.                                                                                                                                                                                                                                                               |
-| `onCorruptedMessage` | `CorruptedMessageHandler`       |          | A callback that will be invoked if a deserialiser throws. The original thrown value is passed unchanged as the final `error` argument and is typed as `unknown`. If the function returns `true`, then the stream will throw an error and thus it will be destroyed. Note that the stream will not wait for the `commit` function to finish so make sure you handle callbacks and promises accordingly. |
-| `context`            | `unknown`                       |          | Opaque user data for the created `MessagesStream`. It is forwarded to the stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value. When provided, it overrides the consumer constructor `streamContext` for that stream.                                                                |
+| `offsets`                | `TopicWithPartitionAndOffset[]` |          | When manual offset mode is specified, a list of topic-partition-offset triplets.                                                                                                                                                                                                                                                               |
+| `onDeserializationError` | `DeserializationErrorHandler`   |          | A callback invoked if a deserialiser throws. It receives a context object containing the original thrown value, payload type, raw record, actual offset and timestamp, and commit function. Return `DeserializationErrorActions.SKIP` to continue or `DeserializationErrorActions.FAIL` to destroy the stream.                                                                                           |
+| `onCorruptedMessage`     | `CorruptedMessageHandler`       |          | **Deprecated:** Use `onDeserializationError` instead. A callback that will be invoked if a deserialiser throws. The original thrown value is passed unchanged as the final `error` argument and is typed as `unknown`. If the function returns `true`, then the stream will throw an error and thus it will be destroyed. Note that the stream will not wait for the `commit` function to finish so make sure you handle callbacks and promises accordingly. |
+| `context`                | `unknown`                       |          | Opaque user data for the created `MessagesStream`. It is forwarded to the stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value. When provided, it overrides the consumer constructor `streamContext` for that stream.                                                                |
 
 It also accepts all options of the constructor except `deserializers` and `groupId`.
 
 For `consume()`, `maxBytesPerPartition` controls the per-partition fetch limit used by the created `MessagesStream`. If omitted, it uses the consumer constructor `maxBytesPerPartition`; if that is also omitted, it uses the effective `maxBytes` value for the `consume()` call.
+
+### Handling deserialization errors
+
+Use `onDeserializationError` to inspect a failed deserialisation and decide whether to skip the record or fail the stream:
+
+```typescript
+import {
+  DeserializationErrorActions,
+  SchemaValidationError
+} from '@platformatic/kafka'
+
+const stream = await consumer.consume({
+  topics: ['events'],
+  onDeserializationError ({ error, topic, partition, offset, payloadType }) {
+    if (error instanceof SchemaValidationError) {
+      console.error('Schema-invalid message', {
+        topic,
+        partition,
+        offset,
+        payloadType,
+        validationErrors: error.validationErrors
+      })
+
+      return DeserializationErrorActions.SKIP
+    }
+
+    return DeserializationErrorActions.FAIL
+  }
+})
+```
+
+The callback is synchronous. If it returns `SKIP`, the record is not emitted and consumption continues. With autocommit enabled, its offset remains eligible for commit. `onDeserializationError` and the deprecated `onCorruptedMessage` cannot be configured together.
 
 `MessagesStreamModes` modes:
 

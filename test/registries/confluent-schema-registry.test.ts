@@ -2,7 +2,15 @@ import { deepStrictEqual, match, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import test from 'node:test'
 import { UserError } from '../../src/errors.ts'
-import { MessagesStreamModes, noopDeserializer, stringDeserializer, stringSerializer } from '../../src/index.ts'
+import {
+  type DeserializationErrorContext,
+  DeserializationErrorActions,
+  MessagesStreamModes,
+  noopDeserializer,
+  SchemaValidationError,
+  stringDeserializer,
+  stringSerializer
+} from '../../src/index.ts'
 import { ConfluentSchemaRegistry } from '../../src/registries/confluent-schema-registry.ts'
 import {
   confluentSchemaRegistryAuthBasicUrl,
@@ -454,6 +462,8 @@ test('fails on JSON schema validation when producing', async t => {
   } catch (error) {
     strictEqual(error instanceof UserError, true)
     strictEqual(error.message, 'Failed to serialize a message.')
+    strictEqual(error.cause instanceof SchemaValidationError, true)
+    strictEqual(error.cause.phase, 'serialization')
     strictEqual(
       error.cause.message,
       'JSON Schema validation failed before serialization: data must NOT have additional properties'
@@ -514,6 +524,8 @@ test('fails on JSON schema validation when consuming', async t => {
   } catch (error) {
     strictEqual(error instanceof UserError, true)
     strictEqual(error.message, 'Failed to deserialize a message.')
+    strictEqual(error.cause instanceof SchemaValidationError, true)
+    strictEqual(error.cause.phase, 'deserialization')
     strictEqual(
       error.cause.message,
       'JSON Schema validation failed before deserialization: data must NOT have additional properties'
@@ -521,7 +533,7 @@ test('fails on JSON schema validation when consuming', async t => {
   }
 })
 
-test('exposes malformed JSON and JSON schema validation errors to onCorruptedMessage', async t => {
+test('exposes malformed JSON and JSON schema validation errors to onDeserializationError', async t => {
   const topic = await createTopic(t, true)
   const consumerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
     url: confluentSchemaRegistryUrl
@@ -551,33 +563,60 @@ test('exposes malformed JSON and JSON schema validation errors to onCorruptedMes
       }
     }
   })
+  const firstTimestamp = BigInt(Date.now())
+  const secondTimestamp = firstTimestamp + 1000n
 
   await producer.send({
     messages: [
-      { topic, key: 'schema-invalid', value: JSON.stringify({ id: 1, name: 'Alice', foo: 'bar' }) },
-      { topic, key: 'malformed', value: '{"id":' }
+      {
+        topic,
+        key: 'schema-invalid',
+        value: JSON.stringify({ id: 1, name: 'Alice', foo: 'bar' }),
+        timestamp: firstTimestamp
+      },
+      { topic, key: 'malformed', value: '{"id":', timestamp: secondTimestamp }
     ]
   })
 
-  const errors: unknown[] = []
+  const failures: DeserializationErrorContext[] = []
   const consumer = createConsumer(t, { registry: consumerRegistry })
   const stream = await consumer.consume({
     topics: [topic],
     maxFetches: 1,
     mode: MessagesStreamModes.EARLIEST,
-    onCorruptedMessage (_record, _topic, _partition, _firstTimestamp, _firstOffset, _commit, error) {
-      errors.push(error)
-      return false
+    onDeserializationError (context) {
+      failures.push(context)
+      return DeserializationErrorActions.SKIP
     }
   })
 
   const messages = await Array.fromAsync(stream)
   strictEqual(messages.length, 0)
-  strictEqual(errors.length, 2)
-  strictEqual(errors.some(error => error instanceof SyntaxError), true)
+  strictEqual(failures.length, 2)
+  deepStrictEqual(
+    failures.map(({ offset }) => offset),
+    [0n, 1n]
+  )
+  deepStrictEqual(
+    failures.map(({ payloadType }) => payloadType),
+    ['value', 'value']
+  )
+  deepStrictEqual(
+    failures.map(({ timestamp }) => timestamp),
+    [firstTimestamp, secondTimestamp]
+  )
+  strictEqual(failures.every(failure => failure.topic === topic), true)
+  strictEqual(failures.every(({ partition }) => partition === 0), true)
+  strictEqual(failures.every(({ commit }) => typeof commit === 'function'), true)
+  strictEqual(failures.every(({ record }) => Buffer.isBuffer(record.value)), true)
+  strictEqual(failures.some(({ error }) => error instanceof SyntaxError), true)
 
-  const validationError = errors.find(error => error instanceof UserError)
-  strictEqual(validationError instanceof UserError, true)
+  const validationError = failures.map(({ error }) => error).find(error => error instanceof SchemaValidationError)
+  strictEqual(validationError instanceof SchemaValidationError, true)
+  strictEqual(validationError?.schemaId, schemaId)
+  strictEqual(validationError?.schemaType, 'json')
+  strictEqual(validationError?.phase, 'deserialization')
+  strictEqual(validationError?.payloadType, 'value')
   strictEqual(Array.isArray(validationError?.validationErrors), true)
 })
 

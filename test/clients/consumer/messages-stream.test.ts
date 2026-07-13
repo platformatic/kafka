@@ -13,6 +13,7 @@ import {
   type ConsumerOptions,
   consumerReceivesChannel,
   type Deserializers,
+  DeserializationErrorActions,
   instancesChannel,
   jsonDeserializer,
   type KafkaRecord,
@@ -242,6 +243,46 @@ test('should throw error when not specifying offsets with MANUAL mode', async t 
     error => {
       ok(error instanceof UserError)
       strictEqual(error.message, 'Must specify offsets when the stream mode is MANUAL.')
+      return true
+    }
+  )
+})
+
+test('should reject multiple deserialization error handlers', async t => {
+  const consumer = createConsumer(t)
+
+  throws(
+    () => {
+      return new MessagesStream(consumer, {
+        topics: [createTestTopic()],
+        onDeserializationError () {
+          return DeserializationErrorActions.FAIL
+        },
+        onCorruptedMessage () {
+          return true
+        }
+      })
+    },
+    error => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Cannot specify both onCorruptedMessage and onDeserializationError.')
+      return true
+    }
+  )
+
+  await rejects(
+    consumer.consume({
+      topics: [createTestTopic()],
+      onDeserializationError () {
+        return DeserializationErrorActions.FAIL
+      },
+      onCorruptedMessage () {
+        return true
+      }
+    }),
+    error => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Cannot specify both onCorruptedMessage and onDeserializationError.')
       return true
     }
   )
@@ -923,20 +964,29 @@ test('should handle deserialization errors', async t => {
   })
 
   // Consume messages with JSON deserializer for value
-  try {
-    await consumeMessages(t, groupId, topic, {
+  let deserializationError: unknown
+  await rejects(
+    consumeMessages(t, groupId, topic, {
       mode: MessagesStreamModes.EARLIEST,
       deserializers: {
         ...stringDeserializers,
         value: jsonDeserializer
+      },
+      onDeserializationError (context) {
+        deserializationError = context.error
+        strictEqual(context.payloadType, 'value')
+        return DeserializationErrorActions.FAIL
       }
-    })
-    throw new Error('Expected error not thrown')
-  } catch (error) {
-    strictEqual(error instanceof UserError, true)
-    strictEqual(error.message.includes('Failed to deserialize a message.'), true)
-    strictEqual(error.cause.message.includes('Unexpected token \'v\', "value-0" is not valid JSON'), true)
-  }
+    }),
+    error => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Failed to deserialize a message.')
+      strictEqual(error.cause, deserializationError)
+      ok(error.cause instanceof Error)
+      strictEqual(error.cause.message.includes('Unexpected token \'v\', "value-0" is not valid JSON'), true)
+      return true
+    }
+  )
 })
 
 test('should allow resuming deserialization errors', async t => {

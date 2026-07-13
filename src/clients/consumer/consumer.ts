@@ -377,6 +377,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
+    if (options.onCorruptedMessage && options.onDeserializationError) {
+      callback(new UserError('Cannot specify both onCorruptedMessage and onDeserializationError.'))
+      return callback[kCallbackPromise]
+    }
+
     options.autocommit ??= this[kOptions].autocommit! ?? true
     options.maxBytes ??= this[kOptions].maxBytes!
     options.maxBytesPerPartition ??= this[kOptions].maxBytesPerPartition ?? options.maxBytes

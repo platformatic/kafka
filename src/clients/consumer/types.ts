@@ -5,7 +5,7 @@ import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
 import { type SchemaRegistry } from '../../registries/abstract.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
-import { type BeforeDeserializationHook, type Deserializers } from '../serde.ts'
+import { type BeforeDeserializationHook, type BeforeHookPayloadType, type Deserializers } from '../serde.ts'
 
 export interface GroupProtocolSubscription {
   name: string
@@ -37,6 +37,30 @@ export interface PreferredReadReplica {
   expiresAt: number
 }
 
+export const DeserializationErrorActions = {
+  FAIL: 'fail',
+  SKIP: 'skip'
+} as const
+
+export type DeserializationErrorAction =
+  (typeof DeserializationErrorActions)[keyof typeof DeserializationErrorActions]
+
+export interface DeserializationErrorContext {
+  error: unknown
+  payloadType: BeforeHookPayloadType
+  record: KafkaRecord
+  topic: string
+  partition: number
+  offset: bigint
+  timestamp: bigint
+  commit: Message['commit']
+}
+
+export type DeserializationErrorHandler = (context: DeserializationErrorContext) => DeserializationErrorAction
+
+/**
+ * @deprecated Use `DeserializationErrorHandler` instead.
+ */
 export type CorruptedMessageHandler = (
   record: KafkaRecord,
   topic: string,
@@ -125,6 +149,10 @@ export interface StreamOptions {
   fallbackMode?: MessagesStreamFallbackModeValue
   maxFetches?: number
   offsets?: TopicWithPartitionAndOffset[]
+  onDeserializationError?: DeserializationErrorHandler
+  /**
+   * @deprecated Use `onDeserializationError` instead.
+   */
   onCorruptedMessage?: CorruptedMessageHandler
 }
 

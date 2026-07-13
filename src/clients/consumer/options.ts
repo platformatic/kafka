@@ -95,6 +95,7 @@ export const consumeOptionsSchema = {
       }
     },
     onCorruptedMessage: { function: true },
+    onDeserializationError: { function: true },
     ...groupOptionsProperties,
     ...consumeOptionsProperties
   },

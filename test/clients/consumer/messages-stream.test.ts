@@ -962,7 +962,9 @@ test('should allow resuming deserialization errors', async t => {
     acks: ProduceAcks.LEADER
   })
 
+  const deserializationError = new Error('Deserialization error')
   let corruptedKey: string = ''
+  let corruptedError: unknown
   const { messages: deserializedMessages } = await consumeMessages(t, groupId, topic, {
     mode: MessagesStreamModes.EARLIEST,
     deserializers: {
@@ -971,14 +973,15 @@ test('should allow resuming deserialization errors', async t => {
         const deserialized = buffer!.toString('utf-8')
 
         if (deserialized === 'key-1') {
-          throw new Error('Deserialization error')
+          throw deserializationError
         }
 
         return deserialized
       }
     },
-    onCorruptedMessage (record) {
+    onCorruptedMessage (record, _topic, _partition, _firstTimestamp, _firstOffset, _commit, error) {
       corruptedKey = record.key!.toString('utf-8')
+      corruptedError = error
       return false
     }
   })
@@ -988,6 +991,7 @@ test('should allow resuming deserialization errors', async t => {
     ['key-0', 'key-2']
   )
   deepStrictEqual(corruptedKey, 'key-1')
+  strictEqual(corruptedError, deserializationError)
 })
 
 test('should support custom deserializers', async t => {

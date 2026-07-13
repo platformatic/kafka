@@ -43,7 +43,8 @@ export type CorruptedMessageHandler = (
   partition: number,
   firstTimestamp: bigint,
   firstOffset: bigint,
-  commit: Message['commit']
+  commit: Message['commit'],
+  error: unknown
 ) => boolean
 
 export type GroupPartitionsAssigner = (

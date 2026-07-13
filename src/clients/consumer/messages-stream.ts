@@ -916,7 +916,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 partition,
                 firstTimestamp,
                 firstOffset,
-                commit as Message['commit']
+                commit as Message['commit'],
+                error
               )
 
               if (shouldDestroy) {

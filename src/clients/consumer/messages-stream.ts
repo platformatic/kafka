@@ -32,11 +32,14 @@ import {
 import type { Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
+  DeserializationErrorActions,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
   type CommitOptionsPartition,
   type ConsumeOptions,
   type CorruptedMessageHandler,
+  type DeserializationErrorContext,
+  type DeserializationErrorHandler,
   type GroupAssignment,
   type Offsets
 } from './types.ts'
@@ -96,6 +99,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #closeCallbacks: Callback<void>[]
   #metricsConsumedMessages: Counter | undefined
   #corruptedMessageHandler: CorruptedMessageHandler
+  #deserializationErrorHandler: DeserializationErrorHandler | undefined
   #context: unknown
   #onConsumerGroupJoin: () => void
   #onBrokerDisconnect: () => void
@@ -138,6 +142,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       context,
       deserializers,
       onCorruptedMessage,
+      onDeserializationError,
       registry,
       beforeDeserialization,
       // The options below are only destructured to avoid being part of structuredClone below
@@ -145,6 +150,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       protocolsMetadata: _protocolsMetadata,
       ...otherOptions
     } = options
+
+    if (onCorruptedMessage && onDeserializationError) {
+      throw new UserError('Cannot specify both onCorruptedMessage and onDeserializationError.')
+    }
 
     if (offsets && mode !== MessagesStreamModes.MANUAL) {
       throw new UserError('Cannot specify offsets when the stream mode is not MANUAL.')
@@ -186,6 +195,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#closed = false
     this.#closeCallbacks = []
     this.#corruptedMessageHandler = onCorruptedMessage ?? defaultCorruptedMessageHandler
+    this.#deserializationErrorHandler = onDeserializationError
     this.#context = context
 
     this.#onConsumerGroupJoin = () => {
@@ -875,23 +885,66 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
 
             try {
-              const headers = new Map()
-              for (const [headerKey, headerValue] of record.headers) {
-                headers.set(
-                  /* c8 ignore next 2 - Hard to test */
-                  headerKeyDeserializer(headerKey ?? undefined, messageToConsume),
-                  headerValueDeserializer(headerValue ?? undefined, messageToConsume)
-                )
+              const headers = new Map<HeaderKey, HeaderValue>()
+              let payloadType: BeforeHookPayloadType = 'headerKey'
+              let deserializedKey: Key | undefined
+              let deserializedValue: Value | undefined
+
+              try {
+                for (const [headerKey, headerValue] of record.headers) {
+                  payloadType = 'headerKey'
+                  /* c8 ignore next - Hard to test */
+                  const deserializedHeaderKey = headerKeyDeserializer(headerKey ?? undefined, messageToConsume)
+                  payloadType = 'headerValue'
+                  /* c8 ignore next - Hard to test */
+                  const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
+                  headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                }
+
+                payloadType = 'key'
+                /* c8 ignore next - Hard to test */
+                deserializedKey = keyDeserializer(record.key ?? undefined, headers, messageToConsume)
+                payloadType = 'value'
+                deserializedValue = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
+              } catch (error) {
+                const context: DeserializationErrorContext = {
+                  error,
+                  payloadType,
+                  record,
+                  topic,
+                  partition,
+                  offset,
+                  timestamp: firstTimestamp + record.timestampDelta,
+                  commit: commit as Message['commit']
+                }
+                const shouldDestroy = this.#deserializationErrorHandler
+                  ? this.#deserializationErrorHandler(context) !== DeserializationErrorActions.SKIP
+                  : this.#corruptedMessageHandler(
+                    record,
+                    topic,
+                    partition,
+                    firstTimestamp,
+                    firstOffset,
+                    commit as Message['commit'],
+                    error
+                  )
+
+                if (shouldDestroy) {
+                  diagnosticContext.error = error
+                  consumerReceivesChannel.error.publish(diagnosticContext)
+
+                  this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
+                  return
+                }
+
+                continue
               }
-              /* c8 ignore next 2 - Hard to test */
-              const key = keyDeserializer(record.key ?? undefined, headers, messageToConsume)
-              const value = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
 
               this.#metricsConsumedMessages?.inc()
 
               const message: Message = {
-                key,
-                value,
+                key: deserializedKey,
+                value: deserializedValue,
                 headers,
                 topic,
                 partition,
@@ -910,23 +963,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
               consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
             } catch (error) {
-              const shouldDestroy = this.#corruptedMessageHandler(
-                record,
-                topic,
-                partition,
-                firstTimestamp,
-                firstOffset,
-                commit as Message['commit'],
-                error
-              )
+              diagnosticContext.error = error
+              consumerReceivesChannel.error.publish(diagnosticContext)
 
-              if (shouldDestroy) {
-                diagnosticContext.error = error
-                consumerReceivesChannel.error.publish(diagnosticContext)
-
-                this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
-                return
-              }
+              this.destroy(new UserError('Failed to process a message.', { cause: error }))
+              return
             } finally {
               consumerReceivesChannel.end.publish(diagnosticContext)
             }

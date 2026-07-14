@@ -1,4 +1,4 @@
-import { type Options, type ValidateFunction } from 'ajv'
+import { type ErrorObject, type Options, type ValidateFunction } from 'ajv'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
@@ -46,6 +46,35 @@ export interface ConfluentSchemaRegistryOptions {
   protobufTypeMapper?: ConfluentSchemaRegistryProtobufTypeMapper
   jsonValidateSend?: boolean
   jsonAjvOptions?: Options
+}
+
+export type SchemaValidationPhase = 'serialization' | 'deserialization'
+
+export interface SchemaValidationErrorProperties {
+  schemaId: number
+  schemaType: 'json'
+  phase: SchemaValidationPhase
+  payloadType: BeforeHookPayloadType
+  type: BeforeHookPayloadType
+  data: unknown
+  headers?: ReadonlyMap<unknown, unknown>
+  validationErrors: ErrorObject[] | null | undefined
+}
+
+export class SchemaValidationError extends UserError {
+  declare readonly schemaId: number
+  declare readonly schemaType: 'json'
+  declare readonly phase: SchemaValidationPhase
+  declare readonly payloadType: BeforeHookPayloadType
+  declare readonly type: BeforeHookPayloadType
+  declare readonly data: unknown
+  declare readonly headers?: ReadonlyMap<unknown, unknown>
+  declare readonly validationErrors: ErrorObject[] | null | undefined
+
+  constructor (message: string, properties: SchemaValidationErrorProperties) {
+    super(message, properties)
+    this.name = 'SchemaValidationError'
+  }
 }
 
 export interface Schema {
@@ -294,9 +323,18 @@ export class ConfluentSchemaRegistry<
           const validate = schema.schema as ValidateFunction
           const valid = validate(data)
           if (!valid) {
-            throw new UserError(
+            throw new SchemaValidationError(
               `JSON Schema validation failed before serialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
-              { type, data, headers, validationErrors: validate.errors }
+              {
+                schemaId,
+                schemaType: 'json',
+                phase: 'serialization',
+                payloadType: type,
+                type,
+                data,
+                headers,
+                validationErrors: validate.errors
+              }
             )
           }
         }
@@ -353,9 +391,18 @@ export class ConfluentSchemaRegistry<
         const valid = validate(parsed)
 
         if (!valid) {
-          throw new UserError(
+          throw new SchemaValidationError(
             `JSON Schema validation failed before deserialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
-            { type, data: parsed, headers, validationErrors: validate.errors }
+            {
+              schemaId,
+              schemaType: 'json',
+              phase: 'deserialization',
+              payloadType: type,
+              type,
+              data: parsed,
+              headers,
+              validationErrors: validate.errors
+            }
           )
         }
 

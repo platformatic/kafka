@@ -43,10 +43,13 @@ export type RetryDelayGetter<Owner = object> = (
   error: Error
 ) => number
 
+export type BootstrapBrokers = Broker[] | string[]
+export type BootstrapBrokersResolver = () => BootstrapBrokers | Promise<BootstrapBrokers>
+
 export interface BaseOptions extends ConnectionOptions {
   clientId: string
   clientRack?: string
-  bootstrapBrokers: Broker[] | string[]
+  bootstrapBrokers: BootstrapBrokers | BootstrapBrokersResolver
   context?: unknown
   timeout?: number
   retries?: number | boolean

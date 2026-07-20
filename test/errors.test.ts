@@ -237,7 +237,7 @@ test('ResponseError', () => {
 test('TimeoutError', () => {
   const error = new TimeoutError('request timed out', { requestId: '123' })
   deepStrictEqual(error.message, 'request timed out')
-  deepStrictEqual(error.code, 'PLT_KFK_NETWORK') // Note: uses NetworkError.code
+  deepStrictEqual(error.code, 'PLT_KFK_TIMEOUT')
   deepStrictEqual(error.requestId, '123')
   ok(GenericError.isGenericError(error))
 })

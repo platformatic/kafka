@@ -9,6 +9,7 @@ import { saslAuthenticateV2, saslHandshakeV1 } from '../apis/index.ts'
 import { type SaslAuthenticateResponse, type SASLAuthenticationAPI } from '../apis/security/sasl-authenticate-v2.ts'
 import {
   connectionsApiChannel,
+  connectionsQueueChannel,
   connectionsConnectsChannel,
   createDiagnosticContext,
   type DiagnosticContext,
@@ -57,7 +58,7 @@ export interface Broker {
 }
 
 export type SASLCustomAuthenticator = (
-  mechanism: SASLMechanismValue,
+  mechanism: SASLMechanismValue | string,
   connection: Connection,
   authenticate: SASLAuthenticationAPI,
   usernameProvider: string | CredentialProvider | undefined,
@@ -67,7 +68,7 @@ export type SASLCustomAuthenticator = (
 ) => void
 
 export interface SASLOptions {
-  mechanism: SASLMechanismValue
+  mechanism: SASLMechanismValue | string
   username?: string | CredentialProvider
   password?: string | CredentialProvider
   token?: string | CredentialProvider
@@ -79,6 +80,9 @@ export interface SASLOptions {
 export interface ConnectionOptions {
   connectTimeout?: number
   requestTimeout?: number
+  authenticationTimeout?: number
+  reauthenticationThreshold?: number
+  enforceRequestTimeout?: boolean
   maxInflights?: number
   tls?: TLSConnectionOptions
   ssl?: TLSConnectionOptions // Alias for tls
@@ -87,6 +91,12 @@ export interface ConnectionOptions {
   ownerId?: number
   handleBackPressure?: boolean
   context?: unknown
+  socketFactory?: (options: {
+    host: string
+    port: number
+    tls?: TLSConnectionOptions
+    onConnect: () => void
+  }) => Socket
 }
 
 export interface Request {
@@ -99,6 +109,8 @@ export interface Request {
   parser: ResponseParser<unknown>
   callback: Callback<any>
   diagnostic: Record<string, unknown>
+  createdAt: number
+  sentAt: number | null
   timeoutHandle: NodeJS.Timeout | null
   timedOut: boolean
 }
@@ -120,7 +132,8 @@ export type ConnectionStatusValue = (typeof ConnectionStatuses)[keyof typeof Con
 export const defaultOptions = {
   connectTimeout: 5000,
   requestTimeout: 30000,
-  maxInflights: 5
+  maxInflights: 5,
+  enforceRequestTimeout: true
 }
 
 let currentInstance = 0
@@ -146,6 +159,9 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #socketMustBeDrained: boolean
   #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
+  #authenticationTimeout: NodeJS.Timeout | undefined
+  #transportConnected: boolean
+  #socketFactoryConnected: boolean
 
   constructor (clientId?: string, options: ConnectionOptions = {}) {
     super()
@@ -173,6 +189,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#responseReader = new Reader(this.#responseBuffer)
     this.#socketMustBeDrained = false
     this.#detectMissingTLS = !this.#options.tls
+    this.#transportConnected = false
+    this.#socketFactoryConnected = false
 
     notifyCreation('connection', this)
   }
@@ -245,68 +263,39 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
           typeof this.#options.tlsServerName === 'string' ? this.#options.tlsServerName : host
       }
 
-      /* c8 ignore next 13 - Hard to test */
-      const connectingSocketTimeoutHandler = () => {
-        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`, { canRetry: true })
-        diagnosticContext.error = error
-        this.#socket.destroy()
-
-        this.#status = ConnectionStatuses.ERROR
-
-        connectionsConnectsChannel.error.publish(diagnosticContext)
-        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
-        this.emit('timeout', error)
-        this.emit('error', error)
-        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
-      }
-
-      const connectingSocketErrorHandler = (error: Error) => {
-        let cause = error
-        const tlsConnectionError = error as NodeJS.ErrnoException
-
-        if (
-          this.#options.tls &&
-          tlsConnectionError.code === 'ECONNRESET' &&
-          tlsConnectionError.message.includes('secure TLS connection was established')
-        ) {
-          cause = new UserError('TLS handshake failed. Please verify the broker supports TLS.', { cause: error })
-        }
-
-        this.#onConnectionError(host, port, diagnosticContext, cause)
-      }
+      const onTimeout = this.#onConnectingSocketTimeout.bind(this, host, port, diagnosticContext)
+      const onError = this.#onConnectingSocketError.bind(this, host, port, diagnosticContext)
+      const onTransportConnect = this.#onTransportConnect.bind(this, host, port, diagnosticContext, onTimeout, onError)
+      const onSocketFactoryConnect = this.#onSocketFactoryConnect.bind(this, onTransportConnect)
 
       this.emit('connecting')
 
       this.#host = host
       this.#port = port
-      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
-      this.#socket = this.#options.tls
-        ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
-        : createConnection({ ...connectionOptions, port, host })
+      this.#transportConnected = false
+      this.#socketFactoryConnected = false
+
+      if (this.#options.socketFactory) {
+        this.#socket = this.#options.socketFactory({
+          host,
+          port,
+          tls: this.#options.tls,
+          onConnect: onSocketFactoryConnect
+        })
+      } else {
+        /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
+        this.#socket = this.#options.tls
+          ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
+          : createConnection({ ...connectionOptions, port, host })
+        this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', onTransportConnect)
+      }
       this.#socket.setNoDelay(true)
 
-      this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
-        this.#socket.removeListener('timeout', connectingSocketTimeoutHandler)
-        this.#socket.removeListener('error', connectingSocketErrorHandler)
-
-        this.#socket.on('error', this.#onError.bind(this))
-        this.#socket.on('data', this.#onData.bind(this))
-        if (this.#handleBackPressure) {
-          this.#socket.on('drain', this.#onDrain.bind(this))
-        }
-        this.#socket.on('close', this.#onClose.bind(this))
-
-        this.#socket.setTimeout(0)
-
-        if (this.#options.sasl) {
-          this.#authenticate(host, port, diagnosticContext)
-        } else {
-          this.#onConnectionSucceed(diagnosticContext)
-        }
-      })
-
-      this.#socket.once('timeout', connectingSocketTimeoutHandler)
-      this.#socket.once('error', connectingSocketErrorHandler)
+      this.#socket.once('timeout', onTimeout)
+      this.#socket.once('error', onError)
+      if (this.#socketFactoryConnected) {
+        onTransportConnect()
+      }
     } catch (error) {
       this.#status = ConnectionStatuses.ERROR
 
@@ -367,7 +356,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
           { canRetry: true }
         )
       )
-    }, this.#options.connectTimeout)
+    }, this.#options.connectTimeout! + (this.#options.sasl ? (this.#options.authenticationTimeout ?? 0) : 0))
 
     this.once('connect', onConnect)
     this.once('error', onError)
@@ -385,6 +374,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
 
     clearInterval(this.#reauthenticationTimeout)
+    clearTimeout(this.#authenticationTimeout)
 
     if (
       this.#status === ConnectionStatuses.CLOSED ||
@@ -431,12 +421,17 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     const correlationId = (this.#correlationId + 1) & 0x7fffffff
     this.#correlationId = correlationId
 
+    const createdAt = Date.now()
     const diagnostic = createDiagnosticContext({
       connection: this,
       operation: 'send',
       apiKey,
       apiVersion,
-      correlationId
+      correlationId,
+      apiName: protocolAPIsById[apiKey],
+      broker: `${this.#host}:${this.#port}`,
+      clientId: this.#clientId,
+      createdAt
     })
 
     const writer = Writer.create()
@@ -467,6 +462,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       hasResponseHeaderTaggedFields,
       noResponse: payload.context.noResponse ?? false,
       diagnostic,
+      createdAt,
+      sentAt: null,
       timeoutHandle: null,
       timedOut: false
     }
@@ -474,8 +471,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#requestsQueue.push(
       fastQueueCallback => {
         request.callback = fastQueueCallback
-        if (!request.noResponse) {
-          request.timeoutHandle = setTimeout(this.#onRequestTimeout.bind(this, request), this.#options.requestTimeout)
+        if (!request.noResponse && this.#options.enforceRequestTimeout) {
+          request.timeoutHandle = setTimeout(
+            this.#onRequestTimeout.bind(this, request),
+            Math.max(this.#options.requestTimeout!, payload.context.requestTimeout ?? 0)
+          )
         }
 
         if (this.#socketMustBeDrained) {
@@ -487,6 +487,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       },
       this.#onResponse.bind(this, request, callback)
     )
+    connectionsQueueChannel.publish({ connection: this, queueSize: this.#requestsQueue.length() })
   }
 
   reauthenticate (): void {
@@ -507,11 +508,92 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     clearTimeout(request.timeoutHandle!)
     request.timeoutHandle = null
     callback(error, payload)
+    connectionsQueueChannel.publish({ connection: this, queueSize: this.#requestsQueue.length() })
   }
 
   #onRequestTimeout (request: Request): void {
     request.timedOut = true
-    request.callback(new TimeoutError('Request timed out'), null)
+    const error = new TimeoutError('Request timed out', {
+      apiKey: request.apiKey,
+      apiVersion: request.apiVersion,
+      correlationId: request.correlationId,
+      broker: request.diagnostic.broker,
+      clientId: request.diagnostic.clientId,
+      createdAt: request.createdAt,
+      sentAt: request.sentAt,
+      pendingDuration: request.sentAt === null ? Date.now() - request.createdAt : request.sentAt - request.createdAt
+    })
+    request.diagnostic.error = error
+    connectionsApiChannel.error.publish(request.diagnostic)
+    request.callback(error, null)
+  }
+
+  /* c8 ignore next 13 - Hard to test */
+  #onConnectingSocketTimeout (host: string, port: number, diagnosticContext: DiagnosticContext): void {
+    const error = new TimeoutError(`Connection to ${host}:${port} timed out.`, { canRetry: true })
+    diagnosticContext.error = error
+    this.#socket.destroy()
+
+    this.#status = ConnectionStatuses.ERROR
+
+    connectionsConnectsChannel.error.publish(diagnosticContext)
+    connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
+    this.emit('timeout', error)
+    this.emit('error', error)
+    connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+  }
+
+  #onConnectingSocketError (host: string, port: number, diagnosticContext: DiagnosticContext, error: Error): void {
+    let cause = error
+    const tlsConnectionError = error as NodeJS.ErrnoException
+
+    if (
+      this.#options.tls &&
+      tlsConnectionError.code === 'ECONNRESET' &&
+      tlsConnectionError.message.includes('secure TLS connection was established')
+    ) {
+      cause = new UserError('TLS handshake failed. Please verify the broker supports TLS.', { cause: error })
+    }
+
+    this.#onConnectionError(host, port, diagnosticContext, cause)
+  }
+
+  #onSocketFactoryConnect (onTransportConnect: () => void): void {
+    if (this.#socket) {
+      onTransportConnect()
+    } else {
+      this.#socketFactoryConnected = true
+    }
+  }
+
+  #onTransportConnect (
+    host: string,
+    port: number,
+    diagnosticContext: DiagnosticContext,
+    onTimeout: () => void,
+    onError: (error: Error) => void
+  ): void {
+    if (this.#transportConnected) {
+      return
+    }
+    this.#transportConnected = true
+    this.#socket.removeListener('timeout', onTimeout)
+    this.#socket.removeListener('error', onError)
+
+    this.#socket.on('error', this.#onError.bind(this))
+    this.#socket.on('data', this.#onData.bind(this))
+    if (this.#handleBackPressure) {
+      this.#socket.on('drain', this.#onDrain.bind(this))
+    }
+    this.#socket.on('close', this.#onClose.bind(this))
+
+    this.#socket.setTimeout(0)
+
+    if (this.#options.sasl) {
+      this.#authenticate(host, port, diagnosticContext)
+    } else {
+      this.#onConnectionSucceed(diagnosticContext)
+    }
   }
 
   #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
@@ -521,7 +603,19 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     const { mechanism, username, password, token, oauthBearerExtensions, authenticate } = this.#options.sasl!
 
-    if (!allowedSASLMechanisms.includes(mechanism)) {
+    clearTimeout(this.#authenticationTimeout)
+    if (this.#options.authenticationTimeout !== undefined) {
+      this.#authenticationTimeout = setTimeout(() => {
+        this.#onConnectionError(
+          host,
+          port,
+          diagnosticContext,
+          new TimeoutError(`SASL authentication with ${host}:${port} timed out.`, { canRetry: true })
+        )
+      }, this.#options.authenticationTimeout)
+    }
+
+    if (!allowedSASLMechanisms.includes(mechanism as SASLMechanismValue) && !authenticate) {
       this.#onConnectionError(
         host,
         port,
@@ -593,6 +687,9 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         this.#inflightRequests.set(request.correlationId, request)
       }
 
+      request.sentAt = Date.now()
+      request.diagnostic.sentAt = request.sentAt
+      request.diagnostic.pendingDuration = request.sentAt - request.createdAt
       let canWrite = this.#socket.write(request.payload)
 
       if (!this.#handleBackPressure) {
@@ -604,6 +701,12 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
 
       if (request.noResponse) {
+        request.diagnostic.sentAt = request.sentAt
+        request.diagnostic.pendingDuration = request.sentAt - request.createdAt
+        request.diagnostic.duration = 0
+        request.diagnostic.size = 0
+        connectionsApiChannel.asyncStart.publish(request.diagnostic)
+        connectionsApiChannel.asyncEnd.publish(request.diagnostic)
         request.callback(null, canWrite)
       }
 
@@ -636,6 +739,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause })
     this.#status = ConnectionStatuses.ERROR
     clearTimeout(this.#reauthenticationTimeout)
+    clearTimeout(this.#authenticationTimeout)
 
     diagnosticContext.error = error
     connectionsConnectsChannel.error.publish(diagnosticContext)
@@ -653,6 +757,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     error: Error | null,
     response?: SaslAuthenticateResponse
   ): void {
+    clearTimeout(this.#authenticationTimeout)
     if (error) {
       const protocolError = (error as MultipleErrors).errors?.[0] as ProtocolError
 
@@ -700,7 +805,10 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
 
     if (sessionLifetimeMs > 0) {
-      this.#reauthenticationTimeout = setTimeout(this.reauthenticate.bind(this), Number(sessionLifetimeMs) * 0.8)
+      const delay = this.#options.reauthenticationThreshold === undefined
+        ? Number(sessionLifetimeMs) * 0.8
+        : Math.max(1, Number(sessionLifetimeMs) - this.#options.reauthenticationThreshold)
+      this.#reauthenticationTimeout = setTimeout(this.reauthenticate.bind(this), delay)
     }
 
     const isReauthenticating = this.#status === ConnectionStatuses.REAUTHENTICATING
@@ -783,13 +891,16 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       const { apiKey, apiVersion, hasResponseHeaderTaggedFields, parser, callback, timedOut } = request
 
-      /* c8 ignore next 3 - Hard to test */
       if (timedOut) {
+        this.#responseBuffer.consume(this.#nextMessage + INT32_SIZE)
+        this.#responseReader.position = 0
+        this.#nextMessage = -1
         return
       }
 
       let deserialized: any
       let responseError: Error | null = null
+      const responseSize = this.#nextMessage
 
       try {
         // Due to inconsistency in the wire protocol, the tag buffer in the header might have to be handled by the APIs
@@ -834,6 +945,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       } else {
         request.diagnostic.result = deserialized
       }
+      request.diagnostic.duration = Date.now() - request.sentAt!
+      request.diagnostic.size = responseSize
 
       connectionsApiChannel.asyncStart.publish(request.diagnostic)
       callback(responseError, deserialized)

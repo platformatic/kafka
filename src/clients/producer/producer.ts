@@ -14,7 +14,7 @@ import {
 } from '../../apis/producer/add-partitions-to-txn-v5.ts'
 import { type EndTxnRequest, type EndTxnResponse } from '../../apis/producer/end-txn-v4.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
-import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
+import { type ProduceRequest, type ProduceResponse, type ProduceResponsePartition } from '../../apis/producer/produce-v11.ts'
 import { type TxnOffsetCommitRequest, type TxnOffsetCommitResponse } from '../../apis/producer/txn-offset-commit-v4.ts'
 import {
   createDiagnosticContext,
@@ -44,6 +44,7 @@ import {
   kTransactionPrepare
 } from '../../symbols.ts'
 import { emitExperimentalApiWarning, NumericMap } from '../../utils.ts'
+
 import {
   Base,
   kAfterCreate,
@@ -84,6 +85,11 @@ import {
   type ProducerStreamOptions,
   type SendOptions
 } from './types.ts'
+
+export const kGetTransactionalIdForInitialization = Symbol('plt.kafka.producer.getTransactionalIdForInitialization')
+
+export const kGetProduceTimeout = Symbol('plt.kafka.producer.getProduceTimeout')
+export const kCreateProduceResultOffset = Symbol('plt.kafka.producer.createProduceResultOffset')
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
@@ -197,6 +203,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   get streamsCount (): number {
     return this.#streams.size
+  }
+
+  [kGetProduceTimeout] (_options: SendOptions<Key, Value, HeaderKey, HeaderValue>): number {
+    return this[kOptions].timeout!
+  }
+
+  [kCreateProduceResultOffset] (topic: string, partition: ProduceResponsePartition) {
+    return { topic, partition: partition.index, offset: partition.baseOffset }
   }
 
   close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
@@ -434,16 +448,23 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return callback[kCallbackPromise]
     }
 
-    this.#transaction = new Transaction(this)
+    const transaction = new Transaction(this)
+    this.#transaction = transaction
 
     producerTransactionsChannel.traceCallback(
-      this.#transaction[kTransactionPrepare],
+      transaction[kTransactionPrepare],
       2,
       createDiagnosticContext({ client: this, operation: 'begin' }),
-      this.#transaction,
+      transaction,
       this.#producerInfo?.transactionalId,
       options,
-      callback
+      error => {
+        if (error && this.#transaction === transaction) {
+          this.#transaction = undefined
+        }
+
+        callback(error, transaction)
+      }
     )
 
     return callback[kCallbackPromise]
@@ -594,7 +615,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
-    const transactionalId = this.#transaction!.id
+    const transactionalId = this[kGetTransactionalIdForInitialization]()!
 
     this[kPerformDeduplicated](
       'findCoordinator',
@@ -902,7 +923,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     options: ProduceOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProducerInfo>
   ) {
-    const transactionalId = this.#transaction?.id
+    const transactionalId = this[kGetTransactionalIdForInitialization]()
 
     this[kPerformDeduplicated](
       'initProducerId',
@@ -1148,7 +1169,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.#performSingleDestinationSend(
             topics,
             destinationMessages,
-            this[kOptions].timeout!,
+            this[kGetProduceTimeout](sendOptions),
             sendOptions.acks,
             sendOptions.autocreateTopics,
             sendOptions.repeatOnStaleMetadata,
@@ -1177,11 +1198,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             for (const result of apiResults!) {
               for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
                 for (const partitionResponse of partitionResponses) {
-                  topics.push({
-                    topic: name,
-                    partition: partitionResponse.index,
-                    offset: partitionResponse.baseOffset
-                  })
+                  topics.push(this[kCreateProduceResultOffset](name, partitionResponse))
                 }
               }
 
@@ -1488,5 +1505,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return partition
+  }
+
+  [kGetTransactionalIdForInitialization] (): string | undefined {
+    return this.#transaction?.id
   }
 }

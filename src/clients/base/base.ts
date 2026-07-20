@@ -1,5 +1,6 @@
 import { type ValidateFunction } from 'ajv'
 import { type EventEmitter } from 'node:events'
+import { callbackify } from 'node:util'
 import {
   createPromisifiedCallback,
   kCallbackPromise,
@@ -38,7 +39,13 @@ import {
   defaultPort,
   metadataOptionsValidator
 } from './options.ts'
-import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
+import {
+  type BaseOptions,
+  type BootstrapBrokers,
+  type ClusterMetadata,
+  type ClusterTopicMetadata,
+  type MetadataOptions
+} from './types.ts'
 
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
@@ -62,6 +69,7 @@ export const kPrometheus = Symbol('plt.kafka.base.prometheus')
 export const kClientType = Symbol('plt.kafka.base.clientType')
 export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 export const kContext = Symbol('plt.kafka.base.context')
+export const kResetConnections = Symbol('plt.kafka.base.resetConnections')
 
 let currentInstance = 0
 
@@ -99,6 +107,7 @@ export class Base<
 
   #metadata: ClusterMetadata | undefined
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
+  #bootstrapBrokersResolver: (() => Broker[] | string[] | Promise<Broker[] | string[]>) | undefined
 
   constructor (options: OptionsType) {
     super()
@@ -126,8 +135,12 @@ export class Base<
 
     // Initialize bootstrap brokers
     this[kBootstrapBrokers] = []
-    for (const broker of options.bootstrapBrokers) {
-      this[kBootstrapBrokers].push(parseBroker(broker, defaultPort))
+    if (typeof options.bootstrapBrokers === 'function') {
+      this.#bootstrapBrokersResolver = options.bootstrapBrokers
+    } else {
+      for (const broker of options.bootstrapBrokers) {
+        this[kBootstrapBrokers].push(parseBroker(broker, defaultPort))
+      }
     }
 
     // Initialize main connection pool
@@ -386,7 +399,8 @@ export class Base<
     callback: CallbackWithPromise<ReturnType>,
     attempt: number = 0,
     errors: Error[] = [],
-    shouldSkipRetry?: (e: Error) => boolean
+    shouldSkipRetry?: (e: Error) => boolean,
+    retryTime?: number
   ): void | Promise<ReturnType> {
     const retries = this[kOptions].retries! as number
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
@@ -405,16 +419,13 @@ export class Base<
             callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
           }
 
-          let delay = this[kOptions].retryDelay
-          if (typeof delay === 'function') {
-            delay = delay(this, operationId, attempt + 1, retries, error)
-          }
+          const delay = this.#retryDelay(operationId, attempt + 1, retries, error)
 
           this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             try {
-              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry, delay)
             } catch (error) {
               errors.push(error)
               callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
@@ -423,8 +434,15 @@ export class Base<
 
           this.once('client:close', onClose)
         } else {
+          const retryProperties = retriable && !shouldSkipRetry?.(error)
+            ? {
+                retryExhausted: true,
+                retryCount: attempt,
+                retryTime: retryTime ?? this.#retryDelay(operationId, attempt + 1, retries, error)
+              }
+            : undefined
           if (attempt > 0) {
-            error = new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors)
+            error = new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors, retryProperties)
           }
 
           this.emitWithDebug('client', 'performWithRetry:failed', operationId, retries, errors)
@@ -444,6 +462,14 @@ export class Base<
     }, attempt)
 
     return callback[kCallbackPromise]
+  }
+
+  #retryDelay (operationId: string, attempt: number, retries: number, error: Error): number {
+    let delay = this[kOptions].retryDelay
+    if (typeof delay === 'function') {
+      delay = delay(this, operationId, attempt, retries, error)
+    }
+    return delay!
   }
 
   [kPerformDeduplicated]<ReturnType> (
@@ -523,12 +549,44 @@ export class Base<
   }
 
   [kGetBootstrapConnection] (callback: Callback<Connection>, attempt = 0): void {
+    if (this.#bootstrapBrokersResolver) {
+      this.#resolveBootstrapBrokers(this.#onBootstrapBrokersResolved.bind(this, attempt, callback))
+      return
+    }
+
+    this.#connectToBootstrapBrokers(attempt, callback, this[kBootstrapBrokers])
+  }
+
+  #resolveBootstrapBrokers (callback: Callback<BootstrapBrokers>): void {
+    callbackify(async () => await this.#bootstrapBrokersResolver!())(callback)
+  }
+
+  #onBootstrapBrokersResolved (
+    attempt: number,
+    callback: Callback<Connection>,
+    error: Error | null,
+    brokers?: BootstrapBrokers
+  ): void {
+    if (error) {
+      callback(error)
+      return
+    }
+    this.#connectToBootstrapBrokers(attempt, callback, brokers!)
+  }
+
+  #connectToBootstrapBrokers (attempt: number, callback: Callback<Connection>, resolved: BootstrapBrokers): void {
     let brokers: Broker[]
-    if (!this.#metadata) {
-      brokers = this[kBootstrapBrokers]
-    } else {
-      const discovered = Array.from(this.#metadata.brokers.values())
-      brokers = [...this[kBootstrapBrokers], ...discovered]
+    try {
+      const bootstrap = resolved.map(broker => parseBroker(broker, defaultPort))
+      brokers = this.#metadata ? [...bootstrap, ...this.#metadata.brokers.values()] : bootstrap
+    } catch (error) {
+      callback(error as Error)
+      return
+    }
+
+    if (brokers.length === 0) {
+      callback(new UserError('No bootstrap brokers are available.'))
+      return
     }
 
     if (attempt > 0 && brokers.length > 1) {
@@ -732,5 +790,26 @@ export class Base<
         this.emitWithDebug('client', `broker:${event}`, ...args)
       })
     }
+  }
+
+  [kResetConnections] (callback: CallbackWithPromise<void>): void
+  [kResetConnections] (): Promise<void>
+  [kResetConnections] (callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (!callback) {
+      callback = createPromisifiedCallback<void>()
+    }
+
+    this[kConnections].close(error => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      this[kConnections] = this[kCreateConnectionPool]()
+      this.#metadata = undefined
+      callback(null)
+    })
+
+    return callback[kCallbackPromise]
   }
 }

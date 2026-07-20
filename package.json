@@ -18,11 +18,28 @@
   "private": false,
   "files": [
     "dist",
+    "docs/compatibility",
     "LICENSE",
     "README.md"
   ],
   "type": "module",
-  "exports": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./compatibility/kafkajs": {
+      "types": "./dist/compatibility/kafkajs/index.d.ts",
+      "import": "./dist/compatibility/kafkajs/index.js",
+      "default": "./dist/compatibility/kafkajs/index.js"
+    },
+    "./compatibility/node-rdkafka": {
+      "types": "./dist/compatibility/node-rdkafka/index.d.ts",
+      "import": "./dist/compatibility/node-rdkafka/index.js",
+      "default": "./dist/compatibility/node-rdkafka/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",

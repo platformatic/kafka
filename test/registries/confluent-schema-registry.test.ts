@@ -14,6 +14,7 @@ import {
 } from '../helpers.ts'
 
 const originalEmitWarning = process.emitWarning
+const missingSchemaId = 2_147_483_647
 
 test.before(() => {
   process.emitWarning = ((..._args: Parameters<typeof process.emitWarning>) => {}) as typeof process.emitWarning
@@ -499,7 +500,7 @@ test('fails on missing schema on the registry when producing', async t => {
           topic,
           key: 'key-1',
           value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
-          metadata: { schemas: { value: 100 } }
+          metadata: { schemas: { value: missingSchemaId } }
         }
       ]
     })
@@ -522,7 +523,7 @@ test('fails on missing schema on the registry when consuming', async t => {
     serializers: {
       key: stringSerializer,
       value (value: object | undefined) {
-        return Buffer.concat([Buffer.from([0, 0, 0, 0, 100]), Buffer.from(JSON.stringify(value))])
+        return Buffer.concat([Buffer.from([0, 127, 255, 255, 255]), Buffer.from(JSON.stringify(value))])
       }
     }
   })
@@ -533,7 +534,7 @@ test('fails on missing schema on the registry when consuming', async t => {
         topic,
         key: 'key-1',
         value: { id: 1, name: 'Alice', foo: 'bar' } as Datum,
-        metadata: { schemas: { value: 100 } }
+        metadata: { schemas: { value: missingSchemaId } }
       }
     ]
   })

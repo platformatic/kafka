@@ -66,6 +66,7 @@ export const instancesChannel = createChannel('instances')
 // Connection related channels
 export const connectionsConnectsChannel = createTracingChannel<ConnectionDiagnosticEvent>('connections:connects')
 export const connectionsApiChannel = createTracingChannel<ConnectionDiagnosticEvent>('connections:api')
+export const connectionsQueueChannel = createChannel<ConnectionDiagnosticEvent<{ queueSize: number }>>('connections:queue')
 export const connectionsPoolGetsChannel = createTracingChannel<ConnectionPoolDiagnosticEvent>('connections:pool:get')
 
 // Base channels

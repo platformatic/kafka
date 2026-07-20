@@ -1058,7 +1058,7 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api!(connection!, requests, this[kOptions].timeout!, false, (error, response) => {
+                api!(connection!, requests, options.timeout ?? this[kOptions].timeout!, false, (error, response) => {
                   this.#handleNotControllerError(error, response!, retryCallback)
                 })
               })
@@ -1117,7 +1117,7 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api!(connection!, requests, this[kOptions].timeout!, (error, response) => {
+                api!(connection!, requests, options.timeout ?? this[kOptions].timeout!, (error, response) => {
                   this.#handleNotControllerError(error, response, retryCallback)
                 })
               })
@@ -1157,7 +1157,7 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api!(connection!, options.topics, this[kOptions].timeout!, options.validateOnly ?? false, (
+                api!(connection!, options.topics, options.timeout ?? this[kOptions].timeout!, options.validateOnly ?? false, (
                   error,
                   response
                 ) => {

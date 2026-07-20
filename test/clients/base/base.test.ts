@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
-import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
+import { createPromisifiedCallback, kCallbackPromise } from '../../../src/apis/callbacks.ts'
 import { kConnections, kGetApi, kGetBootstrapConnection, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
@@ -970,6 +970,41 @@ test('kGetBootstrapConnection rotates broker list based on retry attempt', t => 
   strictEqual(capturedLists[1][0].host, 'broker-b') // attempt 1: offset by 1
   strictEqual(capturedLists[2][0].host, 'broker-c') // attempt 2: offset by 2
   strictEqual(capturedLists[3][0].host, 'broker-a') // attempt 3: wraps around (3 % 3 = 0)
+})
+
+test('kGetBootstrapConnection resolves dynamic broker lists', async t => {
+  const client = createBase(t, {
+    bootstrapBrokers: async () => ['broker-a:9092', 'broker-b:9093'],
+    retries: 0
+  })
+  const pool = client[kConnections]
+  const capturedLists: Broker[][] = []
+  pool.getFirstAvailable = function (brokers: Broker[], callback: CallbackWithPromise<Connection>) {
+    capturedLists.push([...brokers])
+    callback(new Error('test'))
+  } as typeof pool.getFirstAvailable
+
+  const callback = createPromisifiedCallback<Connection>()
+  client[kGetBootstrapConnection](callback, 1)
+  await callback[kCallbackPromise]!.catch(() => {})
+
+  strictEqual(capturedLists[0][0].host, 'broker-b')
+})
+
+test('kGetBootstrapConnection forwards dynamic broker resolver failures', async t => {
+  const client = createBase(t, {
+    bootstrapBrokers: () => Promise.reject(new Error('resolver failed')),
+    retries: 0
+  })
+  const callback = createPromisifiedCallback<Connection>()
+  client[kGetBootstrapConnection](callback)
+
+  await callback[kCallbackPromise]!.then(
+    () => {
+      throw new Error('Expected resolver failure')
+    },
+    error => strictEqual((error as Error).message, 'resolver failed')
+  )
 })
 
 test('metadata retries on TimeoutError', async t => {

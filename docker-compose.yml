@@ -164,6 +164,10 @@ services:
   broker-cluster-1:
     image: *image
     container_name: broker-cluster-1
+    ulimits: &broker_ulimits
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       - '9011:9092'
     healthcheck: *health_check
@@ -189,6 +193,7 @@ services:
   broker-cluster-2:
     image: *image
     container_name: broker-cluster-2
+    ulimits: *broker_ulimits
     ports:
       - '9012:9092'
     healthcheck: *health_check
@@ -201,6 +206,7 @@ services:
   broker-cluster-3:
     image: *image
     container_name: broker-cluster-3
+    ulimits: *broker_ulimits
     ports:
       - '9013:9092'
     healthcheck: *health_check

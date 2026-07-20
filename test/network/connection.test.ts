@@ -218,7 +218,7 @@ test('Connection.connect should handle connection timeout', async t => {
 
   // This IP is not routable due to RFC 5737
   await rejects(() => connection.connect('192.0.2.1', 9092) as Promise<unknown>, {
-    code: 'PLT_KFK_NETWORK',
+    code: 'PLT_KFK_TIMEOUT',
     message: 'Connection to 192.0.2.1:9092 timed out.'
   })
 })
@@ -366,7 +366,12 @@ test('Connection.send should enqueue request and process response', async t => {
     ['connection'],
     {
       start (context: ConnectionDiagnosticEvent) {
-        deepStrictEqual(context, {
+        const { apiName, broker, clientId, createdAt, ...rest } = context
+        strictEqual(apiName, 'Fetch')
+        strictEqual(broker, `localhost:${port}`)
+        strictEqual(clientId, 'test-client')
+        ok(typeof createdAt === 'number')
+        deepStrictEqual(rest, {
           operationId: mockedOperationId,
           connection,
           operation: 'send',
@@ -376,7 +381,16 @@ test('Connection.send should enqueue request and process response', async t => {
         })
       },
       asyncStart (context: ConnectionDiagnosticEvent) {
-        deepStrictEqual(context, {
+        const { apiName, broker, clientId, createdAt, sentAt, pendingDuration, duration, size, ...rest } = context
+        strictEqual(apiName, 'Fetch')
+        strictEqual(broker, `localhost:${port}`)
+        strictEqual(clientId, 'test-client')
+        ok(typeof createdAt === 'number')
+        ok(typeof sentAt === 'number')
+        ok(typeof pendingDuration === 'number')
+        ok(typeof duration === 'number')
+        strictEqual(size, 9)
+        deepStrictEqual(rest, {
           operationId: mockedOperationId,
           connection,
           operation: 'send',

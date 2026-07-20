@@ -5,7 +5,7 @@ import {
   noopCallback,
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
-import type { FetchRequestTopic, FetchResponse } from '../../apis/consumer/fetch-v17.ts'
+import type { FetchRequestTopic, FetchResponse, FetchResponsePartition } from '../../apis/consumer/fetch-v17.ts'
 import type { Callback } from '../../apis/definitions.ts'
 import { ListOffsetTimestamps } from '../../apis/enumerations.ts'
 import {
@@ -29,7 +29,7 @@ import {
   type Deserializer,
   type DeserializerWithHeaders
 } from '../serde.ts'
-import type { Consumer } from './consumer.ts'
+import { kMembershipVersion, type Consumer } from './consumer.ts'
 import { defaultConsumerOptions } from './options.ts'
 import {
   MessagesStreamFallbackModes,
@@ -41,6 +41,14 @@ import {
   type Offsets
 } from './types.ts'
 import { partitionKey } from './utils.ts'
+
+export const kHandleOffsetOutOfRange = Symbol('plt.kafka.messagesStream.handleOffsetOutOfRange')
+export const kDecorateMessage = Symbol('plt.kafka.messagesStream.decorateMessage')
+export const kHandleFetchPartitionProgress = Symbol('plt.kafka.messagesStream.handleFetchPartitionProgress')
+export const kSeekPartition = Symbol('plt.kafka.messagesStream.seekPartition')
+export const kAssignmentsForTopic = Symbol('plt.kafka.messagesStream.assignmentsForTopic')
+export const kAssignmentsForOffsetRestore = Symbol('plt.kafka.messagesStream.assignmentsForOffsetRestore')
+export const kResumeFetch = Symbol('plt.kafka.messagesStream.resumeFetch')
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
@@ -84,6 +92,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
   #partitionsEpochs: Map<string, number>
+  #seekVersions: Map<string, number>
   #inflightNodes: Map<number, number>
   #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
   #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
@@ -103,7 +112,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, { offset: bigint; seekVersion: number; membershipVersion: number }>
   ) => void;
 
   [kInstance]: number;
@@ -167,6 +176,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#offsetsToCommit = new Map()
     this.#offsetsCommitted = new Map()
     this.#partitionsEpochs = new Map()
+    this.#seekVersions = new Map()
     this.#paused = false
     this.#refreshOffsetsInflight = false
     this.#refreshOffsetsPending = false
@@ -190,6 +200,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#onConsumerGroupJoin = () => {
       this.#offsetsCommitted.clear()
+      this.#offsetsToCommit.clear()
+      this.#offsetsToFetch.clear()
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
     }
@@ -551,9 +563,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       const topicIds = new Map<string, string>()
 
       // Group topic-partitions by the destination broker
-      const requestedOffsets = new Map<string, bigint>()
+      const requestedOffsets = new Map<string, { offset: bigint; seekVersion: number; membershipVersion: number }>()
+      const membershipVersion = this.#consumer[kMembershipVersion]?.() ?? 0
       for (const topic of this.#topics) {
-        const assignment = this.#assignmentsForTopic(topic)
+        const assignment = this[kAssignmentsForTopic](topic)
 
         // This consumer has no assignment for the topic, continue
         if (!assignment) {
@@ -580,7 +593,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           topicIds.set(topicId, topic)
 
           const fetchOffset = this.#offsetsToFetch.get(key)!
-          requestedOffsets.set(key, fetchOffset)
+          requestedOffsets.set(key, {
+            offset: fetchOffset,
+            seekVersion: this.#seekVersions.get(key) ?? 0,
+            membershipVersion
+          })
 
           const leaderEpoch = this.#partitionsEpochs.get(key) ?? -1
           nodeRequests.push({
@@ -619,7 +636,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               }
 
               if (this.#fallbackMode !== MessagesStreamFallbackModes.FAIL) {
-                this.#handleOffsetOutOfRange(error as GenericError, topicIds, (recoveryError, recovered) => {
+                this[kHandleOffsetOutOfRange](error as GenericError, topicIds, (recoveryError, recovered) => {
                   if (this.#closed || this.closed || this.destroyed) {
                     return
                   }
@@ -662,7 +679,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     })
   }
 
-  #handleOffsetOutOfRange (
+  [kHandleOffsetOutOfRange] (
     error: GenericError,
     topicIds: Map<string, string>,
     callback: Callback<boolean>
@@ -780,11 +797,38 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return recoveredOffsets.length > 0
   }
 
+  [kDecorateMessage] (
+    _message: Message<Key, Value, HeaderKey, HeaderValue>,
+    _partitionResponse: FetchResponsePartition,
+    _seekVersion: number,
+    _membershipVersion: number
+  ): void {}
+
+  [kHandleFetchPartitionProgress] (
+    _topic: string,
+    _partition: number,
+    _partitionResponse: FetchResponsePartition,
+    _lastOffset: bigint,
+    _seekVersion: number,
+    _membershipVersion: number
+  ): boolean {
+    return true
+  }
+
+  [kSeekPartition] (topic: string, partition: number, offset: bigint, seekVersion: number): void {
+    const key = partitionKey(topic, partition)
+    this.#offsetsToFetch.set(key, offset)
+    this.#offsetsToCommit.delete(key)
+    this.#partitionsEpochs.delete(key)
+    this.#seekVersions.set(key, seekVersion)
+    process.nextTick(() => this.#fetch())
+  }
+
   #pushRecords (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, { offset: bigint; seekVersion: number; membershipVersion: number }>
   ) {
     const autocommit = this.#autocommitEnabled
     const keyDeserializer = this.#keyDeserializer
@@ -809,7 +853,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)!
 
-      for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+      for (const partitionResponse of topicResponse.partitions) {
+        const { records: recordsBatches, partitionIndex: partition } = partitionResponse
         const key = partitionKey(topic, partition)
 
         // The broker can return partitions which were not requested when they linger
@@ -817,8 +862,23 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         if (!requestedOffsets.has(key)) {
           continue
         }
+        const requested = requestedOffsets.get(key)!
+        if (
+          requested.seekVersion !== (this.#seekVersions.get(key) ?? 0) ||
+          requested.membershipVersion !== (this.#consumer[kMembershipVersion]?.() ?? 0)
+        ) {
+          continue
+        }
 
-        if (!recordsBatches) {
+        if (!recordsBatches?.length) {
+          canPush = this[kHandleFetchPartitionProgress](
+            topic,
+            partition,
+            partitionResponse,
+            requested.offset - 1n,
+            requested.seekVersion,
+            requested.membershipVersion
+          ) && canPush
           continue
         }
 
@@ -856,7 +916,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             const messageToConsume: MessageToConsume = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
-            if (offset < requestedOffsets.get(key)!) {
+            if (offset < requested.offset) {
               // Thi is a duplicate message, ignore it
               continue
             }
@@ -889,7 +949,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
               this.#metricsConsumedMessages?.inc()
 
-              const message: Message = {
+              const message: Message<Key, Value, HeaderKey, HeaderValue> = {
                 key,
                 value,
                 headers,
@@ -898,9 +958,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 timestamp: firstTimestamp + record.timestampDelta,
                 offset,
                 commit,
-                metadata: messageMetadata,
+                metadata: {
+                  ...messageMetadata,
+                  consumer: { ...messageMetadata.consumer, generationId: this.#consumer.generationId }
+                },
                 toJSON: messageToJSON
-              } as Message
+              } as Message<Key, Value, HeaderKey, HeaderValue>
+
+              this[kDecorateMessage](message, partitionResponse, requested.seekVersion, requested.membershipVersion)
 
               diagnosticContext.result = message
 
@@ -931,6 +996,17 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             }
           }
         }
+
+        const lastBatch = recordsBatches[recordsBatches.length - 1]
+        const lastOffset = lastBatch.firstOffset + BigInt(lastBatch.lastOffsetDelta)
+        canPush = this[kHandleFetchPartitionProgress](
+          topic,
+          partition,
+          partitionResponse,
+          lastOffset,
+          requested.seekVersion,
+          requested.membershipVersion
+        ) && canPush
       }
     }
 
@@ -1068,7 +1144,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // Now restore group offsets
         const topics: GroupAssignment[] = []
         for (const topic of this.#topics) {
-          const assignment = this.#assignmentsForTopic(topic)
+          const assignment = this[kAssignmentsForOffsetRestore](topic)
 
           if (!assignment) {
             continue
@@ -1113,6 +1189,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#refreshOffsets(error => {
       const shouldDestroyOnError = this.#refreshOffsetsDestroyOnError
+      const refreshPending = this.#refreshOffsetsPending
       this.#refreshOffsetsInflight = false
       this.#refreshOffsetsDestroyOnError = false
       this.#refreshOffsetsPending = false
@@ -1128,7 +1205,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       // A new one was scheduled while the previous one was inflight, we need to run it immediately
       /* c8 ignore next 4 - Hard to test */
-      if (this.#refreshOffsetsPending) {
+      if (refreshPending) {
         this.#scheduleRefreshOffsetsAndFetch(shouldDestroyOnError)
         return
       }
@@ -1170,7 +1247,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Rebuild the list of offsetsCommitted (which is used for consumer lag) out of the offsets to fetch
     for (const topic of this.#topics) {
-      const assignment = this.#assignmentsForTopic(topic)
+      const assignment = this[kAssignmentsForTopic](topic)
 
       // This consumer has no assignment for the topic, continue
       if (!assignment) {
@@ -1190,8 +1267,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     callback(null)
   }
 
-  #assignmentsForTopic (topic: string): GroupAssignment | undefined {
+  [kAssignmentsForTopic] (topic: string): GroupAssignment | undefined {
     return this.#consumer.assignments?.find(assignment => assignment.topic === topic)
+  }
+
+  [kAssignmentsForOffsetRestore] (topic: string): GroupAssignment | undefined {
+    return this[kAssignmentsForTopic](topic)
+  }
+
+  [kResumeFetch] (): void {
+    process.nextTick(() => this.#fetch())
   }
 
   #afterClose (error: Error | null) {
@@ -1214,7 +1299,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, { offset: bigint; seekVersion: number; membershipVersion: number }>
   ) {
     const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsume][] = []
 
@@ -1225,7 +1310,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
         // The broker can return partitions which were not requested when they linger
         // in an incremental fetch session - do not run hooks on their stale records
-        if (!requestedOffsets.has(partitionKey(topic, partition))) {
+        const key = partitionKey(topic, partition)
+        const requested = requestedOffsets.get(key)
+        if (!requested || requested.seekVersion !== (this.#seekVersions.get(key) ?? 0)) {
           continue
         }
 

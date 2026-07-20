@@ -21,6 +21,8 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:lag`              | `Offsets`                       | Emitted during periodic lag monitoring with calculated lag data for topics and partitions. |
 | `consumer:lag:error`        | `Error`                         | Emitted when lag calculation fails during monitoring operations.                           |
 
+`consumer:group:join` includes the elected `leaderId`, negotiated `protocol`, join `duration`, and this member's assignments when the classic group protocol is used.
+
 ## Constructor
 
 Creates a new consumer with type `Consumer<Key, Value, HeaderKey, HeaderValue>`.
@@ -48,6 +50,7 @@ Options:
 | groupRemoteAssignor   | `string`                                                     | `null`                    | Server-side assignor to use for `groupProtocol=consumer`. Keep it unset to let the server select a suitable assignor for the group. Available assignors: `'uniform'` or `'range'`.                                                                                                                                                                                                                   |
 | protocols             | `GroupProtocolSubscription[]`                                | `roundrobin`, version `1` | Protocols used by this consumer group.<br/><br/> Each protocol must be an object specifying the `name`, `version` and optionally `metadata` properties. <br/><br/> Not supported for `groupProtocol=consumer`.                                                                                                                                                                                       |
 | protocolsMetadata     | `GroupProtocolsMetadataCallback`                             |                           | Callback used to compute opaque protocol metadata before joining or rejoining a classic consumer group. The returned `Buffer` is sent as the subscription `user_data` for every configured protocol. Not supported for `groupProtocol=consumer`.                                                                                                                                                      |
+| protocolMetadata      | `GroupProtocolMetadataCallback`                              |                           | Callback used to produce a complete encoded subscription metadata `Buffer` for each configured classic-group protocol. Not supported for `groupProtocol=consumer`.                                                                                                                                                                              |
 | partitionAssigner     | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                                                                                                  |
 | streamContext         | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
 
@@ -105,6 +108,20 @@ const consumer = new Consumer({
   }
 })
 ```
+
+### Per-protocol metadata callback
+
+`protocolMetadata` is the lower-level form of `protocolsMetadata`. It runs once for each configured protocol and must return the complete encoded `JoinGroup` metadata buffer, including the consumer subscription version, topics, and user data. Use it when different protocols need different metadata encodings.
+
+```typescript
+type GroupProtocolMetadataCallback = (
+  protocol: GroupProtocolSubscription,
+  topics: string[],
+  metadata: ClusterMetadata
+) => Buffer
+```
+
+The callback is synchronous. If both metadata options are provided, `protocolMetadata` takes precedence.
 
 ## Basic Methods
 

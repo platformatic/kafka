@@ -104,6 +104,7 @@ import { roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
+  type CommitOptionsPartition,
   type ConsumeOptions,
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
@@ -127,6 +128,15 @@ import {
   type PreferredReadReplica
 } from './types.ts'
 import { nextFetchEpoch, partitionKey } from './utils.ts'
+
+export const kCreateMessagesStream = Symbol('plt.kafka.consumer.createMessagesStream')
+export const kGetCommitGroupMetadata = Symbol('plt.kafka.consumer.getCommitGroupMetadata')
+export const kGetCommittedMetadata = Symbol('plt.kafka.consumer.getCommittedMetadata')
+export const kHandleTerminalGroupFailure = Symbol('plt.kafka.consumer.handleTerminalGroupFailure')
+export const kRequestHeartbeat = Symbol('plt.kafka.consumer.requestHeartbeat')
+export const kMembershipVersion = Symbol('plt.kafka.consumer.membershipVersion')
+export const kCreateGroupAssignments = Symbol('plt.kafka.consumer.createGroupAssignments')
+export const kShouldJoinGroupForConsume = Symbol('plt.kafka.consumer.shouldJoinGroupForConsume')
 
 interface TopicPartition {
   topicId: string
@@ -175,8 +185,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeatIntervalMs: number
   #lastHeartbeat: Date | null
+  #joinStartedAt: number | null
   #useConsumerGroupProtocol: boolean
   #memberEpoch: number
+  #membershipVersion: number
   #groupRemoteAssignor: string | null
   #clientRack: string
   #fetchSessions: Map<number, FetchSession>
@@ -227,9 +239,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
     this.#lastHeartbeatIntervalMs = 0
     this.#lastHeartbeat = null
+    this.#joinStartedAt = null
     this.#streams = new Set()
     this.#lagMonitoring = null
     this.#memberEpoch = 0
+    this.#membershipVersion = 0
     this.#useConsumerGroupProtocol = this[kOptions].groupProtocol === 'consumer'
     this.#groupRemoteAssignor = (this[kOptions] as ConsumerGroupOptions).groupRemoteAssignor ?? null
     this.#clientRack = this[kOptions].clientRack ?? ''
@@ -717,6 +731,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (!options.protocolsMetadata && protocolsMetadata) {
       options.protocolsMetadata = protocolsMetadata
     }
+    const protocolMetadata = (this[kOptions] as GroupOptions).protocolMetadata
+    if (!options.protocolMetadata && protocolMetadata) {
+      options.protocolMetadata = protocolMetadata
+    }
 
     this.#validateGroupOptions(options)
 
@@ -1049,13 +1067,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #commit (options: CommitOptions, callback: CallbackWithPromise<void>, rejoinAttempts: number = 0): void {
+  #commit (
+    options: CommitOptions,
+    callback: CallbackWithPromise<void>,
+    rejoinAttempts: number = 0,
+    membershipVersion: number = this.#membershipVersion
+  ): void {
     this.#performGroupOperation<OffsetCommitResponse>(
       'commit',
       (connection, groupCallback) => {
         const topics = new Map<string, OffsetCommitRequestTopic>()
 
-        for (const { topic, partition, offset, leaderEpoch } of options.offsets) {
+        for (const offsetOptions of options.offsets) {
+          const { topic, partition, offset, leaderEpoch } = offsetOptions
           let topicOffsets = topics.get(topic)
           if (!topicOffsets) {
             topicOffsets = { name: topic, partitions: [] }
@@ -1066,7 +1090,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             partitionIndex: partition,
             committedOffset: offset,
             committedLeaderEpoch: leaderEpoch,
-            committedMetadata: null
+            committedMetadata: this[kGetCommittedMetadata](offsetOptions)
           })
         }
 
@@ -1076,11 +1100,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          const groupMetadata = this[kGetCommitGroupMetadata]()
           api!(
             connection,
             this.groupId,
-            this.#useConsumerGroupProtocol ? this.#memberEpoch : this.generationId,
-            this.memberId!,
+            groupMetadata.generationId,
+            groupMetadata.memberId,
             null,
             Array.from(topics.values()),
             groupCallback
@@ -1088,6 +1113,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         })
       },
       error => {
+        if (membershipVersion !== this.#membershipVersion) {
+          callback(new UserError('Consumer group membership changed before offsets could be committed.'))
+          return
+        }
         if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error)) {
           this.joinGroup({}, joinError => {
             if (joinError) {
@@ -1095,7 +1124,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
-            this.#commit(options, callback, rejoinAttempts + 1)
+            this.#commit(options, callback, rejoinAttempts + 1, membershipVersion)
           })
           return
         }
@@ -1103,6 +1132,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         callback(error)
       }
     )
+  }
+
+  [kGetCommitGroupMetadata] (): { generationId: number, memberId: string } {
+    return {
+      generationId: this.#useConsumerGroupProtocol ? this.#memberEpoch : this.generationId,
+      memberId: this.memberId!
+    }
   }
 
   #listOffsets (
@@ -1336,13 +1372,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #joinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
+    this.#joinStartedAt ??= Date.now()
     consumerGroupChannel.traceCallback(
       this.#performJoinGroup,
       1,
       createDiagnosticContext({ client: this, operation: 'joinGroup', options }),
       this,
       options,
-      callback
+      (error, memberId) => {
+        if (error) {
+          this.#joinStartedAt = null
+        }
+        callback(error, memberId)
+      }
     )
   }
 
@@ -1417,6 +1459,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               },
               error => {
                 if (error) {
+                  if (this[kHandleTerminalGroupFailure](error)) {
+                    return
+                  }
                   this.emitWithDebug(null, 'error', error)
                 }
 
@@ -1429,6 +1474,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          if (this[kHandleTerminalGroupFailure](error)) {
+            return
+          }
 
           // Note that here we purposely do not return, since it was not a group related problem we schedule another heartbeat
         } else {
@@ -1513,6 +1561,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          if (this[kHandleTerminalGroupFailure](error)) {
+            callback(error)
+            return
+          }
+
           this.#heartbeatInterval = setTimeout(() => {
             this.#consumerGroupHeartbeat(options, () => {})
           }, this.#lastHeartbeatIntervalMs || 1000)
@@ -1523,6 +1576,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         this.#lastHeartbeat = new Date()
 
+        if (this.#memberEpoch !== response!.memberEpoch) {
+          this.#membershipVersion++
+        }
         this.#memberEpoch = response!.memberEpoch
 
         if (response!.memberId) {
@@ -1716,10 +1772,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     trackTopics: boolean,
     callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   ): void {
-    // Subscribe all topics
-    let joinNeeded = this.memberId === null
+    const shouldJoinGroup = this[kShouldJoinGroupForConsume](options)
 
-    if (trackTopics) {
+    // Subscribe all topics
+    let joinNeeded = shouldJoinGroup && this.memberId === null
+
+    if (trackTopics && shouldJoinGroup) {
       for (const topic of options.topics) {
         if (this.topics.track(topic)) {
           joinNeeded = true
@@ -1754,10 +1812,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     // Create the stream and start consuming
-    const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
-      this,
-      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
-    )
+    const stream = this[kCreateMessagesStream](options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>)
     this.#streams.add(stream)
 
     this.#metricActiveStreams?.inc()
@@ -1868,6 +1923,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.generationId = response!.generationId
           this.#isLeader = response!.leader === this.memberId
           this.#protocol = response!.protocolName!
+          const leaderId = response!.leader
+          const protocol = response!.protocolName
 
           this.#members = new Map()
           for (const member of response!.members) {
@@ -1895,9 +1952,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             }
 
             this.assignments = response!
+            this.#membershipVersion++
             this.#syncPreferredReadReplicas()
 
             this.#cancelHeartbeat()
+            this.#lastHeartbeatIntervalMs = options.heartbeatInterval
             this.#heartbeatInterval = setTimeout(() => {
               this.#heartbeat(options)
             }, options.heartbeatInterval)
@@ -1907,9 +1966,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               memberId: this.memberId,
               generationId: this.generationId,
               isLeader: this.#isLeader,
+              leaderId,
+              protocol,
+              duration: Date.now() - this.#joinStartedAt!,
               assignments: this.assignments
             })
 
+            this.#joinStartedAt = null
             callback(null, this.memberId!)
           })
         }
@@ -2047,7 +2110,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#performSyncGroup(partitionsAssigner, this.#createAssignments(partitionsAssigner, metadata!), callback)
+          this[kCreateGroupAssignments](
+            partitionsAssigner,
+            this.#members,
+            new Set(metadata!.topics.keys()),
+            metadata!,
+            this.#protocol,
+            (assignmentError, result) => {
+              if (assignmentError) {
+                callback(assignmentError)
+                return
+              }
+              this.#performSyncGroup(partitionsAssigner, result!, callback)
+            }
+          )
         })
 
         return
@@ -2158,7 +2234,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #createJoinGroupProtocols (options: Required<GroupOptions>, callback: Callback<JoinGroupRequestProtocol[]>): void {
-    if (typeof options.protocolsMetadata !== 'function') {
+    if (typeof options.protocolsMetadata !== 'function' && typeof options.protocolMetadata !== 'function') {
       callback(
         null,
         options.protocols.map(protocol => ({
@@ -2175,26 +2251,42 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return
       }
 
-      this.#resolveProtocolsMetadata(options.protocolsMetadata, options.protocols, this.topics.current, metadata!, (
-        error,
-        userData
-      ) => {
-        if (error) {
-          callback(error)
-          return
-        } else if (!Buffer.isBuffer(userData)) {
-          callback(new UserError('protocolsMetadata must resolve to a Buffer.'))
-          return
-        }
+      const protocolMetadata = options.protocolMetadata
+      if (!protocolMetadata) {
+        this.#resolveProtocolsMetadata(options.protocolsMetadata!, options.protocols, this.topics.current, metadata!, (
+          metadataError,
+          userData
+        ) => {
+          if (metadataError) {
+            callback(metadataError)
+            return
+          } else if (!Buffer.isBuffer(userData)) {
+            callback(new UserError('protocolsMetadata must resolve to a Buffer.'))
+            return
+          }
 
+          callback(
+            null,
+            options.protocols.map(protocol => ({
+              name: protocol.name,
+              metadata: this.#encodeProtocolSubscriptionMetadata({ ...protocol, metadata: userData }, this.topics.current)
+            }))
+          )
+        })
+        return
+      }
+
+      try {
         callback(
           null,
           options.protocols.map(protocol => ({
             name: protocol.name,
-            metadata: this.#encodeProtocolSubscriptionMetadata({ ...protocol, metadata: userData }, this.topics.current)
+            metadata: protocolMetadata(protocol, this.topics.current, metadata!)
           }))
         )
-      })
+      } catch (error) {
+        callback(error as Error)
+      }
     })
   }
 
@@ -2317,8 +2409,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (membersSize === 1) {
       const assignments: GroupAssignment[] = []
 
-      for (const topic of this.topics.current) {
-        const partitionsCount = metadata.topics.get(topic)!.partitionsCount
+      for (const [topic, topicMetadata] of metadata.topics) {
+        const partitionsCount = topicMetadata.partitionsCount
         const partitions: number[] = []
         for (let i = 0; i < partitionsCount; i++) {
           partitions.push(i)
@@ -2333,10 +2425,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     const encodedAssignments: SyncGroupRequestAssignment[] = []
 
     partitionsAssigner ??= (this[kOptions] as GroupOptions).partitionAssigner ?? roundRobinAssigner
-    for (const member of partitionsAssigner(this.memberId!, this.#members, new Set(this.topics.current), metadata)) {
+    for (const member of partitionsAssigner(
+      this.memberId!,
+      this.#members,
+      new Set(metadata.topics.keys()),
+      metadata
+    )) {
       encodedAssignments.push({
         memberId: member.memberId,
-        assignment: this.#encodeProtocolAssignment(Array.from(member.assignments.values()))
+        assignment: member.assignment ?? this.#encodeProtocolAssignment(Array.from(member.assignments.values()))
       })
     }
 
@@ -2354,8 +2451,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           const abortedRanges = new Map<bigint, [bigint, bigint]>()
 
           // Find first offsets
-          // For last offsets we set -1n as special value. It allows us to detect open ranges, whichs means
-          // that Kafka has not sent the control marker. In that case we ignore the range for safety.
+          // An open range extends through the end of this response when its control marker is not included.
           for (const aborted of partition.abortedTransactions) {
             abortedRanges.set(aborted.producerId, [aborted.firstOffset, -1n])
           }
@@ -2370,7 +2466,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           // Filter all records in the aborted ranges
           partition.records = partition.records!.filter(r => {
             const toSkip = abortedRanges.get(r.producerId)
-            return !toSkip || !(toSkip[1] !== -1n && r.firstOffset >= toSkip[0] && r.firstOffset < toSkip[1])
+            return !toSkip || r.firstOffset < toSkip[0] || (toSkip[1] !== -1n && r.firstOffset >= toSkip[1])
           })
         }
 
@@ -2508,5 +2604,88 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return error
+  }
+
+  [kCreateMessagesStream] (
+    options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
+  ): MessagesStream<Key, Value, HeaderKey, HeaderValue> {
+    return new MessagesStream(this, options)
+  }
+
+  [kGetCommittedMetadata] (_offset: CommitOptionsPartition): string | null {
+    return null
+  }
+
+  [kHandleTerminalGroupFailure] (_error: Error): boolean {
+    return false
+  }
+
+  [kCreateGroupAssignments] (
+    partitionsAssigner: GroupPartitionsAssigner | null,
+    _members: Map<string, ExtendedGroupProtocolSubscription>,
+    _topics: Set<string>,
+    metadata: ClusterMetadata,
+    _protocol: string | null,
+    callback: Callback<SyncGroupRequestAssignment[]>
+  ): void {
+    try {
+      callback(null, this.#createAssignments(partitionsAssigner, metadata))
+    } catch (error) {
+      callback(error as Error)
+    }
+  }
+
+  [kRequestHeartbeat] (callback: CallbackWithPromise<void>): void | Promise<void> {
+    if (!this.#membershipActive || this.#heartbeatInterval === null) {
+      callback(new NetworkError('Consumer group membership is not active.'))
+      return callback[kCallbackPromise]
+    }
+
+    if (this.#lastHeartbeat && Date.now() - this.#lastHeartbeat.getTime() < this.#lastHeartbeatIntervalMs) {
+      callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    const eventPayload = { groupId: this.groupId, memberId: this.memberId, generationId: this.generationId }
+    consumerHeartbeatChannel.traceCallback(
+      this.#performDeduplicateGroupOperaton<HeartbeatResponse>,
+      2,
+      createDiagnosticContext({ client: this, operation: 'heartbeat' }),
+      this,
+      'heartbeat',
+      (connection, groupCallback) => {
+        this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
+        this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (error, api) => {
+          if (error) {
+            groupCallback(error)
+            return
+          }
+
+          api!(connection, this.groupId, this.generationId, this.memberId!, this.groupInstanceId, groupCallback)
+        })
+      },
+      error => {
+        if (error) {
+          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          callback(error)
+          return
+        }
+
+        this.#lastHeartbeat = new Date()
+        this.#heartbeatInterval?.refresh()
+        this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
+        callback(null)
+      }
+    )
+
+    return callback[kCallbackPromise]
+  }
+
+  [kMembershipVersion] (): number {
+    return this.#membershipVersion
+  }
+
+  [kShouldJoinGroupForConsume] (_options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>): boolean {
+    return true
   }
 }

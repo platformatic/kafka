@@ -222,7 +222,7 @@ export class TimeoutError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_TIMEOUT'
 
   constructor (message: string, properties: ErrorProperties = {}) {
-    super(NetworkError.code, message, { canRetry: false, ...properties })
+    super(TimeoutError.code, message, { canRetry: false, ...properties })
   }
 }
 

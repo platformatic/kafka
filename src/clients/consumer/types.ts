@@ -21,6 +21,7 @@ export interface GroupAssignment {
 export interface GroupPartitionsAssignments {
   memberId: string
   assignments: Map<string, GroupAssignment>
+  assignment?: Buffer
 }
 
 export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSubscription, 'name'> {
@@ -60,6 +61,12 @@ export type GroupProtocolsMetadataCallback = (
   callback: Callback<Buffer>
 ) => Buffer | Promise<Buffer> | undefined
 
+export type GroupProtocolMetadataCallback = (
+  protocol: GroupProtocolSubscription,
+  topics: string[],
+  metadata: ClusterMetadata
+) => Buffer
+
 export const MessagesStreamModes = {
   LATEST: 'latest',
   EARLIEST: 'earliest',
@@ -92,6 +99,7 @@ export interface GroupOptions {
   heartbeatInterval?: number
   protocols?: GroupProtocolSubscription[]
   protocolsMetadata?: GroupProtocolsMetadataCallback
+  protocolMetadata?: GroupProtocolMetadataCallback
   partitionAssigner?: GroupPartitionsAssigner
   assignmentUserData?: Buffer
 }
@@ -174,6 +182,9 @@ export interface ConsumerGroupJoinPayload {
   memberId: string
   generationId?: number
   isLeader?: boolean
+  leaderId?: string
+  protocol?: string
+  duration?: number
   assignments?: GroupAssignment[]
 }
 

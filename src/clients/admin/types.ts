@@ -64,6 +64,7 @@ export interface AdminOptions extends BaseOptions {}
 
 export interface CreateTopicsOptions {
   topics: string[]
+  timeout?: number
   partitions?: number
   replicas?: number
   assignments?: BrokerAssignment[]
@@ -76,10 +77,12 @@ export interface ListTopicsOptions {
 
 export interface DeleteTopicsOptions {
   topics: string[]
+  timeout?: number
 }
 
 export interface CreatePartitionsOptions {
   topics: CreatePartitionsRequestTopic[]
+  timeout?: number
   validateOnly?: boolean
 }
 

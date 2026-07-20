@@ -4,7 +4,7 @@ import generate from '@babel/generator'
 import { parse } from '@babel/parser'
 import traverse from '@babel/traverse'
 import { type ExportAllDeclaration, type Identifier } from '@babel/types'
-import { glob, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, glob, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
 async function generateVersion () {
@@ -27,7 +27,7 @@ async function dropTsExtensionsInDeclarations () {
   for (const file of dtsFiles) {
     const source = await readFile(resolve(distDir, file), 'utf-8')
     const destination = resolve(distDir, 'typescript-4/dist', file)
-    const ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
+    const ast = parse(source, { sourceType: 'module', plugins: [['typescript', { dts: true }]] })
 
     traverse.default(ast, {
       // Do not use .ts extensions in import/export statements
@@ -62,5 +62,14 @@ async function dropTsExtensionsInDeclarations () {
   }
 }
 
+async function installNodeRdkafkaDeclarations () {
+  for (const file of ['index.d.ts', 'config.d.ts', 'errors.d.ts']) {
+    const source = resolve(process.cwd(), 'scripts/declarations/node-rdkafka', file)
+    const destination = resolve(process.cwd(), 'dist/compatibility/node-rdkafka', file)
+    await copyFile(source, destination)
+  }
+}
+
 await generateVersion()
+await installNodeRdkafkaDeclarations()
 await dropTsExtensionsInDeclarations()

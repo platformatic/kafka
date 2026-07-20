@@ -53,6 +53,8 @@ Each tracing channel publishes events with the following common properties:
 | `result`         | Depends on the operation | The result of the operation. This is only present in the `asyncStart` and `asyncEnd` events.                               |
 | `error`          | `Error`                  | The error thrown by the operation. This is only present in the `error` event.                                              |
 
+`plt:kafka:connections:api` additionally includes `apiKey`, `apiName`, `apiVersion`, `correlationId`, `broker`, `clientId`, `createdAt`, `sentAt`, `pendingDuration`, `duration`, and `size`. Queue duration is measured before the request is written; `duration` is measured from write to response; `size` is the received response frame size.
+
 ## Published channels
 
 | Name                     | Description                                                                                                                                                                                        |
@@ -66,6 +68,7 @@ Each tracing channel publishes events with the following common properties:
 | -------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `plt:kafka:connections:connects`       | `Connection`     | Traces a connection attempt to a broker.                                                                                     |
 | `plt:kafka:connections:api`            | `Connection`     | Traces a low level API request.                                                                                              |
+| `plt:kafka:connections:queue`          | `Connection`     | Publishes `{ connection, queueSize }` whenever the request queue size changes.                                             |
 | `plt:kafka:connections:pools:gets`     | `ConnectionPool` | Traces a connection retrieval attempt from a connection pool.                                                                |
 | `plt:kafka:base:apis`                  | `Base`           | Traces a `Base.listApis` request.                                                                                            |
 | `plt:kafka:base:metadata`              | `Base`           | Traces a `Base.metadata` request.                                                                                            |

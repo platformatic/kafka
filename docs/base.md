@@ -26,7 +26,7 @@ Creates a new base client.
 | -------------------- | ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `clientId`           | `string`               |           | Client ID.                                                                                                                                                         |
 | `clientRack`         | `string`               |           | Client rack identifier sent by consumers as the Fetch and ConsumerGroupHeartbeat rack ID.                                                                            |
-| `bootstrapBrokers`   | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.                         |
+| `bootstrapBrokers`   | `(Broker \| string)[] \| BootstrapBrokersResolver` | | Bootstrap brokers, or a synchronous/asynchronous resolver returning them.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`. |
 | `timeout`            | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`            | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
 | `retryDelay`         | `number` \| `function` | `1000`    | Amount of time in milliseconds to wait between retries, or a function to calculate custom delays. See section below.                                               |
@@ -36,17 +36,34 @@ Creates a new base client.
 | `metrics`            | object                 |           | A Prometheus configuration. See the [Metrics section](./metrics.md) for more information.                                                                          |
 | `connectTimeout`     | `number`               | `5000`    | Client connection timeout.                                                                                                                                         |
 | `requestTimeout`     | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                                |
+| `enforceRequestTimeout` | `boolean`            | `true`    | Whether `requestTimeout` installs a local response timer. Set to `false` when the caller manages request lifetime externally.                                    |
+| `authenticationTimeout` | `number`             |           | Maximum time in milliseconds for a SASL authentication exchange. Omit it to use the connection timeout behavior.                                                  |
+| `reauthenticationThreshold` | `number`         |           | Milliseconds before a broker-provided SASL session expiry at which to reauthenticate. Omit it to reauthenticate at 80% of the session lifetime.                   |
 | `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
 | `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
+| `socketFactory`      | `function`             |           | Creates a custom broker socket. It receives `{ host, port, tls, onConnect }` and must return a Node.js `Socket`. Call `onConnect()` when the transport is ready. |
 | `context`            | `unknown`              |           | Opaque user data forwarded to internally created `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                |
 
 The readonly `context` getter exposes the same opaque value on the client instance.
 
 The readonly `currentMetadata` getter exposes the currently cached [`ClusterMetadata`](./other.md#clustermetadata), or `undefined` if metadata has not been loaded yet. It does not fetch or refresh metadata.
+
+### Dynamic bootstrap brokers
+
+`bootstrapBrokers` can be a resolver when broker addresses are discovered dynamically, for example from service discovery or a rotating endpoint provider. The resolver runs lazily for each bootstrap connection attempt, including reconnects, and may return its list directly or as a promise.
+
+```typescript
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: async () => await discoverKafkaBrokers()
+})
+```
+
+An empty result fails the connection attempt. Resolver errors are forwarded to the calling operation unchanged.
 
 ## Methods
 
@@ -111,6 +128,8 @@ When using a function, it receives the following parameters:
 
 The function must return a number representing the delay in milliseconds before the next retry attempt.
 
+When a retried operation exhausts its retry budget, the resulting `MultipleErrors` includes `retryExhausted`, `retryCount`, and `retryTime` properties. `retryTime` is the delay used before the final retry attempt.
+
 ## `timeout` vs `requestTimeout`
 
 Both options are valid and control different things:
@@ -119,6 +138,8 @@ Both options are valid and control different things:
 - `requestTimeout`: client-side timeout that limits how long this client waits for a response on an in-flight request.
 
 In practice, `requestTimeout` is the guard for `TimeoutError: Request timed out` coming from the connection layer.
+
+Set `enforceRequestTimeout: false` to disable that local guard while retaining `requestTimeout` for APIs that send a Kafka request timeout to the broker.
 
 ## Connecting to Kafka via TLS connection
 
@@ -223,6 +244,8 @@ The `authenticate` function receives the following parameters:
 - `passwordProvider`: The password (string or async function) from the sasl options
 - `tokenProvider`: The token (string or async function) from the sasl options
 - `callback`: A callback function to call with the authentication result
+
+Custom SASL mechanism names are accepted when an `authenticate` function is provided. Without one, the client accepts only its built-in mechanisms.
 
 **Important**: The `authenticate` function should never throw exceptions, especially when using async functions. The function is not awaited and exceptions are not handled, which can lead to memory leaks, resource leaks, and unexpected behavior. Always wrap your code in a try-catch block and pass errors to the callback instead.
 

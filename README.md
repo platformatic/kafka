@@ -24,6 +24,10 @@ These are tested in CI against the corresponding Confluent Platform releases, fr
 
 See the maintained list in [`docs/kips.md`](./docs/kips.md).
 
+## Compatibility Layers
+
+Compatibility entry points for selected KafkaJS `2.2.4` and node-rdkafka `3.6.1` APIs are available at `@platformatic/kafka/compatibility/kafkajs` and `@platformatic/kafka/compatibility/node-rdkafka`. They use `@platformatic/kafka` internally and cover the APIs and semantics listed in the [compatibility documentation](./docs/compatibility/README.md), including documented differences and native-only limitations.
+
 ## Installation
 
 ```bash

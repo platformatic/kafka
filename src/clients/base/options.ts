@@ -1,4 +1,3 @@
-import { allowedSASLMechanisms } from '../../apis/enumerations.ts'
 import { ajv } from '../../utils.ts'
 import { version } from '../../version.ts'
 import { type BaseOptions } from './types.ts'
@@ -22,6 +21,7 @@ export const baseOptionsSchema = {
     clientRack: { type: 'string' },
     bootstrapBrokers: {
       oneOf: [
+        { function: true },
         { type: 'array', items: { type: 'string' } },
         {
           type: 'array',
@@ -34,6 +34,10 @@ export const baseOptionsSchema = {
     },
     timeout: { type: 'number', minimum: 0 },
     connectTimeout: { type: 'number', minimum: 0 },
+    authenticationTimeout: { type: 'number', minimum: 0 },
+    reauthenticationThreshold: { type: 'number', minimum: 0 },
+    enforceRequestTimeout: { type: 'boolean' },
+    socketFactory: { function: true },
     retries: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'boolean' }] },
     retryDelay: { oneOf: [{ type: 'number', minimum: 0 }, { function: true }] },
     maxInflights: { type: 'number', minimum: 0 },
@@ -44,7 +48,7 @@ export const baseOptionsSchema = {
     sasl: {
       type: 'object',
       properties: {
-        mechanism: { type: 'string', enum: allowedSASLMechanisms },
+        mechanism: { type: 'string' },
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },

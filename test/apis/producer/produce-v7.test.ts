@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { type MessageRecord, ProduceAcks, produceV7, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = produceV7
+const { createRequest, createRequestAsync, parseResponse } = produceV7
 
 test('createRequest serializes basic parameters correctly', () => {
   const acks = 1
@@ -165,6 +165,27 @@ test('createRequest sets default partition and timestamp if not provided', () =>
     timestamp >= beforeTime && timestamp <= afterTime,
     `Timestamp ${timestamp} should be between ${beforeTime} and ${afterTime}`
   )
+})
+
+test('createRequestAsync preserves legacy gzip request encoding', async () => {
+  const createMessages = (): MessageRecord[] => [
+    {
+      topic: 'test-topic',
+      partition: 1,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-1'.repeat(100))
+    },
+    {
+      topic: 'test-topic',
+      partition: 0,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-0'.repeat(100))
+    }
+  ]
+  const expected = createRequest(1, 30000, createMessages(), { compression: 'gzip' })
+  const actual = await createRequestAsync(1, 30000, createMessages(), { compression: 'gzip' })
+
+  deepStrictEqual(actual.buffer, expected.buffer)
 })
 
 test('createRequest with transactional ID', () => {

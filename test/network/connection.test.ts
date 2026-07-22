@@ -470,6 +470,96 @@ test('Connection.send should enqueue request and process response', async t => {
   verifyTracingChannel()
 })
 
+test('Connection.send should await payloads without reordering requests', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+  await connection.connect('localhost', port)
+
+  const callbacks: number[] = []
+
+  function send (id: number, createPayload: () => Writer | Promise<Writer>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      connection.send(
+        0,
+        0,
+        createPayload,
+        () => undefined,
+        false,
+        false,
+        error => {
+          if (error) {
+            reject(error)
+          } else {
+            callbacks.push(id)
+            resolve()
+          }
+        }
+      )
+    })
+  }
+
+  const first = send(1, async () => {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const writer = Writer.create().appendInt8(1)
+    writer.context.noResponse = true
+    return writer
+  })
+  const second = send(2, () => {
+    const writer = Writer.create().appendInt8(2)
+    writer.context.noResponse = true
+    return writer
+  })
+
+  await Promise.all([first, second])
+  deepStrictEqual(callbacks, [1, 2])
+})
+
+test('Connection.send should release the payload queue after an async payload error', async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+  await connection.connect('localhost', port)
+
+  const expectedError = new Error('payload failed')
+  const failed = new Promise<void>((resolve, reject) => {
+    connection.send(
+      0,
+      0,
+      async () => {
+        throw expectedError
+      },
+      () => undefined,
+      false,
+      false,
+      error => {
+        if (error === expectedError) {
+          resolve()
+        } else {
+          reject(error)
+        }
+      }
+    )
+  })
+  const succeeded = new Promise<void>((resolve, reject) => {
+    connection.send(
+      0,
+      0,
+      () => {
+        const writer = Writer.create().appendInt8(1)
+        writer.context.noResponse = true
+        return writer
+      },
+      () => undefined,
+      false,
+      false,
+      error => (error ? reject(error) : resolve())
+    )
+  })
+
+  await Promise.all([failed, succeeded])
+})
+
 test('Connection.send should handle requests with response', async t => {
   const { server, port } = await createServer(t)
   const connection = new Connection('test-client')

@@ -43,6 +43,14 @@ test('gzip compression works correctly', () => {
   strictEqual(decompressed.toString(), 'test data for compression')
 })
 
+test('async gzip compression works correctly', async () => {
+  const input = Buffer.from('test data for async compression')
+  const compressed = await compressionsAlgorithms.gzip.compress(input)
+  const decompressed = compressionsAlgorithms.gzip.decompressSync(compressed)
+
+  strictEqual(decompressed.toString(), 'test data for async compression')
+})
+
 test('snappy compression works correctly', () => {
   const input = Buffer.from('test data for compression')
   const validCompressed = '196074657374206461746120666f7220636f6d7072657373696f6e'

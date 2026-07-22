@@ -138,6 +138,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #correlationId: number
   #nextMessage: number
   #afterDrainRequests: Request[]
+  #payloadQueue: fastq.queue<(callback: CallbackWithPromise<void>) => void>
   #requestsQueue: fastq.queue<(callback: CallbackWithPromise<any>) => void>
   #inflightRequests: Map<number, Request>
   #responseBuffer: DynamicBuffer
@@ -167,6 +168,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#correlationId = 0
     this.#nextMessage = 0
     this.#afterDrainRequests = []
+    this.#payloadQueue = fastq((op, cb) => op(cb), 1)
     this.#requestsQueue = fastq((op, cb) => op(cb), this.#options.maxInflights! ?? defaultOptions.maxInflights!)
     this.#inflightRequests = new Map()
     this.#responseBuffer = new DynamicBuffer()
@@ -421,7 +423,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   send<ReturnType> (
     apiKey: number,
     apiVersion: number,
-    createPayload: () => Writer,
+    createPayload: () => Writer | Promise<Writer>,
     responseParser: ResponseParser<ReturnType>,
     hasRequestHeaderTaggedFields: boolean,
     hasResponseHeaderTaggedFields: boolean,
@@ -439,53 +441,96 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       correlationId
     })
 
-    const writer = Writer.create()
-    writer.appendInt16(apiKey).appendInt16(apiVersion).appendInt32(correlationId).appendString(this.#clientId, false)
+    this.#payloadQueue.push(
+      payloadQueueCallback => {
+        let payloadQueueCompleted = false
 
-    if (hasRequestHeaderTaggedFields) {
-      writer.appendTaggedFields()
-    }
-
-    let payload: Writer
-    try {
-      payload = createPayload()
-    } catch (err) {
-      diagnostic.error = err as Error
-      connectionsApiChannel.error.publish(diagnostic)
-      return callback(err)
-    }
-
-    writer.appendFrom(payload).prependLength()
-
-    const request: Request = {
-      correlationId,
-      apiKey,
-      apiVersion,
-      parser: responseParser,
-      payload: writer.buffer,
-      callback: null as unknown as Callback<any>, // Will be set later
-      hasResponseHeaderTaggedFields,
-      noResponse: payload.context.noResponse ?? false,
-      diagnostic,
-      timeoutHandle: null,
-      timedOut: false
-    }
-
-    this.#requestsQueue.push(
-      fastQueueCallback => {
-        request.callback = fastQueueCallback
-        if (!request.noResponse) {
-          request.timeoutHandle = setTimeout(this.#onRequestTimeout.bind(this, request), this.#options.requestTimeout)
+        const completePayloadQueue = (): void => {
+          if (!payloadQueueCompleted) {
+            payloadQueueCompleted = true
+            payloadQueueCallback(null)
+          }
         }
 
-        if (this.#socketMustBeDrained) {
-          this.#afterDrainRequests.push(request)
-          return false
+        const onPayloadError = (error: Error): void => {
+          diagnostic.error = error
+          connectionsApiChannel.error.publish(diagnostic)
+
+          try {
+            callback(error)
+          } finally {
+            completePayloadQueue()
+          }
         }
 
-        return this.#sendRequest(request)
+        const onPayload = (payload: Writer): void => {
+          try {
+            const writer = Writer.create()
+            writer
+              .appendInt16(apiKey)
+              .appendInt16(apiVersion)
+              .appendInt32(correlationId)
+              .appendString(this.#clientId, false)
+
+            if (hasRequestHeaderTaggedFields) {
+              writer.appendTaggedFields()
+            }
+
+            writer.appendFrom(payload).prependLength()
+
+            const request: Request = {
+              correlationId,
+              apiKey,
+              apiVersion,
+              parser: responseParser,
+              payload: writer.buffer,
+              callback: null as unknown as Callback<any>, // Will be set later
+              hasResponseHeaderTaggedFields,
+              noResponse: payload.context.noResponse ?? false,
+              diagnostic,
+              timeoutHandle: null,
+              timedOut: false
+            }
+
+            this.#requestsQueue.push(
+              fastQueueCallback => {
+                request.callback = fastQueueCallback
+                if (!request.noResponse) {
+                  request.timeoutHandle = setTimeout(
+                    this.#onRequestTimeout.bind(this, request),
+                    this.#options.requestTimeout
+                  )
+                }
+
+                if (this.#socketMustBeDrained) {
+                  this.#afterDrainRequests.push(request)
+                  return false
+                }
+
+                return this.#sendRequest(request)
+              },
+              this.#onResponse.bind(this, request, callback)
+            )
+          } catch (error) {
+            onPayloadError(error as Error)
+            return
+          }
+
+          completePayloadQueue()
+        }
+
+        try {
+          const payload = createPayload()
+          if (typeof (payload as Promise<Writer>).then === 'function') {
+            Promise.resolve(payload).then(onPayload, onPayloadError)
+          } else {
+            onPayload(payload as Writer)
+          }
+        } catch (error) {
+          onPayloadError(error as Error)
+        }
       },
-      this.#onResponse.bind(this, request, callback)
+      () => {}
     )
   }
 

@@ -203,15 +203,23 @@ export function readRecord (reader: Reader): KafkaRecord {
   }
 }
 
-export function createRecordsBatch (
+interface PreparedRecordsBatch {
+  attributes: number
+  buffer: DynamicBuffer
+  firstSequence: number
+  firstTimestamp: bigint
+  maxTimestamp: bigint
+}
+
+function prepareRecordsBatch (
   messages: MessageRecord[],
-  options: Partial<CreateRecordsBatchOptions> = {}
-): Writer {
+  options: Partial<CreateRecordsBatchOptions>
+): PreparedRecordsBatch {
   const now = BigInt(Date.now())
   const firstTimestamp = messages[0].timestamp ?? now
   let maxTimestamp = firstTimestamp
 
-  let buffer = new DynamicBuffer()
+  const buffer = new DynamicBuffer()
   for (let i = 0; i < messages.length; i++) {
     let ts = messages[i].timestamp ?? now
 
@@ -229,7 +237,6 @@ export function createRecordsBatch (
   }
 
   let attributes = 0
-
   let firstSequence = 0
 
   if (options.sequences) {
@@ -237,39 +244,48 @@ export function createRecordsBatch (
     firstSequence = options.sequences.getWithDefault(`${firstMessage.topic}:${firstMessage.partition}`, 0)
   }
 
-  // Set the transaction
   if (options.transactionalId) {
     attributes |= IS_TRANSACTIONAL
   }
 
-  // Set the compression, if any
-  if ((options.compression ?? 'none') !== 'none') {
-    const algorithm = compressionsAlgorithms[
-      options.compression as keyof typeof compressionsAlgorithms
-    ] as CompressionAlgorithmSpecification
+  return { attributes, buffer, firstSequence, firstTimestamp, maxTimestamp }
+}
 
-    if (!algorithm) {
-      throw new UnsupportedCompressionError(`Unsupported compression algorithm ${options.compression}`)
-    }
-
-    attributes |= algorithm.bitmask
-
-    const compressed = algorithm.compressSync(buffer.buffer)
-    buffer = new DynamicBuffer(compressed)
+function getCompressionAlgorithm (
+  compression: CompressionAlgorithmValue | undefined
+): CompressionAlgorithmSpecification | undefined {
+  if ((compression ?? 'none') === 'none') {
+    return undefined
   }
 
+  const algorithm = compressionsAlgorithms[
+    compression as keyof typeof compressionsAlgorithms
+  ] as CompressionAlgorithmSpecification
+
+  if (!algorithm) {
+    throw new UnsupportedCompressionError(`Unsupported compression algorithm ${compression}`)
+  }
+
+  return algorithm
+}
+
+function finalizeRecordsBatch (
+  messages: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions>,
+  prepared: PreparedRecordsBatch
+): Writer {
   const writer = Writer.create()
     // Phase 1: Prepare the message from Attributes (included) to the end
-    .appendInt16(attributes)
+    .appendInt16(prepared.attributes)
     // LastOffsetDelta, FirstTimestamp and MaxTimestamp are extracted from the messages
     .appendInt32(messages.length - 1)
-    .appendInt64(BigInt(firstTimestamp))
-    .appendInt64(BigInt(maxTimestamp))
+    .appendInt64(BigInt(prepared.firstTimestamp))
+    .appendInt64(BigInt(prepared.maxTimestamp))
     .appendInt64(options.producerId ?? -1n)
     .appendInt16(options.producerEpoch ?? 0)
-    .appendInt32(firstSequence)
+    .appendInt32(prepared.firstSequence)
     .appendInt32(messages.length) // Number of records
-    .appendFrom(buffer)
+    .appendFrom(prepared.buffer)
 
   // Phase 2: Prepend the PartitionLeaderEpoch, Magic and CRC, then the Length and firstOffset, in reverse order
   return (
@@ -281,6 +297,39 @@ export function createRecordsBatch (
       // FirstOffset is 0
       .appendInt64(0n, false)
   )
+}
+
+export function createRecordsBatch (
+  messages: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions> = {}
+): Writer {
+  const prepared = prepareRecordsBatch(messages, options)
+  const algorithm = getCompressionAlgorithm(options.compression)
+
+  if (algorithm) {
+    prepared.attributes |= algorithm.bitmask
+    prepared.buffer = new DynamicBuffer(algorithm.compressSync(prepared.buffer.buffer))
+  }
+
+  return finalizeRecordsBatch(messages, options, prepared)
+}
+
+export async function createRecordsBatchAsync (
+  messages: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions> = {}
+): Promise<Writer> {
+  const prepared = prepareRecordsBatch(messages, options)
+  const algorithm = getCompressionAlgorithm(options.compression)
+
+  if (algorithm) {
+    prepared.attributes |= algorithm.bitmask
+    const compressed = algorithm.compress
+      ? await algorithm.compress(prepared.buffer.buffer)
+      : algorithm.compressSync(prepared.buffer.buffer)
+    prepared.buffer = new DynamicBuffer(compressed)
+  }
+
+  return finalizeRecordsBatch(messages, options, prepared)
 }
 
 // TODO: Early bail out if there are not enough bytes to read all the records as it might be truncated

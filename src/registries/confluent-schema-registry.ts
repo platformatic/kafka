@@ -1,4 +1,4 @@
-import { type ErrorObject, type Options, type ValidateFunction } from 'ajv'
+import { Ajv, type AnySchema, type AnySchemaObject, type ErrorObject, type Options, type ValidateFunction } from 'ajv'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
@@ -23,6 +23,13 @@ import { getCredential } from '../protocol/sasl/utils.ts'
 import { AbstractSchemaRegistry } from './abstract.ts'
 
 const require = createRequire(import.meta.url)
+type JsonSchemaValidator = {
+  compile: (schema: AnySchema) => ValidateFunction
+  errorsText: Ajv['errorsText']
+}
+
+const AjvDraft04 = require('ajv-draft-04') as new (options: Options) => JsonSchemaValidator
+const draft06MetaSchema = require('ajv/dist/refs/json-schema-draft-06.json') as AnySchemaObject
 
 type ConfluentSchemaRegistryMessageToProduce = MessageToProduce<unknown, unknown, unknown, unknown>
 
@@ -105,6 +112,8 @@ export class ConfluentSchemaRegistry<
   #protobufTypeMapper: ConfluentSchemaRegistryProtobufTypeMapper
   #jsonValidateSend: boolean
   #jsonAjv: Ajv2020
+  #jsonAjvDraft7: Ajv
+  #jsonAjvDraft04: JsonSchemaValidator
   #pendingFetches: Map<number, Promise<void>>
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
 
@@ -114,7 +123,11 @@ export class ConfluentSchemaRegistry<
     this.#schemas = new Map()
     this.#protobufTypeMapper = options.protobufTypeMapper ?? defaultProtobufTypeMapper
     this.#jsonValidateSend = options.jsonValidateSend ?? false
-    this.#jsonAjv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions })
+    const jsonAjvOptions = { allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions }
+    this.#jsonAjv = new Ajv2020(jsonAjvOptions)
+    this.#jsonAjvDraft7 = new Ajv(jsonAjvOptions)
+    this.#jsonAjvDraft7.addMetaSchema(draft06MetaSchema)
+    this.#jsonAjvDraft04 = new AjvDraft04(jsonAjvOptions)
     this.#auth = options.auth
     this.#pendingFetches = new Map()
   }
@@ -272,10 +285,28 @@ export class ConfluentSchemaRegistry<
         this.#protobufParse ??= this.#loadProtobuf()
         this.#schemas.set(id, { id, type: 'protobuf', schema: this.#protobufParse!(schema).root })
         break
-      case 'JSON':
-        this.#schemas.set(id, { id, type: 'json', schema: this.#jsonAjv.compile(JSON.parse(schema)) })
+      case 'JSON': {
+        const jsonSchema = JSON.parse(schema) as AnySchema
+        this.#schemas.set(id, { id, type: 'json', schema: this.#getJsonAjv(jsonSchema).compile(jsonSchema) })
         break
+      }
     }
+  }
+
+  #getJsonAjv (schema: AnySchema): JsonSchemaValidator {
+    if (typeof schema !== 'object' || schema === null || typeof schema.$schema !== 'string') {
+      return this.#jsonAjv
+    }
+
+    if (schema.$schema.includes('draft-04')) {
+      return this.#jsonAjvDraft04
+    }
+
+    if (schema.$schema.includes('draft-06') || schema.$schema.includes('draft-07')) {
+      return this.#jsonAjvDraft7
+    }
+
+    return this.#jsonAjv
   }
 
   #schemaSerializer (

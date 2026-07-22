@@ -318,6 +318,77 @@ test('supports producing and consuming messages using Confluent Schema Registry 
   }
 })
 
+test('supports JSON Schema drafts 04, 06, 07, and 2020-12', async () => {
+  const schemas = [
+    {
+      schema: {
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        type: 'number',
+        minimum: 2,
+        exclusiveMinimum: true
+      },
+      valid: 3,
+      invalid: 2
+    },
+    {
+      schema: {
+        $schema: 'http://json-schema.org/draft-06/schema#',
+        type: 'number',
+        exclusiveMinimum: 2
+      },
+      valid: 3,
+      invalid: 2
+    },
+    {
+      schema: {
+        $schema: 'http://json-schema.org/draft-07/schema#',
+        type: 'number',
+        exclusiveMinimum: 2
+      },
+      valid: 3,
+      invalid: 2
+    },
+    {
+      schema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'array',
+        prefixItems: [{ type: 'string' }],
+        items: false,
+        minItems: 1
+      },
+      valid: ['value'],
+      invalid: ['value', 'extra']
+    }
+  ]
+  const originalFetch = globalThis.fetch
+
+  try {
+    for (const { schema, valid, invalid } of schemas) {
+      const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({ url: confluentSchemaRegistryUrl })
+      ;(globalThis as { fetch: typeof fetch }).fetch = async () => {
+        return new Response(JSON.stringify({ schemaType: 'JSON', schema: JSON.stringify(schema) }))
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        registry.fetchSchema(1, error => {
+          if (error) {
+            reject(error)
+            return
+          }
+
+          resolve()
+        })
+      })
+
+      const validate = registry.get(1)?.schema as (data: unknown) => boolean
+      strictEqual(validate(valid), true)
+      strictEqual(validate(invalid), false)
+    }
+  } finally {
+    ;(globalThis as { fetch: typeof fetch }).fetch = originalFetch
+  }
+})
+
 test('deduplicates concurrent fetches for the same JSON schema ID', async () => {
   const subject = createSubject()
   const schemaId = await registerSchema(

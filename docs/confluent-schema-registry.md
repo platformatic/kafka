@@ -134,6 +134,8 @@ await producer.send({
 })
 ```
 
+JSON Schema drafts 04, 06, 07, and 2020-12 are supported. The draft is selected from the schema's `$schema` property; schemas without one use the default 2020-12 validator.
+
 Set `jsonAjvOptions.strict` to `false` if the registry contains JSON schemas with non-standard keywords:
 
 ```typescript

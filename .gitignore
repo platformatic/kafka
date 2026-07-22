@@ -6,3 +6,5 @@ coverage
 .env
 .vscode
 target
+.pi
+.pi-subagents

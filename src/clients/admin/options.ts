@@ -21,25 +21,45 @@ export const groupsProperties = {
   }
 }
 
+const createTopicAssignmentsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      partition: { type: 'number', minimum: 0 },
+      brokers: { type: 'array', items: { type: 'number' }, minItems: 1 }
+    },
+    required: ['partition', 'brokers'],
+    additionalProperties: false
+  },
+  minItems: 1
+}
+
 export const createTopicOptionsSchema = {
   type: 'object',
   properties: {
-    topics: { type: 'array', items: idProperty },
-    partitions: { type: 'number' },
-    replicas: { type: 'number' },
-    assignments: {
+    topics: {
       type: 'array',
       items: {
-        type: 'object',
-        properties: {
-          partition: { type: 'number', minimum: 0 },
-          brokers: { type: 'array', items: { type: 'number' }, minItems: 1 }
-        },
-        required: ['partition', 'brokers'],
-        additionalProperties: false
-      },
-      minItems: 1
-    }
+        oneOf: [
+          idProperty,
+          {
+            type: 'object',
+            properties: {
+              topic: idProperty,
+              partitions: { type: 'number' },
+              replicas: { type: 'number' },
+              assignments: createTopicAssignmentsSchema
+            },
+            required: ['topic'],
+            additionalProperties: false
+          }
+        ]
+      }
+    },
+    partitions: { type: 'number' },
+    replicas: { type: 'number' },
+    assignments: createTopicAssignmentsSchema
   },
   required: ['topics'],
   additionalProperties: false

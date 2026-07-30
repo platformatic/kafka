@@ -55,7 +55,7 @@ export function createRequest (
   subscribedTopicNames: string[] | null,
   subscribedTopicRegex: NullableString,
   serverAssignor: NullableString,
-  topicPartitions: ConsumerGroupHeartbeatRequestTopicPartition[]
+  topicPartitions: ConsumerGroupHeartbeatRequestTopicPartition[] | null
 ): Writer {
   return Writer.create()
     .appendString(groupId)
@@ -68,8 +68,8 @@ export function createRequest (
     .appendString(subscribedTopicRegex)
     .appendString(serverAssignor)
     .appendArray(topicPartitions, (w, t) => {
-      return w.appendUUID(t.topicId).appendArray(t.partitions, (w, p) => w.appendInt32(p), true, false)
-    })
+      return w.appendUUID(t.topicId).appendArray(t.partitions, (w, p) => w.appendInt32(p), true, false).appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -99,15 +99,22 @@ export function parseResponse (
     memberId: reader.readNullableString(),
     memberEpoch: reader.readInt32(),
     heartbeatIntervalMs: reader.readInt32(),
-    assignment: reader.readNullableStruct(() => ({
-      topicPartitions: reader.readArray(r => {
-        return {
-          topicId: r.readUUID(),
-          partitions: r.readArray(r => r.readInt32(), true, false)
-        }
-      })
-    }))
+    assignment: reader.readNullableStruct(() => {
+      const assignment = {
+        topicPartitions: reader.readArray(r => {
+          const topicPartition = {
+            topicId: r.readUUID(),
+            partitions: r.readArray(r => r.readInt32(), true, false)
+          }
+          r.readTaggedFields()
+          return topicPartition
+        }, true, false)
+      }
+      reader.readTaggedFields()
+      return assignment
+    })
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)

@@ -39,6 +39,7 @@ import {
   type OffsetFetchRequestTopic,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
+import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import {
   type SyncGroupRequest,
   type SyncGroupRequestAssignment,
@@ -57,7 +58,14 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { findErrorBy, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
+import {
+  findErrorBy,
+  type GenericError,
+  NetworkError,
+  type ProtocolError,
+  protocolErrors,
+  UserError
+} from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -987,6 +995,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 }
               }
 
+              // Fetch v12 identifies topics by name, while later versions use UUIDs.
+              if (api!.version <= 12) {
+                requestTopics = requestTopics.map(topic => ({
+                  ...topic,
+                  topicId: topicIds.get(topic.topicId) ?? topic.topicId
+                }))
+
+                for (const forgotten of forgottenTopicsData) {
+                  const topicId = forgotten.topicId ?? forgotten.topic
+                  forgotten.topicId = topicIds.get(topicId) ?? topicId
+                  delete forgotten.topic
+                }
+              }
+
               api!(
                 connection!,
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
@@ -999,6 +1021,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 forgottenTopicsData,
                 this.#clientRack,
                 (error, result) => {
+                  const response = result ?? ((error as GenericError | null)?.response as FetchResponse | undefined)
+                  if (response && !response.nodeEndpoints) {
+                    response.nodeEndpoints = []
+                  }
+                  if (api!.version <= 12 && response) {
+                    const topicIdsByName = new Map(Array.from(topicIds, ([id, name]) => [name, id]))
+                    for (const topic of response.responses) {
+                      topic.topicId = topicIdsByName.get(topic.topicId) ?? topic.topicId
+                    }
+                  }
+
                   if (error) {
                     refreshMetadata = NetworkError.isRetryable(error)
                     this.#clearPreferredReadReplicas(options.topics, topicIds)
@@ -1305,7 +1338,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               }
             ],
             false,
-            groupCallback
+            (error, response) => {
+              if (error || api!.version >= 8) {
+                groupCallback(error, response)
+                return
+              }
+
+              const legacyResponse = response as unknown as LegacyOffsetFetchResponse
+              groupCallback(null, {
+                throttleTimeMs: legacyResponse.throttleTimeMs,
+                groups: [{ groupId: this.groupId, topics: legacyResponse.topics, errorCode: legacyResponse.errorCode }]
+              })
+            }
           )
         })
       },
@@ -1938,7 +1982,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   return
                 }
 
-                api!(connection!, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
+                api!(connection!, FindCoordinatorKeyTypes.GROUP, [this.groupId], (error, response) => {
+                  if (response && api!.version < 4) {
+                    response.coordinators[0].key = this.groupId
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             })
           },
@@ -2499,13 +2549,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           continue
         }
 
-        if (partition.abortedTransactions.length) {
+        const abortedTransactions = partition.abortedTransactions ?? []
+        if (abortedTransactions.length) {
           const abortedRanges = new Map<bigint, [bigint, bigint]>()
 
           // Find first offsets
           // For last offsets we set -1n as special value. It allows us to detect open ranges, whichs means
           // that Kafka has not sent the control marker. In that case we ignore the range for safety.
-          for (const aborted of partition.abortedTransactions) {
+          for (const aborted of abortedTransactions) {
             abortedRanges.set(aborted.producerId, [aborted.firstOffset, -1n])
           }
 

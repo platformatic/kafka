@@ -42,6 +42,7 @@ export function parseResponse (
     authBytes: reader.readBytes(),
     sessionLifetimeMs: reader.readInt64()
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)

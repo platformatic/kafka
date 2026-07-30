@@ -169,7 +169,7 @@ test('parseResponse correctly processes a response with group members', () => {
               memberEpoch: 1,
               clientId: 'consumer-1',
               clientHost: '172.17.0.1',
-              subscribedTopicNames: 'test-topic',
+              subscribedTopicNames: ['test-topic', 'other-topic'],
               subscribedTopicRegex: null,
               assignment: {
                 topicPartitions: [
@@ -209,7 +209,7 @@ test('parseResponse correctly processes a response with group members', () => {
               .appendInt32(member.memberEpoch)
               .appendString(member.clientId)
               .appendString(member.clientHost)
-              .appendString(member.subscribedTopicNames)
+              .appendArray(member.subscribedTopicNames, (w, topic) => w.appendString(topic), true, false)
               .appendString(member.subscribedTopicRegex)
               // Assignment
               .appendArray(member.assignment.topicPartitions, (w, tp) => {
@@ -217,24 +217,29 @@ test('parseResponse correctly processes a response with group members', () => {
                   .appendString(tp.topicName)
                   .appendArray(tp.partitions, (w, p) => w.appendInt32(p), true, false)
               })
+              .appendTaggedFields()
               // Target assignment
               .appendArray(member.targetAssignment.topicPartitions, (w, tp) => {
                 w.appendUUID(tp.topicId)
                   .appendString(tp.topicName)
                   .appendArray(tp.partitions, (w, p) => w.appendInt32(p), true, false)
               })
+              .appendTaggedFields()
           })
           .appendInt32(group.authorizedOperations)
       }
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 69, 0, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 69, 0, reader)
 
   // Verify member structure
   deepStrictEqual(response.groups[0].members[0].memberId, 'consumer-1-uuid', 'Member ID should be parsed correctly')
 
   deepStrictEqual(response.groups[0].members[0].clientId, 'consumer-1', 'Client ID should be parsed correctly')
+
+  deepStrictEqual(response.groups[0].members[0].subscribedTopicNames, ['test-topic', 'other-topic'])
 
   deepStrictEqual(
     response.groups[0].members[0].assignment.topicPartitions[0].topicName,
@@ -247,6 +252,7 @@ test('parseResponse correctly processes a response with group members', () => {
     [0, 1],
     'Partitions in assignment should be parsed correctly'
   )
+  deepStrictEqual(reader.remaining, 0)
 })
 
 test('parseResponse handles group level errors correctly', () => {

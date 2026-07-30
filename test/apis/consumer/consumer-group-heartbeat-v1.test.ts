@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { consumerGroupHeartbeatV1, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -38,6 +38,56 @@ test('createRequest serializes subscribed topic regex correctly', () => {
     reader.readArray(() => null),
     []
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+})
+
+test('createRequest preserves null topic partitions distinctly from an empty array', () => {
+  const cases: Array<[Parameters<typeof createRequest>[9], number]> = [[null, 0], [[], 1]]
+  for (const [topicPartitions, expectedLength] of cases) {
+    const reader = Reader.from(createRequest('group', 'member', 1, null, null, 1, null, null, null, topicPartitions))
+    reader.readString()
+    reader.readString()
+    reader.readInt32()
+    reader.readNullableString()
+    reader.readNullableString()
+    reader.readInt32()
+    reader.readArray(() => null)
+    reader.readNullableString()
+    reader.readNullableString()
+    strictEqual(reader.readUnsignedVarInt(), expectedLength)
+    reader.readTaggedFields()
+    strictEqual(reader.remaining, 0)
+  }
+})
+
+test('createRequest serializes populated topic partitions correctly', () => {
+  const topicPartitions = [
+    { topicId: '12345678-1234-1234-1234-123456789012', partitions: [0, 1, 2] },
+    { topicId: '87654321-4321-4321-4321-210987654321', partitions: [3, 4] }
+  ]
+  const reader = Reader.from(createRequest('group', 'member', 1, null, null, 1, null, null, null, topicPartitions))
+
+  reader.readString()
+  reader.readString()
+  reader.readInt32()
+  reader.readNullableString()
+  reader.readNullableString()
+  reader.readInt32()
+  strictEqual(reader.readUnsignedVarInt(), 0)
+  strictEqual(reader.readNullableString(), null)
+  strictEqual(reader.readNullableString(), null)
+  strictEqual(reader.readUnsignedVarInt(), topicPartitions.length + 1)
+  for (const topicPartition of topicPartitions) {
+    strictEqual(reader.readUUID(), topicPartition.topicId)
+    strictEqual(reader.readUnsignedVarInt(), topicPartition.partitions.length + 1)
+    for (const partition of topicPartition.partitions) {
+      strictEqual(reader.readInt32(), partition)
+    }
+    reader.readTaggedFields()
+  }
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -50,9 +100,9 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(3000)
     .appendInt8(-1)
     .appendInt8(0)
-    .appendInt8(0)
 
-  const response = parseResponse(1, 68, 1, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 68, 1, reader)
 
   deepStrictEqual(response, {
     throttleTimeMs: 0,
@@ -63,6 +113,7 @@ test('parseResponse correctly processes a successful response', () => {
     heartbeatIntervalMs: 3000,
     assignment: null
   })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse throws ResponseError on error response', () => {
@@ -74,7 +125,6 @@ test('parseResponse throws ResponseError on error response', () => {
     .appendInt32(0)
     .appendInt32(0)
     .appendInt8(-1)
-    .appendInt8(0)
     .appendInt8(0)
 
   throws(

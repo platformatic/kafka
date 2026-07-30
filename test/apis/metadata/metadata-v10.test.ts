@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { metadataV10, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -10,7 +10,7 @@ test('createRequest serializes request parameters correctly', () => {
   const allowAutoTopicCreation = true
   const includeTopicAuthorizedOperations = true
 
-  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations)
+  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations, true)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer)
@@ -38,11 +38,13 @@ test('createRequest serializes request parameters correctly', () => {
         { uuid: '00000000-0000-0000-0000-000000000000', topic: 'topic-2' }
       ],
       allowAutoTopicCreation,
-      includeClusterAuthorizedOperations: false, // Always false in v10 since is not supported in newer versions
+      includeClusterAuthorizedOperations: true,
       includeTopicAuthorizedOperations
     },
     'Serialized request should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest handles null topics', () => {
@@ -73,11 +75,92 @@ test('createRequest handles null topics', () => {
     {
       topics: null,
       allowAutoTopicCreation,
-      includeClusterAuthorizedOperations: false, // Always false in v10 since is not supported in newer versions
+      includeClusterAuthorizedOperations: false,
       includeTopicAuthorizedOperations
     },
     'Serialized request with null topics should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+})
+
+test('createRequest always selects topics by name', () => {
+  const reader = Reader.from(
+    createRequest([
+      { topicId: '00000000-0000-0000-0000-000000000000', name: 'by-name' },
+      { topicId: '12345678-1234-1234-1234-123456789abc', name: 'name-with-id' },
+      { topicId: '87654321-4321-4321-4321-cba987654321' }
+    ])
+  )
+
+  deepStrictEqual(
+    reader.readArray(r => ({ topicId: r.readUUID(), name: r.readString() })),
+    [
+      { topicId: '00000000-0000-0000-0000-000000000000', name: 'by-name' },
+      { topicId: '00000000-0000-0000-0000-000000000000', name: 'name-with-id' },
+      { topicId: '00000000-0000-0000-0000-000000000000', name: '' }
+    ]
+  )
+})
+
+test('createRequest enables auto topic creation by default', () => {
+  const reader = Reader.from(createRequest(null))
+  reader.readNullableArray(() => '')
+  strictEqual(reader.readBoolean(), true)
+  strictEqual(reader.readBoolean(), false)
+  strictEqual(reader.readBoolean(), false)
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+})
+
+test('parseResponse reads compact topic names and normalizes null names', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([], () => {})
+      .appendString(null)
+      .appendInt32(-1)
+      .appendArray(
+        [
+          { name: 'topic', topicId: '00000000-0000-0000-0000-000000000000' },
+          { name: null, topicId: '11111111-1111-1111-1111-111111111111' }
+        ],
+        (w, topic) => w.appendInt16(0).appendString(topic.name).appendUUID(topic.topicId).appendBoolean(false).appendArray([], () => {}).appendInt32(0)
+      )
+      .appendInt32(0)
+      .appendInt8(0)
+  )
+
+  const response = parseResponse(1, 3, 10, reader)
+
+  deepStrictEqual(response.topics.map(topic => topic.name), ['topic', ''])
+  strictEqual(reader.remaining, 0)
+})
+
+test('parseResponse consumes unknown root tagged fields', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([], () => {})
+      .appendString(null, true)
+      .appendInt32(-1)
+      .appendArray([], () => {})
+      .appendInt32(0)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 3, 10, reader), {
+    throttleTimeMs: 0,
+    brokers: [],
+    clusterId: null,
+    controllerId: -1,
+    topics: [],
+    clusterAuthorizedOperations: 0
+  })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -115,7 +198,7 @@ test('parseResponse correctly processes a successful response', () => {
         {
           errorCode: 0,
           name: 'test-topic',
-          topicId: '00000000-0000-0000-0000-000000000000',
+          topicId: '12345678-1234-1234-1234-123456789abc',
           isInternal: false,
           partitions: [
             {
@@ -150,7 +233,7 @@ test('parseResponse correctly processes a successful response', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // Root tagged fields
 
   const response = parseResponse(1, 3, 10, Reader.from(writer))
@@ -178,7 +261,7 @@ test('parseResponse correctly processes a successful response', () => {
       {
         errorCode: 0,
         name: 'test-topic',
-        topicId: '00000000-0000-0000-0000-000000000000',
+        topicId: '12345678-1234-1234-1234-123456789abc',
         isInternal: false,
         partitions: [
           {
@@ -193,7 +276,8 @@ test('parseResponse correctly processes a successful response', () => {
         ],
         topicAuthorizedOperations: 0
       }
-    ]
+    ],
+    clusterAuthorizedOperations: 0
   })
 })
 
@@ -222,7 +306,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt32(1) // controllerId
     // Topics array (empty)
     .appendArray([], () => {})
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
   const response = parseResponse(1, 3, 10, Reader.from(writer))
@@ -240,7 +324,8 @@ test('parseResponse handles response with throttling', () => {
     ],
     clusterId: 'test-cluster',
     controllerId: 1,
-    topics: []
+    topics: [],
+    clusterAuthorizedOperations: 0
   })
 })
 
@@ -289,7 +374,7 @@ test('parseResponse throws error on topic error code', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
   // Verify that parsing throws ResponseError
@@ -383,7 +468,7 @@ test('parseResponse throws error on partition error code', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
   // Verify that parsing throws ResponseError

@@ -22,8 +22,8 @@ export interface DescribeTopicPartitionsResponsePartition {
   leaderEpoch: number
   replicaNodes: number[]
   isrNodes: number[]
-  eligibleLeaderReplicas: number[]
-  lastKnownElr: number[]
+  eligibleLeaderReplicas: number[] | null
+  lastKnownElr: number[] | null
   offlineReplicas: number[]
 }
 
@@ -44,7 +44,7 @@ export interface DescribeTopicPartitionsResponseCursor {
 export interface DescribeTopicPartitionsResponse {
   throttleTimeMs: number
   topics: DescribeTopicPartitionsResponseTopic[]
-  nextCursor?: DescribeTopicPartitionsResponseCursor
+  nextCursor: DescribeTopicPartitionsResponseCursor | null
 }
 
 /*
@@ -107,6 +107,7 @@ export function parseResponse (
 
   const response: DescribeTopicPartitionsResponse = {
     throttleTimeMs: reader.readInt32(),
+    nextCursor: null,
     topics: reader.readArray((r, i) => {
       const errorCode = r.readInt16()
 
@@ -133,8 +134,8 @@ export function parseResponse (
             leaderEpoch: r.readInt32(),
             replicaNodes: r.readArray(r => r.readInt32(), true, false)!,
             isrNodes: r.readArray(r => r.readInt32(), true, false)!,
-            eligibleLeaderReplicas: r.readArray(r => r.readInt32(), true, false)!,
-            lastKnownElr: r.readArray(r => r.readInt32(), true, false)!,
+            eligibleLeaderReplicas: r.readNullableArray(r => r.readInt32(), true, false),
+            lastKnownElr: r.readNullableArray(r => r.readInt32(), true, false),
             offlineReplicas: r.readArray(r => r.readInt32(), true, false)!
           }
         }),
@@ -148,7 +149,10 @@ export function parseResponse (
       topicName: reader.readString(),
       partitionIndex: reader.readInt32()
     }
+    reader.readTaggedFields()
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

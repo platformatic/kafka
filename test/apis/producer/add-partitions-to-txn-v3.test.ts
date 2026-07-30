@@ -1,8 +1,8 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { addPartitionsToTxnV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = addPartitionsToTxnV3
+const { api, createRequest, parseResponse } = addPartitionsToTxnV3
 
 test('createRequest serializes basic transaction parameters correctly', () => {
   const transactions = [
@@ -10,13 +10,20 @@ test('createRequest serializes basic transaction parameters correctly', () => {
       transactionalId: 'transaction-123',
       producerId: 1234567890n,
       producerEpoch: 5,
-      verifyOnly: false,
+      verifyOnly: true,
       topics: [
         {
           name: 'test-topic',
           partitions: [0, 1, 2]
         }
       ]
+    },
+    {
+      transactionalId: 'ignored-transaction',
+      producerId: 9876543210n,
+      producerEpoch: 6,
+      verifyOnly: false,
+      topics: []
     }
   ]
 
@@ -55,6 +62,10 @@ test('createRequest serializes basic transaction parameters correctly', () => {
   deepStrictEqual(topics[0].partitions, [0, 1, 2])
 })
 
+test('createRequest preserves empty legacy transaction behavior', () => {
+  throws(() => createRequest([]), TypeError)
+})
+
 test('parseResponse correctly processes a successful simple response', () => {
   // Create a successful response
   const writer = Writer.create()
@@ -79,8 +90,10 @@ test('parseResponse correctly processes a successful simple response', () => {
           })
       }
     )
+    .appendTaggedFields()
 
-  const response = parseResponse(1, 24, 5, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 24, api.version, reader)
 
   // Verify structure
   deepStrictEqual(response, {
@@ -103,6 +116,7 @@ test('parseResponse correctly processes a successful simple response', () => {
       }
     ]
   })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a complex response', () => {
@@ -153,7 +167,7 @@ test('parseResponse correctly processes a complex response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 24, 3, Reader.from(writer))
+  const response = parseResponse(1, 24, api.version, Reader.from(writer))
 
   // Verify full response structure
   deepStrictEqual(response, {
@@ -229,7 +243,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 24, 3, Reader.from(writer))
+      parseResponse(1, 24, api.version, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

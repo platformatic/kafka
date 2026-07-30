@@ -283,7 +283,7 @@ test('parseResponse correctly processes a successful response for a follower', (
     errorCode: 0,
     generationId: 5,
     protocolName: 'range',
-    protocolType: '',
+    protocolType: null,
     leader: 'leader-member-id',
     skipAssignment: false,
     memberId: 'follower-member-id',
@@ -334,7 +334,7 @@ test('parseResponse correctly processes a successful response for a leader', () 
     errorCode: 0,
     generationId: 5,
     protocolName: 'range',
-    protocolType: '',
+    protocolType: null,
     leader: 'leader-member-id',
     skipAssignment: false,
     memberId: 'leader-member-id',
@@ -365,7 +365,7 @@ test('parseResponse throws error on non-zero error code', () => {
     .appendInt32(0) // throttleTimeMs
     .appendInt16(15) // errorCode (e.g., COORDINATOR_NOT_AVAILABLE)
     .appendInt32(-1) // generationId (invalid for error)
-    .appendString(null) // protocolName (null for error)
+    .appendString(null) // protocolName (malformed null)
     .appendString('') // leader (empty for error)
     .appendString('') // memberId (empty for error)
     // Empty members array
@@ -389,8 +389,8 @@ test('parseResponse throws error on non-zero error code', () => {
         throttleTimeMs: 0,
         errorCode: 15,
         generationId: -1,
-        protocolName: null,
-        protocolType: '',
+        protocolName: '',
+        protocolType: null,
         leader: '',
         skipAssignment: false,
         memberId: '',

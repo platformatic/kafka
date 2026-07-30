@@ -1,11 +1,11 @@
-import { ResponseError } from '../../errors.ts'
+import { ResponseError, UserError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export interface DeleteTopicsRequestTopic {
-  name: string
+  name?: NullableString
   topicId?: NullableString
 }
 
@@ -33,6 +33,9 @@ export interface DeleteTopicsResponse {
 export function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): Writer {
   return Writer.create()
     .appendArray(topics, (w, topic) => {
+      if (topic.topicId != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(topic.topicId)) {
+        throw new UserError(`Invalid topic ID: ${topic.topicId}.`)
+      }
       w.appendString(topic.name).appendUUID(topic.topicId)
     })
     .appendInt32(timeoutMs)
@@ -73,6 +76,8 @@ export function parseResponse (
       return topicResponse
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

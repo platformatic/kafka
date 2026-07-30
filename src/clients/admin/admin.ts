@@ -73,6 +73,7 @@ import {
   type OffsetFetchRequestGroup,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
+import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import {
   ConfigResourceTypes,
@@ -1089,13 +1090,18 @@ export class Admin extends Base<AdminOptions> {
             }
 
             const created: CreatedTopic[] = []
+            const topics = (response as CreateTopicsResponse).topics
 
-            for (const { name, topicId: id, numPartitions: partitions, replicationFactor: replicas, configs } of (
-              response as CreateTopicsResponse
-            ).topics) {
+            for (const {
+              name,
+              topicId: id = '',
+              numPartitions: partitions = -1,
+              replicationFactor: replicas = -1,
+              configs: topicConfigs
+            } of topics) {
               const configuration: CreatedTopic['configuration'] = {}
 
-              for (const { name, value } of configs) {
+              for (const { name, value } of topicConfigs ?? []) {
                 configuration[name] = value
               }
 
@@ -1249,7 +1255,7 @@ export class Admin extends Base<AdminOptions> {
               groups.set(raw.groupId, {
                 id: raw.groupId,
                 state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
-                groupType: raw.groupType,
+                groupType: raw.groupType || undefined,
                 protocolType: raw.protocolType
               })
             }
@@ -1530,11 +1536,23 @@ export class Admin extends Base<AdminOptions> {
                 reason: typeof member === 'string' ? 'Not specified' : member.reason
               }))
 
-              api!(
-                connection!,
-                options.groupId,
+              if (api!.version >= 3) {
+                api!(
+                  connection!,
+                  options.groupId,
+                  members,
+                  retryCallback as Callback<unknown> as Callback<LeaveGroupResponse>
+                )
+                return
+              }
+
+              runConcurrentCallbacks<LeaveGroupResponse, LeaveGroupRequestMember>(
+                'Removing members from consumer group failed.',
                 members,
-                retryCallback as Callback<unknown> as Callback<LeaveGroupResponse>
+                (member, concurrentCallback) => {
+                  api!(connection!, options.groupId, [member], concurrentCallback)
+                },
+                error => retryCallback(error)
               )
             })
           })
@@ -1568,7 +1586,35 @@ export class Admin extends Base<AdminOptions> {
               return
             }
 
-            api!(connection!, options.keyType, options.keys, retryCallback)
+            if (api!.version >= 4) {
+              api!(connection!, options.keyType, options.keys, retryCallback)
+              return
+            }
+
+            runConcurrentCallbacks<FindCoordinatorResponse, string>(
+              'Finding coordinator failed.',
+              options.keys,
+              (key, concurrentCallback) => {
+                api!(connection!, options.keyType, [key], (error, response) => {
+                  if (response) {
+                    response.coordinators[0].key = key
+                  }
+
+                  concurrentCallback(error, response)
+                })
+              },
+              (error, responses) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                retryCallback(null, {
+                  throttleTimeMs: Math.max(...responses!.map(response => response.throttleTimeMs)),
+                  coordinators: responses!.flatMap(response => response.coordinators)
+                })
+              }
+            )
           })
         })
       },
@@ -1624,7 +1670,7 @@ export class Admin extends Base<AdminOptions> {
           return
         }
 
-        callback(null, (response as DescribeClientQuotasResponse).entries)
+        callback(null, (response as DescribeClientQuotasResponse).entries ?? [])
       },
       0
     )
@@ -1793,8 +1839,46 @@ export class Admin extends Base<AdminOptions> {
                         return
                       }
 
-                      /* c8 ignore next - Hard to test */
-                      api!(connection!, groupRequests, options.requireStable ?? false, retryCallback)
+                      if (api!.version >= 8) {
+                        api!(connection!, groupRequests, options.requireStable ?? false, retryCallback)
+                        return
+                      }
+
+                      runConcurrentCallbacks(
+                        'Listing consumer group offsets failed.',
+                        groupRequests,
+                        (groupRequest, groupCallback: Callback<OffsetFetchResponse>) => {
+                          api!(connection!, [groupRequest], options.requireStable ?? false, (error, response) => {
+                            if (error) {
+                              groupCallback(error)
+                              return
+                            }
+
+                            const legacyResponse = response as unknown as LegacyOffsetFetchResponse
+                            groupCallback(null, {
+                              throttleTimeMs: legacyResponse.throttleTimeMs,
+                              groups: [
+                                {
+                                  groupId: groupRequest.groupId,
+                                  topics: legacyResponse.topics,
+                                  errorCode: legacyResponse.errorCode
+                                }
+                              ]
+                            })
+                          })
+                        },
+                        (error, responses) => {
+                          if (error) {
+                            retryCallback(error)
+                            return
+                          }
+
+                          retryCallback(null, {
+                            throttleTimeMs: responses![0]!.throttleTimeMs,
+                            groups: responses!.flatMap(response => response.groups)
+                          })
+                        }
+                      )
                     })
                   })
                 },

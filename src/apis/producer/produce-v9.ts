@@ -128,6 +128,7 @@ export function parseResponse (
                 batchIndex: r.readInt32(),
                 batchIndexErrorMessage: r.readNullableString()
               }
+              r.readTaggedFields()
 
               if (recordError.batchIndexErrorMessage) {
                 errors.push([
@@ -137,9 +138,10 @@ export function parseResponse (
               }
 
               return recordError
-            }),
+            }, true, false),
             errorMessage: r.readNullableString()
           }
+          r.readTaggedFields()
 
           if (partitionResponse.errorCode !== 0) {
             errors.push([
@@ -149,13 +151,15 @@ export function parseResponse (
           }
 
           return partitionResponse
-        })
+        }, true, false)
       }
+      r.readTaggedFields()
 
       return topicResponse
-    }),
+    }, true, false),
     throttleTimeMs: reader.readInt32()
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

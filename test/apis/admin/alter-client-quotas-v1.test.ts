@@ -1,6 +1,7 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, alterClientQuotasV1 } from '../../../src/index.ts'
+import { ClientQuotaEntityTypes, ClientQuotaKeys } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = alterClientQuotasV1
 
@@ -12,13 +13,13 @@ test('createRequest serializes basic parameters correctly', () => {
       {
         entities: [
           {
-            entityType: 'client-id',
-            entityName: 'test-client'
+            entityType: ClientQuotaEntityTypes.IP,
+            entityName: '127.0.0.1'
           }
         ],
         ops: [
           {
-            key: 'consumer_byte_rate',
+            key: ClientQuotaKeys.CONNECTION_CREATION_RATE,
             value: 1024000,
             remove: false
           }
@@ -68,13 +69,13 @@ test('createRequest serializes basic parameters correctly', () => {
         {
           entities: [
             {
-              entityType: 'client-id',
-              entityName: 'test-client'
+              entityType: ClientQuotaEntityTypes.IP,
+              entityName: '127.0.0.1'
             }
           ],
           ops: [
             {
-              key: 'consumer_byte_rate',
+              key: ClientQuotaKeys.CONNECTION_CREATION_RATE,
               value: 1024000,
               remove: false
             }
@@ -294,8 +295,8 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client-id',
-              entityName: 'test-client'
+              entityType: 'ip',
+              entityName: '127.0.0.1'
             }
           ]
         }
@@ -310,7 +311,8 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 49, 1, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 49, 1, reader)
 
   // Verify response structure
   deepStrictEqual(
@@ -323,8 +325,8 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           entity: [
             {
-              entityType: 'client-id',
-              entityName: 'test-client'
+              entityType: 'ip',
+              entityName: '127.0.0.1'
             }
           ]
         }
@@ -332,6 +334,7 @@ test('parseResponse correctly processes a successful response', () => {
     },
     'Response should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly handles error responses', () => {
@@ -361,13 +364,16 @@ test('parseResponse correctly handles error responses', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 49, 1, Reader.from(writer))
+      parseResponse(1, 49, 1, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify error response is preserved
       deepStrictEqual(
@@ -432,13 +438,16 @@ test('parseResponse handles multiple entries with mixed errors', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 49, 1, Reader.from(writer))
+      parseResponse(1, 49, 1, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify error response contains both entries
       deepStrictEqual(err.response.entries.length, 2, 'Response should contain both entries')

@@ -4,6 +4,16 @@ import { type MessageRecord, ProduceAcks, produceV10, Reader, ResponseError, Wri
 
 const { createRequest, parseResponse } = produceV10
 
+function withProduceDefaults (response: any): any {
+  response.nodeEndpoints = []
+  for (const topic of response.responses) {
+    for (const partition of topic.partitionResponses) {
+      partition.currentLeader = { leaderId: -1, leaderEpoch: -1 }
+    }
+  }
+  return response
+}
+
 test('createRequest serializes basic parameters correctly', () => {
   const acks = 1
   const timeout = 30000
@@ -293,7 +303,7 @@ test('parseResponse correctly processes a successful response', () => {
   const response = parseResponse(1, 0, 10, Reader.from(writer))
 
   // Verify structure
-  deepStrictEqual(response, {
+  deepStrictEqual(response, withProduceDefaults({
     responses: [
       {
         name: 'test-topic',
@@ -311,7 +321,7 @@ test('parseResponse correctly processes a successful response', () => {
       }
     ],
     throttleTimeMs: 0
-  })
+  }))
 })
 
 test('parseResponse handles response with multiple topics and partitions', () => {
@@ -379,7 +389,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
   const response = parseResponse(1, 0, 10, Reader.from(writer))
 
   // Verify structure
-  deepStrictEqual(response, {
+  deepStrictEqual(response, withProduceDefaults({
     responses: [
       {
         name: 'topic1',
@@ -420,7 +430,7 @@ test('parseResponse handles response with multiple topics and partitions', () =>
       }
     ],
     throttleTimeMs: 0
-  })
+  }))
 })
 
 test('parseResponse handles partition error codes', () => {
@@ -479,7 +489,7 @@ test('parseResponse handles partition error codes', () => {
       ok(err.errors !== undefined && typeof err.errors === 'object', 'Errors object should exist')
 
       // Verify the response is preserved
-      deepStrictEqual(err.response, {
+      deepStrictEqual(err.response, withProduceDefaults({
         responses: [
           {
             name: 'test-topic',
@@ -497,7 +507,7 @@ test('parseResponse handles partition error codes', () => {
           }
         ],
         throttleTimeMs: 0
-      })
+      }))
 
       return true
     }
@@ -567,7 +577,7 @@ test('parseResponse handles record-level errors', () => {
       ok(err.errors !== undefined && typeof err.errors === 'object', 'Errors object should exist')
 
       // Verify the response structure is preserved
-      deepStrictEqual(err.response, {
+      deepStrictEqual(err.response, withProduceDefaults({
         responses: [
           {
             name: 'test-topic',
@@ -590,7 +600,7 @@ test('parseResponse handles record-level errors', () => {
           }
         ],
         throttleTimeMs: 0
-      })
+      }))
 
       return true
     }
@@ -639,7 +649,7 @@ test('parseResponse handles throttling', () => {
   const response = parseResponse(1, 0, 10, Reader.from(writer))
 
   // Verify response structure with throttling
-  deepStrictEqual(response, {
+  deepStrictEqual(response, withProduceDefaults({
     responses: [
       {
         name: 'test-topic',
@@ -657,5 +667,5 @@ test('parseResponse handles throttling', () => {
       }
     ],
     throttleTimeMs: 100
-  })
+  }))
 })

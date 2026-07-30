@@ -14,7 +14,7 @@ export type JoinGroupRequest = Parameters<typeof createRequest>
 export interface JoinGroupResponseMember {
   memberId: string
   groupInstanceId?: NullableString
-  metadata: Buffer | null
+  metadata: Buffer
 }
 
 export interface JoinGroupResponse {
@@ -25,7 +25,7 @@ export interface JoinGroupResponse {
   protocolName: NullableString
   leader: string
   skipAssignment: boolean
-  memberId: NullableString
+  memberId: string
   members: JoinGroupResponseMember[]
 }
 
@@ -60,7 +60,8 @@ export function createRequest (
     .appendString(protocolType)
     .appendArray(protocols, (w, protocol) => {
       w.appendString(protocol.name).appendBytes(protocol.metadata ? protocol.metadata : EMPTY_BUFFER)
-    })
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -69,7 +70,7 @@ JoinGroup Response (Version: 6) => throttle_time_ms error_code generation_id pro
   throttle_time_ms => INT32
   error_code => INT16
   generation_id => INT32
-  protocol_name => COMPACT_NULLABLE_STRING
+  protocol_name => COMPACT_STRING
   leader => COMPACT_STRING
   member_id => COMPACT_STRING
   members => member_id group_instance_id metadata TAG_BUFFER
@@ -88,19 +89,21 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
     generationId: reader.readInt32(),
-    protocolType: '',
-    protocolName: reader.readNullableString(),
+    protocolType: null,
+    protocolName: reader.readString(),
     leader: reader.readString(),
     skipAssignment: false,
-    memberId: reader.readNullableString(),
+    memberId: reader.readString(),
     members: reader.readArray(r => {
-      return {
+      const member = {
         memberId: r.readString(),
         groupInstanceId: r.readNullableString(),
-        metadata: r.readNullableBytes()
+        metadata: r.readBytes()
       }
+      return member
     })
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

@@ -46,6 +46,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16()
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

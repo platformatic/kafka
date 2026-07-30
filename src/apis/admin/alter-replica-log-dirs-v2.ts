@@ -25,7 +25,7 @@ export interface AlterReplicaLogDirsResponseResult {
 }
 
 export interface AlterReplicaLogDirsResponse {
-  throttleTimeMs?: number
+  throttleTimeMs: number
   results: AlterReplicaLogDirsResponseResult[]
 }
 
@@ -84,6 +84,8 @@ export function parseResponse (
       }
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

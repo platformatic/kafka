@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { initProducerIdV4, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = initProducerIdV4
+const { api, createRequest, parseResponse } = initProducerIdV4
 
 test('createRequest serializes parameters correctly with transactional ID', () => {
   const transactionalId = 'transaction-123'
@@ -106,7 +106,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt16(5) // producerEpoch
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 22, 5, Reader.from(writer))
+  const response = parseResponse(1, 22, api.version, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -126,7 +126,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt16(5) // producerEpoch
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 22, 5, Reader.from(writer))
+  const response = parseResponse(1, 22, api.version, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -148,7 +148,7 @@ test('parseResponse throws error on non-zero error code', () => {
 
   throws(
     () => {
-      parseResponse(1, 22, 5, Reader.from(writer))
+      parseResponse(1, 22, api.version, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

@@ -339,7 +339,8 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           numPartitions: 3,
           replicationFactor: 2,
-          configs: []
+          configs: [],
+          topicConfigErrorCode: 0
         }
       ],
       (w, topic) => {
@@ -369,7 +370,8 @@ test('parseResponse correctly processes a successful response', () => {
           errorMessage: null,
           numPartitions: 3,
           replicationFactor: 2,
-          configs: []
+          configs: [],
+          topicConfigErrorCode: 0
         }
       ]
     },
@@ -425,7 +427,8 @@ test('parseResponse correctly processes multiple successful topics', () => {
         errorMessage: null,
         numPartitions: 1,
         replicationFactor: 1,
-        configs: []
+        configs: [],
+        topicConfigErrorCode: 0
       },
       {
         name: 'test-topic-2',
@@ -434,7 +437,8 @@ test('parseResponse correctly processes multiple successful topics', () => {
         errorMessage: null,
         numPartitions: 1,
         replicationFactor: 1,
-        configs: []
+        configs: [],
+        topicConfigErrorCode: 0
       }
     ]
   })
@@ -450,7 +454,7 @@ test('parseResponse correctly skips tagged fields between multiple topics', () =
     .appendString(null)
     .appendInt32(1)
     .appendInt16(1)
-    .appendArray([])
+    .appendArray([], () => {})
     .appendUnsignedVarInt(1)
     .appendUnsignedVarInt(0)
     .appendUnsignedVarInt(2)
@@ -461,7 +465,7 @@ test('parseResponse correctly skips tagged fields between multiple topics', () =
     .appendString(null)
     .appendInt32(1)
     .appendInt16(1)
-    .appendArray([])
+    .appendArray([], () => {})
     .appendTaggedFields()
     .appendTaggedFields()
 
@@ -475,7 +479,8 @@ test('parseResponse correctly skips tagged fields between multiple topics', () =
       errorMessage: null,
       numPartitions: 1,
       replicationFactor: 1,
-      configs: []
+      configs: [],
+      topicConfigErrorCode: 0
     },
     {
       name: 'test-topic-2',
@@ -484,7 +489,8 @@ test('parseResponse correctly skips tagged fields between multiple topics', () =
       errorMessage: null,
       numPartitions: 1,
       replicationFactor: 1,
-      configs: []
+      configs: [],
+      topicConfigErrorCode: 0
     }
   ])
 })
@@ -627,7 +633,8 @@ test('parseResponse handles topic-level error', () => {
               errorMessage: 'Topic already exists',
               numPartitions: -1,
               replicationFactor: -1,
-              configs: []
+              configs: [],
+              topicConfigErrorCode: 0
             }
           ]
         },
@@ -653,7 +660,8 @@ test('parseResponse handles multiple topics with mixed errors', () => {
           errorMessage: null,
           numPartitions: 3,
           replicationFactor: 2,
-          configs: []
+          configs: [],
+          topicConfigErrorCode: 0
         },
         {
           name: 'error-topic-1',
@@ -722,7 +730,8 @@ test('parseResponse handles multiple topics with mixed errors', () => {
           errorMessage: null,
           numPartitions: 3,
           replicationFactor: 2,
-          configs: []
+          configs: [],
+          topicConfigErrorCode: 0
         },
         'Successful topic data should be preserved in the response'
       )

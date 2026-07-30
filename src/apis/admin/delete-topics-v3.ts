@@ -1,0 +1,48 @@
+import { ResponseError } from '../../errors.ts'
+import { type NullableString } from '../../protocol/definitions.ts'
+import { type Reader } from '../../protocol/reader.ts'
+import { Writer } from '../../protocol/writer.ts'
+import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import type { DeleteTopicsRequestTopic as DeleteTopicsRequestTopicV6 } from './delete-topics-v6.ts'
+
+export type DeleteTopicsRequestTopic = DeleteTopicsRequestTopicV6
+export type DeleteTopicsRequest = Parameters<typeof createRequest>
+export interface DeleteTopicsResponseResponse { name: string; topicId: string; errorCode: number; errorMessage: NullableString }
+export interface DeleteTopicsResponse { throttleTimeMs: number; responses: DeleteTopicsResponseResponse[] }
+
+/*
+  DeleteTopics Request (Version: 3) => [topics] timeout_ms
+    topics => name
+      name => STRING
+    timeout_ms => INT32
+*/
+export function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): Writer {
+  return Writer.create().appendArray(topics, (w, topic) => w.appendString(topic.name ?? '', false), false, false).appendInt32(timeoutMs)
+}
+
+/*
+  DeleteTopics Response (Version: 3) => throttle_time_ms [responses]
+    throttle_time_ms => INT32
+    responses => name error_code
+      name => STRING
+      error_code => INT16
+*/
+export function parseResponse (_correlationId: number, apiKey: number, apiVersion: number, reader: Reader): DeleteTopicsResponse {
+  const errors: ResponseErrorWithLocation[] = []
+  const response: DeleteTopicsResponse = {
+    throttleTimeMs: reader.readInt32(),
+    responses: reader.readArray((r, i) => {
+      const topicResponse = { name: r.readString(false), topicId: '00000000-0000-0000-0000-000000000000', errorCode: r.readInt16(), errorMessage: null }
+      if (topicResponse.errorCode !== 0) {
+        errors.push([`/responses/${i}`, [topicResponse.errorCode, topicResponse.errorMessage]])
+      }
+      return topicResponse
+    }, false, false)
+  }
+  if (errors.length) {
+    throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
+  }
+  return response
+}
+
+export const api = createAPI<DeleteTopicsRequest, DeleteTopicsResponse>(20, 3, createRequest, parseResponse, false, false)

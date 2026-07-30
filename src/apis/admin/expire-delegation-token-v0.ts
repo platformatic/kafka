@@ -1,0 +1,55 @@
+import { ResponseError } from '../../errors.ts'
+import { type Reader } from '../../protocol/reader.ts'
+import { Writer } from '../../protocol/writer.ts'
+import { createAPI } from '../definitions.ts'
+
+export type ExpireDelegationTokenRequest = Parameters<typeof createRequest>
+
+export interface ExpireDelegationTokenResponse {
+  errorCode: number
+  expiryTimestampMs: bigint
+  throttleTimeMs: number
+}
+
+/*
+  ExpireDelegationToken Request (Version: 0) => hmac expiry_time_period_ms
+    hmac => BYTES
+    expiry_time_period_ms => INT64
+*/
+export function createRequest (hmac: Buffer, expiryTimePeriodMs: bigint): Writer {
+  return Writer.create().appendBytes(hmac, false).appendInt64(expiryTimePeriodMs)
+}
+
+/*
+  ExpireDelegationToken Response (Version: 0) => error_code expiry_timestamp_ms throttle_time_ms
+    error_code => INT16
+    expiry_timestamp_ms => INT64
+    throttle_time_ms => INT32
+*/
+export function parseResponse (
+  _correlationId: number,
+  apiKey: number,
+  apiVersion: number,
+  reader: Reader
+): ExpireDelegationTokenResponse {
+  const response: ExpireDelegationTokenResponse = {
+    errorCode: reader.readInt16(),
+    expiryTimestampMs: reader.readInt64(),
+    throttleTimeMs: reader.readInt32()
+  }
+
+  if (response.errorCode !== 0) {
+    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
+  }
+
+  return response
+}
+
+export const api = createAPI<ExpireDelegationTokenRequest, ExpireDelegationTokenResponse>(
+  40,
+  0,
+  createRequest,
+  parseResponse,
+  false,
+  false
+)

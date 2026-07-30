@@ -1,8 +1,8 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { metadataV9, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = metadataV9
+const { api, createRequest, parseResponse } = metadataV9
 
 test('createRequest serializes request parameters correctly', () => {
   // Values for the request
@@ -10,7 +10,7 @@ test('createRequest serializes request parameters correctly', () => {
   const allowAutoTopicCreation = true
   const includeTopicAuthorizedOperations = true
 
-  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations)
+  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations, true)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer)
@@ -34,7 +34,7 @@ test('createRequest serializes request parameters correctly', () => {
     {
       topics: [{ topic: 'topic-1' }, { topic: 'topic-2' }],
       allowAutoTopicCreation,
-      includeClusterAuthorizedOperations: false, // Always false in v9 since is not supported in newer versions
+      includeClusterAuthorizedOperations: true,
       includeTopicAuthorizedOperations
     },
     'Serialized request should match expected structure'
@@ -69,11 +69,43 @@ test('createRequest handles null topics', () => {
     {
       topics: null,
       allowAutoTopicCreation,
-      includeClusterAuthorizedOperations: false, // Always false in v9 since is not supported in newer versions
+      includeClusterAuthorizedOperations: false,
       includeTopicAuthorizedOperations
     },
     'Serialized request with null topics should match expected structure'
   )
+})
+
+test('createRequest enables auto topic creation by default', () => {
+  const reader = Reader.from(createRequest(null))
+  reader.readNullableArray(() => '')
+  strictEqual(reader.readBoolean(), true)
+})
+
+test('parseResponse consumes unknown root tagged fields', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([], () => {})
+      .appendString(null, true)
+      .appendInt32(-1)
+      .appendArray([], () => {})
+      .appendInt32(0)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 3, api.version, reader), {
+    throttleTimeMs: 0,
+    brokers: [],
+    clusterId: null,
+    controllerId: -1,
+    topics: [],
+    clusterAuthorizedOperations: 0
+  })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -144,10 +176,10 @@ test('parseResponse correctly processes a successful response', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 3, 9, Reader.from(writer))
+  const response = parseResponse(1, 3, api.version, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -172,7 +204,7 @@ test('parseResponse correctly processes a successful response', () => {
       {
         errorCode: 0,
         name: 'test-topic',
-        topicId: 'test-topic',
+        topicId: '00000000-0000-0000-0000-000000000000',
         isInternal: false,
         partitions: [
           {
@@ -187,7 +219,8 @@ test('parseResponse correctly processes a successful response', () => {
         ],
         topicAuthorizedOperations: 0
       }
-    ]
+    ],
+    clusterAuthorizedOperations: 0
   })
 })
 
@@ -216,10 +249,10 @@ test('parseResponse handles response with throttling', () => {
     .appendInt32(1) // controllerId
     // Topics array (empty)
     .appendArray([], () => {})
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
-  const response = parseResponse(1, 3, 9, Reader.from(writer))
+  const response = parseResponse(1, 3, api.version, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -234,7 +267,8 @@ test('parseResponse handles response with throttling', () => {
     ],
     clusterId: 'test-cluster',
     controllerId: 1,
-    topics: []
+    topics: [],
+    clusterAuthorizedOperations: 0
   })
 })
 
@@ -281,13 +315,13 @@ test('parseResponse throws error on topic error code', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 3, 9, Reader.from(writer))
+      parseResponse(1, 3, api.version, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -300,7 +334,7 @@ test('parseResponse throws error on topic error code', () => {
       deepStrictEqual(err.response.topics[0], {
         errorCode: 3,
         name: 'nonexistent-topic',
-        topicId: 'nonexistent-topic',
+        topicId: '00000000-0000-0000-0000-000000000000',
         isInternal: false,
         partitions: [],
         topicAuthorizedOperations: 0
@@ -373,13 +407,13 @@ test('parseResponse throws error on partition error code', () => {
           .appendInt32(topic.topicAuthorizedOperations)
       }
     )
-    .appendBoolean(false)
+    .appendInt32(0)
     .appendInt8(0) // root tagged fields
 
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 3, 9, Reader.from(writer))
+      parseResponse(1, 3, api.version, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

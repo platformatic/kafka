@@ -2,47 +2,26 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import type {
+  AlterPartitionRequestPartition,
+  AlterPartitionRequestTopic,
+  AlterPartitionResponse,
+  AlterPartitionResponsePartition,
+  AlterPartitionResponseTopic
+} from './alter-partition-v2.ts'
+import type { AlterPartitionRequestBroker } from './alter-partition-v0.ts'
 
-export interface AlterPartitionRequestISR {
-  brokerId: number
-  brokerEpoch: bigint
+export type {
+  AlterPartitionRequestPartition,
+  AlterPartitionRequestTopic,
+  AlterPartitionResponse,
+  AlterPartitionResponsePartition,
+  AlterPartitionResponseTopic
 }
 
-export interface AlterPartitionRequestPartition {
-  partitionIndex: number
-  leaderEpoch: number
-  newIsrWithEpochs: AlterPartitionRequestISR[]
-  leaderRecoveryState: number
-  partitionEpoch: number
-}
-
-export interface AlterPartitionRequestTopic {
-  topicId: string
-  partitions: AlterPartitionRequestPartition[]
-}
+export type AlterPartitionRequestISR = AlterPartitionRequestBroker
 
 export type AlterPartitionRequest = Parameters<typeof createRequest>
-
-export interface AlterPartitionResponsePartition {
-  partitionIndex: number
-  errorCode: number
-  leaderId: number
-  leaderEpoch: number
-  isr: number
-  leaderRecoveryState: number
-  partitionEpoch: number
-}
-
-export interface AlterPartitionResponseTopic {
-  topicId: string
-  partitions: AlterPartitionResponsePartition[]
-}
-
-export interface AlterPartitionResponse {
-  throttleTimeMs: number
-  errorCode: number
-  topics: AlterPartitionResponseTopic[]
-}
 
 /*
   AlterPartition Request (Version: 3) => broker_id broker_epoch [topics] TAG_BUFFER
@@ -59,16 +38,16 @@ export interface AlterPartitionResponse {
         leader_recovery_state => INT8
         partition_epoch => INT32
 */
-export function createRequest (brokerId: number, brokerEpoch: bigint, topic: AlterPartitionRequestTopic[]): Writer {
+export function createRequest (brokerId: number, brokerEpoch: bigint, topics: AlterPartitionRequestTopic[]): Writer {
   return Writer.create()
     .appendInt32(brokerId)
     .appendInt64(brokerEpoch)
-    .appendArray(topic, (w, t) => {
-      w.appendString(t.topicId).appendArray(t.partitions, (w, p) => {
+    .appendArray(topics, (w, t) => {
+      w.appendUUID(t.topicId).appendArray(t.partitions, (w, p) => {
         w.appendInt32(p.partitionIndex)
           .appendInt32(p.leaderEpoch)
-          .appendArray(p.newIsrWithEpochs, (w, n) => {
-            w.appendInt32(n.brokerId).appendInt64(n.brokerEpoch)
+          .appendArray(p.newIsrWithEpochs, (w, broker) => {
+            w.appendInt32(broker.brokerId).appendInt64(broker.brokerEpoch)
           })
           .appendInt8(p.leaderRecoveryState)
           .appendInt32(p.partitionEpoch)
@@ -111,15 +90,15 @@ export function parseResponse (
     throttleTimeMs,
     errorCode,
     topics: reader.readArray((r, i) => {
-      return {
-        topicId: r.readString(),
+      const topic = {
+        topicId: r.readUUID(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
             errorCode: r.readInt16(),
             leaderId: r.readInt32(),
             leaderEpoch: r.readInt32(),
-            isr: r.readInt32(),
+            isr: r.readArray(r => r.readInt32(), true, false),
             leaderRecoveryState: r.readInt8(),
             partitionEpoch: r.readInt32()
           }
@@ -131,8 +110,11 @@ export function parseResponse (
           return partition
         })
       }
+      return topic
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

@@ -38,6 +38,8 @@ export function parseResponse (
     errorMessage: reader.readNullableString()
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)
   }

@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeLogDirsV3 } from '../../../src/index.ts'
 
@@ -24,6 +24,16 @@ test('createRequest serializes empty topics array correctly', () => {
 
   // Verify serialized data
   deepStrictEqual(topicsArray, [], 'Empty topics array should be serialized correctly')
+})
+
+test('createRequest serializes null topics with a compact nullable array', () => {
+  const reader = Reader.from(createRequest(null))
+  strictEqual(
+    reader.readNullableArray(() => undefined, true, false),
+    null
+  )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes single topic with no partitions correctly', () => {

@@ -80,7 +80,7 @@ test('createRequest serializes basic parameters correctly', () => {
           metadataLength: protocolsArray[1].metadata?.length
         }
       ],
-      reason: reader.readString()
+      reason: reader.readNullableString()
     },
     {
       protocols: [
@@ -93,12 +93,24 @@ test('createRequest serializes basic parameters correctly', () => {
           metadataLength: 0
         }
       ],
-      reason: '' // Reason (null)
+      reason: null
     }
   )
 
   // Verify second protocol metadata is a Buffer
   ok(Buffer.isBuffer(protocolsArray[1].metadata))
+})
+
+test('createRequest preserves an empty reason distinctly from null', () => {
+  const reader = Reader.from(createRequest('group', 1, 2, 'member', null, 'consumer', [], ''))
+  reader.readString()
+  reader.readInt32()
+  reader.readInt32()
+  reader.readString()
+  reader.readNullableString()
+  reader.readString()
+  reader.readArray(() => {})
+  deepStrictEqual(reader.readNullableString(), '')
 })
 
 test('createRequest with existing member ID', () => {
@@ -324,7 +336,7 @@ test('createRequest with reason', () => {
   })
 
   // Read and verify reason
-  const serializedReason = reader.readString()
+  const serializedReason = reader.readNullableString()
   deepStrictEqual(serializedReason, 'Joining after rebalance')
 
   // Verify tags count

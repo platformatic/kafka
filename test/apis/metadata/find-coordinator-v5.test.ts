@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { findCoordinatorV5, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = findCoordinatorV5
+const { api, createRequest, parseResponse } = findCoordinatorV5
 
 test('createRequest serializes request parameters correctly', () => {
   // Values for the request
@@ -93,7 +93,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendUnsignedVarInt(0) // root tagged fields
 
-  const response = parseResponse(1, 10, 6, Reader.from(writer))
+  const response = parseResponse(1, 10, api.version, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -146,7 +146,7 @@ test('parseResponse handles response with throttling', () => {
     )
     .appendUnsignedVarInt(0) // root tagged fields
 
-  const response = parseResponse(1, 10, 6, Reader.from(writer))
+  const response = parseResponse(1, 10, api.version, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(response, {
@@ -194,7 +194,7 @@ test('parseResponse throws error on non-zero error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 10, 6, Reader.from(writer))
+      parseResponse(1, 10, api.version, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)

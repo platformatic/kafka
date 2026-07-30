@@ -49,7 +49,13 @@ export type FetchIsolationLevelValue = (typeof FetchIsolationLevels)[FetchIsolat
 /** @deprecated Use FetchIsolationLevelLabel */
 export type FetchIsolationLevel = FetchIsolationLevelLabel
 
-export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n } as const
+export const ListOffsetTimestamps = {
+  LATEST: -1n,
+  EARLIEST: -2n,
+  MAX: -3n,
+  EARLIEST_LOCAL: -4n,
+  LATEST_TIERED: -5n
+} as const
 export const allowedListOffsetTimestamps = Object.values(ListOffsetTimestamps)
 export type ListOffsetTimestampLabel = keyof typeof ListOffsetTimestamps
 export type ListOffsetTimestampValue = (typeof ListOffsetTimestamps)[ListOffsetTimestampLabel]
@@ -115,6 +121,7 @@ export type AclPermissionType = AclPermissionTypeLabel
 // ./admin/*-configs.ts
 export const ConfigSources = {
   UNKNOWN: 0,
+  DYNAMIC_TOPIC_CONFIG: 1,
   TOPIC_CONFIG: 1,
   DYNAMIC_BROKER_CONFIG: 2,
   DYNAMIC_DEFAULT_BROKER_CONFIG: 3,
@@ -172,7 +179,7 @@ export type ClientQuotaMatchTypeValue = (typeof ClientQuotaMatchTypes)[ClientQuo
 /** @deprecated Use ClientQuotaMatchTypeValue */
 export type ClientQuotaMatchType = ClientQuotaMatchTypeValue
 
-export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
+export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user', IP: 'ip' } as const
 export const allowedClientQuotaEntityTypes = Object.values(ClientQuotaEntityTypes)
 export type ClientQuotaEntityTypeLabel = keyof typeof ClientQuotaEntityTypes
 export type ClientQuotaEntityTypeValue = (typeof ClientQuotaEntityTypes)[ClientQuotaEntityTypeLabel]
@@ -182,7 +189,9 @@ export type ClientQuotaEntityType = ClientQuotaEntityTypeValue
 export const ClientQuotaKeys = {
   PRODUCER_BYTE_RATE: 'producer_byte_rate',
   CONSUMER_BYTE_RATE: 'consumer_byte_rate',
-  REQUEST_PERCENTAGE: 'request_percentage'
+  REQUEST_PERCENTAGE: 'request_percentage',
+  CONNECTION_CREATION_RATE: 'connection_creation_rate',
+  CONTROLLER_MUTATION_RATE: 'controller_mutation_rate'
 } as const
 export const allowedClientQuotaKeys = Object.values(ClientQuotaKeys)
 export type ClientQuotaKeyLabel = keyof typeof ClientQuotaKeys
@@ -207,10 +216,32 @@ export type DescribeClusterEndpointTypeValue = (typeof DescribeClusterEndpointTy
 export type DescribeClusterEndpointType = DescribeClusterEndpointTypeLabel
 
 // ./admin/list-groups.ts
-export const ConsumerGroupStates = ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'] as const
-export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number]
+export const ConsumerGroupStates = [
+  'Unknown',
+  'PreparingRebalance',
+  'CompletingRebalance',
+  'Stable',
+  'Dead',
+  'Empty',
+  'Assigning',
+  'Reconciling',
+  'NotReady'
+] as const
+export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number] | KafkaConsumerGroupStateValue
 /** @deprecated Use ConsumerGroupStateValue */
 export type ConsumerGroupState = ConsumerGroupStateValue
+
+export const KafkaConsumerGroupStates = [
+  'PREPARING_REBALANCE',
+  'COMPLETING_REBALANCE',
+  'STABLE',
+  'DEAD',
+  'EMPTY'
+] as const
+export type KafkaConsumerGroupStateValue = (typeof KafkaConsumerGroupStates)[number]
+
+export const GroupTypes = ['classic', 'consumer', 'share', 'streams'] as const
+export type GroupTypeValue = (typeof GroupTypes)[number]
 
 // ./admin/list-transactions.ts
 export const TransactionStates = [
@@ -223,6 +254,18 @@ export const TransactionStates = [
   'COMPLETE_ABORT'
 ] as const
 export type TransactionState = (typeof TransactionStates)[number]
+
+export const KafkaTransactionStates = [
+  'Empty',
+  'Ongoing',
+  'PrepareCommit',
+  'PrepareAbort',
+  'CompleteCommit',
+  'CompleteAbort',
+  'Dead',
+  'PrepareEpochFence'
+] as const
+export type KafkaTransactionState = (typeof KafkaTransactionStates)[number]
 
 // ./admin/update-features.ts
 export const FeatureUpgradeTypes = { UPGRADE: 1, SAFE_DOWNGRADE: 2, UNSAFE_DOWNGRADE: 3 } as const

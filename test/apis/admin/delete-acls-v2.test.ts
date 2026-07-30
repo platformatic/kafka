@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import {
   AclOperations,
@@ -217,7 +217,8 @@ test('parseResponse correctly processes a successful response with matching ACLs
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 31, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 31, 2, reader)
 
   // Verify response structure
   deepStrictEqual(response.filterResults[0].errorCode, 0, 'Filter result should have no error')
@@ -233,6 +234,7 @@ test('parseResponse correctly processes a successful response with matching ACLs
     'test-topic',
     'Matching ACL should have correct resource name'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes multiple filter results', () => {
@@ -294,7 +296,8 @@ test('parseResponse correctly processes multiple filter results', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 31, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 31, 2, reader)
 
   // Verify multiple filter results
   deepStrictEqual(response.filterResults.length, 2, 'Response should contain 2 filter results')
@@ -310,6 +313,7 @@ test('parseResponse correctly processes multiple filter results', () => {
     ResourceTypes.GROUP,
     'Second filter result should match GROUP resource'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes multiple matching ACLs in a filter', () => {
@@ -365,7 +369,8 @@ test('parseResponse correctly processes multiple matching ACLs in a filter', () 
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 31, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 31, 2, reader)
 
   // Verify multiple matching ACLs
   deepStrictEqual(response.filterResults[0].matchingAcls.length, 2, 'Filter result should contain 2 matching ACLs')
@@ -381,6 +386,7 @@ test('parseResponse correctly processes multiple matching ACLs in a filter', () 
     AclOperations.WRITE,
     'Second matching ACL should have WRITE operation'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse handles filter level errors correctly', () => {
@@ -403,13 +409,16 @@ test('parseResponse handles filter level errors correctly', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 31, 2, Reader.from(writer))
+      parseResponse(1, 31, 2, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify error response is preserved
       deepStrictEqual(err.response.filterResults[0].errorCode, 37, 'Error code should be preserved in the response')
@@ -467,13 +476,16 @@ test('parseResponse handles matching ACL level errors correctly', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 31, 2, Reader.from(writer))
+      parseResponse(1, 31, 2, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify matching ACL error is preserved
       deepStrictEqual(
@@ -514,8 +526,10 @@ test('parseResponse handles throttle time correctly', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 31, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 31, 2, reader)
 
   // Verify throttle time
   deepStrictEqual(response.throttleTimeMs, throttleTimeMs, 'Throttle time should be parsed correctly')
+  strictEqual(reader.remaining, 0)
 })

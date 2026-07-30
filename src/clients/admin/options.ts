@@ -8,6 +8,7 @@ import {
   allowedResourcePatternTypes,
   allowedResourceTypes,
   ConsumerGroupStates,
+  KafkaConsumerGroupStates,
   IncrementalAlterConfigOperationTypes
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
@@ -103,8 +104,8 @@ export const listGroupsOptionsSchema = {
       items: {
         type: 'string',
         enumeration: {
-          allowed: ConsumerGroupStates,
-          errorMessage: listErrorMessage(ConsumerGroupStates as unknown as string[])
+          allowed: [...ConsumerGroupStates, ...KafkaConsumerGroupStates],
+          errorMessage: listErrorMessage([...ConsumerGroupStates, ...KafkaConsumerGroupStates])
         }
       },
       minItems: 0

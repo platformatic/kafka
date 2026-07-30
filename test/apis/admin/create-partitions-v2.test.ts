@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { createPartitionsV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -268,7 +268,8 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 37, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 37, 2, reader)
 
   // Verify response structure
   deepStrictEqual(
@@ -285,6 +286,7 @@ test('parseResponse correctly processes a successful response', () => {
     },
     'Response should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes multiple results', () => {
@@ -310,7 +312,8 @@ test('parseResponse correctly processes multiple results', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 37, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 37, 2, reader)
 
   // Verify multiple results
   deepStrictEqual(
@@ -318,6 +321,7 @@ test('parseResponse correctly processes multiple results', () => {
     ['test-topic-1', 'test-topic-2'],
     'Response should correctly parse multiple results'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse handles error responses', () => {
@@ -338,13 +342,16 @@ test('parseResponse handles error responses', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 37, 2, Reader.from(writer))
+      parseResponse(1, 37, 2, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify error response is preserved
       deepStrictEqual(
@@ -385,13 +392,16 @@ test('parseResponse handles mixed results with success and errors', () => {
     )
     .appendTaggedFields()
 
+  const reader = Reader.from(writer)
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 37, 2, Reader.from(writer))
+      parseResponse(1, 37, 2, reader)
     },
     (err: any) => {
       ok(err instanceof ResponseError, 'Should be a ResponseError')
+      strictEqual(reader.remaining, 0)
 
       // Verify response contains both successful and error results
       deepStrictEqual(
@@ -427,8 +437,10 @@ test('parseResponse handles throttle time correctly', () => {
     )
     .appendTaggedFields()
 
-  const response = parseResponse(1, 37, 2, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 37, 2, reader)
 
   // Verify throttle time
   deepStrictEqual(response.throttleTimeMs, throttleTimeMs, 'Throttle time should be parsed correctly')
+  strictEqual(reader.remaining, 0)
 })

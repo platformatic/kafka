@@ -1,4 +1,5 @@
 import { ResponseError } from '../../errors.ts'
+import { type Nullable } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
@@ -42,7 +43,7 @@ export interface DescribeLogDirsResponse {
       topic => COMPACT_STRING
       partitions => INT32
 */
-export function createRequest (topics: DescribeLogDirsRequestTopic[]): Writer {
+export function createRequest (topics: Nullable<DescribeLogDirsRequestTopic[]>): Writer {
   return Writer.create()
     .appendArray(topics, (w, t) => {
       w.appendString(t.name).appendArray(t.partitions, (w, p) => w.appendInt32(p), true, false)
@@ -106,11 +107,13 @@ export function parseResponse (
             })
           }
         }),
-        totalBytes: 0n,
-        usableBytes: 0n
+        totalBytes: -1n,
+        usableBytes: -1n
       }
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

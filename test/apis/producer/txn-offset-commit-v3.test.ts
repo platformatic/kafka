@@ -2,7 +2,7 @@ import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, txnOffsetCommitV3, Writer } from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = txnOffsetCommitV3
+const { api, createRequest, parseResponse } = txnOffsetCommitV3
 
 test('createRequest serializes parameters correctly', () => {
   const transactionalId = 'transaction-123'
@@ -386,7 +386,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 28, 3, Reader.from(writer))
+  const response = parseResponse(1, 28, api.version, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -449,7 +449,7 @@ test('parseResponse handles multiple topics', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 28, 3, Reader.from(writer))
+  const response = parseResponse(1, 28, api.version, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {
@@ -511,7 +511,7 @@ test('parseResponse throws error on partition error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 28, 4, Reader.from(writer))
+      parseResponse(1, 28, api.version, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

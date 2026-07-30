@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { ConsumerGroupStates } from '../../../src/apis/enumerations.ts'
 import { listGroupsV5, Reader, ResponseError, Writer } from '../../../src/index.ts'
@@ -6,9 +6,9 @@ import { listGroupsV5, Reader, ResponseError, Writer } from '../../../src/index.
 const { createRequest, parseResponse } = listGroupsV5
 
 test('createRequest serializes states filter and types filter correctly', () => {
-  const typesFilter = ['consumer', 'static-consumer']
+  const typesFilter = ['CONSUMER', 'Classic', 'streams']
 
-  const writer = createRequest(['STABLE', 'EMPTY'], typesFilter)
+  const writer = createRequest(['Stable', 'Empty'], typesFilter)
 
   // Verify it returns a Writer instance
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -22,7 +22,7 @@ test('createRequest serializes states filter and types filter correctly', () => 
   // Read types filter array
   const serializedTypes = reader.readArray(() => reader.readString(), true, false)
 
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
@@ -31,11 +31,12 @@ test('createRequest serializes states filter and types filter correctly', () => 
       typesFilter: serializedTypes
     },
     {
-      statesFilter: ['STABLE', 'EMPTY'],
-      typesFilter: ['consumer', 'static-consumer']
+      statesFilter: ['Stable', 'Empty'],
+      typesFilter: ['consumer', 'classic', 'streams']
     },
     'Serialized data should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with empty states and types filters', () => {
@@ -50,7 +51,7 @@ test('createRequest with empty states and types filters', () => {
   // Read types filter array
   const serializedTypes = reader.readArray(() => reader.readString(), true, false)
 
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
@@ -64,6 +65,7 @@ test('createRequest with empty states and types filters', () => {
     },
     'Serialized data with empty filter arrays should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with all possible consumer group states', () => {
@@ -81,7 +83,7 @@ test('createRequest with all possible consumer group states', () => {
   // Read types filter array
   const serializedTypes = reader.readArray(() => reader.readString(), true, false)
 
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
@@ -90,11 +92,16 @@ test('createRequest with all possible consumer group states', () => {
       typesFilter: serializedTypes
     },
     {
-      statesFilter: ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'],
+      statesFilter: ['Unknown', 'PreparingRebalance', 'CompletingRebalance', 'Stable', 'Dead', 'Empty', 'Assigning', 'Reconciling', 'NotReady'],
       typesFilter: []
     },
     'All consumer group states should be serialized correctly'
   )
+  strictEqual(reader.remaining, 0)
+})
+
+test('createRequest rejects unsupported group types', () => {
+  throws(() => createRequest([], ['unsupported']), /Unsupported Kafka group type: unsupported/)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -108,14 +115,14 @@ test('parseResponse correctly processes a successful response', () => {
         {
           groupId: 'test-group-1',
           protocolType: 'consumer',
-          groupState: 'STABLE',
-          groupType: 'CLASSIC'
+          groupState: 'Stable',
+          groupType: 'classic'
         },
         {
           groupId: 'test-group-2',
           protocolType: 'consumer',
-          groupState: 'EMPTY',
-          groupType: 'CLASSIC'
+          groupState: 'Empty',
+          groupType: 'classic'
         }
       ],
       (w, group) => {
@@ -126,7 +133,8 @@ test('parseResponse correctly processes a successful response', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const reader = Reader.from(writer.appendTaggedFields())
+  const response = parseResponse(1, 16, 5, reader)
 
   // Verify the main response structure
   deepStrictEqual(
@@ -154,8 +162,8 @@ test('parseResponse correctly processes a successful response', () => {
     {
       groupId: 'test-group-1',
       protocolType: 'consumer',
-      groupState: 'STABLE',
-      groupType: 'CLASSIC'
+      groupState: 'Stable',
+      groupType: 'classic'
     },
     'First group data should match expected values'
   )
@@ -171,11 +179,12 @@ test('parseResponse correctly processes a successful response', () => {
     {
       groupId: 'test-group-2',
       protocolType: 'consumer',
-      groupState: 'EMPTY',
-      groupType: 'CLASSIC'
+      groupState: 'Empty',
+      groupType: 'classic'
     },
     'Second group data should match expected values'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse with empty groups array', () => {
@@ -186,7 +195,7 @@ test('parseResponse with empty groups array', () => {
     // Empty groups array
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const response = parseResponse(1, 16, 5, Reader.from(writer.appendTaggedFields()))
 
   // Verify response with empty groups
   deepStrictEqual(
@@ -208,7 +217,7 @@ test('parseResponse handles throttling correctly', () => {
     // Empty groups array for simplicity
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const response = parseResponse(1, 16, 5, Reader.from(writer.appendTaggedFields()))
 
   // Verify throttling is processed correctly
   deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
@@ -225,7 +234,7 @@ test('parseResponse throws on error response', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 16, 5, Reader.from(writer))
+      parseResponse(1, 16, 5, Reader.from(writer.appendTaggedFields()))
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -264,20 +273,20 @@ test('parseResponse with different group types and states', () => {
         {
           groupId: 'classic-group',
           protocolType: 'consumer',
-          groupState: 'STABLE',
-          groupType: 'CLASSIC'
+          groupState: 'Stable',
+          groupType: 'classic'
         },
         {
           groupId: 'high-level-group',
           protocolType: 'consumer',
-          groupState: 'PREPARING_REBALANCE',
-          groupType: 'HIGH_LEVEL'
+          groupState: 'PreparingRebalance',
+          groupType: 'consumer'
         },
         {
           groupId: 'consumer-group',
           protocolType: 'consumer',
-          groupState: 'DEAD',
-          groupType: 'CONSUMER'
+          groupState: 'Dead',
+          groupType: 'share'
         }
       ],
       (w, group) => {
@@ -288,7 +297,7 @@ test('parseResponse with different group types and states', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const response = parseResponse(1, 16, 5, Reader.from(writer.appendTaggedFields()))
 
   // Verify number of groups
   deepStrictEqual(response.groups.length, 3, 'Response should have 3 groups')
@@ -307,20 +316,20 @@ test('parseResponse with different group types and states', () => {
       {
         groupId: 'classic-group',
         protocolType: 'consumer',
-        groupState: 'STABLE',
-        groupType: 'CLASSIC'
+        groupState: 'Stable',
+        groupType: 'classic'
       },
       {
         groupId: 'high-level-group',
         protocolType: 'consumer',
-        groupState: 'PREPARING_REBALANCE',
-        groupType: 'HIGH_LEVEL'
+        groupState: 'PreparingRebalance',
+        groupType: 'consumer'
       },
       {
         groupId: 'consumer-group',
         protocolType: 'consumer',
-        groupState: 'DEAD',
-        groupType: 'CONSUMER'
+        groupState: 'Dead',
+        groupType: 'share'
       }
     ],
     'Group data with different types and states should be parsed correctly'

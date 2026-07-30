@@ -3,11 +3,12 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type ConfigSourceValue, type ConfigResourceTypeValue, type ConfigTypeValue } from '../enumerations.ts'
 
 export interface DescribeConfigsRequestResource {
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
-  configurationKeys: string[]
+  configurationKeys?: string[] | null | undefined
 }
 
 export type DescribeConfigsRequest = Parameters<typeof createRequest>
@@ -15,24 +16,24 @@ export type DescribeConfigsRequest = Parameters<typeof createRequest>
 export interface DescribeConfigsResponseSynonym {
   name: string
   value: NullableString
-  source: number
+  source: ConfigSourceValue
 }
 
 export interface DescribeConfigsResponseConfig {
   name: string
   value: NullableString
   readOnly: boolean
-  configSource: number
+  configSource: ConfigSourceValue
   isSensitive: boolean
   synonyms: DescribeConfigsResponseSynonym[]
-  configType: number
+  configType: ConfigTypeValue
   documentation: NullableString
 }
 
 export interface DescribeConfigsResponseResult {
   errorCode: number
   errorMessage: NullableString
-  resourceType: number
+  resourceType: ConfigResourceTypeValue
   resourceName: string
   configs: DescribeConfigsResponseConfig[]
 }
@@ -43,18 +44,17 @@ export interface DescribeConfigsResponse {
 }
 
 /*
-  DescribeConfigs Request (Version: 2) => [resources] include_synonyms include_documentation TAG_BUFFER
-    resources => resource_type resource_name [configuration_keys] TAG_BUFFER
+  DescribeConfigs Request (Version: 2) => [resources] include_synonyms
+    resources => resource_type resource_name [configuration_keys]
       resource_type => INT8
       resource_name => STRING
       configuration_keys => STRING
     include_synonyms => BOOLEAN
-    include_documentation => BOOLEAN
 */
 export function createRequest (
   resources: DescribeConfigsRequestResource[],
-  includeSynonyms: boolean,
-  includeDocumentation: boolean
+  includeSynonyms: boolean = false,
+  _includeDocumentation: boolean = false
 ): Writer {
   return Writer.create()
     .appendArray(
@@ -68,29 +68,26 @@ export function createRequest (
       false
     )
     .appendBoolean(includeSynonyms)
-    .appendBoolean(includeDocumentation)
 }
 
 /*
-  DescribeConfigs Response (Version: 2) => throttle_time_ms [results] TAG_BUFFER
+  DescribeConfigs Response (Version: 2) => throttle_time_ms [results]
     throttle_time_ms => INT32
-    results => error_code error_message resource_type resource_name [configs] TAG_BUFFER
+    results => error_code error_message resource_type resource_name [configs]
       error_code => INT16
       error_message => NULLABLE_STRING
       resource_type => INT8
       resource_name => STRING
-      configs => name value read_only config_source is_sensitive [synonyms] config_type documentation TAG_BUFFER
+      configs => name value read_only config_source is_sensitive [synonyms]
         name => STRING
         value => NULLABLE_STRING
         read_only => BOOLEAN
         config_source => INT8
         is_sensitive => BOOLEAN
-        synonyms => name value source TAG_BUFFER
+        synonyms => name value source
           name => STRING
           value => NULLABLE_STRING
           source => INT8
-        config_type => INT8
-        documentation => NULLABLE_STRING
 */
 export function parseResponse (
   _correlationId: number,
@@ -114,7 +111,7 @@ export function parseResponse (
         return {
           errorCode,
           errorMessage,
-          resourceType: r.readInt8(),
+          resourceType: r.readInt8() as ConfigResourceTypeValue,
           resourceName: r.readString(false),
           configs: r.readArray(
             r => {
@@ -122,21 +119,21 @@ export function parseResponse (
                 name: r.readString(false),
                 value: r.readNullableString(false),
                 readOnly: r.readBoolean(),
-                configSource: r.readInt8(),
+                configSource: r.readInt8() as ConfigSourceValue,
                 isSensitive: r.readBoolean(),
                 synonyms: r.readArray(
                   r => {
                     return {
                       name: r.readString(false),
                       value: r.readNullableString(false),
-                      source: r.readInt8()
+                      source: r.readInt8() as ConfigSourceValue
                     }
                   },
                   false,
                   false
                 ),
-                configType: r.readInt8(),
-                documentation: r.readNullableString(false)
+                configType: 0,
+                documentation: null
               }
             },
             false,

@@ -2,7 +2,7 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ConsumerGroupStateValue } from '../enumerations.ts'
+import { type ConsumerGroupStateValue, type KafkaConsumerGroupStateValue } from '../enumerations.ts'
 
 export type ListGroupsRequest = Parameters<typeof createRequest>
 
@@ -24,11 +24,37 @@ export interface ListGroupsResponse {
     states_filter => COMPACT_STRING
     types_filter => COMPACT_STRING
 */
-export function createRequest (statesFilter: ConsumerGroupStateValue[], typesFilter: string[]): Writer {
+export function createRequest (
+  statesFilter: Array<ConsumerGroupStateValue | KafkaConsumerGroupStateValue>,
+  typesFilter: string[]
+): Writer {
   return Writer.create()
-    .appendArray(statesFilter, (w, s) => w.appendString(s as string), true, false)
-    .appendArray(typesFilter, (w, t) => w.appendString(t), true, false)
+    .appendArray(statesFilter, (w, state) => w.appendString(normalizeState(state)), true, false)
+    .appendArray(typesFilter, (w, type) => w.appendString(normalizeType(type)), true, false)
     .appendTaggedFields()
+}
+
+function normalizeType (type: string): string {
+  switch (type) {
+    case 'CONSUMER': return 'consumer'
+    case 'Classic': return 'classic'
+    case 'classic':
+    case 'consumer':
+    case 'share':
+    case 'streams': return type
+    default: throw new Error(`Unsupported Kafka group type: ${type}`)
+  }
+}
+
+function normalizeState (state: ConsumerGroupStateValue | KafkaConsumerGroupStateValue): string {
+  switch (state) {
+    case 'PREPARING_REBALANCE': return 'PreparingRebalance'
+    case 'COMPLETING_REBALANCE': return 'CompletingRebalance'
+    case 'STABLE': return 'Stable'
+    case 'DEAD': return 'Dead'
+    case 'EMPTY': return 'Empty'
+    default: return state
+  }
 }
 
 /*
@@ -52,13 +78,15 @@ export function parseResponse (
     errorCode: reader.readInt16(),
     groups: reader.readArray(r => {
       return {
-        groupId: r.readNullableString(),
+        groupId: r.readString(),
         protocolType: r.readString(),
         groupState: r.readString(),
         groupType: r.readString()
-      } as ListGroupsResponseGroup
+      }
     })
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

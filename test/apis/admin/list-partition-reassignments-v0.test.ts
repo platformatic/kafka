@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, listPartitionReassignmentsV0 } from '../../../src/index.ts'
 
@@ -30,6 +30,33 @@ test('createRequest serializes basic parameters correctly', () => {
   deepStrictEqual(serializedTimeoutMs, 30000, 'Timeout should be serialized correctly')
 
   deepStrictEqual(topicsArray, [], 'Empty topics array should be serialized correctly')
+})
+
+test('createRequest distinguishes null topics from an empty topic filter', () => {
+  const nullTopics = Reader.from(createRequest(30000, null))
+  nullTopics.readInt32()
+  strictEqual(nullTopics.readNullableArray(() => undefined, true, false), null)
+
+  const emptyTopics = Reader.from(createRequest(30000, []))
+  emptyTopics.readInt32()
+  deepStrictEqual(emptyTopics.readNullableArray(() => undefined, true, false), [])
+})
+
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendInt16(0)
+      .appendString(null)
+      .appendArray([], () => {})
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 46, 0, reader).topics, [])
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes single topic with partitions correctly', () => {

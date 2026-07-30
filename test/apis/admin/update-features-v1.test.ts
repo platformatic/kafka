@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, Writer, updateFeaturesV1 } from '../../../src/index.ts'
+import { FeatureUpgradeTypes, Reader, ResponseError, Writer, updateFeaturesV1 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = updateFeaturesV1
 
@@ -10,7 +10,7 @@ test('createRequest serializes basic parameters correctly', () => {
     {
       feature: 'test-feature',
       maxVersionLevel: 2,
-      upgradeType: 1
+      upgradeType: FeatureUpgradeTypes.UPGRADE
     }
   ]
   const validateOnly = false
@@ -46,7 +46,7 @@ test('createRequest serializes basic parameters correctly', () => {
       {
         feature: 'test-feature',
         maxVersionLevel: 2,
-        upgradeType: 1
+        upgradeType: FeatureUpgradeTypes.UPGRADE
       }
     ],
     'Feature updates should be serialized correctly'
@@ -84,17 +84,17 @@ test('createRequest serializes multiple feature updates correctly', () => {
     {
       feature: 'feature-1',
       maxVersionLevel: 1,
-      upgradeType: 0
+      upgradeType: FeatureUpgradeTypes.UPGRADE
     },
     {
       feature: 'feature-2',
       maxVersionLevel: 2,
-      upgradeType: 1
+      upgradeType: FeatureUpgradeTypes.SAFE_DOWNGRADE
     },
     {
       feature: 'feature-3',
       maxVersionLevel: 3,
-      upgradeType: 2
+      upgradeType: FeatureUpgradeTypes.UNSAFE_DOWNGRADE
     }
   ]
   const validateOnly = false
@@ -120,17 +120,17 @@ test('createRequest serializes multiple feature updates correctly', () => {
       {
         feature: 'feature-1',
         maxVersionLevel: 1,
-        upgradeType: 0
+        upgradeType: FeatureUpgradeTypes.UPGRADE
       },
       {
         feature: 'feature-2',
         maxVersionLevel: 2,
-        upgradeType: 1
+        upgradeType: FeatureUpgradeTypes.SAFE_DOWNGRADE
       },
       {
         feature: 'feature-3',
         maxVersionLevel: 3,
-        upgradeType: 2
+        upgradeType: FeatureUpgradeTypes.UNSAFE_DOWNGRADE
       }
     ],
     'Multiple feature updates should be serialized correctly'
@@ -143,7 +143,7 @@ test('createRequest serializes validateOnly flag correctly', () => {
     {
       feature: 'test-feature',
       maxVersionLevel: 2,
-      upgradeType: 1
+      upgradeType: FeatureUpgradeTypes.UPGRADE
     }
   ]
   const validateOnly = true

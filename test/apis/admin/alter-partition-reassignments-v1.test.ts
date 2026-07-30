@@ -38,39 +38,38 @@ test('createRequest serializes allowReplicationFactorChange correctly', () => {
   )
 })
 
+test('createRequest serializes null replicas to cancel a reassignment', () => {
+  const reader = Reader.from(createRequest(30000, false, [{ name: 'test-topic', partitions: [{ partitionIndex: 0, replicas: null }] }]))
+  reader.readInt32()
+  reader.readBoolean()
+  reader.readArray(reader => {
+    reader.readString()
+    reader.readArray(reader => {
+      reader.readInt32()
+      deepStrictEqual(reader.readNullableArray(() => 0, true, false), null)
+    })
+  })
+})
+
 test('parseResponse correctly processes a successful response', () => {
-  const writer = Writer.create()
-    .appendInt32(0)
-    .appendInt16(0)
-    .appendString(null)
-    .appendArray(
-      [
-        {
-          name: 'test-topic',
-          partitions: [{ partitionIndex: 0, errorCode: 0, errorMessage: null }]
-        }
-      ],
-      (w, response) => {
-        w.appendString(response.name).appendArray(response.partitions, (w, partition) => {
-          w.appendInt32(partition.partitionIndex).appendInt16(partition.errorCode).appendString(partition.errorMessage)
-        })
-      }
-    )
-    .appendTaggedFields()
+  // Apache Kafka v1 uses compact arrays and tagged fields at every flexible struct boundary.
+  const fixture = Buffer.from('0000000001000000020b746573742d746f7069630200000000000000000000', 'hex')
+  const reader = Reader.from(fixture)
 
-  const response = parseResponse(1, 45, 1, Reader.from(writer))
-
-  deepStrictEqual(response.responses, [
-    {
-      name: 'test-topic',
-      partitions: [{ partitionIndex: 0, errorCode: 0, errorMessage: null }]
-    }
-  ])
+  deepStrictEqual(parseResponse(1, 45, 1, reader), {
+    throttleTimeMs: 0,
+    allowReplicationFactorChange: true,
+    errorCode: 0,
+    errorMessage: null,
+    responses: [{ name: 'test-topic', partitions: [{ partitionIndex: 0, errorCode: 0, errorMessage: null }] }]
+  })
+  deepStrictEqual(reader.remaining, 0)
 })
 
 test('parseResponse throws ResponseError on partition error', () => {
   const writer = Writer.create()
     .appendInt32(0)
+    .appendBoolean(false)
     .appendInt16(0)
     .appendString(null)
     .appendArray(

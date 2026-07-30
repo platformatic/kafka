@@ -184,7 +184,9 @@ export class Writer {
       this.appendInt32(value.length)
     }
 
-    this.#buffer.append(value)
+    if (value.length > 0) {
+      this.#buffer.append(value)
+    }
 
     return this
   }
@@ -292,7 +294,7 @@ export class Writer {
     return this
   }
 
-  // TODO: Tagged fields are not supported yet
+  // This client emits only empty tagged-field sections; it does not expose tagged fields to callers.
   appendTaggedFields (_: any[] = []): this {
     return this.append(EMPTY_TAGGED_FIELDS_BUFFER)
   }

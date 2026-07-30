@@ -545,18 +545,19 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       this.emit('sasl:handshake', response!.mechanisms)
       const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+      const saslAuthenticate = saslAuthenticateV2.api
 
       if (authenticate) {
-        authenticate(mechanism, this, saslAuthenticateV2.api, username, password, token, callback)
+        authenticate(mechanism, this, saslAuthenticate, username, password, token, callback)
       } else if (mechanism === SASLMechanisms.PLAIN) {
-        saslPlain.authenticate(saslAuthenticateV2.api, this, username!, password!, callback)
+        saslPlain.authenticate(saslAuthenticate, this, username!, password!, callback)
       } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
-        saslOAuthBearer.authenticate(saslAuthenticateV2.api, this, token!, oauthBearerExtensions!, callback)
+        saslOAuthBearer.authenticate(saslAuthenticate, this, token!, oauthBearerExtensions!, callback)
       } else if (mechanism === SASLMechanisms.GSSAPI) {
         callback(new UserError('No custom SASL/GSSAPI authenticator provided.'))
       } else {
         saslScramSha.authenticate(
-          saslAuthenticateV2.api,
+          saslAuthenticate,
           this,
           mechanism.substring(6) as ScramAlgorithm,
           username!,

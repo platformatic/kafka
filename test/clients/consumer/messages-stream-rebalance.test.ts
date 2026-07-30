@@ -52,6 +52,7 @@ function createFetchResponse (preferredReadReplica: number): FetchResponse {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -62,6 +63,9 @@ function createFetchResponse (preferredReadReplica: number): FetchResponse {
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica,
             records: []
@@ -327,6 +331,9 @@ test('should ignore data for partitions which were not part of the fetch request
           highWatermark: 100n,
           lastStableOffset: 100n,
           logStartOffset: 0n,
+          divergingEpoch: { epoch: -1, endOffset: -1n },
+          currentLeader: { leaderId: -1, leaderEpoch: -1 },
+          snapshotId: { endOffset: -1n, epoch: -1 },
           abortedTransactions: [],
           preferredReadReplica: -1,
           records: [createRecordsBatch(40n, ['stale-0', 'stale-1'])]
@@ -382,6 +389,7 @@ test('should refresh fallback offsets when offset out of range fetch errors omit
       throttleTimeMs: 0,
       errorCode: 0,
       sessionId: 0,
+      nodeEndpoints: [],
       responses: [
         {
           topicId,
@@ -392,8 +400,12 @@ test('should refresh fallback offsets when offset out of range fetch errors omit
               highWatermark: 3n,
               lastStableOffset: 3n,
               logStartOffset: -1n,
+              divergingEpoch: { epoch: -1, endOffset: -1n },
+              currentLeader: { leaderId: -1, leaderEpoch: -1 },
+              snapshotId: { endOffset: -1n, epoch: -1 },
               abortedTransactions: [],
-              preferredReadReplica: -1
+              preferredReadReplica: -1,
+              records: null
             }
           ]
         }

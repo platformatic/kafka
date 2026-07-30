@@ -1,11 +1,11 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { listClientMetricsResourcesV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { ConfigResourceTypes, listClientMetricsResourcesV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listClientMetricsResourcesV0
 
-test('createRequest returns a correctly structured empty request', () => {
-  const writer = createRequest()
+test('createRequest ignores resource types and returns a correctly structured empty request', () => {
+  const writer = createRequest([ConfigResourceTypes.GROUP])
 
   // Verify it returns a Writer
   ok(writer instanceof Writer)
@@ -35,7 +35,7 @@ test('parseResponse correctly processes a successful empty response', () => {
   deepStrictEqual(response, {
     throttleTimeMs: 0,
     errorCode: 0,
-    clientMetricsResources: []
+    configResources: []
   })
 })
 
@@ -45,8 +45,8 @@ test('parseResponse correctly processes a response with multiple resources', () 
     .appendInt32(0) // throttleTimeMs
     .appendInt16(0) // errorCode (success)
     // clientMetricsResources array in compact format
-    .appendArray([{ name: 'cpu' }, { name: 'memory' }], (w, resource) => {
-      w.appendString(resource.name, true) // compact string
+    .appendArray([{ resourceName: 'cpu' }, { resourceName: 'memory' }], (w, resource) => {
+      w.appendString(resource.resourceName, true) // compact string
     })
     .appendInt8(0) // Root tagged fields (none)
 
@@ -56,7 +56,10 @@ test('parseResponse correctly processes a response with multiple resources', () 
   deepStrictEqual(response, {
     throttleTimeMs: 0,
     errorCode: 0,
-    clientMetricsResources: [{ name: 'cpu' }, { name: 'memory' }]
+    configResources: [
+      { resourceName: 'cpu', resourceType: ConfigResourceTypes.CLIENT_METRICS },
+      { resourceName: 'memory', resourceType: ConfigResourceTypes.CLIENT_METRICS }
+    ]
   })
 })
 
@@ -78,7 +81,7 @@ test('parseResponse handles response with throttling', () => {
   deepStrictEqual(response, {
     throttleTimeMs: 100,
     errorCode: 0,
-    clientMetricsResources: []
+    configResources: []
   })
 })
 
@@ -106,7 +109,7 @@ test('parseResponse throws error on non-zero error code', () => {
       deepStrictEqual(err.response, {
         errorCode: 42,
         throttleTimeMs: 0,
-        clientMetricsResources: []
+        configResources: []
       })
 
       // Check that errors object exists

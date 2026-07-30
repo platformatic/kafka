@@ -1,12 +1,12 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { ConsumerGroupStates } from '../../../src/apis/enumerations.ts'
 import { listGroupsV4, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listGroupsV4
 
-test('createRequest serializes states filter and types filter correctly', () => {
-  const writer = createRequest(['STABLE', 'EMPTY'], [])
+test('createRequest serializes states filter and accepts the compatibility types filter argument', () => {
+  const writer = createRequest(['Stable', 'Empty'], ['consumer'])
 
   // Verify it returns a Writer instance
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -16,8 +16,7 @@ test('createRequest serializes states filter and types filter correctly', () => 
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
-
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
@@ -29,6 +28,7 @@ test('createRequest serializes states filter and types filter correctly', () => 
     },
     'Serialized data should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with empty states and types filters', () => {
@@ -39,24 +39,19 @@ test('createRequest with empty states and types filters', () => {
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
-
-  // Read types filter array
-  const serializedTypes = reader.readArray(() => reader.readString(), true, false)
-
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
     {
-      statesFilter: serializedStates,
-      typesFilter: serializedTypes
+      statesFilter: serializedStates
     },
     {
-      statesFilter: [],
-      typesFilter: []
+      statesFilter: []
     },
     'Serialized data with empty filter arrays should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with all possible consumer group states', () => {
@@ -69,24 +64,19 @@ test('createRequest with all possible consumer group states', () => {
 
   // Read states filter array
   const serializedStates = reader.readArray(() => reader.readString(), true, false)
-
-  // Read types filter array
-  const serializedTypes = reader.readArray(() => reader.readString(), true, false)
-
-  // Read tagged fields count
+  reader.readTaggedFields()
 
   // Verify the complete structure
   deepStrictEqual(
     {
-      statesFilter: serializedStates,
-      typesFilter: serializedTypes
+      statesFilter: serializedStates
     },
     {
-      statesFilter: ['PreparingRebalance', 'CompletingRebalance', 'Stable', 'Dead', 'Empty'],
-      typesFilter: []
+      statesFilter: ['Unknown', 'PreparingRebalance', 'CompletingRebalance', 'Stable', 'Dead', 'Empty', 'Assigning', 'Reconciling', 'NotReady']
     },
     'All consumer group states should be serialized correctly'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -100,12 +90,12 @@ test('parseResponse correctly processes a successful response', () => {
         {
           groupId: 'test-group-1',
           protocolType: 'consumer',
-          groupState: 'STABLE'
+          groupState: 'Stable'
         },
         {
           groupId: 'test-group-2',
           protocolType: 'consumer',
-          groupState: 'EMPTY'
+          groupState: 'Empty'
         }
       ],
       (w, group) => {
@@ -113,7 +103,8 @@ test('parseResponse correctly processes a successful response', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const reader = Reader.from(writer.appendTaggedFields())
+  const response = parseResponse(1, 16, 4, reader)
 
   // Verify the main response structure
   deepStrictEqual(
@@ -129,18 +120,21 @@ test('parseResponse correctly processes a successful response', () => {
     },
     'Response structure should match expected values'
   )
+  strictEqual(reader.remaining, 0)
 
   // Verify the first group data
   deepStrictEqual(
     {
       groupId: response.groups[0].groupId,
       protocolType: response.groups[0].protocolType,
-      groupState: response.groups[0].groupState
+      groupState: response.groups[0].groupState,
+      groupType: response.groups[0].groupType
     },
     {
       groupId: 'test-group-1',
       protocolType: 'consumer',
-      groupState: 'STABLE'
+      groupState: 'Stable',
+      groupType: ''
     },
     'First group data should match expected values'
   )
@@ -150,12 +144,14 @@ test('parseResponse correctly processes a successful response', () => {
     {
       groupId: response.groups[1].groupId,
       protocolType: response.groups[1].protocolType,
-      groupState: response.groups[1].groupState
+      groupState: response.groups[1].groupState,
+      groupType: response.groups[1].groupType
     },
     {
       groupId: 'test-group-2',
       protocolType: 'consumer',
-      groupState: 'EMPTY'
+      groupState: 'Empty',
+      groupType: ''
     },
     'Second group data should match expected values'
   )
@@ -169,7 +165,8 @@ test('parseResponse with empty groups array', () => {
     // Empty groups array
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const reader = Reader.from(writer.appendTaggedFields())
+  const response = parseResponse(1, 16, 4, reader)
 
   // Verify response with empty groups
   deepStrictEqual(
@@ -181,6 +178,7 @@ test('parseResponse with empty groups array', () => {
     },
     'Response with empty groups should be parsed correctly'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse handles throttling correctly', () => {
@@ -191,10 +189,12 @@ test('parseResponse handles throttling correctly', () => {
     // Empty groups array for simplicity
     .appendArray([], () => {})
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const reader = Reader.from(writer.appendTaggedFields())
+  const response = parseResponse(1, 16, 4, reader)
 
   // Verify throttling is processed correctly
   deepStrictEqual(response.throttleTimeMs, 100, 'Throttle time should be correctly parsed')
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse throws on error response', () => {
@@ -205,10 +205,12 @@ test('parseResponse throws on error response', () => {
     // Empty groups array
     .appendArray([], () => {})
 
+  const reader = Reader.from(writer.appendTaggedFields())
+
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 16, 5, Reader.from(writer))
+      parseResponse(1, 16, 4, reader)
     },
     (err: any) => {
       // Verify error is a ResponseError
@@ -219,6 +221,8 @@ test('parseResponse throws on error response', () => {
       ok(protocolError, 'Should have at least one error')
       deepStrictEqual(protocolError.apiCode, 41, 'Error code should be correctly captured')
       deepStrictEqual(protocolError.apiId, 'NOT_CONTROLLER', 'Error ID should be correctly captured')
+      ok(err.message.includes('ListGroups(v4)'), 'API version should be correctly captured')
+      strictEqual(reader.remaining, 0)
 
       // Verify the response structure is preserved
       deepStrictEqual(
@@ -247,17 +251,17 @@ test('parseResponse with different group types and states', () => {
         {
           groupId: 'classic-group',
           protocolType: 'consumer',
-          groupState: 'STABLE'
+          groupState: 'Stable'
         },
         {
           groupId: 'high-level-group',
           protocolType: 'consumer',
-          groupState: 'PREPARING_REBALANCE'
+          groupState: 'PreparingRebalance'
         },
         {
           groupId: 'consumer-group',
           protocolType: 'consumer',
-          groupState: 'DEAD'
+          groupState: 'Dead'
         }
       ],
       (w, group) => {
@@ -265,7 +269,8 @@ test('parseResponse with different group types and states', () => {
       }
     )
 
-  const response = parseResponse(1, 16, 5, Reader.from(writer))
+  const reader = Reader.from(writer.appendTaggedFields())
+  const response = parseResponse(1, 16, 4, reader)
 
   // Verify number of groups
   deepStrictEqual(response.groups.length, 3, 'Response should have 3 groups')
@@ -274,7 +279,8 @@ test('parseResponse with different group types and states', () => {
   const groupsData = response.groups.map(g => ({
     groupId: g.groupId,
     protocolType: g.protocolType,
-    groupState: g.groupState
+    groupState: g.groupState,
+    groupType: g.groupType
   }))
 
   deepStrictEqual(
@@ -283,19 +289,23 @@ test('parseResponse with different group types and states', () => {
       {
         groupId: 'classic-group',
         protocolType: 'consumer',
-        groupState: 'STABLE'
+        groupState: 'Stable',
+        groupType: ''
       },
       {
         groupId: 'high-level-group',
         protocolType: 'consumer',
-        groupState: 'PREPARING_REBALANCE'
+        groupState: 'PreparingRebalance',
+        groupType: ''
       },
       {
         groupId: 'consumer-group',
         protocolType: 'consumer',
-        groupState: 'DEAD'
+        groupState: 'Dead',
+        groupType: ''
       }
     ],
     'Group data with different types and states should be parsed correctly'
   )
+  strictEqual(reader.remaining, 0)
 })

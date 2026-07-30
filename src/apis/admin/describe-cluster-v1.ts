@@ -3,6 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import { type DescribeClusterEndpointTypeValue } from '../enumerations.ts'
 
 export type DescribeClusterRequest = Parameters<typeof createRequest>
 
@@ -17,7 +18,7 @@ export interface DescribeClusterResponse {
   throttleTimeMs: number
   errorCode: number
   errorMessage: NullableString
-  endpointType: number
+  endpointType: DescribeClusterEndpointTypeValue
   clusterId: string
   controllerId: number
   brokers: DescribeClusterResponseBroker[]
@@ -29,7 +30,7 @@ export interface DescribeClusterResponse {
     include_cluster_authorized_operations => BOOLEAN
     endpoint_type => INT8
 */
-export function createRequest (includeClusterAuthorizedOperations: boolean, endpointType: number): Writer {
+export function createRequest (includeClusterAuthorizedOperations: boolean, endpointType: DescribeClusterEndpointTypeValue): Writer {
   return Writer.create().appendBoolean(includeClusterAuthorizedOperations).appendInt8(endpointType).appendTaggedFields()
 }
 
@@ -58,7 +59,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
     errorMessage: reader.readNullableString(),
-    endpointType: reader.readInt8(),
+    endpointType: reader.readInt8() as DescribeClusterEndpointTypeValue,
     clusterId: reader.readString(),
     controllerId: reader.readInt32(),
     brokers: reader.readArray(r => {
@@ -71,6 +72,8 @@ export function parseResponse (
     }),
     clusterAuthorizedOperations: reader.readInt32()
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)

@@ -49,18 +49,20 @@ export interface AddPartitionsToTxnResponse {
       partitions => INT32
 */
 export function createRequest (transactions: AddPartitionsToTxnRequestTransaction[]): Writer {
+  const transaction = transactions[0]
+
   return Writer.create()
-    .appendString(transactions[0].transactionalId)
-    .appendInt64(transactions[0].producerId)
-    .appendInt16(transactions[0].producerEpoch)
-    .appendArray(transactions[0].topics, (w, topic) => {
+    .appendString(transaction.transactionalId)
+    .appendInt64(transaction.producerId)
+    .appendInt16(transaction.producerEpoch)
+    .appendArray(transaction.topics, (w, topic) => {
       w.appendString(topic.name).appendArray(topic.partitions, (w, partition) => w.appendInt32(partition), true, false)
     })
     .appendTaggedFields()
 }
 
 /*
-  AddPartitionsToTxn Response (Version: 3) => throttle_time_ms [results_by_transaction] TAG_BUFFER
+  AddPartitionsToTxn Response (Version: 3) => throttle_time_ms [results_by_topic] TAG_BUFFER
     throttle_time_ms => INT32
     results_by_topic => name [results_by_partition] TAG_BUFFER
       name => COMPACT_STRING
@@ -85,13 +87,14 @@ export function parseResponse (
       {
         transactionalId: '',
         topicResults: reader.readArray((r, j) => {
-          return {
+          const topic = {
             name: r.readString(),
             resultsByPartition: r.readArray((r, k) => {
               const partition = {
                 partitionIndex: r.readInt32(),
                 partitionErrorCode: r.readInt16()
               }
+              r.readTaggedFields()
 
               if (partition.partitionErrorCode !== 0) {
                 errors.push([
@@ -101,12 +104,16 @@ export function parseResponse (
               }
 
               return partition
-            })
+            }, true, false)
           }
-        })
+          r.readTaggedFields()
+          return topic
+        }, true, false)
       }
     ]
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

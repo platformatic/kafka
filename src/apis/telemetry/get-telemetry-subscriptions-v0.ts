@@ -3,6 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type TelemetryCompressionType } from './compression-types.ts'
 
 export type GetTelemetrySubscriptionsRequest = Parameters<typeof createRequest>
 
@@ -11,7 +12,7 @@ export interface GetTelemetrySubscriptionsResponse {
   errorCode: number
   clientInstanceId: string
   subscriptionId: number
-  acceptedCompressionTypes: number[]
+  acceptedCompressionTypes: TelemetryCompressionType[]
   pushIntervalMs: number
   telemetryMaxBytes: number
   deltaTemporality: boolean
@@ -58,12 +59,13 @@ export function parseResponse (
     errorCode,
     clientInstanceId: reader.readUUID(),
     subscriptionId: reader.readInt32(),
-    acceptedCompressionTypes: reader.readArray(r => r.readInt8(), true, false)!,
+    acceptedCompressionTypes: reader.readArray(r => r.readInt8() as TelemetryCompressionType, true, false)!,
     pushIntervalMs: reader.readInt32(),
     telemetryMaxBytes: reader.readInt32(),
     deltaTemporality: reader.readBoolean(),
     requestedMetrics: reader.readArray(r => r.readString(), true, false)!
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

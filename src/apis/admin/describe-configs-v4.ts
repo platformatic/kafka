@@ -54,8 +54,8 @@ export interface DescribeConfigsResponse {
 */
 export function createRequest (
   resources: DescribeConfigsRequestResource[],
-  includeSynonyms: boolean,
-  includeDocumentation: boolean
+  includeSynonyms: boolean = false,
+  includeDocumentation: boolean = false
 ): Writer {
   return Writer.create()
     .appendArray(resources, (w, r) => {
@@ -107,32 +107,40 @@ export function parseResponse (
         errors.push([`/results/${i}`, [errorCode, errorMessage]])
       }
 
-      return {
+      const result = {
         errorCode,
         errorMessage,
         resourceType: r.readInt8() as ConfigResourceTypeValue,
         resourceName: r.readString(),
         configs: r.readArray(r => {
-          return {
+          const config = {
             name: r.readString(),
             value: r.readNullableString(),
             readOnly: r.readBoolean(),
             configSource: r.readInt8() as ConfigSourceValue,
             isSensitive: r.readBoolean(),
             synonyms: r.readArray(r => {
-              return {
+              const synonym = {
                 name: r.readString(),
                 value: r.readNullableString(),
                 source: r.readInt8() as ConfigSourceValue
               }
-            }),
+              r.readTaggedFields()
+              return synonym
+            }, true, false),
             configType: r.readInt8() as ConfigTypeValue,
             documentation: r.readNullableString()
           }
-        })
+          r.readTaggedFields()
+          return config
+        }, true, false)
       }
-    })
+      r.readTaggedFields()
+      return result
+    }, true, false)
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

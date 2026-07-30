@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { deleteTopicsV6, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -43,6 +43,30 @@ test('createRequest serializes topic names correctly', () => {
       timeout: 30000
     },
     'Serialized data should match expected structure'
+  )
+})
+
+test('createRequest supports nullable names and validates topic IDs', () => {
+  const reader = Reader.from(createRequest([
+    { name: 'by-name' },
+    { name: null, topicId: '12345678-1234-1234-1234-123456789abc' },
+    { name: 'both', topicId: '87654321-4321-4321-4321-cba987654321' },
+    { name: null }
+  ], 1000))
+
+  deepStrictEqual(reader.readArray(r => ({ name: r.readNullableString(), topicId: r.readUUID() })), [
+    { name: 'by-name', topicId: '00000000-0000-0000-0000-000000000000' },
+    { name: null, topicId: '12345678-1234-1234-1234-123456789abc' },
+    { name: 'both', topicId: '87654321-4321-4321-4321-cba987654321' },
+    { name: null, topicId: '00000000-0000-0000-0000-000000000000' }
+  ])
+  strictEqual(reader.readInt32(), 1000)
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+
+  throws(
+    () => createRequest([{ name: null, topicId: 'not-a-uuid' }], 1000),
+    error => error instanceof Error && error.message === 'Invalid topic ID: not-a-uuid.'
   )
 })
 

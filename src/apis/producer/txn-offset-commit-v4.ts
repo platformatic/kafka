@@ -99,23 +99,28 @@ export function parseResponse (
   const response: TxnOffsetCommitResponse = {
     throttleTimeMs: reader.readInt32(),
     topics: reader.readArray((r, i) => {
-      return {
+      const topic = {
         name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
             partitionIndex: r.readInt32(),
             errorCode: r.readInt16()
           }
+          r.readTaggedFields()
 
           if (partition.errorCode !== 0) {
             errors.push([`/topics/${i}/partitions/${j}`, [partition.errorCode, null]])
           }
 
           return partition
-        })
+        }, true, false)
       }
-    })
+      r.readTaggedFields()
+      return topic
+    }, true, false)
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

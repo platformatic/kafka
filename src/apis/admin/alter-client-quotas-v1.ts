@@ -3,21 +3,23 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
-import { type ClientQuotaEntityTypeValue, type ClientQuotaKeyValue } from '../enumerations.ts'
+import type { ClientQuotaEntityType, ClientQuotaKey } from '../enumerations.ts'
+
+export type { ClientQuotaEntityType, ClientQuotaKey } from '../enumerations.ts'
 
 export interface AlterClientQuotasRequestEntity {
-  entityType: ClientQuotaEntityTypeValue
+  entityType: ClientQuotaEntityType
   entityName?: NullableString
 }
 
 export interface AlterClientQuotaRequestOpAddition {
-  key: ClientQuotaKeyValue
+  key: ClientQuotaKey
   value: number
   remove: false
 }
 
 export interface AlterClientQuotaRequestOpRemoval {
-  key: ClientQuotaKeyValue
+  key: ClientQuotaKey
   remove: true
 }
 
@@ -31,7 +33,7 @@ export interface AlterClientQuotasRequestEntry {
 export type AlterClientQuotasRequest = Parameters<typeof createRequest>
 
 export interface AlterClientQuotasResponseEntity {
-  entityType: string
+  entityType: ClientQuotaEntityType
   entityName: NullableString
 }
 
@@ -98,10 +100,11 @@ export function parseResponse (
         errorCode: r.readInt16(),
         errorMessage: r.readNullableString(),
         entity: r.readArray(r => {
-          return {
-            entityType: r.readString(),
+          const entity = {
+            entityType: r.readString() as ClientQuotaEntityType,
             entityName: r.readNullableString()
           }
+          return entity
         })
       }
 
@@ -112,6 +115,7 @@ export function parseResponse (
       return entry
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

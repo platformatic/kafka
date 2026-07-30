@@ -1,14 +1,21 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { type DescribeConfigsResponseResult } from '../../../src/apis/admin/describe-configs-v2.ts'
-import { Reader, ResponseError, Writer, describeConfigsV2 } from '../../../src/index.ts'
+import { ConfigResourceTypes, ConfigSources, Reader, ResponseError, Writer, describeConfigsV2 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = describeConfigsV2
+
+test('createRequest defaults optional filters to false', () => {
+  const reader = Reader.from(createRequest([]))
+  deepStrictEqual(reader.readArray(() => undefined, false, false), [])
+  ok(!reader.readBoolean())
+  ok(reader.remaining === 0)
+})
 
 test('createRequest serializes basic parameters correctly', () => {
   const resources = [
     {
-      resourceType: 2, // TOPIC
+      resourceType: ConfigResourceTypes.TOPIC,
       resourceName: 'test-topic',
       configurationKeys: []
     }
@@ -39,15 +46,11 @@ test('createRequest serializes basic parameters correctly', () => {
   // Read includeSynonyms boolean
   const includeSynonymsValue = reader.readBoolean()
 
-  // Read includeDocumentation boolean
-  const includeDocumentationValue = reader.readBoolean()
-
   // Verify serialized data
   deepStrictEqual(
     {
       resources: resourcesArray,
-      includeSynonyms: includeSynonymsValue,
-      includeDocumentation: includeDocumentationValue
+      includeSynonyms: includeSynonymsValue
     },
     {
       resources: [
@@ -57,8 +60,7 @@ test('createRequest serializes basic parameters correctly', () => {
           configurationKeys: []
         }
       ],
-      includeSynonyms: true,
-      includeDocumentation: false
+      includeSynonyms: true
     },
     'Serialized data should match expected values'
   )
@@ -67,7 +69,7 @@ test('createRequest serializes basic parameters correctly', () => {
 test('createRequest serializes configurationKeys correctly', () => {
   const resources = [
     {
-      resourceType: 2, // TOPIC
+      resourceType: ConfigResourceTypes.TOPIC,
       resourceName: 'test-topic',
       configurationKeys: ['cleanup.policy', 'compression.type']
     }
@@ -101,12 +103,12 @@ test('createRequest serializes configurationKeys correctly', () => {
 test('createRequest serializes multiple resources correctly', () => {
   const resources = [
     {
-      resourceType: 2, // TOPIC
+      resourceType: ConfigResourceTypes.TOPIC,
       resourceName: 'topic-1',
       configurationKeys: ['cleanup.policy']
     },
     {
-      resourceType: 4, // BROKER
+      resourceType: ConfigResourceTypes.BROKER,
       resourceName: '1',
       configurationKeys: ['num.io.threads']
     }
@@ -148,10 +150,10 @@ test('createRequest serializes multiple resources correctly', () => {
   )
 })
 
-test('createRequest serializes include flags correctly', () => {
+test('createRequest ignores includeDocumentation', () => {
   const resources = [
     {
-      resourceType: 2,
+      resourceType: ConfigResourceTypes.TOPIC,
       resourceName: 'test-topic',
       configurationKeys: []
     }
@@ -174,13 +176,33 @@ test('createRequest serializes include flags correctly', () => {
     false
   )
 
-  // Read include flags
+  // Read the only flag present in v2.
   const includeSynonymsValue = reader.readBoolean()
-  const includeDocumentationValue = reader.readBoolean()
 
-  // Verify flags
   ok(includeSynonymsValue === true, 'includeSynonyms flag should be set to true')
-  ok(includeDocumentationValue === true, 'includeDocumentation flag should be set to true')
+  ok(reader.remaining === 0, 'includeDocumentation must not be serialized')
+})
+
+test('createRequest serializes null configurationKeys', () => {
+  const writer = createRequest(
+    [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: null }],
+    false,
+    false
+  )
+  const reader = Reader.from(writer)
+
+  deepStrictEqual(
+    reader.readArray(
+      () => {
+        reader.readInt8()
+        reader.readString(false)
+        return reader.readNullableArray(() => reader.readString(false), false, false)
+      },
+      false,
+      false
+    ),
+    [null]
+  )
 })
 
 test('parseResponse correctly processes a successful empty response', () => {
@@ -218,16 +240,16 @@ test('parseResponse correctly processes a successful response with configs', () 
               name: 'cleanup.policy',
               value: 'delete',
               readOnly: false,
-              configSource: 1, // DYNAMIC_TOPIC_CONFIG
+              configSource: ConfigSources.DYNAMIC_TOPIC_CONFIG,
               isSensitive: false,
               synonyms: [
                 {
                   name: 'cleanup.policy',
                   value: 'delete',
-                  source: 1 // DYNAMIC_TOPIC_CONFIG
+                  source: ConfigSources.DYNAMIC_TOPIC_CONFIG
                 }
               ],
-              configType: 1, // STRING
+              configType: 1,
               documentation: 'The cleanup policy for log segments'
             }
           ]
@@ -254,8 +276,6 @@ test('parseResponse correctly processes a successful response with configs', () 
                   false,
                   false
                 )
-                .appendInt8(config.configType)
-                .appendString(config.documentation, false)
             },
             false,
             false
@@ -286,11 +306,8 @@ test('parseResponse correctly processes a successful response with configs', () 
     'Synonyms should be parsed correctly'
   )
 
-  deepStrictEqual(
-    response.results[0].configs[0].documentation,
-    'The cleanup policy for log segments',
-    'Documentation should be parsed correctly'
-  )
+  deepStrictEqual(response.results[0].configs[0].configType, 0, 'Config type should be normalized')
+  deepStrictEqual(response.results[0].configs[0].documentation, null, 'Documentation should be normalized')
 })
 
 test('parseResponse correctly processes multiple config entries', () => {
@@ -342,8 +359,6 @@ test('parseResponse correctly processes multiple config entries', () => {
                 .appendInt8(config.configSource)
                 .appendBoolean(config.isSensitive)
                 .appendArray(config.synonyms, () => {}, false, false)
-                .appendInt8(config.configType)
-                .appendString(config.documentation, false)
             },
             false,
             false
@@ -459,8 +474,6 @@ test('parseResponse handles multiple resources with mixed errors', () => {
                   .appendInt8(config.configSource)
                   .appendBoolean(config.isSensitive)
                   .appendArray([], () => {}, false, false) // Empty synonyms
-                  .appendInt8(config.configType)
-                  .appendString(config.documentation, false)
               }
             },
             false,

@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeTopicPartitionsV0 } from '../../../src/index.ts'
 
@@ -155,17 +155,20 @@ test('parseResponse correctly processes a successful empty response', () => {
     .appendInt8(-1) // No next cursor
     .appendTaggedFields()
 
-  const response = parseResponse(1, 75, 0, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 75, 0, reader)
 
   // Verify response structure
   deepStrictEqual(
     response,
     {
       throttleTimeMs: 0,
-      topics: []
+      topics: [],
+      nextCursor: null
     },
     'Empty response should match expected structure'
   )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a response with topic partitions', () => {
@@ -237,6 +240,55 @@ test('parseResponse correctly processes a response with topic partitions', () =>
   deepStrictEqual(partition.eligibleLeaderReplicas, [1, 2], 'Eligible leader replicas should be parsed correctly')
   deepStrictEqual(partition.lastKnownElr, [1], 'Last known ELR should be parsed correctly')
   deepStrictEqual(partition.offlineReplicas, [], 'Offline replicas should be parsed correctly')
+})
+
+test('parseResponse preserves nullable ELR arrays', () => {
+  const writer = Writer.create()
+    .appendInt32(0)
+    .appendArray(
+      [
+        {
+          partitions: [
+            { eligibleLeaderReplicas: null, lastKnownElr: null },
+            { eligibleLeaderReplicas: [], lastKnownElr: [] },
+            { eligibleLeaderReplicas: [1, 2], lastKnownElr: [3] }
+          ]
+        }
+      ],
+      (w, topic) => {
+        w.appendInt16(0)
+          .appendString('test-topic')
+          .appendUUID('12345678-1234-1234-1234-123456789abc')
+          .appendBoolean(false)
+          .appendArray(topic.partitions, (w, partition) => {
+            w.appendInt16(0)
+              .appendInt32(0)
+              .appendInt32(1)
+              .appendInt32(5)
+              .appendArray([1], (w, node) => w.appendInt32(node), true, false)
+              .appendArray([1], (w, node) => w.appendInt32(node), true, false)
+              .appendArray(partition.eligibleLeaderReplicas, (w, node) => w.appendInt32(node), true, false)
+              .appendArray(partition.lastKnownElr, (w, node) => w.appendInt32(node), true, false)
+              .appendArray([], (w, node) => w.appendInt32(node), true, false)
+          })
+          .appendInt32(0)
+      }
+    )
+    .appendInt8(-1)
+    .appendTaggedFields()
+
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 75, 0, reader)
+
+  deepStrictEqual(
+    response.topics[0].partitions.map(({ eligibleLeaderReplicas, lastKnownElr }) => ({ eligibleLeaderReplicas, lastKnownElr })),
+    [
+      { eligibleLeaderReplicas: null, lastKnownElr: null },
+      { eligibleLeaderReplicas: [], lastKnownElr: [] },
+      { eligibleLeaderReplicas: [1, 2], lastKnownElr: [3] }
+    ]
+  )
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a response with multiple topics and partitions', () => {
@@ -346,8 +398,10 @@ test('parseResponse correctly processes a response with next cursor', () => {
     .appendString('next-topic') // cursor topic name
     .appendInt32(3) // cursor partition index
     .appendTaggedFields()
+    .appendTaggedFields()
 
-  const response = parseResponse(1, 75, 0, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 75, 0, reader)
 
   // Verify next cursor
   deepStrictEqual(
@@ -358,6 +412,26 @@ test('parseResponse correctly processes a response with next cursor', () => {
     },
     'Next cursor should be parsed correctly'
   )
+  strictEqual(reader.remaining, 0)
+})
+
+test('parses a complete flexible response with cursor and unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([], () => {})
+      .appendInt8(1)
+      .appendString('next-topic')
+      .appendInt32(3)
+      .appendTaggedFields()
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 75, 0, reader).nextCursor, { topicName: 'next-topic', partitionIndex: 3 })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse throws ResponseError on topic error', () => {

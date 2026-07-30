@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, unregisterBrokerV0 } from '../../../src/index.ts'
 
@@ -20,6 +20,22 @@ test('createRequest serializes broker ID correctly', () => {
 
   // Verify serialized data
   deepStrictEqual(serializedBrokerId, 1, 'Broker ID should be serialized correctly')
+})
+
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendInt16(0)
+      .appendString(null)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 64, 0, reader).errorCode, 0)
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest handles different broker IDs correctly', () => {

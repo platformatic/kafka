@@ -96,7 +96,7 @@ export function createRequest (
   Produce Response (Version: 7) => [responses] throttle_time_ms
     responses => name [partition_responses]
       name => STRING
-      partition_responses => index error_code base_offset log_append_time_ms log_start_offset [record_errors] error_message
+      partition_responses => index error_code base_offset log_append_time_ms log_start_offset
         index => INT32
         error_code => INT16
         base_offset => INT64

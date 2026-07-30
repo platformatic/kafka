@@ -17,8 +17,8 @@ export interface OffsetForLeaderEpochRequestTopic {
 export type OffsetForLeaderEpochRequest = Parameters<typeof createRequest>
 
 export interface OffsetForLeaderEpochResponsePartition {
-  partition: number
   errorCode: number
+  partition: number
   leaderEpoch: number
   endOffset: bigint
 }
@@ -51,8 +51,10 @@ export function createRequest (replicaId: number, topics: OffsetForLeaderEpochRe
         w.appendInt32(partition.partitionIndex)
           .appendInt32(partition.currentLeaderEpoch)
           .appendInt32(partition.leaderEpoch)
-      })
-    })
+          .appendTaggedFields()
+      }, true, false)
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -61,9 +63,9 @@ export function createRequest (replicaId: number, topics: OffsetForLeaderEpochRe
     throttle_time_ms => INT32
     topics => topic [partitions] TAG_BUFFER
       topic => COMPACT_STRING
-      partitions => partition error_code leader_epoch end_offset TAG_BUFFER
-        partition => INT32
-        error_code => INT16
+       partitions => error_code partition leader_epoch end_offset TAG_BUFFER
+         error_code => INT16
+         partition => INT32
         leader_epoch => INT32
         end_offset => INT64
 */
@@ -81,16 +83,16 @@ export function parseResponse (
       return {
         topic: r.readString(),
         partitions: r.readArray((r, j) => {
-          const partition = r.readInt32()
           const errorCode = r.readInt16()
+          const partition = r.readInt32()
 
           if (errorCode !== 0) {
             errors.push([`/topics/${i}/partitions/${j}`, [errorCode, null]])
           }
 
           return {
-            partition,
             errorCode,
+            partition,
             leaderEpoch: r.readInt32(),
             endOffset: r.readInt64()
           }
@@ -98,6 +100,7 @@ export function parseResponse (
       }
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

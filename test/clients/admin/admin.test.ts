@@ -22,9 +22,10 @@ import {
   type GroupBase,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
-import { kConnections, kGetApi, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
+import { kApis, kConnections, kGetApi, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
 import { type Connection } from '../../../src/network/connection.ts'
 import { Reader } from '../../../src/protocol/reader.ts'
+import { type DescribeGroupsResponse } from '../../../src/apis/admin/describe-groups-v5.ts'
 import {
   AclOperations,
   AclPermissionTypes,
@@ -38,6 +39,7 @@ import {
   adminTopicsChannel,
   alterClientQuotasV1,
   alterConfigsV2,
+  type API,
   type Broker,
   type Callback,
   type CallbackWithPromise,
@@ -48,19 +50,25 @@ import {
   createAclsV3,
   createPartitionsV3,
   deleteAclsV3,
+  deleteGroupsV0,
+  deleteGroupsV1,
   deleteRecordsV2,
   describeAclsV3,
   describeClientQuotasV0,
+  describeClientQuotasV1,
+  describeConfigsV1,
   describeConfigsV4,
   describeGroupsV5,
   describeLogDirsV4,
   EMPTY_BUFFER,
+  findCoordinatorV3,
   findCoordinatorV6,
   incrementalAlterConfigsV1,
   instancesChannel,
   listGroupsV5,
   listOffsetsV9,
   MultipleErrors,
+  offsetFetchV3,
   ResourcePatternTypes,
   ResourceTypes,
   ResponseError,
@@ -69,7 +77,7 @@ import {
   stringSerializers,
   UnsupportedApiError,
   UserError,
-  type Writer
+  Writer
 } from '../../../src/index.ts'
 import {
   createAdmin,
@@ -83,6 +91,7 @@ import {
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
+  mockMethod,
   mockedErrorMessage,
   mockedOperationId,
   mockMetadata,
@@ -98,7 +107,6 @@ test('constructor should initialize properly', t => {
   strictEqual(admin.closed, false)
   deepStrictEqual(created(), { type: 'admin', instance: admin })
 })
-
 test('should support both promise and callback API', (t, done) => {
   const admin = createAdmin(t)
 
@@ -871,6 +879,59 @@ test('createTopics should handle unavailable API errors', async t => {
   }
 })
 
+test('createTopics should negotiate legacy versions and normalize their responses', async t => {
+  for (const version of [0, 2, 5, 6]) {
+    await t.test(`v${version}`, async t => {
+      const admin = createAdmin(t)
+      const response = {
+        throttleTimeMs: 0,
+        topics: [
+          {
+            name: 'topic',
+            errorCode: 0,
+            errorMessage: null,
+            ...(version < 5
+              ? {}
+              : {
+                  numPartitions: 3,
+                  replicationFactor: 2,
+                  configs: [{ name: 'cleanup.policy', value: 'compact' }]
+                })
+          }
+        ]
+      }
+      const connection = {
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          _payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          _hasRequestHeaderTaggedFields: boolean,
+          _hasResponseHeaderTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ) {
+          strictEqual(apiKey, 19)
+          strictEqual(apiVersion, version)
+          callback(null, response as ReturnType)
+        }
+      } as unknown as Connection
+
+      admin[kApis] = [{ apiKey: 19, name: 'CreateTopics', minVersion: version, maxVersion: version }]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+
+      deepStrictEqual(await admin.createTopics({ topics: ['topic'] }), [
+        {
+          id: '',
+          name: 'topic',
+          partitions: version < 5 ? -1 : 3,
+          replicas: version < 5 ? -1 : 2,
+          configuration: version < 5 ? {} : { 'cleanup.policy': 'compact' }
+        }
+      ])
+    })
+  }
+})
+
 test('deleteTopics should delete a topic and support diagnostic channels', async t => {
   const admin = createAdmin(t)
 
@@ -921,6 +982,80 @@ test('deleteTopics should delete a topic and support diagnostic channels', async
 
   // Clean up
   await admin.deleteTopics({ topics: [topicName] })
+})
+
+test('deleteTopics should negotiate legacy versions with name-based requests', async t => {
+  for (const version of [5, 4, 3, 2, 1]) {
+    await t.test(`DeleteTopics v${version}`, async t => {
+      const admin = createAdmin(t)
+      const topicName = `topic-v${version}`
+      const connection = {
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          requestTaggedFields: boolean,
+          responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          strictEqual(apiKey, 20)
+          strictEqual(apiVersion, version)
+          strictEqual(requestTaggedFields, false)
+          strictEqual(responseTaggedFields, false)
+
+          const reader = Reader.from(payload())
+          deepStrictEqual(
+            reader.readArray(r => r.readString(false), false, false),
+            [topicName]
+          )
+          strictEqual(reader.readInt32(), 5000)
+          strictEqual(reader.remaining, 0)
+
+          callback(null, { throttleTimeMs: 0, responses: [] } as ReturnType)
+        }
+      } as unknown as Connection
+
+      const legacyDeleteTopics = Object.assign(
+        (connection: Connection, topics: Array<{ name: string }>, timeout: number, callback: Callback<unknown>) => {
+          connection.send(
+            20,
+            version,
+            () =>
+              Writer.create()
+                .appendArray(topics, (writer, topic) => writer.appendString(topic.name, false), false, false)
+                .appendInt32(timeout),
+            () => null,
+            false,
+            false,
+            callback
+          )
+        },
+        { key: 20, version }
+      ) as unknown as API<[Array<{ name: string }>, number], unknown>
+
+      admin[kApis] = [{ apiKey: 20, name: 'DeleteTopics', minVersion: 0, maxVersion: version }]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+      mockMethod(
+        admin,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'DeleteTopics') {
+            callback(null, legacyDeleteTopics)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      await admin.deleteTopics({ topics: [topicName] })
+    })
+  }
 })
 
 test('deleteTopics should retarget controller when needed', async t => {
@@ -1490,6 +1625,104 @@ test('listGroups should return consumer groups and support diagnostic channels',
   verifyTracingChannel()
 })
 
+test('listGroups should negotiate legacy versions and normalize their defaults', async t => {
+  for (const version of [3, 2, 1]) {
+    await t.test(`ListGroups v${version}`, async t => {
+      const admin = createAdmin(t)
+      const groupId = `group-v${version}`
+      const connection = {
+        instanceId: 1,
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          requestTaggedFields: boolean,
+          responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          strictEqual(apiKey, listGroupsV5.api.key)
+          strictEqual(apiVersion, version)
+          strictEqual(requestTaggedFields, version === 3)
+          strictEqual(responseTaggedFields, version === 3)
+
+          const reader = Reader.from(payload())
+          if (version === 3) {
+            deepStrictEqual(
+              reader.readArray(r => r.readString(), true, false),
+              []
+            )
+            reader.readTaggedFields()
+          } else {
+            deepStrictEqual(
+              reader.readArray(r => r.readString(false), false, false),
+              []
+            )
+          }
+          strictEqual(reader.remaining, 0)
+
+          callback(null, {
+            throttleTimeMs: 0,
+            errorCode: 0,
+            groups: [{ groupId, protocolType: 'consumer', groupState: '' }]
+          } as ReturnType)
+        }
+      } as unknown as Connection
+
+      const legacyListGroups = Object.assign(
+        (connection: Connection, statesFilter: string[], _typesFilter: string[], callback: Callback<unknown>) => {
+          connection.send(
+            listGroupsV5.api.key,
+            version,
+            () => {
+              const writer = Writer.create().appendArray(
+                statesFilter,
+                (writer, state) => writer.appendString(state, version !== 3),
+                version === 3,
+                false
+              )
+              if (version === 3) {
+                writer.appendTaggedFields()
+              }
+              return writer
+            },
+            () => null,
+            version === 3,
+            version === 3,
+            callback
+          )
+        },
+        { key: listGroupsV5.api.key, version }
+      ) as unknown as API<[string[], string[]], unknown>
+
+      admin[kApis] = [{ apiKey: listGroupsV5.api.key, name: 'ListGroups', minVersion: 0, maxVersion: version }]
+      mockMetadata(admin, () => true, null, { brokers: new Map([[1, { host: 'localhost', port: 9092 }]]) })
+      mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+      mockMethod(
+        admin,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'ListGroups') {
+            callback(null, legacyListGroups)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      deepStrictEqual(
+        await admin.listGroups(),
+        new Map([[groupId, { id: groupId, state: '', groupType: undefined, protocolType: 'consumer' }]])
+      )
+    })
+  }
+})
+
 test('listGroups should support filtering by types and states', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({
@@ -1518,15 +1751,15 @@ test('listGroups should support filtering by types and states', async t => {
 
   // Test with state filtering - stable should include our group
   const groups3 = await admin.listGroups({
-    states: ['STABLE']
+    states: ['Stable']
   })
-  strictEqual(groups3.has(consumer.groupId), true, 'The consumer group should be found with state "STABLE"')
+  strictEqual(groups3.has(consumer.groupId), true, 'The consumer group should be found with state "Stable"')
 
   // Test with a state that shouldn't match our group
   const groups4 = await admin.listGroups({
-    states: ['DEAD']
+    states: ['Dead']
   })
-  strictEqual(groups4.has(consumer.groupId), false, 'The consumer group should not be found with state "DEAD"')
+  strictEqual(groups4.has(consumer.groupId), false, 'The consumer group should not be found with state "Dead"')
 })
 
 test('listGroups should validate options in strict mode', async t => {
@@ -1770,6 +2003,162 @@ test('describeGroups should handle includeAuthorizedOperations option', async t 
   // Depending on broker configuration, this might still be populated
   // Just ensure the field exists without asserting a specific value
   strictEqual(typeof group2.authorizedOperations, 'number')
+})
+
+test('describeGroups should negotiate legacy versions and normalize their defaults', async t => {
+  for (const version of [4, 3, 2, 1]) {
+    await t.test(`DescribeGroups v${version}`, async t => {
+      const admin = createAdmin(t)
+      const groupId = `group-v${version}`
+      const includeAuthorizedOperations = true
+      const connection = {
+        instanceId: 1,
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          requestTaggedFields: boolean,
+          responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          if (apiKey === findCoordinatorV6.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              coordinators: [
+                { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+              ]
+            } as ReturnType)
+            return
+          }
+
+          strictEqual(apiKey, describeGroupsV5.api.key)
+          strictEqual(apiVersion, version)
+          strictEqual(requestTaggedFields, false)
+          strictEqual(responseTaggedFields, false)
+
+          const reader = Reader.from(payload())
+          deepStrictEqual(
+            reader.readArray(r => r.readString(false), false, false),
+            [groupId]
+          )
+          if (version >= 3) {
+            strictEqual(reader.readBoolean(), includeAuthorizedOperations)
+          }
+          strictEqual(reader.remaining, 0)
+
+          callback(null, {
+            throttleTimeMs: 0,
+            groups: [
+              {
+                errorCode: 0,
+                groupId,
+                groupState: 'stable',
+                protocolType: 'consumer',
+                protocolData: 'range',
+                members: [
+                  {
+                    memberId: 'member-1',
+                    groupInstanceId: null,
+                    clientId: 'client-1',
+                    clientHost: '/127.0.0.1',
+                    memberMetadata: EMPTY_BUFFER,
+                    memberAssignment: EMPTY_BUFFER
+                  }
+                ],
+                authorizedOperations: -2147483648
+              }
+            ]
+          } as ReturnType)
+        }
+      } as unknown as Connection
+
+      const legacyDescribeGroups = Object.assign(
+        (
+          connection: Connection,
+          groups: string[],
+          includeAuthorizedOperations: boolean,
+          callback: Callback<DescribeGroupsResponse>
+        ) => {
+          connection.send(
+            describeGroupsV5.api.key,
+            version,
+            () => {
+              const writer = Writer.create().appendArray(
+                groups,
+                (writer, group) => writer.appendString(group, false),
+                false,
+                false
+              )
+              if (version >= 3) {
+                writer.appendBoolean(includeAuthorizedOperations)
+              }
+              return writer
+            },
+            () => null as unknown as DescribeGroupsResponse,
+            false,
+            false,
+            callback
+          )
+        },
+        { key: describeGroupsV5.api.key, version }
+      ) as unknown as API<[string[], boolean], DescribeGroupsResponse>
+
+      admin[kApis] = [
+        { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+        { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: version }
+      ]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+      mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+      mockMethod(
+        admin,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'DescribeGroups') {
+            callback(null, legacyDescribeGroups)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      const groups = await admin.describeGroups({ groups: [groupId], includeAuthorizedOperations })
+
+      deepStrictEqual(
+        groups,
+        new Map([
+          [
+            groupId,
+            {
+              id: groupId,
+              state: 'STABLE',
+              protocolType: 'consumer',
+              protocol: 'range',
+              members: new Map([
+                [
+                  'member-1',
+                  {
+                    id: 'member-1',
+                    groupInstanceId: null,
+                    clientId: 'client-1',
+                    clientHost: '/127.0.0.1',
+                    metadata: undefined,
+                    assignments: undefined
+                  }
+                ]
+              ]),
+              authorizedOperations: -2147483648
+            }
+          ]
+        ])
+      )
+    })
+  }
 })
 
 test('describeGroups should handle memberAssignment with single user data byte with high bit set', async t => {
@@ -2042,6 +2431,63 @@ test('deleteGroups should delete groups and support diagnostic channels', async 
   verifyTracingChannel()
 })
 
+test('deleteGroups should negotiate classic versions with compatible responses', async t => {
+  for (const legacyApi of [deleteGroupsV1, deleteGroupsV0]) {
+    await t.test(`DeleteGroups v${legacyApi.api.version}`, async t => {
+      const admin = createAdmin(t)
+      const groupId = `group-v${legacyApi.api.version}`
+      const connection = {
+        instanceId: 1,
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          requestTaggedFields: boolean,
+          responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          if (apiKey === findCoordinatorV6.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              coordinators: [
+                { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+              ]
+            } as ReturnType)
+            return
+          }
+
+          strictEqual(apiKey, legacyApi.api.key)
+          strictEqual(apiVersion, legacyApi.api.version)
+          strictEqual(requestTaggedFields, false)
+          strictEqual(responseTaggedFields, false)
+
+          const reader = Reader.from(payload())
+          deepStrictEqual(
+            reader.readArray(r => r.readString(false), false, false),
+            [groupId]
+          )
+          strictEqual(reader.remaining, 0)
+
+          callback(null, {
+            throttleTimeMs: 0,
+            results: [{ groupId, errorCode: 0 }]
+          } as ReturnType)
+        }
+      } as unknown as Connection
+
+      admin[kApis] = [
+        { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+        { apiKey: legacyApi.api.key, name: 'DeleteGroups', minVersion: 0, maxVersion: legacyApi.api.version }
+      ]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+      mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+
+      await admin.deleteGroups({ groups: [groupId] })
+    })
+  }
+})
+
 test('deleteGroups should handle non-existent groups properly', async t => {
   const admin = createAdmin(t)
 
@@ -2198,6 +2644,101 @@ test('removeMembersFromConsumerGroup should remove specific members with custom 
 
   const groups2 = await admin.describeGroups({ groups: [groupId] })
   strictEqual(groups2.get(groupId)!.members.has(consumer.memberId), false)
+})
+
+test('removeMembersFromConsumerGroup should fan out legacy LeaveGroup requests', async t => {
+  for (const version of [1, 2]) {
+    await t.test(`LeaveGroup v${version}`, async t => {
+      const admin = createAdmin(t)
+      const groupId = 'test-group'
+      const memberIds = ['member-1', 'member-2']
+      const requests: Array<{ groupId: string; memberId: string }> = []
+      const connection = {
+        instanceId: 1,
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          requestTaggedFields: boolean,
+          responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          if (apiKey === findCoordinatorV6.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              coordinators: [
+                { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+              ]
+            } as ReturnType)
+            return
+          }
+
+          strictEqual(apiKey, 13)
+          strictEqual(apiVersion, version)
+          strictEqual(requestTaggedFields, false)
+          strictEqual(responseTaggedFields, false)
+
+          const reader = Reader.from(payload())
+          requests.push({ groupId: reader.readString(false), memberId: reader.readString(false) })
+          strictEqual(reader.remaining, 0)
+          callback(null, { throttleTimeMs: 0, errorCode: 0, members: [] } as ReturnType)
+        }
+      } as unknown as Connection
+
+      const legacyLeaveGroup = Object.assign(
+        (
+          connection: Connection,
+          groupId: string,
+          members: Array<{ memberId: string }>,
+          callback: Callback<unknown>
+        ) => {
+          connection.send(
+            13,
+            version,
+            () => Writer.create().appendString(groupId, false).appendString(members[0].memberId, false),
+            () => null,
+            false,
+            false,
+            callback
+          )
+        },
+        { key: 13, version }
+      ) as unknown as API<[string, Array<{ memberId: string }>], unknown>
+
+      admin[kApis] = [
+        { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+        { apiKey: 13, name: 'LeaveGroup', minVersion: version, maxVersion: version }
+      ]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+      mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+      mockMethod(
+        admin,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'LeaveGroup') {
+            callback(null, legacyLeaveGroup)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      await admin.removeMembersFromConsumerGroup({ groupId, members: memberIds.map(memberId => ({ memberId })) })
+      deepStrictEqual(
+        requests.sort((a, b) => a.memberId.localeCompare(b.memberId)),
+        [
+          { groupId, memberId: 'member-1' },
+          { groupId, memberId: 'member-2' }
+        ]
+      )
+    })
+  }
 })
 
 test('removeMembersFromConsumerGroup should remove all members', async t => {
@@ -3208,6 +3749,57 @@ test('describeClientQuotas should handle unavailable API errors (DescribeClientQ
   }
 })
 
+test('describeClientQuotas should negotiate classic and flexible codecs', async t => {
+  for (const api of [describeClientQuotasV0.api, describeClientQuotasV1.api]) {
+    await t.test(`v${api.version}`, async t => {
+      const admin = createAdmin(t)
+      const connection = {
+        send <ReturnType>(
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          hasRequestHeaderTaggedFields: boolean,
+          hasResponseHeaderTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ) {
+          strictEqual(apiKey, api.key)
+          strictEqual(apiVersion, api.version)
+          strictEqual(hasRequestHeaderTaggedFields, api.version === 1)
+          strictEqual(hasResponseHeaderTaggedFields, api.version === 1)
+          const request = Reader.from(payload())
+          strictEqual(
+            request.readArray(
+              r => {
+                r.readString(api.version === 1)
+                r.readInt8()
+                r.readNullableString(api.version === 1)
+              },
+              api.version === 1,
+              api.version === 1
+            ).length,
+            1
+          )
+          strictEqual(request.readBoolean(), false)
+          if (api.version === 1) {
+            strictEqual(request.readUnsignedVarInt(), 0)
+          }
+          callback(null, { entries: [] } as ReturnType)
+        }
+      } as unknown as Connection
+
+      admin[kApis] = [
+        { apiKey: api.key, name: 'DescribeClientQuotas', minVersion: api.version, maxVersion: api.version }
+      ]
+      admin[kGetBootstrapConnection] = callback => callback(null, connection)
+      deepStrictEqual(
+        await admin.describeClientQuotas({ components: [{ entityType: 'client-id', matchType: 0, match: 'client' }] }),
+        []
+      )
+    })
+  }
+})
+
 test('describeLogDirs should describe log directories for topics and support diagnostic channels', async t => {
   const admin = createAdmin(t)
 
@@ -3553,6 +4145,95 @@ test('listConsumerGroupOffsets should list selected offsets', async t => {
       ]
     }
   ])
+})
+
+test('listConsumerGroupOffsets should fan out legacy OffsetFetch requests for groups sharing a coordinator', async t => {
+  const admin = createAdmin(t)
+  const groupIds = ['group-1', 'group-2']
+  const offsetFetchGroups: string[] = []
+  const connection = {
+    instanceId: 1,
+    send <ReturnType>(
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      requestTaggedFields: boolean,
+      responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      if (apiKey === findCoordinatorV6.api.key) {
+        callback(null, {
+          throttleTimeMs: 0,
+          coordinators: groupIds.map(key => ({
+            key,
+            nodeId: 1,
+            host: 'localhost',
+            port: 9092,
+            errorCode: 0,
+            errorMessage: null
+          }))
+        } as ReturnType)
+        return
+      }
+
+      strictEqual(apiKey, offsetFetchV3.api.key)
+      strictEqual(apiVersion, 3)
+      strictEqual(requestTaggedFields, false)
+      strictEqual(responseTaggedFields, false)
+
+      const reader = Reader.from(payload())
+      const groupId = reader.readString(false)
+      offsetFetchGroups.push(groupId)
+      deepStrictEqual(
+        reader.readArray(
+          r => ({ name: r.readString(false), partitionIndexes: r.readArray(r => r.readInt32(), false, false) }),
+          false,
+          false
+        ),
+        [{ name: `topic-${groupId}`, partitionIndexes: [0] }]
+      )
+      strictEqual(reader.remaining, 0)
+
+      callback(null, {
+        throttleTimeMs: 0,
+        topics: [
+          {
+            name: `topic-${groupId}`,
+            partitions: [
+              { partitionIndex: 0, committedOffset: 1n, committedLeaderEpoch: -1, metadata: null, errorCode: 0 }
+            ]
+          }
+        ],
+        errorCode: 0
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  admin[kApis] = [
+    { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+    { apiKey: offsetFetchV3.api.key, name: 'OffsetFetch', minVersion: 0, maxVersion: 3 }
+  ]
+  admin[kGetBootstrapConnection] = callback => callback(null, connection)
+  mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+
+  const offsets = await admin.listConsumerGroupOffsets({
+    groups: groupIds.map(groupId => ({ groupId, topics: [{ name: `topic-${groupId}`, partitionIndexes: [0] }] }))
+  })
+
+  deepStrictEqual(offsetFetchGroups.sort(), groupIds)
+  deepStrictEqual(
+    offsets,
+    groupIds.map(groupId => ({
+      groupId,
+      topics: [
+        {
+          name: `topic-${groupId}`,
+          partitions: [{ partitionIndex: 0, committedOffset: 1n, committedLeaderEpoch: -1, metadata: null }]
+        }
+      ]
+    }))
+  )
 })
 
 test('listConsumerGroupOffsets should list all offsets', async t => {
@@ -4847,10 +5528,7 @@ test('describeConfigs should include documentation and synonyms if requested (TO
     configType: ConfigTypes.LIST
   })
   strictEqual(typeof documentation, 'string')
-  strictEqual(
-    documentation!.startsWith('This config designates the retention policy to use on log segments.'),
-    true
-  )
+  strictEqual(documentation!.startsWith('This config designates the retention policy to use on log segments.'), true)
 
   // Clean up
   await admin.deleteTopics({ topics: [topicName] })
@@ -5213,6 +5891,131 @@ test('describeConfigs should handle unavailable API errors', async t => {
     strictEqual(subError instanceof UnsupportedApiError, true)
     strictEqual(error.errors[0].message, 'Unsupported API DescribeConfigs.')
   }
+})
+
+test('describeConfigs should negotiate v1 with public defaults', async t => {
+  const admin = createAdmin(t)
+  const connection = {
+    instanceId: 1,
+    send <ReturnType>(
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      requestTaggedFields: boolean,
+      responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      strictEqual(apiKey, describeConfigsV1.api.key)
+      strictEqual(apiVersion, 1)
+      strictEqual(requestTaggedFields, false)
+      strictEqual(responseTaggedFields, false)
+
+      const reader = Reader.from(payload())
+      deepStrictEqual(
+        reader.readArray(
+          r => ({
+            resourceType: r.readInt8(),
+            resourceName: r.readString(false),
+            configurationKeys: r.readNullableArray(() => r.readString(false), false, false)
+          }),
+          false,
+          false
+        ),
+        [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: null }]
+      )
+      strictEqual(reader.readBoolean(), false)
+      strictEqual(reader.remaining, 0)
+
+      callback(null, {
+        throttleTimeMs: 0,
+        results: [
+          {
+            errorCode: 0,
+            errorMessage: null,
+            resourceType: ConfigResourceTypes.TOPIC,
+            resourceName: 'test-topic',
+            configs: [
+              {
+                name: 'cleanup.policy',
+                value: 'delete',
+                readOnly: false,
+                configSource: ConfigSources.TOPIC_CONFIG,
+                isSensitive: false,
+                synonyms: [],
+                configType: ConfigTypes.UNKNOWN,
+                documentation: null
+              }
+            ]
+          }
+        ]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+  const legacyDescribeConfigs = Object.assign(
+    (
+      connection: Connection,
+      resources: Parameters<typeof describeConfigsV1.createRequest>[0],
+      includeSynonyms: boolean,
+      includeDocumentation: boolean,
+      callback: Callback<unknown>
+    ) => {
+      connection.send(
+        describeConfigsV1.api.key,
+        1,
+        () => describeConfigsV1.createRequest(resources, includeSynonyms, includeDocumentation),
+        () => null,
+        false,
+        false,
+        callback
+      )
+    },
+    { key: describeConfigsV1.api.key, version: 1 }
+  ) as unknown as API<Parameters<typeof describeConfigsV1.createRequest>, unknown>
+
+  admin[kApis] = [{ apiKey: describeConfigsV1.api.key, name: 'DescribeConfigs', minVersion: 0, maxVersion: 1 }]
+  mockMetadata(admin, () => true, null, { brokers: new Map([[1, { host: 'localhost', port: 9092 }]]) })
+  mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+  mockMethod(
+    admin,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (original, name, callback) => {
+      if (name === 'DescribeConfigs') {
+        callback(null, legacyDescribeConfigs)
+        return true
+      }
+
+      original(name, callback)
+      return true
+    }
+  )
+
+  deepStrictEqual(
+    await admin.describeConfigs({
+      resources: [{ resourceType: ConfigResourceTypes.TOPIC, resourceName: 'test-topic', configurationKeys: null }]
+    }),
+    [
+      {
+        resourceType: ConfigResourceTypes.TOPIC,
+        resourceName: 'test-topic',
+        configs: [
+          {
+            name: 'cleanup.policy',
+            value: 'delete',
+            readOnly: false,
+            configSource: ConfigSources.TOPIC_CONFIG,
+            isSensitive: false,
+            synonyms: [],
+            configType: ConfigTypes.UNKNOWN,
+            documentation: null
+          }
+        ]
+      }
+    ]
+  )
 })
 
 test('alterConfigs should update configs', async t => {
@@ -8542,6 +9345,50 @@ test('findCoordinator should find group coordinators', async t => {
   strictEqual(typeof coordinators[0].nodeId, 'number')
   strictEqual(typeof coordinators[0].host, 'string')
   strictEqual(typeof coordinators[0].port, 'number')
+})
+
+test('findCoordinator should fan out legacy requests and restore coordinator keys', async t => {
+  const admin = createAdmin(t)
+  const keys = ['group-1', 'group-2']
+  const requestedKeys: string[] = []
+  const connection = {
+    instanceId: 1,
+    send <ReturnType>(
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      strictEqual(apiKey, findCoordinatorV3.api.key)
+      strictEqual(apiVersion, 3)
+
+      const reader = Reader.from(payload())
+      const key = reader.readString()
+      requestedKeys.push(key)
+      strictEqual(reader.readInt8(), FindCoordinatorKeyTypes.GROUP)
+      reader.readTaggedFields()
+      strictEqual(reader.remaining, 0)
+
+      callback(null, {
+        throttleTimeMs: 0,
+        coordinators: [{ key: '', nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  admin[kApis] = [{ apiKey: findCoordinatorV3.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 3 }]
+  mockConnectionPoolGetFirstAvailable(admin[kConnections], () => true, null, connection)
+
+  const coordinators = await admin.findCoordinator({ keyType: FindCoordinatorKeyTypes.GROUP, keys })
+
+  deepStrictEqual(requestedKeys.sort(), keys)
+  deepStrictEqual(
+    coordinators.map(coordinator => coordinator.key),
+    keys
+  )
 })
 
 test('findCoordinator should validate options', async t => {

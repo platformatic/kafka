@@ -1,9 +1,8 @@
-import { pascalCase } from 'scule'
 import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type ConsumerGroupStateValue } from '../enumerations.ts'
+import { type ConsumerGroupStateValue, type KafkaConsumerGroupStateValue } from '../enumerations.ts'
 
 export type ListGroupsRequest = Parameters<typeof createRequest>
 
@@ -11,6 +10,7 @@ export interface ListGroupsResponseGroup {
   groupId: string
   protocolType: string
   groupState: string
+  groupType?: string
 }
 
 export interface ListGroupsResponse {
@@ -23,9 +23,12 @@ export interface ListGroupsResponse {
   ListGroups Request (Version: 4) => [states_filter] TAG_BUFFER
     states_filter => COMPACT_STRING
 */
-export function createRequest (statesFilter: ConsumerGroupStateValue[], _typesFilter: string[]): Writer {
+export function createRequest (
+  statesFilter: Array<ConsumerGroupStateValue | KafkaConsumerGroupStateValue>,
+  _typesFilter: string[]
+): Writer {
   return Writer.create()
-    .appendArray(statesFilter, (w, s) => w.appendString(pascalCase(s, { normalize: true })), true, false)
+    .appendArray(statesFilter, (w, state) => w.appendString(normalizeState(state)), true, false)
     .appendTaggedFields()
 }
 
@@ -49,18 +52,32 @@ export function parseResponse (
     errorCode: reader.readInt16(),
     groups: reader.readArray(r => {
       return {
-        groupId: r.readNullableString(),
+        groupId: r.readString(),
         protocolType: r.readString(),
-        groupState: r.readString()
-      } as ListGroupsResponseGroup
+        groupState: r.readString(),
+        groupType: ''
+      }
     })
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response
+}
+
+function normalizeState (state: ConsumerGroupStateValue | KafkaConsumerGroupStateValue): string {
+  switch (state) {
+    case 'PREPARING_REBALANCE': return 'PreparingRebalance'
+    case 'COMPLETING_REBALANCE': return 'CompletingRebalance'
+    case 'STABLE': return 'Stable'
+    case 'DEAD': return 'Dead'
+    case 'EMPTY': return 'Empty'
+    default: return state
+  }
 }
 
 export const api = createAPI<ListGroupsRequest, ListGroupsResponse>(16, 4, createRequest, parseResponse)

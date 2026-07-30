@@ -100,16 +100,17 @@ export function parseResponse (
     throttleTimeMs,
     errorCode,
     resultsByTransaction: reader.readArray((r, i) => {
-      return {
+      const transaction = {
         transactionalId: r.readString(),
         topicResults: r.readArray((r, j) => {
-          return {
+          const topic = {
             name: r.readString(),
             resultsByPartition: r.readArray((r, k) => {
               const partition = {
                 partitionIndex: r.readInt32(),
                 partitionErrorCode: r.readInt16()
               }
+              r.readTaggedFields()
 
               if (partition.partitionErrorCode !== 0) {
                 errors.push([
@@ -119,12 +120,18 @@ export function parseResponse (
               }
 
               return partition
-            })
+            }, true, false)
           }
-        })
+          r.readTaggedFields()
+          return topic
+        }, true, false)
       }
-    })
+      r.readTaggedFields()
+      return transaction
+    }, true, false)
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

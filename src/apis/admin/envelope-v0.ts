@@ -44,6 +44,8 @@ export function parseResponse (
     errorCode: reader.readInt16()
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }

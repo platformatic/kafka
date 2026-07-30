@@ -10,7 +10,7 @@ import {
   type FindCoordinatorRequest,
   type FindCoordinatorResponse
 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
-import { kConnections, kCreateConnectionPool, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
+import { kApis, kConnections, kCreateConnectionPool, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
 import { TopicsMap } from '../../../src/clients/consumer/topics-map.ts'
 import {
   type API,
@@ -33,11 +33,19 @@ import {
   defaultConsumerOptions,
   type ExtendedGroupProtocolSubscription,
   FetchIsolationLevels,
+  fetchV12,
   fetchV17,
   findCoordinatorV6,
   type GroupPartitionsAssignments,
   heartbeatV4,
+  heartbeatV3,
+  heartbeatV2,
+  heartbeatV1,
   instancesChannel,
+  joinGroupV2,
+  joinGroupV3,
+  joinGroupV4,
+  joinGroupV5,
   joinGroupV9,
   leaveGroupV5,
   MessagesStream,
@@ -47,6 +55,7 @@ import {
   MultipleErrors,
   NetworkError,
   offsetCommitV9,
+  offsetFetchV3,
   offsetFetchV9,
   type Offsets,
   type OffsetsWithTimestamps,
@@ -56,6 +65,7 @@ import {
   ProtocolError,
   Reader,
   ResponseError,
+  type Writer,
   type RecordsBatch,
   sleep,
   syncGroupV5,
@@ -149,6 +159,108 @@ async function fetchFromOffset ({
 
 const broker = parseBroker(kafkaBootstrapServers[0])
 
+test('fetch normalizes legacy response error topic names to IDs', async t => {
+  const consumer = createConsumer(t, { retries: false })
+  const topic = 'legacy-offset-reset'
+  const topicId = randomUUID()
+  const metadata: ClusterMetadata = {
+    id: 'cluster',
+    controllerId: 1,
+    brokers: new Map([[1, { nodeId: 1, ...broker, rack: null }]]),
+    topics: new Map([
+      [
+        topic,
+        {
+          id: topicId,
+          partitions: [{ leader: 1, leaderEpoch: -1, replicas: [1], isr: [1], offlineReplicas: [] }],
+          partitionsCount: 1,
+          lastUpdate: Date.now()
+        }
+      ]
+    ]),
+    lastUpdate: Date.now()
+  }
+  const response: FetchResponse = {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 123,
+    nodeEndpoints: [],
+    responses: [
+      {
+        topicId: topic,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 1,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
+            abortedTransactions: [],
+            preferredReadReplica: -1,
+            records: []
+          }
+        ]
+      }
+    ]
+  }
+  const connection = {
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _parser: unknown,
+      _requestTags: boolean,
+      _responseTags: boolean,
+      callback: Callback<unknown>
+    ): void {
+      callback(new ResponseError(fetchV12.api.key, fetchV12.api.version, { '/responses/0/partitions/0': [1, null] }, response))
+    }
+  } as unknown as Connection
+
+  consumer[kApis] = [{ apiKey: fetchV12.api.key, name: 'Fetch', minVersion: 12, maxVersion: 12 }]
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback) => {
+      callback(null, metadata)
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    consumer[kConnections],
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback) => {
+      callback(null, connection)
+      return true
+    }
+  )
+
+  await rejects(
+    consumer.fetch({
+      node: 1,
+      topics: [
+        {
+          topicId,
+          partitions: [
+            { partition: 0, currentLeaderEpoch: -1, fetchOffset: 0n, lastFetchedEpoch: -1, partitionMaxBytes: 1024 }
+          ]
+        }
+      ]
+    }),
+    error => {
+      strictEqual((error as ResponseError).response.responses[0].topicId, topicId)
+      return true
+    }
+  )
+})
+
 function createPreferredReplicaMetadata (
   topic: string,
   topicId: string,
@@ -189,7 +301,8 @@ function createPreferredReplicaMetadata (
 function mockConsumerGroupCoordinator (
   consumer: Consumer<Buffer, Buffer, Buffer, Buffer>,
   coordinatorId: number,
-  operationError?: Error
+  operationError?: Error,
+  legacyFindCoordinator: boolean = false
 ): void {
   mockConnectionPoolGetFirstAvailable(consumer[kConnections], 1, null, {} as any)
 
@@ -218,7 +331,7 @@ function mockConsumerGroupCoordinator (
     undefined,
     (_original, name, callback: Callback<API<FindCoordinatorRequest, FindCoordinatorResponse>>) => {
       if (name === 'FindCoordinator') {
-        callback(null, ((
+        const findCoordinator = (
           _connection: Connection,
           _keyType: number,
           keys: string[],
@@ -228,7 +341,7 @@ function mockConsumerGroupCoordinator (
             throttleTimeMs: 0,
             coordinators: [
               {
-                key: keys[0],
+                key: legacyFindCoordinator ? '' : keys[0],
                 nodeId: coordinatorId,
                 host: broker.host,
                 port: broker.port,
@@ -237,7 +350,9 @@ function mockConsumerGroupCoordinator (
               }
             ]
           })
-        }) as any)
+        }
+        Object.assign(findCoordinator, { version: legacyFindCoordinator ? 3 : 6 })
+        callback(null, findCoordinator as unknown as API<FindCoordinatorRequest, FindCoordinatorResponse>)
         return true
       }
 
@@ -264,30 +379,27 @@ async function seedPreferredReadReplicas (
 
   mockMetadata(consumer, 1, null, metadata)
   mockConnectionPoolGet(pool, 1, null, connection)
-  mockMethod(
-    consumer,
-    kGetApi,
-    1,
-    null,
-    null,
-    (_original, _name, callback: CallbackWithPromise<typeof fetchV17.api>) => {
-      callback(null, ((
-        _connection,
-        _maxWaitMs,
-        _minBytes,
-        _maxBytes,
-        _isolationLevel,
-        _sessionId,
-        _sessionEpoch,
-        _topics,
-        _forgottenTopicsData,
-        _rackId,
-        callback
-      ) => {
-        callback!(null, response)
-      }) as typeof fetchV17.api)
-    }
-  )
+  mockMethod(consumer, kGetApi, 1, null, null, (
+    _original,
+    _name,
+    callback: CallbackWithPromise<typeof fetchV17.api>
+  ) => {
+    callback(null, ((
+      _connection,
+      _maxWaitMs,
+      _minBytes,
+      _maxBytes,
+      _isolationLevel,
+      _sessionId,
+      _sessionEpoch,
+      _topics,
+      _forgottenTopicsData,
+      _rackId,
+      callback
+    ) => {
+      callback!(null, response)
+    }) as typeof fetchV17.api)
+  })
 
   await consumer.fetch({
     connectionPool: pool,
@@ -1317,6 +1429,7 @@ test('fetch should return data and support diagnostic channels', async t => {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId: topicInfo.id,
@@ -1327,8 +1440,12 @@ test('fetch should return data and support diagnostic channels', async t => {
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
-            preferredReadReplica: -1
+            preferredReadReplica: -1,
+            records: []
           }
         ]
       }
@@ -1423,47 +1540,51 @@ test('fetch should send clientRack as the fetch rack id', async t => {
   })
   mockConnectionPoolGet(pool, 1, null, connection)
   mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
-  mockAPI(
-    pool,
-    fetchV17.api.key,
-    null,
-    null,
-    (_original, _apiKey, _apiVersion, payload, _responseParser, _requestTags, _responseTags, callback) => {
-      const reader = Reader.from(payload())
+  mockAPI(pool, fetchV17.api.key, null, null, (
+    _original,
+    _apiKey,
+    _apiVersion,
+    payload,
+    _responseParser,
+    _requestTags,
+    _responseTags,
+    callback
+  ) => {
+    const reader = Reader.from(payload())
 
-      reader.readInt32()
-      reader.readInt32()
-      reader.readInt32()
-      reader.readInt8()
-      reader.readInt32()
-      reader.readInt32()
-      reader.readArray(r => {
-        r.readUUID()
-        r.readArray(r => {
-          r.readInt32()
-          r.readInt32()
-          r.readInt64()
-          r.readInt32()
-          r.readInt64()
-          r.readInt32()
-        })
+    reader.readInt32()
+    reader.readInt32()
+    reader.readInt32()
+    reader.readInt8()
+    reader.readInt32()
+    reader.readInt32()
+    reader.readArray(r => {
+      r.readUUID()
+      r.readArray(r => {
+        r.readInt32()
+        r.readInt32()
+        r.readInt64()
+        r.readInt32()
+        r.readInt64()
+        r.readInt32()
       })
-      reader.readArray(r => {
-        r.readUUID()
-        r.readArray(r => r.readInt32(), true, false)
-      })
-      requestRackId = reader.readString()
+    })
+    reader.readArray(r => {
+      r.readUUID()
+      r.readArray(r => r.readInt32(), true, false)
+    })
+    requestRackId = reader.readString()
 
-      callback(null, {
-        throttleTimeMs: 0,
-        errorCode: 0,
-        sessionId: 0,
-        responses: []
-      })
+    callback(null, {
+      throttleTimeMs: 0,
+      errorCode: 0,
+      sessionId: 0,
+      nodeEndpoints: [],
+      responses: []
+    })
 
-      return false
-    }
-  )
+    return false
+  })
 
   await consumer.fetch({
     connectionPool: pool,
@@ -1526,37 +1647,44 @@ test('fetch should send incremental fetch requests and forget partitions no long
       return true
     }
   )
-  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
-    const api = (
-      _connection: unknown,
-      _maxWaitMs: number,
-      _minBytes: number,
-      _maxBytes: number,
-      _isolationLevel: number,
-      sessionId: number,
-      sessionEpoch: number,
-      topics: { topicId: string; partitions: { partition: number; fetchOffset: bigint }[] }[],
-      forgottenTopicsData: { topic: string; partitions: number[] }[],
-      _rackId: string,
-      callback: CallbackWithPromise<FetchResponse>
-    ) => {
-      fetchRequests.push({
-        sessionId,
-        sessionEpoch,
-        topics: topics.map(topic => {
-          return {
-            topicId: topic.topicId,
-            partitions: topic.partitions.map(partition => `${partition.partition}@${partition.fetchOffset}`)
-          }
-        }),
-        forgottenTopicsData
-      })
-      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
-    }
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _maxWaitMs: number,
+        _minBytes: number,
+        _maxBytes: number,
+        _isolationLevel: number,
+        sessionId: number,
+        sessionEpoch: number,
+        topics: { topicId: string; partitions: { partition: number; fetchOffset: bigint }[] }[],
+        forgottenTopicsData: { topic: string; partitions: number[] }[],
+        _rackId: string,
+        callback: CallbackWithPromise<FetchResponse>
+      ) => {
+        fetchRequests.push({
+          sessionId,
+          sessionEpoch,
+          topics: topics.map(topic => {
+            return {
+              topicId: topic.topicId,
+              partitions: topic.partitions.map(partition => `${partition.partition}@${partition.fetchOffset}`)
+            }
+          }),
+          forgottenTopicsData
+        })
+        callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, nodeEndpoints: [], responses: [] })
+      }
 
-    callback(null, api)
-    return true
-  })
+      callback(null, api)
+      return true
+    }
+  )
 
   function fetchOptions (topics: [string, number[], bigint][]) {
     return {
@@ -1580,7 +1708,12 @@ test('fetch should send incremental fetch requests and forget partitions no long
   }
 
   // Full fetch establishing the session
-  await consumer.fetch(fetchOptions([[topicId, [0, 1], 0n], [otherTopicId, [0], 0n]]))
+  await consumer.fetch(
+    fetchOptions([
+      [topicId, [0, 1], 0n],
+      [otherTopicId, [0], 0n]
+    ])
+  )
   // Same state for partition 0, the others are dropped: only forgotten data is sent
   await consumer.fetch(fetchOptions([[topicId, [0], 0n]]))
   // The offset of partition 0 advanced: only that partition is sent
@@ -1661,27 +1794,34 @@ test('fetch should not share incremental fetch sessions across connection pools'
     )
   }
 
-  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
-    const api = (
-      _connection: unknown,
-      _maxWaitMs: number,
-      _minBytes: number,
-      _maxBytes: number,
-      _isolationLevel: number,
-      sessionId: number,
-      sessionEpoch: number,
-      topics: { partitions: unknown[] }[],
-      _forgottenTopicsData: unknown[],
-      _rackId: string,
-      callback: CallbackWithPromise<FetchResponse>
-    ) => {
-      fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
-      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
-    }
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _maxWaitMs: number,
+        _minBytes: number,
+        _maxBytes: number,
+        _isolationLevel: number,
+        sessionId: number,
+        sessionEpoch: number,
+        topics: { partitions: unknown[] }[],
+        _forgottenTopicsData: unknown[],
+        _rackId: string,
+        callback: CallbackWithPromise<FetchResponse>
+      ) => {
+        fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
+        callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, nodeEndpoints: [], responses: [] })
+      }
 
-    callback(null, api)
-    return true
-  })
+      callback(null, api)
+      return true
+    }
+  )
 
   function fetchOptions (connectionPool: typeof pool) {
     return {
@@ -1747,35 +1887,42 @@ test('fetch should retry with a full fetch when the broker evicts the session', 
       return true
     }
   )
-  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
-    const api = (
-      _connection: unknown,
-      _maxWaitMs: number,
-      _minBytes: number,
-      _maxBytes: number,
-      _isolationLevel: number,
-      sessionId: number,
-      sessionEpoch: number,
-      topics: { partitions: unknown[] }[],
-      _forgottenTopicsData: unknown[],
-      _rackId: string,
-      callback: CallbackWithPromise<FetchResponse>
-    ) => {
-      fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _maxWaitMs: number,
+        _minBytes: number,
+        _maxBytes: number,
+        _isolationLevel: number,
+        sessionId: number,
+        sessionEpoch: number,
+        topics: { partitions: unknown[] }[],
+        _forgottenTopicsData: unknown[],
+        _rackId: string,
+        callback: CallbackWithPromise<FetchResponse>
+      ) => {
+        fetchRequests.push({ sessionId, sessionEpoch, partitions: topics.reduce((c, t) => c + t.partitions.length, 0) })
 
-      // The broker evicted the session: fail the second request (the first incremental one)
-      if (fetchRequests.length === 2) {
-        const response = { throttleTimeMs: 0, errorCode: 70, sessionId: 0, responses: [] }
-        callback(new ResponseError(1, 17, { '': [70, null] }, response), undefined)
-        return
+        // The broker evicted the session: fail the second request (the first incremental one)
+        if (fetchRequests.length === 2) {
+          const response = { throttleTimeMs: 0, errorCode: 70, sessionId: 0, nodeEndpoints: [], responses: [] }
+          callback(new ResponseError(1, 17, { '': [70, null] }, response), undefined)
+          return
+        }
+
+        callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, nodeEndpoints: [], responses: [] })
       }
 
-      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 123, responses: [] })
+      callback(null, api)
+      return true
     }
-
-    callback(null, api)
-    return true
-  })
+  )
 
   function fetchOptions () {
     return {
@@ -1846,28 +1993,35 @@ test('fetch should start a new session with no forgotten partitions when the bro
       return true
     }
   )
-  mockMethod(consumer, kGetApi, () => true, null, null, (_original, _name, callback: CallbackWithPromise<unknown>) => {
-    const api = (
-      _connection: unknown,
-      _maxWaitMs: number,
-      _minBytes: number,
-      _maxBytes: number,
-      _isolationLevel: number,
-      sessionId: number,
-      sessionEpoch: number,
-      _topics: unknown,
-      forgottenTopicsData: { topic: string; partitions: number[] }[],
-      _rackId: string,
-      callback: CallbackWithPromise<FetchResponse>
-    ) => {
-      fetchRequests.push({ sessionId, sessionEpoch, forgottenTopicsData })
-      // The broker never establishes a session
-      callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, responses: [] })
-    }
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _maxWaitMs: number,
+        _minBytes: number,
+        _maxBytes: number,
+        _isolationLevel: number,
+        sessionId: number,
+        sessionEpoch: number,
+        _topics: unknown,
+        forgottenTopicsData: { topic: string; partitions: number[] }[],
+        _rackId: string,
+        callback: CallbackWithPromise<FetchResponse>
+      ) => {
+        fetchRequests.push({ sessionId, sessionEpoch, forgottenTopicsData })
+        // The broker never establishes a session
+        callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, nodeEndpoints: [], responses: [] })
+      }
 
-    callback(null, api)
-    return true
-  })
+      callback(null, api)
+      return true
+    }
+  )
 
   function fetchOptions (partitions: number[]) {
     return {
@@ -1906,11 +2060,20 @@ test('fetch should route direct requests to cached preferred read replicas', asy
   const pool = consumer[kCreateConnectionPool]()
   const connection = {
     instanceId: 1,
-    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: unknown,
+      _parser: unknown,
+      _requestTags: unknown,
+      _responseTags: unknown,
+      callback: CallbackWithPromise<FetchResponse>
+    ) {
       callback(null, {
         throttleTimeMs: 0,
         errorCode: 0,
         sessionId: 0,
+        nodeEndpoints: [],
         responses: []
       })
     }
@@ -1924,6 +2087,7 @@ test('fetch should route direct requests to cached preferred read replicas', asy
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -1934,6 +2098,9 @@ test('fetch should route direct requests to cached preferred read replicas', asy
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2002,6 +2169,7 @@ test('fetch should clear preferred read replicas for all partitions in a failed 
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -2012,6 +2180,9 @@ test('fetch should clear preferred read replicas for all partitions in a failed 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2022,6 +2193,9 @@ test('fetch should clear preferred read replicas for all partitions in a failed 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2056,11 +2230,20 @@ test('fetch should clear preferred read replicas for all partitions in a failed 
   const successfulPool = consumer[kCreateConnectionPool]()
   const connection = {
     instanceId: 1,
-    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: unknown,
+      _parser: unknown,
+      _requestTags: unknown,
+      _responseTags: unknown,
+      callback: CallbackWithPromise<FetchResponse>
+    ) {
       callback(null, {
         throttleTimeMs: 0,
         errorCode: 0,
         sessionId: 0,
+        nodeEndpoints: [],
         responses: []
       })
     }
@@ -2092,6 +2275,7 @@ test('preferred read replica should expire and fall back to leader', async t => 
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -2102,6 +2286,9 @@ test('preferred read replica should expire and fall back to leader', async t => 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2132,6 +2319,7 @@ test('preferred read replica should clear and refresh metadata when cached node 
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -2142,6 +2330,9 @@ test('preferred read replica should clear and refresh metadata when cached node 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2164,11 +2355,20 @@ test('fetch should fall back to requested node when partitions prefer different 
   const pool = consumer[kCreateConnectionPool]()
   const connection = {
     instanceId: 1,
-    send (_apiKey: number, _apiVersion: number, _payload: unknown, _parser: unknown, _requestTags: unknown, _responseTags: unknown, callback: CallbackWithPromise<FetchResponse>) {
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: unknown,
+      _parser: unknown,
+      _requestTags: unknown,
+      _responseTags: unknown,
+      callback: CallbackWithPromise<FetchResponse>
+    ) {
       callback(null, {
         throttleTimeMs: 0,
         errorCode: 0,
         sessionId: 0,
+        nodeEndpoints: [],
         responses: []
       })
     }
@@ -2181,6 +2381,7 @@ test('fetch should fall back to requested node when partitions prefer different 
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 0,
+    nodeEndpoints: [],
     responses: [
       {
         topicId,
@@ -2191,6 +2392,9 @@ test('fetch should fall back to requested node when partitions prefer different 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 1,
             records: []
@@ -2201,6 +2405,9 @@ test('fetch should fall back to requested node when partitions prefer different 
             highWatermark: 0n,
             lastStableOffset: 0n,
             logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
             abortedTransactions: [],
             preferredReadReplica: 2,
             records: []
@@ -3365,6 +3572,59 @@ test('listCommittedOffsets should handle errors from the API', async t => {
   }
 })
 
+test('listCommittedOffsets should normalize legacy OffsetFetch responses', async t => {
+  const consumer = createConsumer(t)
+  const topic = await createTopic(t, true)
+
+  await consumer.joinGroup()
+  consumer[kApis] = consumer[kApis].map(api =>
+    api.name === 'OffsetFetch' ? { ...api, minVersion: 0, maxVersion: 3 } : api)
+
+  mockAPI(consumer[kConnections], offsetFetchV3.api.key, null, null, (
+    _original,
+    _apiKey,
+    apiVersion,
+    payload,
+    _responseParser,
+    requestTaggedFields,
+    responseTaggedFields,
+    callback
+  ) => {
+    strictEqual(apiVersion, 3)
+    strictEqual(requestTaggedFields, false)
+    strictEqual(responseTaggedFields, false)
+
+    const reader = Reader.from(payload())
+    strictEqual(reader.readString(false), consumer.groupId)
+    deepStrictEqual(
+      reader.readArray(
+        r => ({ name: r.readString(false), partitionIndexes: r.readArray(r => r.readInt32(), false, false) }),
+        false,
+        false
+      ),
+      [{ name: topic, partitionIndexes: [0] }]
+    )
+    strictEqual(reader.remaining, 0)
+
+    callback(null, {
+      throttleTimeMs: 0,
+      topics: [
+        {
+          name: topic,
+          partitions: [
+            { partitionIndex: 0, committedOffset: 42n, committedLeaderEpoch: -1, metadata: null, errorCode: 0 }
+          ]
+        }
+      ],
+      errorCode: 0
+    })
+    return true
+  })
+
+  const committed = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(committed.get(topic), [42n])
+})
+
 test('listCommittedOffsets should refresh member epoch and retry STALE_MEMBER_EPOCH with consumer group protocol', async t => {
   const clientRack = 'rack-2'
   const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: 2, clientRack })
@@ -3853,6 +4113,13 @@ test('findGroupCoordinator should return the coordinator nodeId and support diag
   verifyTracingChannel()
 })
 
+test('findGroupCoordinator should restore legacy coordinator keys', async t => {
+  const consumer = createConsumer(t)
+  mockConsumerGroupCoordinator(consumer, 1, undefined, true)
+
+  strictEqual(await consumer.findGroupCoordinator(), 1)
+})
+
 test('commit should invalidate cached coordinator on coordinator protocol errors', async t => {
   const consumer = createConsumer(t, { retries: 0 })
   mockConsumerGroupCoordinator(consumer, 1, new ProtocolError('NOT_COORDINATOR'))
@@ -4050,6 +4317,416 @@ test('joinGroup should join the consumer group and return memberId and support d
   verifySyncTracingChannel()
 })
 
+test('joinGroup should use negotiated legacy APIs and continue to SyncGroup', async t => {
+  for (const { api, groupInstanceId } of [
+    { api: joinGroupV5.api, groupInstanceId: 'test-instance' },
+    { api: joinGroupV4.api, groupInstanceId: null },
+    { api: joinGroupV3.api, groupInstanceId: null },
+    { api: joinGroupV2.api, groupInstanceId: null }
+  ]) {
+    const version = api.version
+
+    await t.test(`JoinGroup v${version}`, async t => {
+      const consumer = createConsumer(t, { groupInstanceId: 'test-instance' })
+      let syncGroupCalled = false
+      const connection = {
+        instanceId: 1,
+        send (
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: unknown,
+          requestHeaderTaggedFields: boolean,
+          responseHeaderTaggedFields: boolean,
+          callback: CallbackWithPromise<unknown>
+        ) {
+          if (apiKey === api.key) {
+            strictEqual(apiVersion, version)
+            strictEqual(requestHeaderTaggedFields, false)
+            strictEqual(responseHeaderTaggedFields, false)
+
+            const reader = Reader.from(payload())
+            strictEqual(reader.readString(false), consumer.groupId)
+            strictEqual(reader.readInt32(), 6000)
+            strictEqual(reader.readInt32(), 6000)
+            strictEqual(reader.readString(false), '')
+
+            if (version === 5) {
+              strictEqual(reader.readNullableString(false), groupInstanceId)
+            }
+
+            strictEqual(reader.readString(false), 'consumer')
+            const protocols = reader.readArray(
+              r => ({ name: r.readString(false), metadata: r.readBytes(false) }),
+              false,
+              false
+            )
+            deepStrictEqual(
+              protocols.map(protocol => protocol.name),
+              defaultConsumerOptions.protocols.map(protocol => protocol.name)
+            )
+            for (const protocol of protocols) {
+              ok(Buffer.isBuffer(protocol.metadata))
+            }
+            strictEqual(reader.remaining, 0)
+
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              generationId: 1,
+              protocolType: null,
+              protocolName: defaultConsumerOptions.protocols[0].name,
+              leader: 'another-member',
+              skipAssignment: false,
+              memberId: 'test-member',
+              members: []
+            })
+            return
+          }
+
+          if (apiKey === syncGroupV5.api.key) {
+            syncGroupCalled = true
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              protocolType: null,
+              protocolName: null,
+              assignment: Buffer.from([0, 0])
+            })
+            return
+          }
+
+          if (apiKey === leaveGroupV5.api.key) {
+            callback(null, {})
+            return
+          }
+
+          throw new Error(`Unexpected API key ${apiKey}`)
+        }
+      }
+
+      consumer[kApis] = [
+        { apiKey: joinGroupV5.api.key, name: 'JoinGroup', minVersion: version, maxVersion: version },
+        { apiKey: syncGroupV5.api.key, name: 'SyncGroup', minVersion: 5, maxVersion: 5 },
+        { apiKey: leaveGroupV5.api.key, name: 'LeaveGroup', minVersion: 5, maxVersion: 5 }
+      ]
+
+      mockConnectionPoolGet(
+        consumer[kConnections],
+        () => true,
+        null,
+        null,
+        (_original, _broker, callback) => {
+          callback(null, connection as unknown as Connection)
+          return true
+        }
+      )
+      mockMetadata(
+        consumer,
+        () => true,
+        null,
+        null,
+        (_original, _options, callback) => {
+          callback(null, { brokers: new Map([[1, broker]]), topics: new Map() })
+          return true
+        }
+      )
+      mockMethod(
+        consumer,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'FindCoordinator') {
+            const findCoordinator = (
+              _connection: Connection,
+              _keyType: number,
+              _keys: string[],
+              apiCallback: Callback<unknown>
+            ) => {
+              apiCallback(null, { coordinators: [{ key: consumer.groupId, nodeId: 1 }] })
+            }
+            Object.assign(findCoordinator, { version: 3 })
+            callback(null, findCoordinator as unknown as API<FindCoordinatorRequest, FindCoordinatorResponse>)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      strictEqual(await consumer.joinGroup(), 'test-member')
+      strictEqual(syncGroupCalled, true)
+    })
+  }
+})
+
+test('joinGroup should use negotiated legacy SyncGroup APIs and continue with assignments', async t => {
+  for (const version of [3, 2, 1]) {
+    await t.test(`SyncGroup v${version}`, async t => {
+      const groupInstanceId = 'test-instance'
+      const consumer = createConsumer(t, { groupInstanceId })
+      const connection = {
+        instanceId: 1,
+        send (
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: unknown,
+          requestHeaderTaggedFields: boolean,
+          responseHeaderTaggedFields: boolean,
+          callback: CallbackWithPromise<unknown>
+        ) {
+          if (apiKey === joinGroupV5.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              generationId: 1,
+              protocolType: 'ignored-protocol-type',
+              protocolName: 'ignored-protocol-name',
+              leader: 'another-member',
+              skipAssignment: false,
+              memberId: 'test-member',
+              members: []
+            })
+            return
+          }
+
+          if (apiKey === syncGroupV5.api.key) {
+            strictEqual(apiVersion, version)
+            strictEqual(requestHeaderTaggedFields, false)
+            strictEqual(responseHeaderTaggedFields, false)
+
+            const reader = Reader.from(payload())
+            strictEqual(reader.readString(false), consumer.groupId)
+            strictEqual(reader.readInt32(), 1)
+            strictEqual(reader.readString(false), 'test-member')
+            if (version === 3) {
+              strictEqual(reader.readNullableString(false), groupInstanceId)
+            }
+            deepStrictEqual(
+              reader.readArray(r => ({ memberId: r.readString(false), assignment: r.readBytes(false) }), false, false),
+              []
+            )
+            strictEqual(reader.remaining, 0)
+
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              protocolType: null,
+              protocolName: null,
+              assignment: Buffer.from([0, 0])
+            })
+            return
+          }
+
+          if (apiKey === leaveGroupV5.api.key) {
+            callback(null, {})
+            return
+          }
+
+          throw new Error(`Unexpected API key ${apiKey}`)
+        }
+      }
+
+      consumer[kApis] = [
+        { apiKey: joinGroupV5.api.key, name: 'JoinGroup', minVersion: 5, maxVersion: 5 },
+        { apiKey: syncGroupV5.api.key, name: 'SyncGroup', minVersion: version, maxVersion: version },
+        { apiKey: leaveGroupV5.api.key, name: 'LeaveGroup', minVersion: 5, maxVersion: 5 }
+      ]
+
+      mockConnectionPoolGet(
+        consumer[kConnections],
+        () => true,
+        null,
+        null,
+        (_original, _broker, callback) => {
+          callback(null, connection as unknown as Connection)
+          return true
+        }
+      )
+      mockMetadata(
+        consumer,
+        () => true,
+        null,
+        null,
+        (_original, _options, callback) => {
+          callback(null, { brokers: new Map([[1, broker]]), topics: new Map() })
+          return true
+        }
+      )
+      mockMethod(
+        consumer,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'FindCoordinator') {
+            const findCoordinator = (
+              _connection: Connection,
+              _keyType: number,
+              _keys: string[],
+              apiCallback: Callback<unknown>
+            ) => {
+              apiCallback(null, { coordinators: [{ key: consumer.groupId, nodeId: 1 }] })
+            }
+            Object.assign(findCoordinator, { version: 3 })
+            callback(null, findCoordinator as unknown as API<FindCoordinatorRequest, FindCoordinatorResponse>)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      strictEqual(await consumer.joinGroup(), 'test-member')
+      deepStrictEqual(consumer.assignments, [])
+    })
+  }
+})
+
+test('heartbeat should use negotiated legacy APIs and continue the consumer state', async t => {
+  for (const api of [heartbeatV3.api, heartbeatV2.api, heartbeatV1.api]) {
+    const version = api.version
+
+    await t.test(`Heartbeat v${version}`, async t => {
+      const groupInstanceId = 'test-instance'
+      const consumer = createConsumer(t, { groupInstanceId, heartbeatInterval: 10 })
+      let heartbeatCalls = 0
+      const connection = {
+        instanceId: 1,
+        send (
+          apiKey: number,
+          apiVersion: number,
+          payload: () => Writer,
+          _responseParser: unknown,
+          requestHeaderTaggedFields: boolean,
+          responseHeaderTaggedFields: boolean,
+          callback: CallbackWithPromise<unknown>
+        ) {
+          if (apiKey === joinGroupV5.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              generationId: 1,
+              protocolType: null,
+              protocolName: defaultConsumerOptions.protocols[0].name,
+              leader: 'another-member',
+              skipAssignment: false,
+              memberId: 'test-member',
+              members: []
+            })
+            return
+          }
+
+          if (apiKey === syncGroupV5.api.key) {
+            callback(null, {
+              throttleTimeMs: 0,
+              errorCode: 0,
+              protocolType: null,
+              protocolName: null,
+              assignment: Buffer.from([0, 0])
+            })
+            return
+          }
+
+          if (apiKey === api.key) {
+            heartbeatCalls++
+            strictEqual(apiVersion, version)
+            strictEqual(requestHeaderTaggedFields, false)
+            strictEqual(responseHeaderTaggedFields, false)
+
+            const reader = Reader.from(payload())
+            strictEqual(reader.readString(false), consumer.groupId)
+            strictEqual(reader.readInt32(), consumer.generationId)
+            strictEqual(reader.readString(false), consumer.memberId)
+            if (version === 3) {
+              strictEqual(reader.readNullableString(false), groupInstanceId)
+            }
+            strictEqual(reader.remaining, 0)
+
+            callback(null, { throttleTimeMs: 0, errorCode: 0 })
+            return
+          }
+
+          if (apiKey === leaveGroupV5.api.key) {
+            callback(null, {})
+            return
+          }
+
+          throw new Error(`Unexpected API key ${apiKey}`)
+        }
+      }
+
+      consumer[kApis] = [
+        { apiKey: joinGroupV5.api.key, name: 'JoinGroup', minVersion: 5, maxVersion: 5 },
+        { apiKey: syncGroupV5.api.key, name: 'SyncGroup', minVersion: 5, maxVersion: 5 },
+        { apiKey: api.key, name: 'Heartbeat', minVersion: version, maxVersion: version },
+        { apiKey: leaveGroupV5.api.key, name: 'LeaveGroup', minVersion: 5, maxVersion: 5 }
+      ]
+
+      mockConnectionPoolGet(
+        consumer[kConnections],
+        () => true,
+        null,
+        null,
+        (_original, _broker, callback) => {
+          callback(null, connection as unknown as Connection)
+          return true
+        }
+      )
+      mockMetadata(
+        consumer,
+        () => true,
+        null,
+        null,
+        (_original, _options, callback) => {
+          callback(null, { brokers: new Map([[1, broker]]), topics: new Map() })
+          return true
+        }
+      )
+      mockMethod(
+        consumer,
+        kGetApi,
+        () => true,
+        null,
+        null,
+        (original, name, callback) => {
+          if (name === 'FindCoordinator') {
+            const findCoordinator = (
+              _connection: Connection,
+              _keyType: number,
+              _keys: string[],
+              apiCallback: Callback<unknown>
+            ) => {
+              apiCallback(null, { coordinators: [{ key: consumer.groupId, nodeId: 1 }] })
+            }
+            Object.assign(findCoordinator, { version: 3 })
+            callback(null, findCoordinator as unknown as API<FindCoordinatorRequest, FindCoordinatorResponse>)
+            return true
+          }
+
+          original(name, callback)
+          return true
+        }
+      )
+
+      await consumer.joinGroup()
+      await once(consumer, 'consumer:heartbeat:end')
+      await once(consumer, 'consumer:heartbeat:end')
+
+      strictEqual(heartbeatCalls, 2)
+      ok(consumer.lastHeartbeat !== null)
+      strictEqual(consumer.memberId, 'test-member')
+      strictEqual(consumer.generationId, 1)
+    })
+  }
+})
+
 test('joinGroup should setup assignment for a topic', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)
@@ -4198,11 +4875,7 @@ test('joinGroup should expose protocolsMetadata to the partition assigner', asyn
   const groupId = createGroupId()
   const seenUserData: Record<string, number[]>[] = []
 
-  function protocolsMetadata (
-    _protocols: unknown,
-    topics: string[],
-    metadata: ClusterMetadata
-  ): Buffer {
+  function protocolsMetadata (_protocols: unknown, topics: string[], metadata: ClusterMetadata): Buffer {
     const userData: Record<string, number[]> = {}
 
     for (const topic of topics) {
@@ -4276,6 +4949,7 @@ test('joinGroup should support callback style protocolsMetadata', async t => {
       strictEqual(topics[0], topic)
       strictEqual(metadata.topics.get(topic)!.partitionsCount, 3)
       callback(null, Buffer.from('callback-metadata'))
+      return undefined
     }
   })
 
@@ -4759,6 +5433,46 @@ test('leaveGroup should silently succeed if not in a group', async t => {
   // State should remain unchanged
   strictEqual(consumer.memberId, null)
   strictEqual(consumer.generationId, 0)
+})
+
+test('leaveGroup should use a negotiated legacy API with one member', async t => {
+  const consumer = createConsumer(t)
+  consumer.memberId = 'test-member'
+  consumer.generationId = 1
+  let members: Array<{ memberId: string }> | undefined
+
+  mockConsumerGroupCoordinator(consumer, 1)
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (original, name, callback) => {
+      if (name === 'LeaveGroup') {
+        const leaveGroup = Object.assign(
+          (
+            _connection: Connection,
+            _groupId: string,
+            requestMembers: Array<{ memberId: string }>,
+            apiCallback: Callback<unknown>
+          ) => {
+            members = requestMembers
+            apiCallback(null, {})
+          },
+          { key: 13, version: 1 }
+        ) as unknown as API<[string, Array<{ memberId: string }>], unknown>
+        callback(null, leaveGroup)
+        return true
+      }
+
+      original(name, callback)
+      return true
+    }
+  )
+
+  await consumer.leaveGroup()
+  deepStrictEqual(members, [{ memberId: 'test-member' }])
 })
 
 test('leaveGroup should handle errors from Connection.get', async t => {
@@ -5258,8 +5972,6 @@ test('metrics should track the consumer lag', async t => {
       }
     )
   }
-  consumer.startLagMonitoring({ topics: [topic] }, 500)
-
   // We have 15 messages, 5 in each partition
   const messages = Array.from({ length: 15 }, (_, i) => ({
     topic,
@@ -5290,9 +6002,9 @@ test('metrics should track the consumer lag', async t => {
   const paused = once(stream, 'pause')
   stream.resume()
   await paused
-  const [lag] = await once(consumer, 'consumer:lag')
+  const lag = await consumer.getLag({ topics: [topic] })
 
-  const expectedSum = Number(lag.get(topic).reduce((a: bigint, c: bigint) => a + c, 0n))
+  const expectedSum = Number(lag.get(topic)!.reduce((a: bigint, c: bigint) => a + c, 0n))
 
   {
     const metrics = await registry.getMetricsAsJSON()

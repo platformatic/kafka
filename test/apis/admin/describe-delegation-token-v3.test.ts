@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeDelegationTokenV3 } from '../../../src/index.ts'
 
@@ -24,6 +24,16 @@ test('createRequest serializes empty owners array correctly', () => {
 
   // Verify serialized data
   deepStrictEqual(ownersArray, [], 'Empty owners array should be serialized correctly')
+})
+
+test('createRequest serializes null owners with compact encoding and consumes root tags', () => {
+  const reader = Reader.from(createRequest(null))
+  strictEqual(
+    reader.readNullableArray(() => undefined),
+    null
+  )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes single owner correctly', () => {
@@ -112,7 +122,7 @@ test('parseResponse correctly processes a successful empty response', () => {
     .appendInt32(0) // throttleTimeMs
     .appendTaggedFields()
 
-  const response = parseResponse(1, 41, 3, Reader.from(writer))
+  const response: describeDelegationTokenV3.DescribeDelegationTokenResponse = parseResponse(1, 41, 3, Reader.from(writer))
 
   // Verify response structure
   deepStrictEqual(

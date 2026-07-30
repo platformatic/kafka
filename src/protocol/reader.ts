@@ -416,7 +416,7 @@ export class Reader {
     return reader()
   }
 
-  // TODO: Tagged fields are not supported yet
+  // Skip unknown tagged fields because codecs do not expose them to callers.
   readTaggedFields (): void {
     const length = this.readUnsignedVarInt()
     for (let i = 0; i < length; i++) {

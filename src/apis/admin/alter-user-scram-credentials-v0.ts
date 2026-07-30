@@ -58,7 +58,6 @@ export function createRequest (
         .appendBytes(u.saltedPassword)
     })
     .appendTaggedFields()
-    .appendTaggedFields()
 }
 
 /*
@@ -93,6 +92,8 @@ export function parseResponse (
       return result
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

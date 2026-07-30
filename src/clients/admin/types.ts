@@ -49,7 +49,7 @@ export interface GroupMember {
 export interface GroupBase {
   id: string
   state: ConsumerGroupStateValue
-  groupType: string
+  groupType?: string
   protocolType: string
 }
 

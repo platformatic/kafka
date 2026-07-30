@@ -1,17 +1,26 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
+import * as apis from '../../../src/apis/index.ts'
 import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
-import { kConnections, kGetApi, kGetBootstrapConnection, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
+import { kApis, kConnections, kGetApi, kGetBootstrapConnection, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
-  apiVersionsV3,
+  apiVersionsV1,
   Base,
   baseApisChannel,
   baseMetadataChannel,
+  type Callback,
   Connection,
   MultipleErrors,
+  Reader,
+  metadataV0,
+  metadataV1,
+  metadataV10,
+  metadataV8,
+  type ResponseParser,
   sleep,
   TimeoutError,
   UnsupportedApiError,
@@ -19,7 +28,8 @@ import {
   type Broker,
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
-  type ClusterMetadata
+  type ClusterMetadata,
+  Writer
 } from '../../../src/index.ts'
 import {
   createBase,
@@ -223,6 +233,63 @@ test('listApis should return a list of available APIs', async t => {
   ok(produceApi.maxVersion > 0)
 })
 
+test('listApis should bootstrap with the empty ApiVersions v1 payload', async t => {
+  const client = createBase(t)
+  const connection = {
+    send<ReturnType> (
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      requestTaggedFields: boolean,
+      responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      strictEqual(apiKey, apiVersionsV1.api.key)
+      strictEqual(apiVersion, apiVersionsV1.api.version)
+      strictEqual(payload().length, 0)
+      strictEqual(requestTaggedFields, false)
+      strictEqual(responseTaggedFields, false)
+      callback(null, {
+        errorCode: 0,
+        apiKeys: [{ apiKey: 0, name: 'Produce', minVersion: 0, maxVersion: 9 }],
+        throttleTimeMs: 0
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  client[kGetBootstrapConnection] = callback => callback(null, connection)
+
+  const apis = await client.listApis()
+  deepStrictEqual(apis, [{ apiKey: 0, name: 'Produce', minVersion: 0, maxVersion: 9 }])
+})
+
+test('listApis should send the actual ApiVersions v1 bytes', async t => {
+  const client = createBase(t)
+  let calls = 0
+  const connection = {
+    send <ReturnType>(
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _parser: ResponseParser<ReturnType>,
+      _requestTags: boolean,
+      _responseTags: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      calls++
+      strictEqual(apiKey, apiVersionsV1.api.key)
+      strictEqual(apiVersion, apiVersionsV1.api.version)
+      strictEqual(payload().buffer.toString('hex'), '')
+      callback(null, { errorCode: 0, apiKeys: [], throttleTimeMs: 0 } as ReturnType)
+    }
+  } as unknown as Connection
+
+  client[kGetBootstrapConnection] = callback => callback(null, connection)
+  deepStrictEqual(await client.listApis(), [])
+  strictEqual(calls, 1)
+})
+
 test('listApis should support diagnostic channels', async t => {
   const client = createBase(t)
 
@@ -275,7 +342,7 @@ test('listApis should handle errors from Connection.getFirstAvailable', async t 
 test('listApis should handle errors from the API (apiVersions)', async t => {
   const client = createBase(t)
 
-  mockAPI(client[kConnections], apiVersionsV3.api.key)
+  mockAPI(client[kConnections], apiVersionsV1.api.key)
 
   // Attempt to commit with mocked error
   try {
@@ -336,6 +403,99 @@ test('metadata should fetch topic metadata', async t => {
   strictEqual(typeof firstPartition.leader, 'number')
   strictEqual(typeof firstPartition.leaderEpoch, 'number')
   strictEqual(Array.isArray(firstPartition.replicas), true)
+})
+
+test('metadata should normalize IDs for negotiated legacy codecs only', async t => {
+  const topicId = randomUUID()
+  for (const { api, version, expectedId } of [
+    { api: metadataV0.api, version: 0, expectedId: 'legacy-topic' },
+    { api: metadataV8.api, version: 8, expectedId: 'legacy-topic' },
+    { api: metadataV10.api, version: 10, expectedId: topicId }
+  ]) {
+    await t.test(`Metadata v${version}`, async t => {
+      const client = createBase(t)
+      const connection = {
+        send (
+          apiKey: number,
+          apiVersion: number,
+          _payload: () => Writer,
+          _responseParser: ResponseParser<unknown>,
+          _requestTags: boolean,
+          _responseTags: boolean,
+          callback: Callback<unknown>
+        ): void {
+          strictEqual(apiKey, api.key)
+          strictEqual(apiVersion, version)
+          callback(null, {
+            clusterId: 'cluster',
+            controllerId: 1,
+            brokers: [{ nodeId: 1, host: 'localhost', port: 9092, rack: null }],
+            topics: [{ name: 'legacy-topic', topicId, isInternal: false, partitions: [] }]
+          })
+        }
+      } as unknown as Connection
+
+      client[kApis] = [{ apiKey: api.key, name: 'Metadata', minVersion: version, maxVersion: version }]
+      client[kGetBootstrapConnection] = callback => callback(null, connection)
+
+      strictEqual((await client.metadata({ topics: ['legacy-topic'] })).topics.get('legacy-topic')!.id, expectedId)
+    })
+  }
+})
+
+test('metadata parses legacy response bytes into the base metadata shape', async t => {
+  for (const { api, version } of [
+    { api: metadataV0.api, version: 0 },
+    { api: metadataV1.api, version: 1 }
+  ]) {
+    await t.test(`Metadata v${version}`, async t => {
+      const client = createBase(t)
+      const responseBytes = Writer.create()
+        .appendArray([{ nodeId: 1, host: 'localhost', port: 9092 }], (writer, broker) => {
+          writer.appendInt32(broker.nodeId).appendString(broker.host, false).appendInt32(broker.port)
+          if (version === 1) {
+            writer.appendString(null, false)
+          }
+        }, false, false)
+
+      if (version === 1) {
+        responseBytes.appendInt32(1)
+      }
+
+      responseBytes.appendArray([{ name: 'legacy-topic' }], (writer, topic) => {
+        writer.appendInt16(0).appendString(topic.name, false)
+        if (version === 1) {
+          writer.appendBoolean(false)
+        }
+        writer.appendArray([], () => {}, false, false)
+      }, false, false)
+
+      const connection = {
+        send (
+          apiKey: number,
+          apiVersion: number,
+          _payload: () => Writer,
+          responseParser: ResponseParser<unknown>,
+          _requestTags: boolean,
+          _responseTags: boolean,
+          callback: Callback<unknown>
+        ): void {
+          strictEqual(apiKey, api.key)
+          strictEqual(apiVersion, version)
+          callback(null, responseParser(1, apiKey, apiVersion, Reader.from(responseBytes.buffer)))
+        }
+      } as unknown as Connection
+
+      client[kApis] = [{ apiKey: api.key, name: 'Metadata', minVersion: version, maxVersion: version }]
+      client[kGetBootstrapConnection] = callback => callback(null, connection)
+
+      const metadata = await client.metadata({ topics: ['legacy-topic'] })
+      strictEqual(metadata.id, null)
+      strictEqual(metadata.controllerId, version === 0 ? -1 : 1)
+      deepStrictEqual(metadata.brokers, new Map([[1, { host: 'localhost', port: 9092, rack: null }]]))
+      strictEqual(metadata.topics.get('legacy-topic')!.id, 'legacy-topic')
+    })
+  }
 })
 
 test('metadata should cache metadata according to metadataMaxAge', async t => {
@@ -742,7 +902,7 @@ test('kGetApi should fail on unsupported API', (t, done) => {
 test('kGetApi should fail on unsupported API version', (t, done) => {
   const client = createBase(t)
 
-  mockAPI(client[kConnections], apiVersionsV3.api.key, null, {
+  mockAPI(client[kConnections], apiVersionsV1.api.key, null, {
     errorCode: 0,
     throttleTimeMs: 0,
     apiKeys: [
@@ -760,6 +920,37 @@ test('kGetApi should fail on unsupported API version', (t, done) => {
 
     done()
   })
+})
+
+test('every API version advertised in apis-status is exported and selectable', async t => {
+  const status = await readFile(new URL('../../../docs/internals/apis-status.md', import.meta.url), 'utf8')
+  const advertised = Array.from(status.matchAll(/^\|\s*(?:[A-Za-z]+\s*\|\s*)?([A-Za-z]+)\s*\|\s*\d+\s*\|\s*(\d+)(?:-(\d+))?\s*\|$/gm))
+
+  for (const [, name, minVersion, maxVersion] of advertised) {
+    const client = createBase(t)
+    const min = Number(minVersion)
+    const max = Number(maxVersion ?? minVersion)
+
+    for (let version = min; version <= max; version++) {
+      const exportName = `${name.slice(0, 1).toLowerCase()}${name.slice(1)}V${version}` as keyof typeof apis
+      const candidate = apis[exportName] as unknown as { api?: { version: number } }
+      ok(candidate?.api, `Missing ${exportName} from the API barrel.`)
+      strictEqual(candidate.api.version, version)
+
+      client[kApis] = [{ apiKey: 0, name, minVersion: version, maxVersion: version }]
+      await new Promise<void>((resolve, reject) => {
+        client[kGetApi](name, (error, api) => {
+          if (error) {
+            reject(error)
+            return
+          }
+
+          strictEqual(api!.version, version)
+          resolve()
+        })
+      })
+    }
+  }
 })
 
 test('kPerformWithRetry should not leak timers', async t => {

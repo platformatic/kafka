@@ -1,2 +1,5 @@
+export * as saslAuthenticateV0 from './sasl-authenticate-v0.ts'
+export * as saslAuthenticateV1 from './sasl-authenticate-v1.ts'
 export * as saslAuthenticateV2 from './sasl-authenticate-v2.ts'
+export * as saslHandshakeV0 from './sasl-handshake-v0.ts'
 export * as saslHandshakeV1 from './sasl-handshake-v1.ts'

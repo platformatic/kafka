@@ -1,5 +1,5 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
@@ -37,7 +37,7 @@ export interface ListPartitionReassignmentsResponse {
       name => COMPACT_STRING
       partition_indexes => INT32
 */
-export function createRequest (timeoutMs: number, topics: ListPartitionReassignmentsRequestTopic[]): Writer {
+export function createRequest (timeoutMs: number, topics: Nullable<ListPartitionReassignmentsRequestTopic[]>): Writer {
   return Writer.create()
     .appendInt32(timeoutMs)
     .appendArray(topics, (w, t) => {
@@ -83,6 +83,8 @@ export function parseResponse (
       }
     })
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)

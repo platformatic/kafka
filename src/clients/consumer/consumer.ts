@@ -1583,6 +1583,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
+
     for (const stream of this.#streams) {
       stream.pause()
       stream[kAutocommit]()

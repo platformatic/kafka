@@ -1,5 +1,5 @@
 import { ok, strictEqual } from 'node:assert'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import * as apis from '../../src/apis/index.ts'
 import { type Connection, kGetBootstrapConnection, SASLMechanisms } from '../../src/index.ts'
 import { kafkaSaslBootstrapServers } from '../helpers.ts'
@@ -42,8 +42,39 @@ async function issueToken (probe: any, connection: Connection) {
   return invoke<any>(codec('CreateDelegationToken', newest), connection, null, null, [], 86400000n)
 }
 
+/**
+ * Delegation tokens only work when the broker has a secret key, which docker-compose.yml cannot set
+ * unconditionally: KRaft only supports them from Apache Kafka 3.6 (KIP-900), and on 3.5 the broker
+ * refuses to start. Skip rather than fail when the feature is off, so the suite stays meaningful on
+ * every broker in the matrix.
+ */
+async function delegationTokensEnabled (t: TestContext, probe: any): Promise<boolean> {
+  // Kafka 3.5 does not implement the APIs under KRaft at all and reports them as UNSUPPORTED,
+  // which is a different case from a broker which has them but no secret key configured.
+  if (!(await usableVersions(probe, 'CreateDelegationToken')).length) {
+    t.diagnostic('This broker does not support the delegation token APIs at all, skipping.')
+    return false
+  }
+
+  try {
+    await issueToken(probe, await connectionOf(probe))
+    return true
+  } catch (error) {
+    t.diagnostic(
+      'Delegation tokens are not enabled on this broker, skipping. Enable them with ' +
+        '-f docker-compose.delegation-tokens.yml on Confluent 7.6.0 or later. ' +
+        `(${(error as Error).message})`
+    )
+    return false
+  }
+}
+
 test('CreateDelegationToken issues a token at every version', async t => {
   const probe = createSaslAdmin(t)
+
+  if (!(await delegationTokensEnabled(t, probe))) {
+    return
+  }
 
   await forEachVersion(t, probe, 'CreateDelegationToken', async version => {
     const admin = createSaslAdmin(t)
@@ -68,6 +99,10 @@ test('CreateDelegationToken issues a token at every version', async t => {
 test('DescribeDelegationToken lists tokens at every version', async t => {
   const probe = createSaslAdmin(t)
 
+  if (!(await delegationTokensEnabled(t, probe))) {
+    return
+  }
+
   await forEachVersion(t, probe, 'DescribeDelegationToken', async version => {
     const admin = createSaslAdmin(t)
     const connection = await connectionOf(admin)
@@ -91,6 +126,10 @@ test('DescribeDelegationToken lists tokens at every version', async t => {
 
 test('RenewDelegationToken and ExpireDelegationToken act on a token at every version', async t => {
   const probe = createSaslAdmin(t)
+
+  if (!(await delegationTokensEnabled(t, probe))) {
+    return
+  }
 
   for (const name of ['RenewDelegationToken', 'ExpireDelegationToken']) {
     await forEachVersion(t, probe, name, async version => {

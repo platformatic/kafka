@@ -104,6 +104,16 @@ Two groups are not covered that way, deliberately:
 | `AlterPartition` v0-v3                 | Broker to controller API. No client sends it, nothing in this package uses it, and Kafka 4.x does not advertise it to clients, so it cannot be driven at all. |
 | Delegation token v0 (APIs 38-41)       | Every supported broker advertises a minimum of v1.                                                                                                            |
 
+Delegation tokens v1 and above need a broker secret key, which `docker-compose.yml` cannot set
+unconditionally: KRaft only gained delegation token support in Apache Kafka 3.6 (KIP-900), and on
+3.5 a broker configured with one refuses to start. Enable them explicitly where they are supported:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.delegation-tokens.yml up -d --wait
+```
+
+The delegation token sweeps skip themselves, with a diagnostic, on brokers without the feature.
+
 Versions below a broker's advertised floor are skipped with a diagnostic rather than silently
 passing. The floors moved in Kafka 4.0 (KIP-896), so the oldest and newest brokers in the matrix
 cover different ends of the range: `Fetch` starts at v0 on Confluent 7.5.0 and at v4 on 8.2.0.

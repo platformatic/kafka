@@ -1244,7 +1244,9 @@ export class Admin extends Base<AdminOptions> {
             for (const raw of result.groups) {
               groups.set(raw.groupId, {
                 id: raw.groupId,
-                state: raw.groupState as ConsumerGroupStateValue,
+                // ListGroups only carries group_state from v4, so below that the codec has nothing
+                // to report. 'Unknown' is the value Kafka itself uses for exactly this case.
+                state: (raw.groupState || 'Unknown') as ConsumerGroupStateValue,
                 groupType: raw.groupType || undefined,
                 protocolType: raw.protocolType
               })

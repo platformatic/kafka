@@ -89,6 +89,28 @@ The version ranges below are implemented message codec versions, not supported b
 
 > The standalone SaslHandshake codec supports v0-v1, but connections use v1 only. SASL authentication requires Kafka 1.0.0 or later because the pre-1.0 raw-SASL flow is intentionally unsupported.
 
+# Integration coverage
+
+Every codec above is covered by a protocol test, which parses bytes the test itself wrote. The
+`test/integration/*.compat-test.ts` suites additionally exercise them against a real broker by
+pinning the negotiated version (`pinApiVersions` in `test/helpers/api-versions.ts`), because the
+client otherwise always selects the newest version a broker advertises and the legacy codecs are
+never sent or parsed.
+
+Two groups are not covered that way, deliberately:
+
+| Codecs                                 | Why                                                                                                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AlterPartition` v0-v3                 | Broker to controller API. No client sends it, nothing in this package uses it, and Kafka 4.x does not advertise it to clients, so it cannot be driven at all. |
+| Delegation token v0 (APIs 38-41)       | Every supported broker advertises a minimum of v1.                                                                                                            |
+
+Versions below a broker's advertised floor are skipped with a diagnostic rather than silently
+passing. The floors moved in Kafka 4.0 (KIP-896), so the oldest and newest brokers in the matrix
+cover different ends of the range: `Fetch` starts at v0 on Confluent 7.5.0 and at v4 on 8.2.0.
+
+Broker versions older than Apache Kafka 3.5.0 are not exercised by anything, including these
+suites, because the CI matrix does not contain one.
+
 # Unsupported APIs
 
 This is a non-exhaustive list of broker-only APIs outside this client's scope. Other Apache Kafka APIs may be unsupported or not exposed by the public client API.

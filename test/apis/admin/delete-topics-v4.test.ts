@@ -9,7 +9,9 @@ test('DeleteTopics v4 consumes flexible boundaries and headers', () => {
     { topicId: 'not-a-uuid' },
     { name: 'both', topicId: '12345678-1234-1234-1234-123456789abc' }
   ], 42)
-  deepStrictEqual(request.buffer, Buffer.from('040862792d6e616d6500010005626f7468000000002a00', 'hex'))
+  // topic_names is an array of plain COMPACT_STRINGs: it only becomes an array of structs, with a
+  // tagged field section per entry, in v6. The broker drops the connection if one is sent here.
+  deepStrictEqual(request.buffer, Buffer.from('040862792d6e616d650105626f74680000002a00', 'hex'))
 
   const reader = Reader.from(Buffer.from('000000010206746f70696300000000', 'hex'))
   deepStrictEqual(parseResponse(1, 20, 4, reader), { throttleTimeMs: 1, responses: [{ name: 'topic', topicId: '00000000-0000-0000-0000-000000000000', errorCode: 0, errorMessage: null }] })

@@ -25,8 +25,11 @@ for (const groupProtocol of ['classic', 'consumer'] as const) {
     const consumer = createConsumer(t, {
       deserializers: stringDeserializers,
       groupProtocol,
-      retries: 1,
-      retryDelay: 50
+      // The retry budget only needs to be small enough to keep the initial refresh
+      // in flight while we pause/resume. retries: 1 was tight enough that a single
+      // slow ListOffsets under CI load failed the whole refresh.
+      retries: 5,
+      retryDelay: 100
     })
     await consumer.topics.trackAll(topic)
 

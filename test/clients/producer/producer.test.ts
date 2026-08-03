@@ -1377,7 +1377,11 @@ test('send should handle errors from Base.metadata in internal calls', async t =
 })
 
 test('send should return produced messages when another destination fails', async t => {
-  const producer = createProducer(t, { retries: 0 })
+  // The mocked failure below is flagged canRetry: false, so that destination fails
+  // permanently regardless of the retry budget. The budget exists for the *other*
+  // destination: under CI load its Produce can hit a genuine retriable broker error,
+  // and with retries: 0 both destinations failed, leaving nothing in produced.offsets.
+  const producer = createProducer(t, { retries: 3 })
   const testTopic = await createTopic(t, true, 3)
 
   let partition = -1

@@ -128,10 +128,6 @@ services:
       KAFKA_SASL_OAUTHBEARER_EXPECTED_ISSUER: kafka
       KAFKA_SASL_OAUTHBEARER_EXPECTED_AUDIENCE: users
       KAFKA_SASL_OAUTHBEARER_EXPECTED_SCOPE: test
-      # Delegation tokens are rejected outright unless the broker has a secret key, and the requests
-      # must arrive over an authenticated connection, so they live on this broker rather than the
-      # PLAINTEXT ones. Without this the CreateDelegationToken codecs cannot be exercised at all.
-      KAFKA_DELEGATION_TOKEN_SECRET_KEY: 'compat-delegation-token-secret'
 
   broker-sasl-kerberos:
     image: *image

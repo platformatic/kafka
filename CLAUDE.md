@@ -42,6 +42,10 @@ across every version the broker still accepts, reporting the unreachable ones as
 They run in their own CI job against the oldest and newest brokers in the matrix, because Kafka 4.0
 raised the minimum accepted version of several APIs. Use the `.compat-test.ts` suffix for new ones.
 
+The delegation token sweeps need `-f docker-compose.delegation-tokens.yml`, which only works on
+Confluent 7.6.0 or later: KRaft gained delegation tokens in Apache Kafka 3.6, and a 3.5 broker
+configured with a token secret key refuses to start. They skip themselves elsewhere.
+
 ## Code Style Guidelines
 
 - **TypeScript**: Strict typing with explicit type imports `import type { X }`. Avoid `any` all the times. Ensure types compliance.

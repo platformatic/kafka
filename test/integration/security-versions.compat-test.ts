@@ -17,7 +17,6 @@ import {
   createTopic,
   forEachVersion,
   kafkaBootstrapServers,
-  legacyBroker,
   pinApiVersions,
   waitFor
 } from './helpers.ts'
@@ -145,13 +144,6 @@ test('DescribeClientQuotas and AlterClientQuotas round-trip a quota at every ver
 })
 
 test('SaslHandshake and SaslAuthenticate authenticate at every version', async t => {
-  if (legacyBroker()) {
-    // Connection pins SaslAuthenticate v2, which only exists from Apache Kafka 2.4, so SASL cannot
-    // be exercised on an older broker at all: see https://github.com/platformatic/kafka/issues/350.
-    t.diagnostic('SASL needs Kafka 2.4 or later while SaslAuthenticate is pinned to v2, skipping (#350)')
-    return
-  }
-
   const probe = createAdmin(t, {
     bootstrapBrokers: kafkaSaslBootstrapServers,
     sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' }

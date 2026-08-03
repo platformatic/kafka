@@ -22,7 +22,6 @@ export {
   forEachVersion,
   implementedVersions,
   isUnsupportedVersion,
-  legacyBroker,
   pinApiVersions,
   runAtVersion,
   usableVersions

@@ -1,5 +1,5 @@
 import { DynamicBuffer } from '@platformatic/dynamic-buffer'
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { EMPTY_UUID, Writer } from '../../src/index.ts'
 
@@ -453,6 +453,17 @@ test('appendUUID - undefined', () => {
 
   // Verify the buffer content
   deepStrictEqual(writer.buffer.slice(0, 16), EMPTY_UUID)
+})
+
+test('appendUUID - rejects values which are not UUIDs', () => {
+  // UUIDs are fixed width and carry no length prefix, so a value which does not serialize to
+  // exactly 16 bytes would silently desync the rest of the request instead of failing.
+  for (const value of ['my-topic', '', '550e8400-e29b-41d4-a716', '550e8400e29b41d4a71644665544000000']) {
+    throws(
+      () => Writer.create().appendUUID(value),
+      (error: Error) => error instanceof RangeError && error.message === `Expected a UUID, got ${JSON.stringify(value)}.`
+    )
+  }
 })
 
 test('appendBytes', () => {

@@ -1618,7 +1618,7 @@ test('listGroups should return consumer groups and support diagnostic channels',
   deepStrictEqual(groups.get(consumer.groupId), {
     id: consumer.groupId,
     protocolType: 'consumer',
-    state: 'STABLE',
+    state: 'Stable',
     groupType
   })
 
@@ -1760,6 +1760,22 @@ test('listGroups should support filtering by types and states', async t => {
     states: ['Dead']
   })
   strictEqual(groups4.has(consumer.groupId), false, 'The consumer group should not be found with state "Dead"')
+
+  // The legacy Java enum constant names are translated to the values brokers filter on, otherwise
+  // the multiple word ones (which brokers do not know in this form) would silently match nothing.
+  const groups5 = await admin.listGroups({
+    states: ['STABLE']
+  })
+  strictEqual(groups5.has(consumer.groupId), true, 'The consumer group should be found with state "STABLE"')
+
+  const groups6 = await admin.listGroups({
+    states: ['PREPARING_REBALANCE']
+  })
+  strictEqual(
+    groups6.has(consumer.groupId),
+    false,
+    'The consumer group should not be found with state "PREPARING_REBALANCE"'
+  )
 })
 
 test('listGroups should validate options in strict mode', async t => {
@@ -1914,7 +1930,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
         })
       },
       asyncStart (context: ClientDiagnosticEvent) {
-        deepStrictEqual((context.result as Map<string, GroupBase>).get(groupId)!.state, 'STABLE')
+        deepStrictEqual((context.result as Map<string, GroupBase>).get(groupId)!.state, 'Stable')
       },
       error (context: ClientDiagnosticEvent) {
         ok(typeof context === 'undefined')
@@ -1934,7 +1950,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
     [
       {
         id: 'non-existent-group',
-        state: 'DEAD',
+        state: 'Dead',
         protocolType: '',
         protocol: '',
         members: new Map(),
@@ -1944,7 +1960,7 @@ test('describeGroups should describe consumer groups and support diagnostic chan
         id: consumer.groupId,
         protocol: 'roundrobin',
         protocolType: 'consumer',
-        state: 'STABLE',
+        state: 'Stable',
         members: new Map([
           [
             id,
@@ -2053,7 +2069,7 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
               {
                 errorCode: 0,
                 groupId,
-                groupState: 'stable',
+                groupState: 'Stable',
                 protocolType: 'consumer',
                 protocolData: 'range',
                 members: [
@@ -2136,7 +2152,7 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
             groupId,
             {
               id: groupId,
-              state: 'STABLE',
+              state: 'Stable',
               protocolType: 'consumer',
               protocol: 'range',
               members: new Map([
@@ -2183,7 +2199,7 @@ test('describeGroups should handle memberAssignment with single user data byte w
   const groups = await admin.describeGroups({ groups: [groupId] })
   const group = groups.get(groupId)!
 
-  strictEqual(group.state, 'STABLE')
+  strictEqual(group.state, 'Stable')
   strictEqual(group.members.size, 1)
 })
 
@@ -2205,7 +2221,7 @@ test('describeGroups memberAssignment should include user data field when no ass
   await consumer.joinGroup()
 
   const groups = await admin.describeGroups({ groups: [groupId] })
-  strictEqual(groups.get(groupId)!.state, 'STABLE')
+  strictEqual(groups.get(groupId)!.state, 'Stable')
   strictEqual(groups.get(groupId)!.members.size, 1)
 
   // Use kGetApi so FindCoordinator uses the broker-negotiated version.

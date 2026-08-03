@@ -978,7 +978,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               }
 
               // Fetch v12 identifies topics by name, while later versions use UUIDs.
-              if (api!.version <= 12) {
+              const useTopicNames = api!.version <= 12
+              let topicIdsByName: Map<string, string> | undefined
+
+              if (useTopicNames) {
+                // Built here rather than in the response callback so that the fetch loop allocates
+                // it once per request instead of once per request and once per response.
+                topicIdsByName = new Map()
+                for (const [id, name] of topicIds) {
+                  topicIdsByName.set(name, id)
+                }
+
                 requestTopics = requestTopics.map(topic => ({
                   ...topic,
                   topicId: topicIds.get(topic.topicId) ?? topic.topicId
@@ -1007,10 +1017,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   if (response && !response.nodeEndpoints) {
                     response.nodeEndpoints = []
                   }
-                  if (api!.version <= 12 && response) {
-                    const topicIdsByName = new Map(Array.from(topicIds, ([id, name]) => [name, id]))
+                  if (useTopicNames && response) {
                     for (const topic of response.responses) {
-                      topic.topicId = topicIdsByName.get(topic.topicId) ?? topic.topicId
+                      topic.topicId = topicIdsByName!.get(topic.topicId) ?? topic.topicId
                     }
                   }
 

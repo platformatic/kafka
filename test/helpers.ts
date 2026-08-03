@@ -137,9 +137,23 @@ export async function createTopic (
   if (create) {
     const admin = createAdmin(t, { bootstrapBrokers })
     await admin.createTopics({ topics: [topic], partitions })
-    // Wait for the topic to be fully created across all brokers
-    await sleep(500)
-    await admin.metadata({ topics: [topic] })
+    await waitFor(
+      async () => {
+        const metadata = await admin.metadata({ topics: [topic], forceUpdate: true })
+        const topicMetadata = metadata.topics.get(topic)
+
+        if (!topicMetadata || topicMetadata.partitions.length !== partitions) {
+          throw new Error(`Topic ${topic} is not ready.`)
+        }
+
+        for (const partition of topicMetadata.partitions) {
+          if (!partition || partition.leader < 0) {
+            throw new Error(`Topic ${topic} is not ready.`)
+          }
+        }
+      },
+      { interval: 100, timeout: 30000 }
+    )
   }
 
   return topic

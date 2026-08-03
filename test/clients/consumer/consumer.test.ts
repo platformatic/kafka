@@ -4063,8 +4063,6 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
 
   subscribe(consumerLagChannel.name, onLag as ChannelListener)
 
-  consumer.startLagMonitoring({ topics: [topic] }, 1000)
-
   consumer.on('consumer:lag', lag => {
     lagsViaEvent.push(lag)
 
@@ -4073,13 +4071,21 @@ test('startLagMonitoring should regularly check consumer lag', async t => {
     }
   })
 
-  await consumer.consume({
+  const stream = await consumer.consume({
     topics: [topic],
     autocommit: true,
     mode: 'earliest',
     maxWaitTime: 1000,
     maxBytes: 10
   })
+
+  // getLag reports -1n for partitions without a committed offset. Start monitoring only
+  // once autocommit has covered all three, otherwise the first reading races the commits.
+  while (stream.offsetsCommitted.size < 3) {
+    await once(stream, 'offsets')
+  }
+
+  consumer.startLagMonitoring({ topics: [topic] }, 1000)
 
   await promise
   unsubscribe(consumerLagChannel.name, onLag as ChannelListener)

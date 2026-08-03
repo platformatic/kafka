@@ -59,7 +59,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        confluent-kafka-version: [7.5.0, 8.2.0]
+        include:
+          # KRaft only supports delegation tokens from Apache Kafka 3.6 (KIP-900). Setting a secret
+          # key on 7.5.0 makes the broker refuse to start, so the override is applied only where the
+          # feature exists; the delegation token sweeps skip themselves on the other broker.
+          - confluent-kafka-version: 7.5.0
+            compose-files: '-f docker-compose.yml'
+          - confluent-kafka-version: 8.2.0
+            compose-files: '-f docker-compose.yml -f docker-compose.delegation-tokens.yml'
     name: 'API compatibility / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -82,7 +89,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
-        run: docker compose up --build --force-recreate -d --wait broker-single broker-sasl broker-cluster-1 broker-cluster-2 broker-cluster-3
+        run: >
+          docker compose ${{ matrix.compose-files }} up --build --force-recreate -d --wait
+          broker-single broker-sasl broker-cluster-1 broker-cluster-2 broker-cluster-3
         env:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run API compatibility sweeps

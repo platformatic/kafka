@@ -88,7 +88,6 @@ export function createRequest (
   if (acks === ProduceAcks.NO_RESPONSE) {
     writer.context.noResponse = true
   }
-  writer.context.requestTimeout = timeout
 
   return writer
 }

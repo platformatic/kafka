@@ -5,7 +5,14 @@ import { connect as createTLSConnection, type ConnectionOptions as TLSConnection
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
-import { saslAuthenticateV2, saslHandshakeV1 } from '../apis/index.ts'
+import { clientSoftwareName, clientSoftwareVersion } from '../clients/base/options.ts'
+import {
+  apiVersionsV1,
+  saslAuthenticateV0,
+  saslAuthenticateV1,
+  saslAuthenticateV2,
+  saslHandshakeV1
+} from '../apis/index.ts'
 import { type SaslAuthenticateResponse, type SASLAuthenticationAPI } from '../apis/security/sasl-authenticate-v2.ts'
 import {
   connectionsApiChannel,
@@ -146,6 +153,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #socketMustBeDrained: boolean
   #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
+  // Negotiated once per connection: reauthentication runs the same path again.
+  #saslAuthenticateApi: SASLAuthenticationAPI | undefined
 
   constructor (clientId?: string, options: ConnectionOptions = {}) {
     super()
@@ -532,40 +541,89 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       return
     }
 
-    saslHandshakeV1.api(this, mechanism, (error, response) => {
+    this.#negotiateSaslAuthenticate(saslAuthenticate => {
+      saslHandshakeV1.api(this, mechanism, (error, response) => {
+        if (error) {
+          this.#onConnectionError(
+            host,
+            port,
+            diagnosticContext,
+            new AuthenticationError('Cannot find a suitable SASL mechanism.', { cause: error })
+          )
+          return
+        }
+
+        this.emit('sasl:handshake', response!.mechanisms)
+        const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
+
+        if (authenticate) {
+          authenticate(mechanism, this, saslAuthenticate, username, password, token, callback)
+        } else if (mechanism === SASLMechanisms.PLAIN) {
+          saslPlain.authenticate(saslAuthenticate, this, username!, password!, callback)
+        } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
+          saslOAuthBearer.authenticate(saslAuthenticate, this, token!, oauthBearerExtensions!, callback)
+        } else if (mechanism === SASLMechanisms.GSSAPI) {
+          callback(new UserError('No custom SASL/GSSAPI authenticator provided.'))
+        } else {
+          saslScramSha.authenticate(
+            saslAuthenticate,
+            this,
+            mechanism.substring(6) as ScramAlgorithm,
+            username!,
+            password!,
+            defaultCrypto,
+            callback
+          )
+        }
+      })
+    })
+  }
+
+  /**
+   * Chooses the SaslAuthenticate version to authenticate with.
+   *
+   * The version cannot be assumed: v1 arrived in Apache Kafka 2.0 and v2 in 2.4, so pinning the
+   * newest makes authentication fail outright on older brokers, which answer an unparseable request
+   * with InvalidRequestException and drop the connection.
+   *
+   * Brokers accept ApiVersions before authentication precisely so that clients can ask, and it has
+   * to happen before SaslHandshake: once the handshake is sent the connection only accepts
+   * SaslAuthenticate. The result is cached because reauthentication runs this path again.
+   *
+   * SaslHandshake itself stays at v1. v0 signals the pre-1.0 flow, where the SASL tokens are written
+   * raw on the wire rather than wrapped in SaslAuthenticate requests, which this package does not
+   * implement.
+   */
+  #negotiateSaslAuthenticate (callback: (api: SASLAuthenticationAPI) => void): void {
+    if (this.#saslAuthenticateApi) {
+      callback(this.#saslAuthenticateApi)
+      return
+    }
+
+    const candidates: [number, SASLAuthenticationAPI][] = [
+      [2, saslAuthenticateV2.api],
+      [1, saslAuthenticateV1.api],
+      [0, saslAuthenticateV0.api]
+    ]
+
+    apiVersionsV1.api(this, clientSoftwareName, clientSoftwareVersion, (error, response) => {
+      let selected: SASLAuthenticationAPI | undefined
+
+      /* c8 ignore next 3 - Only reachable against a broker which refuses ApiVersions before authentication */
       if (error) {
-        this.#onConnectionError(
-          host,
-          port,
-          diagnosticContext,
-          new AuthenticationError('Cannot find a suitable SASL mechanism.', { cause: error })
-        )
-        return
-      }
-
-      this.emit('sasl:handshake', response!.mechanisms)
-      const callback = this.#onSaslAuthenticate.bind(this, host, port, diagnosticContext)
-      const saslAuthenticate = saslAuthenticateV2.api
-
-      if (authenticate) {
-        authenticate(mechanism, this, saslAuthenticate, username, password, token, callback)
-      } else if (mechanism === SASLMechanisms.PLAIN) {
-        saslPlain.authenticate(saslAuthenticate, this, username!, password!, callback)
-      } else if (mechanism === SASLMechanisms.OAUTHBEARER) {
-        saslOAuthBearer.authenticate(saslAuthenticate, this, token!, oauthBearerExtensions!, callback)
-      } else if (mechanism === SASLMechanisms.GSSAPI) {
-        callback(new UserError('No custom SASL/GSSAPI authenticator provided.'))
+        selected = undefined
       } else {
-        saslScramSha.authenticate(
-          saslAuthenticate,
-          this,
-          mechanism.substring(6) as ScramAlgorithm,
-          username!,
-          password!,
-          defaultCrypto,
-          callback
-        )
+        const advertised = response!.apiKeys.find(api => api.apiKey === saslAuthenticateV2.api.key)
+
+        selected = candidates.find(
+          ([version]) => advertised && version >= advertised.minVersion && version <= advertised.maxVersion
+        )?.[1]
       }
+
+      // Falling back to the newest version keeps the previous behaviour for brokers which do not
+      // answer the probe, rather than failing a connection which would otherwise have worked.
+      this.#saslAuthenticateApi = selected ?? saslAuthenticateV2.api
+      callback(this.#saslAuthenticateApi)
     })
   }
 

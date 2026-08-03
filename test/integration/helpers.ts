@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { type TestContext } from 'node:test'
 import { type AdminOptions } from '../../src/clients/admin/index.ts'
 import {
@@ -10,7 +11,6 @@ import {
   createAdmin as baseCreateAdmin,
   createConsumer as baseCreateConsumer,
   createProducer as baseCreateProducer,
-  createTopic as baseCreateTopic,
   kafkaBootstrapServers,
   kafkaSingleBootstrapServers,
   waitFor
@@ -22,6 +22,7 @@ export {
   forEachVersion,
   implementedVersions,
   isUnsupportedVersion,
+  legacyBroker,
   pinApiVersions,
   runAtVersion,
   usableVersions
@@ -57,6 +58,38 @@ export function createConsumer<K = Buffer, V = Buffer, HK = Buffer, HV = Buffer>
   })
 }
 
-export function createTopic (t: TestContext, partitions = 1, bootstrapBrokers = kafkaSingleBootstrapServers) {
-  return baseCreateTopic(t, true, partitions, bootstrapBrokers)
+/**
+ * Creates a topic with an explicit partition count and replication factor.
+ *
+ * The shared helper omits both and lets Admin send -1, meaning "use the broker default". That is
+ * KIP-464, which brokers only accept from Apache Kafka 2.4 (CreateTopics v4): older ones answer
+ * INVALID_PARTITIONS or INVALID_REPLICATION_FACTOR, so the sweeps have to be explicit to run
+ * against them at all.
+ */
+export async function createTopic (
+  t: TestContext,
+  partitions = 1,
+  bootstrapBrokers = kafkaSingleBootstrapServers
+): Promise<string> {
+  const topic = `compat-topic-${randomUUID()}`
+  const replicas = bootstrapBrokers === kafkaBootstrapServers ? 3 : 1
+  const admin = createAdmin(t, { bootstrapBrokers })
+
+  await admin.createTopics({ topics: [topic], partitions, replicas })
+
+  await waitFor(
+    async () => {
+      const metadata = await admin.metadata({ topics: [topic], forceUpdate: true })
+      const described = metadata.topics.get(topic)
+
+      if (described?.partitions.length !== partitions || described.partitions.some(p => !p || p.leader < 0)) {
+        throw new Error(`Topic ${topic} is not ready.`)
+      }
+
+      return true
+    },
+    { interval: 100, timeout: 30000 }
+  )
+
+  return topic
 }

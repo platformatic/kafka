@@ -46,6 +46,11 @@ The delegation token sweeps need `-f docker-compose.delegation-tokens.yml`, whic
 Confluent 7.6.0 or later: KRaft gained delegation tokens in Apache Kafka 3.6, and a 3.5 broker
 configured with a token secret key refuses to start. They skip themselves elsewhere.
 
+`docker-compose.legacy.yml` runs the same sweeps against Apache Kafka 1.1.0, the oldest supported
+broker. It is a standalone stack rather than an override because pre-KRaft brokers need ZooKeeper
+and must not receive the KRaft settings, and compose overrides cannot remove keys. Run it with
+`COMPAT_LEGACY_BROKER=1`, which opts out of the sweeps that cannot work there at all.
+
 ## Code Style Guidelines
 
 - **TypeScript**: Strict typing with explicit type imports `import type { X }`. Avoid `any` all the times. Ensure types compliance.

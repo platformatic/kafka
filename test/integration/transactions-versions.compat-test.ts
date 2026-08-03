@@ -8,6 +8,7 @@ import {
   createTopic,
   kafkaBootstrapServers,
   pinApiVersions,
+  runAtVersion,
   stringDeserializers,
   stringSerializers,
   usableVersions
@@ -74,32 +75,34 @@ test('A transaction commits at every version of every transactional API', async 
 
     for (const version of versions) {
       await t.test(`${name} v${version}`, async t => {
-        const topic = await createTopic(t, 1, kafkaBootstrapServers)
-        const producer = await createTransactionalProducer(t, { [name]: version })
+        await runAtVersion(t, `${name} v${version}`, async () => {
+          const topic = await createTopic(t, 1, kafkaBootstrapServers)
+          const producer = await createTransactionalProducer(t, { [name]: version })
 
-        const transaction = await producer.beginTransaction()
-        ok(producer.producerId! >= 0n, `${name} v${version} produced no producer id`)
-        ok(producer.producerEpoch! >= 0, `${name} v${version} produced no producer epoch`)
+          const transaction = await producer.beginTransaction()
+          ok(producer.producerId! >= 0n, `${name} v${version} produced no producer id`)
+          ok(producer.producerEpoch! >= 0, `${name} v${version} produced no producer epoch`)
 
-        await transaction.send({
-          messages: [{ topic, partition: 0, key: 'k', value: `committed-${name}-${version}` }],
-          acks: ProduceAcks.ALL
+          await transaction.send({
+            messages: [{ topic, partition: 0, key: 'k', value: `committed-${name}-${version}` }],
+            acks: ProduceAcks.ALL
+          })
+
+          // AddOffsetsToTxn and TxnOffsetCommit only run when a consumer group takes part in the
+          // transaction, so enrol one: commit() then drives the offset commit through the coordinator.
+          const consumer = createConsumer(t, {
+            bootstrapBrokers: kafkaBootstrapServers,
+            deserializers: stringDeserializers,
+            autocommit: false
+          })
+          await consumer.joinGroup({})
+          await transaction.addConsumer(consumer)
+
+          await transaction.commit()
+
+          const values = await readCommitted(t, topic, 1)
+          strictEqual(values[0], `committed-${name}-${version}`, `${name} v${version} did not commit the record`)
         })
-
-        // AddOffsetsToTxn and TxnOffsetCommit only run when a consumer group takes part in the
-        // transaction, so enrol one: commit() then drives the offset commit through the coordinator.
-        const consumer = createConsumer(t, {
-          bootstrapBrokers: kafkaBootstrapServers,
-          deserializers: stringDeserializers,
-          autocommit: false
-        })
-        await consumer.joinGroup({})
-        await transaction.addConsumer(consumer)
-
-        await transaction.commit()
-
-        const values = await readCommitted(t, topic, 1)
-        strictEqual(values[0], `committed-${name}-${version}`, `${name} v${version} did not commit the record`)
       })
     }
   }
@@ -113,31 +116,33 @@ test('A transaction aborts at every version of every transactional API', async t
 
     for (const version of versions) {
       await t.test(`${name} v${version}`, async t => {
-        const topic = await createTopic(t, 1, kafkaBootstrapServers)
-        const producer = await createTransactionalProducer(t, { [name]: version })
+        await runAtVersion(t, `${name} v${version}`, async () => {
+          const topic = await createTopic(t, 1, kafkaBootstrapServers)
+          const producer = await createTransactionalProducer(t, { [name]: version })
 
-        const aborted = await producer.beginTransaction()
-        await aborted.send({
-          messages: [{ topic, partition: 0, key: 'k', value: `aborted-${name}-${version}` }],
-          acks: ProduceAcks.ALL
-        })
-        await aborted.abort()
+          const aborted = await producer.beginTransaction()
+          await aborted.send({
+            messages: [{ topic, partition: 0, key: 'k', value: `aborted-${name}-${version}` }],
+            acks: ProduceAcks.ALL
+          })
+          await aborted.abort()
 
-        // A read committed consumer must not see the aborted record, only the committed one which
-        // follows it. Writing a second transaction gives the reader something to stop on.
-        const committed = await producer.beginTransaction()
-        await committed.send({
-          messages: [{ topic, partition: 0, key: 'k', value: `committed-${name}-${version}` }],
-          acks: ProduceAcks.ALL
-        })
-        await committed.commit()
+          // A read committed consumer must not see the aborted record, only the committed one which
+          // follows it. Writing a second transaction gives the reader something to stop on.
+          const committed = await producer.beginTransaction()
+          await committed.send({
+            messages: [{ topic, partition: 0, key: 'k', value: `committed-${name}-${version}` }],
+            acks: ProduceAcks.ALL
+          })
+          await committed.commit()
 
-        const values = await readCommitted(t, topic, 1)
-        strictEqual(
-          values[0],
+          const values = await readCommitted(t, topic, 1)
+          strictEqual(
+            values[0],
           `committed-${name}-${version}`,
           `${name} v${version} leaked an aborted record to a read committed consumer`
-        )
+          )
+        })
       })
     }
   }

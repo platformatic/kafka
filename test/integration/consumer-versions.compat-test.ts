@@ -7,6 +7,7 @@ import {
   createTopic,
   forEachVersion,
   pinApiVersions,
+  runAtVersion,
   stringDeserializers,
   stringSerializers,
   usableVersions
@@ -101,27 +102,27 @@ test('OffsetCommit and OffsetFetch round-trip committed offsets at every version
 
   for (const commitVersion of commitVersions) {
     for (const fetchVersion of [fetchVersions[0], fetchVersions.at(-1)!]) {
-      await t.test(`OffsetCommit v${commitVersion} + OffsetFetch v${fetchVersion}`, async t => {
-        const groupId = `compat-offsets-${commitVersion}-${fetchVersion}-${Date.now()}`
-        const writer = await pinApiVersions(createConsumer(t, { groupId }), { OffsetCommit: commitVersion })
+      const label = `OffsetCommit v${commitVersion} + OffsetFetch v${fetchVersion}`
 
-        // A commit needs a group which has joined, otherwise the coordinator rejects it.
-        await writer.joinGroup({})
-        await writer.commit({
-          offsets: [
-            { topic, partition: 0, offset: 2n, leaderEpoch: 0 },
-            { topic, partition: 1, offset: 1n, leaderEpoch: 0 }
-          ]
+      await t.test(label, async t => {
+        await runAtVersion(t, label, async () => {
+          const groupId = `compat-offsets-${commitVersion}-${fetchVersion}-${Date.now()}`
+          const writer = await pinApiVersions(createConsumer(t, { groupId }), { OffsetCommit: commitVersion })
+
+          // A commit needs a group which has joined, otherwise the coordinator rejects it.
+          await writer.joinGroup({})
+          await writer.commit({
+            offsets: [
+              { topic, partition: 0, offset: 2n, leaderEpoch: 0 },
+              { topic, partition: 1, offset: 1n, leaderEpoch: 0 }
+            ]
+          })
+
+          const reader = await pinApiVersions(createConsumer(t, { groupId }), { OffsetFetch: fetchVersion })
+          const committed = await reader.listCommittedOffsets({ topics: [{ topic, partitions: [0, 1] }] })
+
+          deepStrictEqual(committed.get(topic)?.slice(0, 2), [2n, 1n], `${label} did not round-trip the offsets`)
         })
-
-        const reader = await pinApiVersions(createConsumer(t, { groupId }), { OffsetFetch: fetchVersion })
-        const committed = await reader.listCommittedOffsets({ topics: [{ topic, partitions: [0, 1] }] })
-
-        deepStrictEqual(
-          committed.get(topic)?.slice(0, 2),
-          [2n, 1n],
-          `OffsetCommit v${commitVersion} / OffsetFetch v${fetchVersion} did not round-trip the offsets`
-        )
       })
     }
   }
@@ -145,21 +146,23 @@ test('The group protocol APIs complete a full lifecycle at every version', async
 
       for (const version of versions) {
         await t.test(`${name} v${version}`, async t => {
-          const consumer = await pinApiVersions(
-            createConsumer(t, { deserializers: stringDeserializers, groupId: `compat-${name}-${version}` }),
-            { [name]: version }
-          )
+          await runAtVersion(t, `${name} v${version}`, async () => {
+            const consumer = await pinApiVersions(
+              createConsumer(t, { deserializers: stringDeserializers, groupId: `compat-${name}-${version}` }),
+              { [name]: version }
+            )
 
-          const received = await consumeAll(consumer, topic, expected)
+            const received = await consumeAll(consumer, topic, expected)
 
-          deepStrictEqual(
-            Array.from(received).sort(),
-            Array.from(expected).sort(),
-            `${name} v${version} broke the consumer group lifecycle`
-          )
+            deepStrictEqual(
+              Array.from(received).sort(),
+              Array.from(expected).sort(),
+              `${name} v${version} broke the consumer group lifecycle`
+            )
 
-          // Closing drives LeaveGroup, which must also succeed at the pinned version.
-          await consumer.close()
+            // Closing drives LeaveGroup, which must also succeed at the pinned version.
+            await consumer.close()
+          })
         })
       }
     })

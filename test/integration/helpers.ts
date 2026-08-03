@@ -18,7 +18,14 @@ import {
 
 export { stringDeserializers, stringSerializers }
 export { kafkaBootstrapServers, kafkaSingleBootstrapServers, waitFor }
-export { forEachVersion, implementedVersions, pinApiVersions, usableVersions } from '../helpers/api-versions.ts'
+export {
+  forEachVersion,
+  implementedVersions,
+  isUnsupportedVersion,
+  pinApiVersions,
+  runAtVersion,
+  usableVersions
+} from '../helpers/api-versions.ts'
 
 // The version sweeps run against the single broker: they repeat the same scenario many times over
 // and the cluster's rebalances make that both slower and flakier for no extra coverage. The

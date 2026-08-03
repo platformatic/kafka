@@ -8,6 +8,7 @@ import {
   createTopic,
   forEachVersion,
   pinApiVersions,
+  runAtVersion,
   stringSerializers,
   usableVersions,
   waitFor
@@ -300,19 +301,21 @@ test('DeleteGroups removes an empty group at every version', async t => {
 
   for (const version of versions) {
     await t.test(`DeleteGroups v${version}`, async t => {
-      const topic = await createTopic(t, 1)
-      const groupId = `compat-delete-group-v${version}-${Date.now()}`
+      await runAtVersion(t, `DeleteGroups v${version}`, async () => {
+        const topic = await createTopic(t, 1)
+        const groupId = `compat-delete-group-v${version}-${Date.now()}`
 
-      const consumer = createConsumer(t, { groupId })
-      const stream = await consumer.consume({ topics: [topic], mode: 'earliest' })
-      await stream.close()
-      await consumer.close()
+        const consumer = createConsumer(t, { groupId })
+        const stream = await consumer.consume({ topics: [topic], mode: 'earliest' })
+        await stream.close()
+        await consumer.close()
 
-      const admin = await pinApiVersions(createAdmin(t), { DeleteGroups: version })
-      await admin.deleteGroups({ groups: [groupId] })
+        const admin = await pinApiVersions(createAdmin(t), { DeleteGroups: version })
+        await admin.deleteGroups({ groups: [groupId] })
 
-      const groups = await admin.listGroups({})
-      ok(!groups.has(groupId), `DeleteGroups v${version} did not remove the group`)
+        const groups = await admin.listGroups({})
+        ok(!groups.has(groupId), `DeleteGroups v${version} did not remove the group`)
+      })
     })
   }
 })

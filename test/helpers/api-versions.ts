@@ -6,16 +6,6 @@ import { type Base, kApis, kBootstrapBrokers, kListApis } from '../../src/client
 export type ApiPins = Record<string, number>
 
 /**
- * True when the broker under test predates the features a sweep needs.
- *
- * Set by the legacy compose stack's CI job. It is an explicit opt out rather than a catch of
- * connection failures, so a genuine regression on a modern broker still fails.
- */
-export function legacyBroker (): boolean {
-  return process.env.COMPAT_LEGACY_BROKER === '1'
-}
-
-/**
  * The versions of an API this package actually implements, in ascending order.
  *
  * Mirrors the name mangling in Base[kGetApi]: the codec for Produce v3 is exported as produceV3.

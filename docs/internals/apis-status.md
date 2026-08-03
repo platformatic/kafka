@@ -87,11 +87,9 @@ The version ranges below are implemented message codec versions, not supported b
 | SASL      | SaslHandshake              | 17  | 0-1     |
 | SASL      | SaslAuthenticate           | 36  | 0-2     |
 
-> The standalone SaslHandshake codec supports v0-v1, but connections use v1 only. The pre-1.0 raw-SASL flow is intentionally unsupported.
+> The standalone SaslHandshake codec supports v0-v1, but connections use v1 only: v0 signals the pre-1.0 flow, where SASL tokens are written raw on the wire rather than wrapped in SaslAuthenticate requests, which is intentionally unsupported.
 >
-> `Connection` also pins SaslAuthenticate to v2, which was introduced in Apache Kafka 2.4, so **SASL
-> authentication needs a 2.4 or later broker** even though the rest of the client works on 1.1.0.
-> Tracked in [#350](https://github.com/platformatic/kafka/issues/350).
+> SaslAuthenticate is negotiated per connection across v0-v2, so SASL works from Apache Kafka 1.1.0 onwards.
 
 # Integration coverage
 
@@ -106,7 +104,7 @@ Two groups are not covered that way, deliberately:
 | Codecs                                 | Why                                                                                                                                                          |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `AlterPartition` v0-v3                 | Broker to controller API. No client sends it, nothing in this package uses it, and Kafka 4.x does not advertise it to clients, so it cannot be driven at all. |
-| Delegation token v0 (APIs 38-41)       | Every supported broker advertises a minimum of v1.                                                                                                            |
+| Delegation token v0 (APIs 38-41)       | Covered by the Apache Kafka 1.1.0 stack only: every later broker advertises a minimum of v1.                                                                  |
 
 Delegation tokens v1 and above need a broker secret key, which `docker-compose.yml` cannot set
 unconditionally: KRaft only gained delegation token support in Apache Kafka 3.6 (KIP-900), and on
@@ -127,12 +125,12 @@ support, and CI runs the sweeps against it. It is pre-KRaft, so it brings its ow
 
 ```
 docker compose -f docker-compose.legacy.yml up -d --wait
-COMPAT_LEGACY_BROKER=1 npm run test:compat
+npm run test:compat
 ```
 
-`COMPAT_LEGACY_BROKER` opts out of the sweeps which cannot work there at all, rather than letting
-them fail: currently SASL and delegation tokens, both blocked by
-[#350](https://github.com/platformatic/kafka/issues/350).
+The whole suite runs there, including SASL and the delegation tokens which depend on it. That broker
+is also the only one which accepts delegation token v0, since every later one advertises a minimum
+of v1.
 
 Two behaviours differ enough on that broker to be worth knowing when writing sweeps:
 

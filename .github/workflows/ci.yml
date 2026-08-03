@@ -126,6 +126,3 @@ jobs:
         run: docker compose -f docker-compose.legacy.yml up -d --wait
       - name: Run API compatibility sweeps
         run: 'pnpm run test:compat'
-        env:
-          # SASL cannot work on this broker while SaslAuthenticate is pinned to v2: see issue #350.
-          COMPAT_LEGACY_BROKER: '1'

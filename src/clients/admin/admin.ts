@@ -79,8 +79,10 @@ import {
   ConfigResourceTypes,
   FetchIsolationLevels,
   FindCoordinatorKeyTypes,
+  legacyConsumerGroupStates,
   type ConfigResourceTypeValue,
-  type ConsumerGroupStateValue
+  type ConsumerGroupStateValue,
+  type KafkaConsumerGroupStateValue
 } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
@@ -1234,8 +1236,14 @@ export class Admin extends Base<AdminOptions> {
                     return
                   }
 
+                  // Brokers filter on the values they put on the wire, so the legacy Java enum
+                  // constant names have to be translated or they would silently match nothing.
+                  const states = ((options.states as ConsumerGroupStateValue[]) ?? []).map(
+                    state => legacyConsumerGroupStates[state as KafkaConsumerGroupStateValue] ?? state
+                  )
+
                   /* c8 ignore next 5 */
-                  api!(connection!, (options.states as ConsumerGroupStateValue[]) ?? [], options.types!, retryCallback)
+                  api!(connection!, states as ConsumerGroupStateValue[], options.types!, retryCallback)
                 })
               },
               concurrentCallback,
@@ -1254,7 +1262,7 @@ export class Admin extends Base<AdminOptions> {
             for (const raw of result.groups) {
               groups.set(raw.groupId, {
                 id: raw.groupId,
-                state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
+                state: raw.groupState as ConsumerGroupStateValue,
                 groupType: raw.groupType || undefined,
                 protocolType: raw.protocolType
               })
@@ -1333,7 +1341,7 @@ export class Admin extends Base<AdminOptions> {
                 for (const raw of result.groups) {
                   const group: Group = {
                     id: raw.groupId,
-                    state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
+                    state: raw.groupState as ConsumerGroupStateValue,
                     protocolType: raw.protocolType,
                     protocol: raw.protocolData,
                     members: new Map(),
@@ -1610,7 +1618,8 @@ export class Admin extends Base<AdminOptions> {
                 }
 
                 retryCallback(null, {
-                  throttleTimeMs: Math.max(...responses!.map(response => response.throttleTimeMs)),
+                  // The caller controls how many keys are looked up, so reduce rather than spread.
+                  throttleTimeMs: responses!.reduce((max, response) => Math.max(max, response.throttleTimeMs), 0),
                   coordinators: responses!.flatMap(response => response.coordinators)
                 })
               }
@@ -1874,7 +1883,10 @@ export class Admin extends Base<AdminOptions> {
                           }
 
                           retryCallback(null, {
-                            throttleTimeMs: responses![0]!.throttleTimeMs,
+                            throttleTimeMs: responses!.reduce(
+                              (max, response) => Math.max(max, response.throttleTimeMs),
+                              0
+                            ),
                             groups: responses!.flatMap(response => response.groups)
                           })
                         }

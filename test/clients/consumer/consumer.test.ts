@@ -97,12 +97,14 @@ async function produceTestMessages ({
   messages,
   batchSize = 3,
   delay = 0,
+  acks = ProduceAcks.LEADER,
   overrideOptions
 }: {
   t: TestContext
   messages: MessageToProduce<string, string, string, string>[]
   batchSize?: number
   delay?: number
+  acks?: number
   overrideOptions?: Partial<ProducerOptions<Buffer, Buffer, Buffer, Buffer>>
 }): Promise<void> {
   const producer = createProducer(t, overrideOptions)
@@ -118,7 +120,7 @@ async function produceTestMessages ({
         ),
         partition: msg.partition
       })),
-      acks: ProduceAcks.LEADER
+      acks
     })
     await sleep(delay)
   }
@@ -3778,7 +3780,7 @@ test('getLag should return the consumer lag', async t => {
     partition: i % 3
   }))
 
-  await produceTestMessages({ t, messages })
+  await produceTestMessages({ t, messages, acks: ProduceAcks.ALL })
 
   // Create three consumers and join the group
   const consumer1 = createConsumer(t, { groupId })
@@ -3787,7 +3789,24 @@ test('getLag should return the consumer lag', async t => {
   const consumers = [consumer1, consumer2, consumer3]
 
   await Promise.all(consumers.map(consumer => consumer.topics.trackAll(topic)))
-  await Promise.all(consumers.map(consumer => consumer.joinGroup()))
+
+  await consumer1.joinGroup()
+
+  const consumer1Rejoined = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await consumer1Rejoined
+
+  const consumersRejoined = [consumer1, consumer2].map(consumer => once(consumer, 'consumer:group:join'))
+  await consumer3.joinGroup()
+  await Promise.all(consumersRejoined)
+
+  strictEqual(new Set(consumers.map(consumer => consumer.generationId)).size, 1)
+  deepStrictEqual(
+    consumers
+      .flatMap(consumer => consumer.assignments!.find(assignment => assignment.topic === topic)!.partitions)
+      .sort((a, b) => a - b),
+    [0, 1, 2]
+  )
 
   async function setup (
     consumer: Consumer,

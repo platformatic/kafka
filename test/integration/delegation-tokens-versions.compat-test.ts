@@ -3,7 +3,14 @@ import test, { type TestContext } from 'node:test'
 import * as apis from '../../src/apis/index.ts'
 import { type Connection, kGetBootstrapConnection, SASLMechanisms } from '../../src/index.ts'
 import { kafkaSaslBootstrapServers } from '../helpers.ts'
-import { createAdmin, forEachVersion, implementedVersions, usableVersions, waitFor } from './helpers.ts'
+import {
+  createAdmin,
+  forEachVersion,
+  implementedVersions,
+  legacyBroker,
+  usableVersions,
+  waitFor
+} from './helpers.ts'
 
 // Delegation tokens have no Admin wrapper, so these drive the codecs directly. They only work on a
 // broker configured with delegation.token.secret.key and only over an authenticated connection,
@@ -49,6 +56,13 @@ async function issueToken (probe: any, connection: Connection) {
  * every broker in the matrix.
  */
 async function delegationTokensEnabled (t: TestContext, probe: any): Promise<boolean> {
+  // The delegation token APIs are only reachable over an authenticated connection, and SASL itself
+  // does not work on pre-2.4 brokers because SaslAuthenticate is pinned to v2 (issue #350).
+  if (legacyBroker()) {
+    t.diagnostic('Delegation tokens need SASL, which needs Kafka 2.4 or later, skipping (#350)')
+    return false
+  }
+
   // Kafka 3.5 does not implement the APIs under KRaft at all and reports them as UNSUPPORTED,
   // which is a different case from a broker which has them but no secret key configured.
   if (!(await usableVersions(probe, 'CreateDelegationToken')).length) {

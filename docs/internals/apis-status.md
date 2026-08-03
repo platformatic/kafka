@@ -87,7 +87,11 @@ The version ranges below are implemented message codec versions, not supported b
 | SASL      | SaslHandshake              | 17  | 0-1     |
 | SASL      | SaslAuthenticate           | 36  | 0-2     |
 
-> The standalone SaslHandshake codec supports v0-v1, but connections use v1 only. SASL authentication requires Kafka 1.0.0 or later because the pre-1.0 raw-SASL flow is intentionally unsupported.
+> The standalone SaslHandshake codec supports v0-v1, but connections use v1 only. The pre-1.0 raw-SASL flow is intentionally unsupported.
+>
+> `Connection` also pins SaslAuthenticate to v2, which was introduced in Apache Kafka 2.4, so **SASL
+> authentication needs a 2.4 or later broker** even though the rest of the client works on 1.1.0.
+> Tracked in [#350](https://github.com/platformatic/kafka/issues/350).
 
 # Integration coverage
 
@@ -118,8 +122,29 @@ Versions below a broker's advertised floor are skipped with a diagnostic rather 
 passing. The floors moved in Kafka 4.0 (KIP-896), so the oldest and newest brokers in the matrix
 cover different ends of the range: `Fetch` starts at v0 on Confluent 7.5.0 and at v4 on 8.2.0.
 
-Broker versions older than Apache Kafka 3.5.0 are not exercised by anything, including these
-suites, because the CI matrix does not contain one.
+`docker-compose.legacy.yml` provides Apache Kafka 1.1.0, the oldest broker this package claims to
+support, and CI runs the sweeps against it. It is pre-KRaft, so it brings its own ZooKeeper:
+
+```
+docker compose -f docker-compose.legacy.yml up -d --wait
+COMPAT_LEGACY_BROKER=1 npm run test:compat
+```
+
+`COMPAT_LEGACY_BROKER` opts out of the sweeps which cannot work there at all, rather than letting
+them fail: currently SASL and delegation tokens, both blocked by
+[#350](https://github.com/platformatic/kafka/issues/350).
+
+Two behaviours differ enough on that broker to be worth knowing when writing sweeps:
+
+- `createTopics` must be given an explicit partition count and replication factor. Omitting them
+  makes the client send -1, meaning "use the broker default", which is KIP-464 and only understood
+  from Apache Kafka 2.4. Older brokers answer `INVALID_PARTITIONS` or `INVALID_REPLICATION_FACTOR`.
+- `OffsetCommit` and `OffsetFetch` v0 read and write offsets in ZooKeeper while v1 and above use the
+  group coordinator, so the two cannot be mixed on a broker old enough to still accept v0.
+
+Nothing between Apache Kafka 1.1.0 and 3.5.0 is exercised. Kafka 2.4 (flexible versions, KIP-482)
+and 2.8 (topic IDs, KIP-516) are the next most valuable additions, being where the wire format
+changes shape.
 
 # Unsupported APIs
 

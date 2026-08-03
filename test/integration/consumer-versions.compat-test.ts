@@ -104,6 +104,13 @@ test('OffsetCommit and OffsetFetch round-trip committed offsets at every version
     for (const fetchVersion of [fetchVersions[0], fetchVersions.at(-1)!]) {
       const label = `OffsetCommit v${commitVersion} + OffsetFetch v${fetchVersion}`
 
+      // v0 of both APIs reads and writes offsets in ZooKeeper, while v1 and above use the group
+      // coordinator. Pairing one with the other therefore cannot round-trip on a broker old enough
+      // to still accept v0, and says nothing about either codec.
+      if ((commitVersion === 0) !== (fetchVersion === 0)) {
+        continue
+      }
+
       await t.test(label, async t => {
         await runAtVersion(t, label, async () => {
           const groupId = `compat-offsets-${commitVersion}-${fetchVersion}-${Date.now()}`

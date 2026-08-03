@@ -115,6 +115,43 @@ export async function pinApiVersions<ClientType extends Base<any>> (
 }
 
 /**
+ * True when an error, or anything it aggregates, is the broker rejecting the API version.
+ *
+ * Brokers do not always honour the range they advertise. Confluent 7.5.0 reports a minimum of v0
+ * for OffsetCommit and OffsetFetch but refuses v0 requests, because those versions stored offsets
+ * in ZooKeeper and KRaft has no such storage. That is a property of the broker, not a defect in the
+ * codec, so it is reported and skipped rather than failed.
+ */
+export function isUnsupportedVersion (error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  if ((error as { apiId?: string }).apiId === 'UNSUPPORTED_VERSION') {
+    return true
+  }
+
+  const aggregated = (error as { errors?: unknown[] }).errors
+
+  return Array.isArray(aggregated) && aggregated.some(isUnsupportedVersion)
+}
+
+/**
+ * Runs body, turning a broker level version rejection into a reported skip.
+ */
+export async function runAtVersion (t: TestContext, label: string, body: () => Promise<void>): Promise<void> {
+  try {
+    await body()
+  } catch (error) {
+    if (!isUnsupportedVersion(error)) {
+      throw error
+    }
+
+    t.diagnostic(`${label}: the broker advertises this version but rejects it, skipping`)
+  }
+}
+
+/**
  * Runs body once per usable version of an API, as a subtest, and reports the versions which are not
  * reachable on this broker instead of quietly not testing them.
  */
@@ -138,6 +175,6 @@ export async function forEachVersion (
   }
 
   for (const version of usable) {
-    await t.test(`${name} v${version}`, async t => body(version, t))
+    await t.test(`${name} v${version}`, async t => runAtVersion(t, `${name} v${version}`, () => body(version, t)))
   }
 }

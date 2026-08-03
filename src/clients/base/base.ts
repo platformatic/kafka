@@ -337,6 +337,12 @@ export class Base<
               }
 
               // We use V1 because it is supported by Kafka 1.1.0+.
+              //
+              // The tradeoff is that clientSoftwareName and clientSoftwareVersion only exist from
+              // V3, so brokers cannot attribute client metrics to this package (KIP-511) and the
+              // two arguments below are accepted and discarded by the V1 codec. Removing the
+              // tradeoff requires negotiating down from V3 on UNSUPPORTED_VERSION rather than
+              // pinning a version: see https://github.com/platformatic/kafka/issues/343.
               apiVersionsV1(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
             }, attempt)
           },

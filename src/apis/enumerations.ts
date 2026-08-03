@@ -122,6 +122,7 @@ export type AclPermissionType = AclPermissionTypeLabel
 export const ConfigSources = {
   UNKNOWN: 0,
   DYNAMIC_TOPIC_CONFIG: 1,
+  /** @deprecated Use ConfigSources.DYNAMIC_TOPIC_CONFIG, which is the name Kafka uses for this source. */
   TOPIC_CONFIG: 1,
   DYNAMIC_BROKER_CONFIG: 2,
   DYNAMIC_DEFAULT_BROKER_CONFIG: 3,
@@ -131,7 +132,9 @@ export const ConfigSources = {
   CLIENT_METRICS_CONFIG: 7,
   GROUP_CONFIG: 8
 } as const
-export const allowedConfigSources = Object.values(ConfigSources)
+// DYNAMIC_TOPIC_CONFIG and its TOPIC_CONFIG alias share the value 1, so the values must be deduplicated:
+// a JSON Schema enum requires unique items and a duplicate would also break any value to label lookup.
+export const allowedConfigSources = Array.from(new Set(Object.values(ConfigSources)))
 export type ConfigSourceLabel = keyof typeof ConfigSources
 export type ConfigSourceValue = (typeof ConfigSources)[ConfigSourceLabel]
 /** @deprecated Use ConfigSourceLabel */
@@ -216,6 +219,9 @@ export type DescribeClusterEndpointTypeValue = (typeof DescribeClusterEndpointTy
 export type DescribeClusterEndpointType = DescribeClusterEndpointTypeLabel
 
 // ./admin/list-groups.ts
+// These are the values Kafka puts on the wire and therefore the values reported back to callers.
+// Note that brokers match the ListGroups states filter case insensitively but not underscore
+// insensitively, so 'PREPARING_REBALANCE' never matches anything: see legacyConsumerGroupStates.
 export const ConsumerGroupStates = [
   'Unknown',
   'PreparingRebalance',
@@ -231,6 +237,8 @@ export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number] | Kaf
 /** @deprecated Use ConsumerGroupStateValue */
 export type ConsumerGroupState = ConsumerGroupStateValue
 
+// The names of the constants in Kafka's Java ConsumerGroupState enum, which this package used to
+// report and accept. They are still accepted as filters, but are translated to the wire values above.
 export const KafkaConsumerGroupStates = [
   'PREPARING_REBALANCE',
   'COMPLETING_REBALANCE',
@@ -239,6 +247,14 @@ export const KafkaConsumerGroupStates = [
   'EMPTY'
 ] as const
 export type KafkaConsumerGroupStateValue = (typeof KafkaConsumerGroupStates)[number]
+
+export const legacyConsumerGroupStates: Readonly<Record<KafkaConsumerGroupStateValue, string>> = {
+  PREPARING_REBALANCE: 'PreparingRebalance',
+  COMPLETING_REBALANCE: 'CompletingRebalance',
+  STABLE: 'Stable',
+  DEAD: 'Dead',
+  EMPTY: 'Empty'
+}
 
 export const GroupTypes = ['classic', 'consumer', 'share', 'streams'] as const
 export type GroupTypeValue = (typeof GroupTypes)[number]

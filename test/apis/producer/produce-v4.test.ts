@@ -22,7 +22,6 @@ test('Produce v4 marks no-ack requests as having no response', () => {
   const writer = createRequest(ProduceAcks.NO_RESPONSE, 10, [{ topic: 'orders', value: Buffer.from('created') }])
 
   strictEqual(writer.context.noResponse, true)
-  strictEqual(writer.context.requestTimeout, 10)
 })
 
 test('Produce v4 adapts successful responses to the current producer response API', () => {

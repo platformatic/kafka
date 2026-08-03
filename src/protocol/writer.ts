@@ -1,6 +1,6 @@
 import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import { humanize } from '../utils.ts'
-import { EMPTY_TAGGED_FIELDS_BUFFER, EMPTY_UUID, type NullableString } from './definitions.ts'
+import { EMPTY_TAGGED_FIELDS_BUFFER, EMPTY_UUID, UUID_SIZE, type NullableString } from './definitions.ts'
 
 // Note that in this class "== null" is purposely used instead of "===" to check for both null and undefined
 
@@ -168,6 +168,14 @@ export class Writer {
     }
 
     const buffer = Buffer.from(value.replaceAll('-', ''), 'hex')
+
+    // UUIDs are fixed width and carry no length prefix, so anything that is not exactly 16 bytes
+    // would silently desync the rest of the request. Buffer.from() stops at the first non hex
+    // character, so a topic name used as a topic id would append nothing at all here.
+    if (buffer.length !== UUID_SIZE) {
+      throw new RangeError(`Expected a UUID, got ${JSON.stringify(value)}.`)
+    }
+
     this.#buffer.append(buffer)
 
     return this
@@ -198,7 +206,13 @@ export class Writer {
     }
 
     this.appendVarInt(value.length)
-    this.#buffer.append(value)
+
+    // Appending an empty buffer corrupts DynamicBuffer's positional reads, so it must be skipped:
+    // see https://github.com/platformatic/dynamic-buffer/issues/12. Record keys and values are
+    // allowed to be empty without being null, so this is reachable.
+    if (value.length > 0) {
+      this.#buffer.append(value)
+    }
 
     return this
   }

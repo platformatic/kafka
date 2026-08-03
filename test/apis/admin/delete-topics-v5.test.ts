@@ -10,7 +10,8 @@ test('DeleteTopics v5 serializes flexible names and ignores topic IDs', () => {
     { topicId: 'not-a-uuid' },
     { name: 'both', topicId: '12345678-1234-1234-1234-123456789abc' }
   ], 30000))
-  deepStrictEqual(reader.readArray(r => r.readString()), ['by-name', '', 'both'])
+  // As in v4, topic_names has no per entry tagged fields, so the reader must not consume any.
+  deepStrictEqual(reader.readArray(r => r.readString(), true, false), ['by-name', '', 'both'])
   deepStrictEqual(reader.readInt32(), 30000)
   deepStrictEqual({ key: api.key, version: api.version }, { key: 20, version: 5 })
 })

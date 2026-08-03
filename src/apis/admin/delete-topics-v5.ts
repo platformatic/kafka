@@ -21,14 +21,17 @@ export interface DeleteTopicsResponse {
 }
 
 /*
-  DeleteTopics Request (Version: 5) => [topics] timeout_ms TAG_BUFFER
-    topics => name TAG_BUFFER
-      name => COMPACT_STRING
+  DeleteTopics Request (Version: 5) => [topic_names] timeout_ms TAG_BUFFER
+    topic_names => COMPACT_STRING
     timeout_ms => INT32
+
+  Note that topic_names is an array of plain strings, not of structs: it only becomes
+  [topics] with per entry tagged fields in v6. Appending a tagged field section after each
+  name makes the broker drop the connection.
 */
 export function createRequest (topics: DeleteTopicsRequestTopic[], timeoutMs: number): Writer {
   return Writer.create()
-    .appendArray(topics, (w, topic) => w.appendString(topic.name ?? ''))
+    .appendArray(topics, (w, topic) => w.appendString(topic.name ?? ''), true, false)
     .appendInt32(timeoutMs)
     .appendTaggedFields()
 }

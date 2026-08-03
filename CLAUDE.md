@@ -48,8 +48,8 @@ configured with a token secret key refuses to start. They skip themselves elsewh
 
 `docker-compose.legacy.yml` runs the same sweeps against Apache Kafka 1.1.0, the oldest supported
 broker. It is a standalone stack rather than an override because pre-KRaft brokers need ZooKeeper
-and must not receive the KRaft settings, and compose overrides cannot remove keys. Run it with
-`COMPAT_LEGACY_BROKER=1`, which opts out of the sweeps that cannot work there at all.
+and must not receive the KRaft settings, and compose overrides cannot remove keys. The whole suite
+runs against it, and it is the only broker which reaches the delegation token v0 codecs.
 
 ## Code Style Guidelines
 

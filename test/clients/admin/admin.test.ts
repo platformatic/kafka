@@ -1813,9 +1813,10 @@ test('listGroups should negotiate legacy versions and normalize their defaults',
         }
       )
 
+      // ListGroups only carries group_state from v4, so these versions report Kafka's 'Unknown'.
       deepStrictEqual(
         await admin.listGroups(),
-        new Map([[groupId, { id: groupId, state: '', groupType: undefined, protocolType: 'consumer' }]])
+        new Map([[groupId, { id: groupId, state: 'Unknown', groupType: undefined, protocolType: 'consumer' }]])
       )
     })
   }

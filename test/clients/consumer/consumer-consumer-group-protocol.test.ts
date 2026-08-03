@@ -2,14 +2,17 @@ import { ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
-import { kClosed, kConnections } from '../../../src/clients/base/base.ts'
+import { kClosed, kConnections, kMetadata } from '../../../src/clients/base/base.ts'
 import {
   consumerGroupHeartbeatV0,
+  MultipleErrors,
   ProduceAcks,
   ResponseError,
   sleep,
   TimeoutError,
   UnsupportedApiError,
+  type CallbackWithPromise,
+  type ClusterMetadata,
   type MessageToProduce,
   type ProducerOptions
 } from '../../../src/index.ts'
@@ -19,6 +22,7 @@ import {
   createTopic,
   isKafka,
   mockAPI,
+  mockedErrorMessage,
   mockMetadata,
   mockUnavailableAPI,
   waitFor
@@ -198,8 +202,65 @@ test('#leaveGroupNewProtocol should handle unavailable API errors', skipConsumer
 test('#updateAssignments should handle metadata error', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)
-  consumer.on('consumer:heartbeat:start', () => mockMetadata(consumer))
+
+  let metadataErrorDelivered = false
+
+  // #updateAssignments is invoked synchronously while a ConsumerGroupHeartbeat response is being
+  // handled, so the metadata mock is armed only for the duration of that handling. Arming it from a
+  // 'consumer:heartbeat:start' listener instead leaves it live across the whole request/response
+  // round trip, where the stream's own metadata calls can consume it and destroy the stream with the
+  // mocked error - which surfaced as an uncaught exception under load. See #341.
+  mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, (
+    originalSend,
+    apiKey,
+    apiVersion,
+    payload,
+    responseParser,
+    hasRequestHeaderTaggedFields,
+    hasResponseHeaderTaggedFields,
+    callback
+  ) => {
+    originalSend(
+      apiKey,
+      apiVersion,
+      payload,
+      responseParser,
+      hasRequestHeaderTaggedFields,
+      hasResponseHeaderTaggedFields,
+      (error: Error | null, response: unknown) => {
+        if (metadataErrorDelivered) {
+          callback(error, response)
+          return
+        }
+
+        const originalMetadata = consumer[kMetadata]
+
+        mockMetadata(consumer, 1, undefined, undefined, (_original, ...args: unknown[]) => {
+          metadataErrorDelivered = true
+          ;(args.at(-1) as CallbackWithPromise<ClusterMetadata>)(
+            new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')], {
+              canRetry: false
+            })
+          )
+          return false
+        })
+
+        try {
+          callback(error, response)
+        } finally {
+          consumer[kMetadata] = originalMetadata
+        }
+      }
+    )
+
+    return true
+  })
+
   const stream = await consumer.consume({ topics: [topic] })
-  await once(consumer, 'consumer:heartbeat:end')
+  await waitFor(() => ok(metadataErrorDelivered), { timeout: 10000 })
+
+  // The error was handled rather than thrown, and the assignments were left untouched
+  strictEqual(consumer.assignments, null)
+
   await stream.close()
 })

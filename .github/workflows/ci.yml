@@ -96,3 +96,36 @@ jobs:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run API compatibility sweeps
         run: 'pnpm run test:compat'
+
+  # Apache Kafka 1.1.0, the oldest broker this package claims to support. It is the only place the
+  # legacy codecs are the *negotiated* choice rather than a forced pin, and the only broker where
+  # ApiVersions maxes out at v1. Pre-KRaft, so it needs its own ZooKeeper based stack.
+  legacy-compatibility:
+    name: 'API compatibility / Apache Kafka 1.1.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Restore cached dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: node-modules-${{ hashFiles('package.json') }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start Kafka 1.1.0
+        run: docker compose -f docker-compose.legacy.yml up -d --wait
+      - name: Run API compatibility sweeps
+        run: 'pnpm run test:compat'
+        env:
+          # SASL cannot work on this broker while SaslAuthenticate is pinned to v2: see issue #350.
+          COMPAT_LEGACY_BROKER: '1'

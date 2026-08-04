@@ -22,7 +22,7 @@ import {
   producerSendsChannel,
   producerTransactionsChannel
 } from '../../diagnostic.ts'
-import { GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { findErrorBy, type GenericError, type ProtocolError, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   type CreateRecordsBatchOptions,
@@ -1249,11 +1249,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (error) {
             // If the last error was due to stale metadata, we retry the operation with this set of messages
             // since the partition is already set, it should attempt on the new destination
-            /* c8 ignore next 3 - Hard to test */
-            const kafkaError = GenericError.isGenericError(error)
-              ? (error as GenericError & { findBy: (property: string, value: unknown) => GenericError | null })
-              : null
-            const hasStaleMetadata = kafkaError?.findBy('hasStaleMetadata', true)
+            /* c8 ignore next - Hard to test */
+            const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
 
             if (hasStaleMetadata && repeatOnStaleMetadata) {
               this.clearMetadata()
@@ -1303,24 +1300,20 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         [],
         error => {
           /* c8 ignore next 3 - Hard to test */
-          if (!repeatOnStaleMetadata || !GenericError.isGenericError(error)) {
+          if (!repeatOnStaleMetadata) {
             return false
           }
 
-          return !!(
-            error as GenericError & { findBy: (property: string, value: unknown) => GenericError | null }
-          ).findBy('hasStaleMetadata', true)
+          return !!findErrorBy(error, 'hasStaleMetadata', true)
         }
       )
     })
   }
 
   #isProducerStateLost (error: Error): boolean {
-    const kafkaError = error as GenericError
-
     return !!(
-      GenericError.isGenericError(error) &&
-      (kafkaError.findBy('apiId', 'UNKNOWN_PRODUCER_ID') || kafkaError.findBy('apiId', 'OUT_OF_ORDER_SEQUENCE_NUMBER'))
+      findErrorBy(error, 'apiId', 'UNKNOWN_PRODUCER_ID') ||
+      findErrorBy(error, 'apiId', 'OUT_OF_ORDER_SEQUENCE_NUMBER')
     )
   }
 
@@ -1390,24 +1383,20 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #handleFencingError (error: Error): void {
-    if ((error as GenericError).findBy<ProtocolError>?.('producerFenced', true)) {
+    if (findErrorBy<ProtocolError>(error, 'producerFenced', true)) {
       this.#producerInfo = undefined
       this.#transaction = undefined
     }
   }
 
   #handleError (error: Error | null): Error | null {
-    const kafkaError = error as GenericError
-
-    if (kafkaError) {
-      if (
-        kafkaError.findBy('code', 'PLT_KFK_NETWORK') ||
-        kafkaError.findBy('apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
-        kafkaError.findBy('apiId', 'COORDINATOR_NOT_AVAILABLE') ||
-        kafkaError.findBy('apiId', 'NOT_COORDINATOR')
-      ) {
-        this.#coordinatorId = undefined
-      }
+    if (
+      findErrorBy(error, 'code', 'PLT_KFK_NETWORK') ||
+      findErrorBy(error, 'apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
+      findErrorBy(error, 'apiId', 'COORDINATOR_NOT_AVAILABLE') ||
+      findErrorBy(error, 'apiId', 'NOT_COORDINATOR')
+    ) {
+      this.#coordinatorId = undefined
     }
 
     return error

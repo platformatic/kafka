@@ -1377,10 +1377,20 @@ test('send should handle errors from Base.metadata in internal calls', async t =
 })
 
 test('send should return produced messages when another destination fails', async t => {
-  const producer = createProducer(t, { retries: 0 })
+  const producer = createProducer(t)
   const testTopic = await createTopic(t, true, 3)
 
-  let partition = -1
+  const messages = [
+    { topic: testTopic, value: Buffer.from('produced-message'), partition: 0 },
+    { topic: testTopic, value: Buffer.from('failed-message'), partition: 1 }
+  ]
+
+  // Produce once with retries still enabled. A freshly created topic can still be settling
+  // leadership, and this test needs the destination that is not mocked to reliably succeed.
+  await producer.send({ messages })
+  producer[kOptions].retries = 0
+
+  let calls = 0
   mockAPI(producer[kConnections], produceV11.api.key, null, null, (
     originalSend,
     apiKey,
@@ -1391,9 +1401,9 @@ test('send should return produced messages when another destination fails', asyn
     hasResponseHeaderTaggedFields,
     callback
   ) => {
-    partition++
+    calls++
 
-    if (partition === 0) {
+    if (calls === 1) {
       callback(new GenericError('PLT_KFK_NETWORK', 'Produce failed.', { canRetry: false }))
     } else {
       originalSend(
@@ -1412,18 +1422,18 @@ test('send should return produced messages when another destination fails', asyn
 
   await rejects(
     async () => {
-      await producer.send({
-        messages: [
-          { topic: testTopic, value: Buffer.from('produced-message'), partition: 0 },
-          { topic: testTopic, value: Buffer.from('failed-message'), partition: 1 }
-        ]
-      })
+      await producer.send({ messages })
     },
     error => {
-      const produced = (error as MultipleErrors).produced?.offsets?.[0] as TopicWithPartitionAndOffset
+      // The two partitions must have different leaders, otherwise there is only one destination and
+      // nothing is left to succeed.
+      strictEqual(calls, 2)
 
-      deepStrictEqual((error as MultipleErrors).produced, { offsets: [produced] })
-      deepStrictEqual(produced.topic, testTopic)
+      const produced = (error as MultipleErrors).produced as ProduceResult
+      const offsets = produced.offsets as TopicWithPartitionAndOffset[]
+
+      strictEqual(offsets.length, 1)
+      strictEqual(offsets[0].topic, testTopic)
       return true
     }
   )

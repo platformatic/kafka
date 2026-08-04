@@ -139,6 +139,24 @@ export class MultipleErrors extends AggregateError {
   }
 }
 
+// findBy only exists on the library's own error classes, but errors also come from user code, Node
+// internals and third parties. This brand checks first, so classification is total: an error that
+// cannot be classified reports no match instead of throwing. Use it for any error whose origin is
+// not statically known.
+export function findErrorBy<ErrorType extends GenericError = GenericError> (
+  error: Error | null | undefined,
+  property: string,
+  value: unknown
+): ErrorType | null {
+  if (!error || !GenericError.isGenericError(error)) {
+    return null
+  }
+
+  // GenericError and MultipleErrors declare findBy with different generic defaults, so the union is
+  // not callable. The brand check above guarantees the call is safe either way.
+  return (error as GenericError).findBy<ErrorType>(property, value)
+}
+
 export * from './protocol/errors.ts'
 
 export class AuthenticationError extends GenericError {

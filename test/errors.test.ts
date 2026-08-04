@@ -14,7 +14,8 @@ import {
   UnsupportedCompressionError,
   UnsupportedError,
   UserError,
-  errorCodes
+  errorCodes,
+  findErrorBy
 } from '../src/index.ts'
 
 test('should export error codes with correct prefix', () => {
@@ -288,6 +289,27 @@ test('ProtocolError FENCED_LEADER_EPOCH has hasStaleMetadata', () => {
   deepStrictEqual(error.code, 'PLT_KFK_PROTOCOL')
   deepStrictEqual(error.apiId, 'FENCED_LEADER_EPOCH')
   deepStrictEqual(error.hasStaleMetadata, true)
+})
+
+test('findErrorBy - classifies library errors and ignores everything else', () => {
+  const error = new GenericError('PLT_KFK_USER', 'error', { foo: 'bar' })
+
+  strictEqual(findErrorBy(error, 'foo', 'bar'), error)
+  strictEqual(findErrorBy(error, 'foo', 'baz'), null)
+
+  // Errors from user code, Node internals or third parties have no findBy, so they must report no
+  // match rather than throwing a TypeError.
+  strictEqual(findErrorBy(new Error('plain'), 'foo', 'bar'), null)
+  strictEqual(findErrorBy(null, 'foo', 'bar'), null)
+  strictEqual(findErrorBy(undefined, 'foo', 'bar'), null)
+})
+
+test('findErrorBy - recurses into nested errors', () => {
+  const nested = new GenericError('PLT_KFK_USER', 'nested', { foo: 'bar' })
+  const error = new MultipleErrors('multiple', [new Error('plain'), nested])
+
+  strictEqual(findErrorBy(error, 'foo', 'bar'), nested)
+  strictEqual(findErrorBy(error, 'foo', 'baz'), null)
 })
 
 test('MultipleErrors.findBy - handles undefined entries in errors array', () => {

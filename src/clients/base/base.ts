@@ -21,8 +21,7 @@ import {
   notifyCreation,
   type ClientType
 } from '../../diagnostic.ts'
-import type { GenericError } from '../../errors.ts'
-import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
+import { findErrorBy, MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
 import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
@@ -368,7 +367,12 @@ export class Base<
 
   [kCheckNotClosed] (callback: CallbackWithPromise<any>): boolean {
     if (this[kClosed]) {
-      const error = new NetworkError('Client is closed.', { closed: true, instance: this[kInstance] })
+      // A closed client never reopens, so this must not be retried.
+      const error = new NetworkError('Client is closed.', {
+        canRetry: false,
+        closed: true,
+        instance: this[kInstance]
+      })
       callback(error, undefined)
       return true
     }
@@ -393,9 +397,8 @@ export class Base<
 
     operation((error, result) => {
       if (error) {
-        const genericError = error as GenericError
         // Only retry if all the errors in the chain are retriable
-        const retriable = !genericError.findBy?.('canRetry', false)
+        const retriable = !findErrorBy(error, 'canRetry', false)
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
@@ -639,7 +642,7 @@ export class Base<
           },
           (error, metadata) => {
             if (error) {
-              const unknownTopicError = (error as GenericError).findBy('apiCode', 3)
+              const unknownTopicError = findErrorBy(error, 'apiCode', 3)
               if (unknownTopicError) {
                 const topicIndexMatch = unknownTopicError.path?.match(/\/topics\/(\d+)/)
                 /* c8 ignore next 3 - Hard to test  */
@@ -650,7 +653,7 @@ export class Base<
                 return
               }
 
-              const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
+              const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again
               /* c8 ignore next 4 - Hard to test */

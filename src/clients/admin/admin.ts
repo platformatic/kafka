@@ -95,7 +95,7 @@ import {
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { MultipleErrors, UserError } from '../../errors.ts'
+import { findErrorBy, MultipleErrors, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
@@ -951,7 +951,7 @@ export class Admin extends Base<AdminOptions> {
   }
 
   #handleNotControllerError<T> (error: Error | null, value: T, callback: Callback<T>): void {
-    if (error && (error as MultipleErrors)?.findBy?.('apiCode', 41)) {
+    if (findErrorBy(error, 'apiCode', 41)) {
       this[kMetadata]({ topics: [], forceUpdate: true }, (metadataError, metadata) => {
         /* c8 ignore next 4 - Hard to test */
         if (metadataError) {

@@ -21,8 +21,7 @@ import {
   notifyCreation,
   type ClientType
 } from '../../diagnostic.ts'
-import type { GenericError } from '../../errors.ts'
-import { MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
+import { GenericError, MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
 import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
@@ -639,7 +638,10 @@ export class Base<
           },
           (error, metadata) => {
             if (error) {
-              const unknownTopicError = (error as GenericError).findBy('apiCode', 3)
+              // findBy only exists on our own error classes, so brand check before classifying.
+              const kafkaError = GenericError.isGenericError(error) ? (error as GenericError) : null
+
+              const unknownTopicError = kafkaError?.findBy('apiCode', 3)
               if (unknownTopicError) {
                 const topicIndexMatch = unknownTopicError.path?.match(/\/topics\/(\d+)/)
                 /* c8 ignore next 3 - Hard to test  */
@@ -650,7 +652,7 @@ export class Base<
                 return
               }
 
-              const hasStaleMetadata = (error as GenericError).findBy('hasStaleMetadata', true)
+              const hasStaleMetadata = kafkaError?.findBy('hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again
               /* c8 ignore next 4 - Hard to test */

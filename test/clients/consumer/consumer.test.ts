@@ -35,6 +35,7 @@ import {
   FetchIsolationLevels,
   fetchV17,
   findCoordinatorV6,
+  GenericError,
   type GroupPartitionsAssignments,
   heartbeatV4,
   instancesChannel,
@@ -3894,6 +3895,57 @@ test('commit should invalidate cached coordinator on coordinator connection erro
   )
 
   strictEqual(consumer.coordinatorId, null)
+})
+
+test('commit should not crash when the error is not a library error', async t => {
+  const consumer = createConsumer(t, { retries: 0 })
+  // A plain Error has no findBy, so classifying it must degrade instead of throwing a TypeError.
+  const plainError = new Error('Connection pool is closed.')
+  mockConsumerGroupCoordinator(consumer, 1, plainError)
+
+  const coordinatorId = await consumer.findGroupCoordinator()
+
+  strictEqual(consumer.coordinatorId, coordinatorId)
+
+  await rejects(
+    async () => {
+      await consumer.commit({ offsets: [{ topic: 'test-topic', partition: 0, offset: 100n, leaderEpoch: 0 }] })
+    },
+    error => {
+      strictEqual(error, plainError)
+      return true
+    }
+  )
+
+  // Nothing could be classified, so the cached coordinator is left alone.
+  strictEqual(consumer.coordinatorId, coordinatorId)
+})
+
+test('a closed connection pool should surface a library error rather than an uncaught TypeError', async t => {
+  const consumer = createConsumer(t, { retries: 0 })
+  const topic = await createTopic(t, true)
+
+  // Resolve the coordinator first so the next call asks the pool for a specific broker.
+  await consumer.findGroupCoordinator()
+
+  // Close the pool underneath the running client, which is the state the original crash hit.
+  await consumer[kConnections].close()
+
+  await rejects(
+    async () => {
+      await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+    },
+    error => {
+      ok(GenericError.isGenericError(error as Error))
+
+      const closedPoolError = (error as GenericError).findBy('closed', true)
+      ok(closedPoolError)
+      strictEqual(closedPoolError.message, 'Connection pool is closed.')
+      strictEqual(closedPoolError.code, 'PLT_KFK_NETWORK')
+      strictEqual(closedPoolError.canRetry, false)
+      return true
+    }
+  )
 })
 
 test('findGroupCoordinator should support both promise and callback API', t => {

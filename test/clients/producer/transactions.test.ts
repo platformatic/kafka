@@ -193,6 +193,37 @@ test('transaction commit should invalidate cached coordinator on coordinator pro
   strictEqual(producer.coordinatorId, undefined)
 })
 
+test('transaction commit should not crash when the error is not a library error', async t => {
+  const transactionalId = randomUUID()
+  const producer = createProducer(t, {
+    idempotent: true,
+    strict: true,
+    transactionalId
+  })
+  producer[kOptions].retries = 0
+  // A plain Error has no findBy, so classifying it must degrade instead of throwing a TypeError.
+  const plainError = new Error('Connection pool is closed.')
+  mockTransactionCoordinator(producer, 1, plainError)
+
+  const transaction = await producer.beginTransaction()
+  const coordinatorId = producer.coordinatorId
+
+  strictEqual(typeof coordinatorId, 'number')
+
+  await rejects(
+    async () => {
+      await transaction.commit()
+    },
+    error => {
+      strictEqual(error, plainError)
+      return true
+    }
+  )
+
+  // Nothing could be classified, so the cached coordinator is left alone.
+  strictEqual(producer.coordinatorId, coordinatorId)
+})
+
 test('beginTransaction should validate options in strict mode', async t => {
   const producer = createProducer(t, { strict: true })
 

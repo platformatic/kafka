@@ -1399,7 +1399,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #handleError (error: Error | null): Error | null {
     const kafkaError = error as GenericError
 
-    if (kafkaError) {
+    // findBy only exists on our own error classes, so brand check before classifying.
+    if (error && GenericError.isGenericError(error)) {
       if (
         kafkaError.findBy('code', 'PLT_KFK_NETWORK') ||
         kafkaError.findBy('apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||

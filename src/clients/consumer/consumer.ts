@@ -57,7 +57,7 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { type GenericError, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
+import { GenericError, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -2499,7 +2499,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #handleError (error: Error | null): Error | null {
     const kafkaError = error as GenericError
 
-    if (kafkaError) {
+    // findBy only exists on our own error classes, so brand check before classifying.
+    if (error && GenericError.isGenericError(error)) {
       if (kafkaError.findBy('hasStaleMetadata', true)) {
         this.clearMetadata()
       } else if (

@@ -9,6 +9,7 @@ import {
   type ConnectionPoolDiagnosticEvent,
   connectionsPoolGetsChannel,
   ConnectionStatuses,
+  GenericError,
   instancesChannel
 } from '../../src/index.ts'
 import {
@@ -316,6 +317,25 @@ test('get fail when the pool is closed', async t => {
   await connectionPool.close()
 
   await rejects(() => connectionPool.get(broker) as Promise<unknown>, { message: 'Connection pool is closed.' })
+})
+
+test('get should reject with a non retriable library error when the pool is closed', async t => {
+  const { port } = await createServer(t)
+  const broker = { host: 'localhost', port }
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+  await connectionPool.close()
+
+  // The clients classify errors via findBy, which only exists on GenericError subclasses.
+  await rejects(() => connectionPool.get(broker) as Promise<unknown>, error => {
+    ok(GenericError.isGenericError(error as Error))
+    deepStrictEqual((error as GenericError).code, 'PLT_KFK_NETWORK')
+    deepStrictEqual((error as GenericError).canRetry, false)
+    deepStrictEqual((error as GenericError).closed, true)
+    deepStrictEqual((error as GenericError).findBy('code', 'PLT_KFK_NETWORK'), error)
+    return true
+  })
 })
 
 test('get should reject with a retriable error when the broker is missing from stale metadata', async t => {

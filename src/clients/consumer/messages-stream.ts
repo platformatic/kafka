@@ -15,7 +15,7 @@ import {
   type DiagnosticContext
 } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
-import { protocolErrors, UserError } from '../../errors.ts'
+import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
@@ -677,7 +677,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     topicIds: Map<string, string>,
     callback: Callback<boolean>
   ): void {
-    if (!error.findBy?.('apiId', 'OFFSET_OUT_OF_RANGE')) {
+    if (!findErrorBy(error, 'apiId', 'OFFSET_OUT_OF_RANGE')) {
       callback(null, false)
       return
     }
@@ -1059,7 +1059,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // Only destroy the stream when the broker requires a group rejoin
         // (ILLEGAL_GENERATION, UNKNOWN_MEMBER_ID, REBALANCE_IN_PROGRESS).
         // Transient coordinator errors must not tear down the consumption loop.
-        if ((error as GenericError).findBy?.('needsRejoin', true)) {
+        if (findErrorBy(error, 'needsRejoin', true)) {
           this.destroy(error)
         }
         return

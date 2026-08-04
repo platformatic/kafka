@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
@@ -970,6 +970,25 @@ test('kGetBootstrapConnection rotates broker list based on retry attempt', t => 
   strictEqual(capturedLists[1][0].host, 'broker-b') // attempt 1: offset by 1
   strictEqual(capturedLists[2][0].host, 'broker-c') // attempt 2: offset by 2
   strictEqual(capturedLists[3][0].host, 'broker-a') // attempt 3: wraps around (3 % 3 = 0)
+})
+
+test('metadata should not crash when the error is not a library error', async t => {
+  const client = createBase(t, { retries: 0 })
+
+  // A plain Error has no findBy, so classifying it must degrade instead of throwing a TypeError.
+  const plainError = new Error('Connection pool is closed.')
+  const pool = client[kConnections]
+  pool.getFirstAvailable = function (_brokers: Broker[], callback: CallbackWithPromise<Connection>) {
+    callback(plainError)
+  } as typeof pool.getFirstAvailable
+
+  await rejects(
+    () => client.metadata({ topics: [] }),
+    error => {
+      strictEqual(error, plainError)
+      return true
+    }
+  )
 })
 
 test('metadata retries on TimeoutError', async t => {

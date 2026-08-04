@@ -955,6 +955,9 @@ test('consume should fail when consumer is closed', async t => {
   } catch (error) {
     strictEqual(error instanceof NetworkError, true)
     strictEqual(error.message, 'Client is closed.')
+    // A closed client never reopens, so the error must not be retried.
+    strictEqual(error.canRetry, false)
+    strictEqual(error.closed, true)
   }
 })
 
@@ -3946,6 +3949,9 @@ test('a closed connection pool should surface a library error rather than an unc
       return true
     }
   )
+
+  // The closed pool error is a network error, so the cached coordinator is invalidated.
+  strictEqual(consumer.coordinatorId, null)
 })
 
 test('findGroupCoordinator should support both promise and callback API', t => {

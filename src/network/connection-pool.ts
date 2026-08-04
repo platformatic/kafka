@@ -170,7 +170,7 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
     if (this.#closed) {
       // A closed pool never reopens, so this must not be retried. It also has to be a library error:
       // clients classify errors via findBy, which only exists on GenericError subclasses.
-      callback(new NetworkError('Connection pool is closed.', { canRetry: false, closed: true }))
+      callback(new NetworkError('Connection pool is closed.', { canRetry: false, closed: true, broker }))
       return
     }
 

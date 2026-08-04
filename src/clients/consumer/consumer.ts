@@ -57,7 +57,7 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { GenericError, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
+import { findErrorBy, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -984,16 +984,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   if (error) {
                     this.#clearPreferredReadReplicas(options.topics, topicIds)
 
-                    const genericError = error as GenericError
                     if (
-                      genericError.findBy?.('apiId', 'FETCH_SESSION_ID_NOT_FOUND') ||
-                      genericError.findBy?.('apiId', 'INVALID_FETCH_SESSION_EPOCH') ||
-                      genericError.findBy?.('apiId', 'FETCH_SESSION_TOPIC_ID_ERROR')
+                      findErrorBy(error, 'apiId', 'FETCH_SESSION_ID_NOT_FOUND') ||
+                      findErrorBy(error, 'apiId', 'INVALID_FETCH_SESSION_EPOCH') ||
+                      findErrorBy(error, 'apiId', 'FETCH_SESSION_TOPIC_ID_ERROR')
                     ) {
                       this.#fetchSessions.delete(node)
                     }
 
-                    if (genericError.findBy?.('apiId', 'FENCED_LEADER_EPOCH')) {
+                    if (findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH')) {
                       this.#fetchSessions.delete(node)
                       this.clearMetadata()
                       for (const topic of options.topics) {
@@ -1289,7 +1288,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (
             this.#useConsumerGroupProtocol &&
             staleMemberEpochRetries < (this[kOptions].retries as number) &&
-            (error as GenericError).findBy?.('apiId', 'STALE_MEMBER_EPOCH')
+            findErrorBy(error, 'apiId', 'STALE_MEMBER_EPOCH')
           ) {
             this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, heartbeatError => {
               if (heartbeatError) {
@@ -1977,7 +1976,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       error => {
         if (error) {
-          const unknownMemberError = (error as GenericError).findBy<ProtocolError>?.('unknownMemberId', true)
+          const unknownMemberError = findErrorBy<ProtocolError>(error, 'unknownMemberId', true)
 
           // This is to avoid throwing an error if a group join was cancelled.
           if (!unknownMemberError) {
@@ -2386,7 +2385,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #getRejoinError (error: Error): ProtocolError | null {
-    const protocolError = (error as GenericError).findBy<ProtocolError>?.('needsRejoin', true)
+    const protocolError = findErrorBy<ProtocolError>(error, 'needsRejoin', true)
 
     if (!protocolError) {
       return null
@@ -2497,20 +2496,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #handleError (error: Error | null): Error | null {
-    const kafkaError = error as GenericError
-
-    // findBy only exists on our own error classes, so brand check before classifying.
-    if (error && GenericError.isGenericError(error)) {
-      if (kafkaError.findBy('hasStaleMetadata', true)) {
-        this.clearMetadata()
-      } else if (
-        kafkaError.findBy('code', 'PLT_KFK_NETWORK') ||
-        kafkaError.findBy('apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
-        kafkaError.findBy('apiId', 'COORDINATOR_NOT_AVAILABLE') ||
-        kafkaError.findBy('apiId', 'NOT_COORDINATOR')
-      ) {
-        this.#coordinatorId = null
-      }
+    if (findErrorBy(error, 'hasStaleMetadata', true)) {
+      this.clearMetadata()
+    } else if (
+      findErrorBy(error, 'code', 'PLT_KFK_NETWORK') ||
+      findErrorBy(error, 'apiId', 'COORDINATOR_LOAD_IN_PROGRESS') ||
+      findErrorBy(error, 'apiId', 'COORDINATOR_NOT_AVAILABLE') ||
+      findErrorBy(error, 'apiId', 'NOT_COORDINATOR')
+    ) {
+      this.#coordinatorId = null
     }
 
     return error

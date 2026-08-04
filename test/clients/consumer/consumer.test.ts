@@ -3533,6 +3533,42 @@ test('getLag should return the consumer lag', async t => {
   await Promise.all(consumers.map(consumer => consumer.topics.trackAll(topic)))
   await Promise.all(consumers.map(consumer => consumer.joinGroup()))
 
+  // joinGroup resolves once a consumer synced, but the consumers that joined earlier only rejoin
+  // after their next heartbeat, so the group rebalances again behind this await. Capturing an
+  // assignment before it settles picks a partition that a later rebalance can take away.
+  async function waitForOnePartitionEach (): Promise<void> {
+    let assigned: number[][] = []
+
+    for (let i = 0; i < 100; i++) {
+      assigned = consumers.map(consumer => consumer.assignments?.find(a => a.topic === topic)?.partitions ?? [])
+
+      if (assigned.every(partitions => partitions.length === 1) && new Set(assigned.flat()).size === 3) {
+        return
+      }
+
+      await sleep(50)
+    }
+
+    throw new Error(`The group never settled on one partition per consumer, got ${JSON.stringify(assigned)}.`)
+  }
+
+  // A group join clears the committed offsets a stream reports, and getLag reads exactly those, so
+  // a partition whose offset has not been republished yet reads as unassigned.
+  async function waitForCommittedOffset (
+    stream: MessagesStream<Buffer, Buffer, Buffer, Buffer>,
+    partition: number
+  ): Promise<void> {
+    const key = `${topic}:${partition}`
+
+    for (let i = 0; i < 100 && !stream.offsetsCommitted.has(key); i++) {
+      await sleep(50)
+    }
+
+    ok(stream.offsetsCommitted.has(key), `No committed offset for partition ${partition}.`)
+  }
+
+  await waitForOnePartitionEach()
+
   async function setup (
     consumer: Consumer,
     offset: bigint
@@ -3549,9 +3585,7 @@ test('getLag should return the consumer lag', async t => {
       maxBytes: 10
     })
 
-    if (stream.offsetsCommitted.size === 0) {
-      await once(stream, 'offsets')
-    }
+    await waitForCommittedOffset(stream, partition)
 
     return [partition, stream]
   }
@@ -3562,6 +3596,11 @@ test('getLag should return the consumer lag', async t => {
   const [consumerPartition3, stream3] = await setup(consumer3, 3n)
 
   try {
+    // Creating the later streams can have triggered another join, so recheck before reading the lag.
+    await waitForCommittedOffset(stream1, consumerPartition1)
+    await waitForCommittedOffset(stream2, consumerPartition2)
+    await waitForCommittedOffset(stream3, consumerPartition3)
+
     const lag1 = (await consumer1.getLag({ topics: [topic] })).get(topic)!
     const lag2 = (await consumer2.getLag({ topics: [topic] })).get(topic)!
     const lag3 = (await consumer3.getLag({ topics: [topic] })).get(topic)!

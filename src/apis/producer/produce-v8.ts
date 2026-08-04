@@ -6,6 +6,7 @@ import { Writer } from '../../protocol/writer.ts'
 import { groupByProperty } from '../../utils.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 import { ProduceAcks } from '../enumerations.ts'
+import { encodeProduceTopicData } from './utils.ts'
 
 export type ProduceRequest = Parameters<typeof createRequest>
 
@@ -90,6 +91,51 @@ export function createRequest (
   }
 
   return writer
+}
+
+export async function createRequestAsync (
+  acks: number = 1,
+  timeout: number = 0,
+  topicData: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions> = {}
+): Promise<Writer> {
+  const topics = await encodeProduceTopicData(topicData, options)
+  const writer = Writer.create()
+    .appendString(options.transactionalId, false)
+    .appendInt16(acks)
+    .appendInt32(timeout)
+    .appendArray(
+      topics,
+      (w, { topic, partitions }) => {
+        w.appendString(topic, false).appendArray(
+          partitions,
+          (w, { partition, records }) => {
+            w.appendInt32(partition).appendInt32(records.length).appendFrom(records)
+          },
+          false,
+          false
+        )
+      },
+      false,
+      false
+    )
+
+  if (acks === ProduceAcks.NO_RESPONSE) {
+    writer.context.noResponse = true
+  }
+
+  return writer
+}
+
+function createApiRequest (
+  acks: number = 1,
+  timeout: number = 0,
+  topicData: MessageRecord[],
+  options: Partial<CreateRecordsBatchOptions> = {}
+): Writer | Promise<Writer> {
+  return options.compression === 'gzip'
+    ? createRequestAsync(acks, timeout, topicData, options)
+    : createRequest(acks, timeout, topicData, options)
 }
 
 /*
@@ -183,7 +229,7 @@ export function parseResponse (
 export const api = createAPI<ProduceRequest, ProduceResponse | boolean>(
   0,
   8,
-  createRequest,
+  createApiRequest,
   parseResponse,
   false,
   false

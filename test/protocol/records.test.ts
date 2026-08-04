@@ -4,6 +4,7 @@ import {
   compressionsAlgorithms,
   createRecord,
   createRecordsBatch,
+  createRecordsBatchAsync,
   NumericMap,
   Reader,
   readRecord,
@@ -261,6 +262,31 @@ test('createRecordsBatch with compression should compress the records', () => {
   strictEqual(batch.records.length, 2, 'Should have two records after decompression')
   strictEqual(batch.records[0].value!.toString(), 'value1'.repeat(100), 'First record value should match')
   strictEqual(batch.records[1].value!.toString(), 'value2'.repeat(100), 'Second record value should match')
+})
+
+test('createRecordsBatchAsync should use asynchronous gzip compression', async t => {
+  const compressSync = t.mock.method(compressionsAlgorithms.gzip, 'compressSync', () => {
+    throw new Error('synchronous gzip should not be used')
+  })
+  const messages = [
+    {
+      value: Buffer.from('value1'.repeat(100)),
+      topic: 'test-topic'
+    },
+    {
+      value: Buffer.from('value2'.repeat(100)),
+      topic: 'test-topic'
+    }
+  ]
+
+  const writer = await createRecordsBatchAsync(messages, { compression: 'gzip' })
+  const batch = readRecordsBatch(Reader.from(writer))
+
+  strictEqual(compressSync.mock.calls.length, 0)
+  strictEqual(batch.attributes & 0b111, 1)
+  strictEqual(batch.records.length, 2)
+  strictEqual(batch.records[0].value!.toString(), 'value1'.repeat(100))
+  strictEqual(batch.records[1].value!.toString(), 'value2'.repeat(100))
 })
 
 test('createRecordsBatch should throw on unsupported compression', () => {

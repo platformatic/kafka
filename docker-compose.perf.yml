@@ -1,0 +1,22 @@
+# Isolation overrides for the protocol version load tests in LOAD_TESTING.md. Not used by CI.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --wait broker-single
+#
+# This box has 8 cores, so an unpinned run lets the broker JVM and the client contend and then
+# attributes the resulting scheduler noise to whichever codec happened to be measured at the time.
+# The broker gets cores 0-3 and the client is expected to run under `taskset -c 6,7`.
+services:
+  broker-single:
+    cpuset: '0-3'
+    mem_limit: 8g
+    environment:
+      # The comparison is about CPU in the client, so keep the broker's log off the disk entirely:
+      # page cache behaviour and fsync latency would otherwise land in the numbers.
+      KAFKA_LOG_DIRS: '/tmpfs-logs'
+      # Guard 1 of LOAD_TESTING.md reads BrokerTopicMetrics over JMX to prove the broker is not
+      # down-converting record batches for the older codecs. Without that check the sweeps could be
+      # measuring the broker's conversion cost and calling it the client's.
+      KAFKA_JMX_PORT: '9101'
+      KAFKA_JMX_HOSTNAME: 'localhost'
+    tmpfs:
+      - /tmpfs-logs:size=8g

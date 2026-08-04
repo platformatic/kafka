@@ -823,6 +823,34 @@ test('createTopics should validate options in strict mode', async t => {
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
+
+  // Test with invalid configs type
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createTopics({ topics: ['test-topic'], configs: 'not-an-array' })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('configs'), true)
+  }
+})
+
+test('createTopics should accept the configs option in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  const topicName = `test-topic-${randomUUID()}`
+
+  // `configs` is a documented CreateTopicsOptions field (see "createTopics with custom
+  // configuration" above) but was missing from createTopicOptionsSchema, so strict mode
+  // rejected it as an unrecognized additional property.
+  const created = await admin.createTopics({
+    topics: [topicName],
+    configs: [{ name: 'cleanup.policy', value: 'compact' }]
+  })
+
+  strictEqual(created[0].configuration['cleanup.policy'], 'compact')
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics should handle errors from Connection.getFirstAvailable', async t => {

@@ -39,6 +39,18 @@ export const createTopicOptionsSchema = {
         additionalProperties: false
       },
       minItems: 1
+    },
+    configs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          value: { type: ['string', 'null'] }
+        },
+        required: ['name'],
+        additionalProperties: false
+      }
     }
   },
   required: ['topics'],

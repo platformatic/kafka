@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Runs the protocol version load test described in LOAD_TESTING.md.
+# Runs the protocol version benchmarks. See benchmarks/protocol-versions/README.md.
 #
 # The ordering matters and is easy to get wrong by hand: the broker has to be restarted between the
 # producer and consumer sweeps so log segment growth does not favour whichever sweep ran second, and

@@ -1,4 +1,4 @@
-// Tier 1 of LOAD_TESTING.md, consumer side: every implemented Fetch version against the same
+// Tier 1 (see README.md), consumer side: every implemented Fetch version against the same
 // modern broker, reading the same pre-seeded log.
 //
 // The maxBytes sweep is the point rather than an extra: it varies records per response by roughly

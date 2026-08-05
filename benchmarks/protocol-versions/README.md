@@ -7,8 +7,7 @@ legacy codecs as fast as the newest ones?**
 newest codec always wins and the rest are never serialized, sent or parsed. `test/integration/*.compat-test.ts`
 covers them for correctness. This suite covers them for speed.
 
-The plan, the criteria and the recorded results live in [`../../LOAD_TESTING.md`](../../LOAD_TESTING.md).
-This file is how to run it.
+Raw per-sample results land in `regression/artifacts/`. The recorded verdict is [below](#recorded-results).
 
 ## Quick start
 
@@ -41,12 +40,17 @@ A Kafka 4.x broker still accepts every version implemented here — KIP-896 set 
 
 ## What each script does
 
-| Script | Broker | Measures |
-| --- | --- | --- |
-| `codecs.ts` | none | `createRequest` for Produce v3–v11 and `parseResponse` for Fetch v4–v17, over 1 / 10 / 100 / 1000 / 10000 records. Reports ns/op, ns/record and exact wire bytes |
-| `produce-versions.ts` | live | Every Produce version, three batch sizes, `acks=0` and `acks=all` |
-| `consume-versions.ts` | live | Every Fetch version at `maxBytes` 4 KB / 64 KB / 1 MB, which varies records per response by ~250x |
-| `guards.ts` | live | Validity guard: proves the broker performs **zero** record batch conversions, so the sweeps measure our codecs and not the broker's down-conversion work |
+| Script | Tier | Broker | Measures |
+| --- | --- | --- | --- |
+| `codecs.ts` | 0 | none | `createRequest` for Produce v3–v11 and `parseResponse` for Fetch v4–v17, over 1 / 10 / 100 / 1000 / 10000 records. Reports ns/op, ns/record and exact wire bytes |
+| `produce-versions.ts` | 1, and 2 unpinned | live | Every Produce version, three batch sizes, `acks=0` and `acks=all` |
+| `consume-versions.ts` | 1, and 2 unpinned | live | Every Fetch version at `maxBytes` 4 KB / 64 KB / 1 MB, which varies records per response by ~250x |
+| `guards.ts` | guard 1 | live | Proves the broker performs **zero** record batch conversions, so the sweeps measure our codecs and not the broker's down-conversion work |
+
+A second guard has no script of its own: every live cell asserts that the version the client negotiated equals
+the version it was pinned to (`assertNegotiated()` in `utils/live.ts`). A silently unpinned run would report
+the newest codec's numbers under an old version's label, which is the one failure mode here that yields a
+confident wrong answer.
 
 `utils/` holds the shared harness: `codecs.ts` (version discovery and per-version traits), `payload.ts`
 (deterministic records), `fetch-response.ts` (response synthesizer), `measure.ts` (timing, medians, shuffle),
@@ -133,8 +137,48 @@ check. Matching `--time latest` means the log is empty and the client is behavin
 ## Output
 
 Human-readable tables on stdout, plus JSON with every individual sample under `regression/artifacts/`. Those
-are gitignored: they describe one machine, not the code. The committed record is the results section of
-`LOAD_TESTING.md`.
+are gitignored: they describe one machine, not the code. The committed record is the section below.
+
+## Recorded results
+
+Run 2026-08-04 on Linux 6.8.0-90, 8 cores, 62 GB RAM, Node v24.18.0, against `confluentinc/cp-kafka:8.1.0`
+(single node, KRaft, log on tmpfs, advertising Produce v0–v13 and Fetch v4–v18). Tier 2 used
+`confluentinc/cp-kafka:4.1.0`, which is Apache Kafka 1.1.0.
+
+**The legacy codecs are not slower than the newest ones.** Across 9 Produce versions, 14 Fetch versions,
+three payload shapes and two acks settings, no legacy version is consistently slower than the newest. Where a
+reproducible difference exists it runs the other way.
+
+| | Produce v3–v11 | Fetch v4–v11 | Fetch v12–v17 |
+| --- | --- | --- | --- |
+| CPU µs/msg, 1 MB fetches | 4.00–4.57, no ordering | **1.39–1.42** | **1.72–1.76** |
+
+`v3` is faster than `v11` in four of six producer cells. Peak RSS is flat across versions everywhere. Broker
+message conversions were zero for every implemented version of both APIs. Against Apache Kafka 1.1.0 the
+client negotiated Produce v5 / Fetch v7 unaided and matched the modern broker to within 1% (1.40 vs
+1.39 µs/msg at 1 MB fetches), with stable throughput and flat RSS.
+
+Two findings, both in the *newest* versions:
+
+1. **`Reader.readUUID` was 14x slower than necessary — fixed.** It hyphenated with a capture-group regex,
+   801 ns against 56 ns for the equivalent slicing. Fetch v13+ identifies topics by UUID, so this made the
+   newest Fetch versions 15–18% slower to decode than the name-based ones.
+2. **Flexible framing costs ~23% per message at 1 MB fetch responses**, breaking exactly at the v11→v12
+   boundary where compact collections and tagged fields begin. Four consecutive runs, tight clusters either
+   side. Not fixed, and the mechanism is not isolated — recorded rather than guessed at. It matters because
+   v17 is what the client negotiates by default against a modern broker.
+
+Version-independent, so invisible to this comparison but worth knowing: the shared record encoder costs ~48%
+more per record at 10,000 records than at 100 (1898 → 5418 ns/record out to 400k). Roughly 1.3x per 10x, so
+allocation and cache pressure — `createRecord` allocates a `Writer` per record — not anything quadratic.
+
+Wire bytes, confirming that the newest versions are not the most compact for short topic names: Produce v3–v8
+encode 100 records in 9876 bytes against 9869 for v9–v11; Fetch v13+ responses are 9901 bytes against 9894
+for v4.
+
+The verdict rests on tier 1 at 64 KB and 1 MB and on everything Produce-side, where clusters are tight across
+four runs and three shuffle seeds. It does **not** rest on tier 1 Fetch at `maxBytes=4096` or on tier 0 Fetch
+decode; see the noise floor note above.
 
 ## Adding a version
 

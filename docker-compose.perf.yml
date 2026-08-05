@@ -1,4 +1,5 @@
-# Isolation overrides for the protocol version load tests in LOAD_TESTING.md. Not used by CI.
+# Isolation overrides for the protocol version benchmarks. Not used by CI.
+# See benchmarks/protocol-versions/README.md.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --wait broker-single
 #
@@ -13,7 +14,7 @@ services:
       # The comparison is about CPU in the client, so keep the broker's log off the disk entirely:
       # page cache behaviour and fsync latency would otherwise land in the numbers.
       KAFKA_LOG_DIRS: '/tmpfs-logs'
-      # Guard 1 of LOAD_TESTING.md reads BrokerTopicMetrics over JMX to prove the broker is not
+      # guards.ts reads BrokerTopicMetrics over JMX to prove the broker is not
       # down-converting record batches for the older codecs. Without that check the sweeps could be
       # measuring the broker's conversion cost and calling it the client's.
       KAFKA_JMX_PORT: '9101'

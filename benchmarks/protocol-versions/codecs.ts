@@ -1,4 +1,4 @@
-// Tier 0 of LOAD_TESTING.md: protocol codec cost with no broker, no sockets and no scheduler noise.
+// Tier 0 (see README.md): protocol codec cost with no broker, no sockets and no scheduler noise.
 //
 // This is the tier that can prove an algorithmic defect. Everything downstream measures the same
 // codecs with a broker attached, which only ever adds variance.

@@ -71,7 +71,7 @@ export async function createTopic (admin: Admin, partitions = 1): Promise<string
 /**
  * The version the client will actually negotiate for an API.
  *
- * Guard 3 of LOAD_TESTING.md. pinApiVersions throws when the broker rejects a pin, but it cannot
+ * The pin assertion guard (see README.md). pinApiVersions throws when the broker rejects a pin, but it cannot
  * notice a client that negotiated before the pin was seeded. A run that silently used the newest
  * codec while reporting an old version's label is the one failure mode here that produces a
  * confident wrong answer, so every cell asserts the pin took effect.

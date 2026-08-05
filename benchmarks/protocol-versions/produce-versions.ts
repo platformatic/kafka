@@ -1,4 +1,4 @@
-// Tier 1 of LOAD_TESTING.md, producer side: every implemented Produce version against the same
+// Tier 1 (see README.md), producer side: every implemented Produce version against the same
 // modern broker, with the codec as the only variable.
 
 import { writeFileSync } from 'node:fs'

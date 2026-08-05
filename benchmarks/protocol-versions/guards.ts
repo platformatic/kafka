@@ -1,4 +1,4 @@
-// Guard 1 of LOAD_TESTING.md: prove the broker is not down-converting record batches.
+// Guard 1 (see README.md): prove the broker is not down-converting record batches.
 //
 // If it were, the sweeps would be measuring the broker's conversion cost under the label of the
 // client's codec, and every conclusion about the legacy versions would be wrong. Every version this

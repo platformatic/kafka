@@ -6,16 +6,22 @@ import { type Base, kApis, kBootstrapBrokers, kListApis } from '../../src/client
 export type ApiPins = Record<string, number>
 
 /**
- * The versions of an API this package actually implements, in ascending order.
+ * The export name of a codec module.
  *
  * Mirrors the name mangling in Base[kGetApi]: the codec for Produce v3 is exported as produceV3.
  */
+export function codecName (name: string, version: number): string {
+  return name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + version
+}
+
+/**
+ * The versions of an API this package actually implements, in ascending order.
+ */
 export function implementedVersions (name: string): number[] {
-  const prefix = name.slice(0, 1).toLowerCase() + name.slice(1) + 'V'
   const versions: number[] = []
 
   for (let version = 0; version <= 32; version++) {
-    if (apis[(prefix + version) as keyof typeof apis]) {
+    if (apis[codecName(name, version) as keyof typeof apis]) {
       versions.push(version)
     }
   }

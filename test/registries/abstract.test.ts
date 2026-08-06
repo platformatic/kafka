@@ -26,3 +26,29 @@ test('runAsyncSeries should complete with empty collections', async () => {
 
   strictEqual(operationCalls, 0)
 })
+
+test('runAsyncSeries should not blow the call stack on large collections with synchronous operations', async () => {
+  const collection = Array.from({ length: 5_000 }, (_, i) => i)
+  let operationCalls = 0
+
+  await new Promise<void>((resolve, reject) => {
+    runAsyncSeries(
+      (_item: number, callback) => {
+        operationCalls++
+        callback(null)
+      },
+      collection,
+      0,
+      error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve()
+      }
+    )
+  })
+
+  strictEqual(operationCalls, collection.length)
+})

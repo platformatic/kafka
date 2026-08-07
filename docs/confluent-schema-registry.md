@@ -391,6 +391,22 @@ consumed without a schema has no `schemas` entry at all.
 The IDs are recorded before the schema is fetched and before the payload is decoded, so they are
 still available when either step fails.
 
+Deserializing replaces `key` and `value` with the decoded values, so their original `.length` is no
+longer reachable. The registry records the on-wire sizes on the message metadata before decoding:
+
+```typescript
+for await (const message of stream) {
+  // { key: 5, value: 21 }
+  console.log(message.metadata.lengths)
+
+  ingressBytes.inc(message.metadata.lengths.value)
+}
+```
+
+The lengths are the sizes of the payloads as they were received, including the 5 bytes of the
+Confluent wire format header when the payload carries one. Payloads which are absent, such as a null
+key, have no entry.
+
 ## Schema Types
 
 ### AVRO Schema

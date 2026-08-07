@@ -99,6 +99,10 @@ export interface ConfluentSchemaRegistryMetadata {
   schemas?: Partial<Record<BeforeHookPayloadType, number>>
 }
 
+export interface ConfluentSchemaRegistryConsumedMetadata {
+  lengths?: { key?: number; value?: number }
+}
+
 export type ConfluentSchemaRegistryProtobufTypeMapper = (
   id: number,
   type: BeforeHookPayloadType,
@@ -188,6 +192,21 @@ export function trackConsumedSchemaId (
   const metadata = (message.metadata ??= {}) as ConfluentSchemaRegistryMetadata
   metadata.schemas ??= {}
   metadata.schemas[type] = schemaId
+}
+
+export function trackConsumedPayloadLength (
+  message: MessageToConsume | undefined,
+  type: 'key' | 'value',
+  data: Buffer
+): void {
+  /* c8 ignore next 3 - The message is always provided for keys and values */
+  if (!message) {
+    return
+  }
+
+  const metadata = (message.metadata ??= {}) as ConfluentSchemaRegistryConsumedMetadata
+  metadata.lengths ??= {}
+  metadata.lengths[type] = data.length
 }
 
 /* c8 ignore next 8 */
@@ -580,6 +599,14 @@ export class ConfluentSchemaRegistry<
     headers?: Map<string, string>,
     message?: MessageToConsume
   ): unknown {
+    /*
+      Deserializing replaces the original payload, so record its size beforehand: it is the only
+      chance callers have to account for the actual ingress size of the message.
+    */
+    if ((type === 'key' || type === 'value') && Buffer.isBuffer(data)) {
+      trackConsumedPayloadLength(message, type, data)
+    }
+
     /* c8 ignore next 3 - Hard to test */
     if (typeof data === 'undefined' || data.length === 0) {
       return EMPTY_BUFFER

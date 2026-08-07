@@ -1649,3 +1649,68 @@ test('exposes the schema IDs when the registry deserializers are used without th
   deepStrictEqual(structuredClone(messages[0].value), { id: 1, name: 'Alice' })
   deepStrictEqual(messages[0].metadata.schemas, { value: schemaId })
 })
+
+test('exposes the original key and value byte lengths on the message metadata', async t => {
+  const topic = await createTopic(t, true)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const producer = await createProducer(t, { registry })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } },
+      { topic, key: 'key-2', value: { id: 2, name: 'Bob' }, metadata: { schemas: { value: schemaId } } }
+    ]
+  })
+
+  // Consume the raw payloads to know the exact on-wire sizes
+  const rawConsumer = createConsumer(t, { deserializers: { key: noopDeserializer, value: noopDeserializer } })
+  const rawStream = await rawConsumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+  const rawMessages = []
+  for await (const message of rawStream) {
+    rawMessages.push(message)
+  }
+
+  const consumer = createConsumer(t, { registry })
+  const stream = await consumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  deepStrictEqual(structuredClone(messages[0].value), { id: 1, name: 'Alice' })
+  deepStrictEqual(messages[0].metadata.lengths, {
+    key: rawMessages[0].key.length,
+    value: rawMessages[0].value.length
+  })
+  deepStrictEqual(messages[1].metadata.lengths, {
+    key: rawMessages[1].key.length,
+    value: rawMessages[1].value.length
+  })
+
+  // The decoded value is smaller than the payload it came from, which is the whole point
+  ok((messages[0].metadata.lengths as { value: number }).value > 5)
+
+  // The metadata added by the registry does not replace the one added by the consumer
+  strictEqual((messages[0].metadata.consumer as { groupId: string }).groupId, consumer.groupId)
+
+  // Each message gets its own metadata object
+  ok(messages[0].metadata !== messages[1].metadata)
+})

@@ -256,6 +256,7 @@ When using a schema registry:
 - JSON schemas are validated on receive (and optionally on send)
 - Supports AVRO, Protocol Buffers, and JSON Schema formats
 - The schema IDs used to decode each message are exposed as `message.metadata.schemas`
+- The original key and value byte lengths are exposed as `message.metadata.lengths`
 
 For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 

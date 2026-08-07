@@ -1,10 +1,10 @@
-import { deepStrictEqual, match, strictEqual } from 'node:assert'
+import { deepStrictEqual, match, ok, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { createServer, type IncomingHttpHeaders } from 'node:http'
+import { createServer, type IncomingHttpHeaders, type ServerResponse } from 'node:http'
 import { type AddressInfo } from 'node:net'
 import test, { type TestContext } from 'node:test'
-import { UserError } from '../../src/errors.ts'
+import { MultipleErrors, NetworkError, TimeoutError, UserError } from '../../src/errors.ts'
 import {
   type DeserializationErrorContext,
   DeserializationErrorActions,
@@ -1037,13 +1037,23 @@ test('supports Bearer token authentication', async t => {
   strictEqual(res.offsets![0].topic, topic)
 })
 
-async function createFakeRegistry (t: TestContext): Promise<{ url: string; requests: IncomingHttpHeaders[] }> {
+const avroStringSchema = JSON.stringify({ schemaType: 'AVRO', schema: JSON.stringify({ type: 'string' }) })
+
+function answerWithAvroStringSchema (res: ServerResponse): void {
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(avroStringSchema)
+}
+
+async function createFakeRegistry (
+  t: TestContext,
+  handler: (res: ServerResponse, attempt: number) => void = answerWithAvroStringSchema
+): Promise<{ url: string; requests: IncomingHttpHeaders[]; attempts: () => number }> {
   const requests: IncomingHttpHeaders[] = []
+  let attempts = 0
 
   const server = createServer((req, res) => {
     requests.push(req.headers)
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ schemaType: 'AVRO', schema: JSON.stringify({ type: 'string' }) }))
+    handler(res, ++attempts)
   })
 
   server.listen(0, '127.0.0.1')
@@ -1051,11 +1061,12 @@ async function createFakeRegistry (t: TestContext): Promise<{ url: string; reque
 
   t.after(() => {
     return new Promise<void>(resolve => {
+      server.closeAllConnections()
       server.close(() => resolve())
     })
   })
 
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests }
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests, attempts: () => attempts }
 }
 
 function fetchSchema (registry: ConfluentSchemaRegistry<string, Datum, string, string>, id: number): Promise<void> {
@@ -1153,4 +1164,175 @@ test('does not mutate the custom headers object', async t => {
 
   strictEqual(requests[0].authorization, 'Bearer TOKEN')
   deepStrictEqual(headers, { 'Confluent-Identity-Pool-Id': 'pool-123' })
+})
+
+test('times out slow schema registry requests', async t => {
+  const { url } = await createFakeRegistry(t, () => {
+    // Never answer, so that the request can only end with a timeout
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    timeout: 200,
+    retries: 0
+  })
+
+  const error = await fetchSchema(registry, 1).catch((error: Error) => error)
+
+  strictEqual(error instanceof TimeoutError, true)
+  strictEqual((error as Error).message, 'Fetching a schema timed out after 200 ms.')
+})
+
+test('supports disabling the schema registry request timeout', async t => {
+  const { url } = await createFakeRegistry(t, res => {
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(avroStringSchema)
+    }, 300).unref()
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    timeout: 0
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('retries schema registry requests which fail with a retriable status', async t => {
+  const { url, attempts } = await createFakeRegistry(t, (res, attempt) => {
+    if (attempt < 3) {
+      res.writeHead(503)
+      res.end('Service Unavailable')
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(avroStringSchema)
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 3,
+    retryDelay: 10
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(attempts(), 3)
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('retries schema registry requests which fail with a network error', async t => {
+  const { url, attempts } = await createFakeRegistry(t, (res, attempt) => {
+    if (attempt < 2) {
+      res.destroy()
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(avroStringSchema)
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 3,
+    retryDelay: 10
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(attempts(), 2)
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('gives up after the configured amount of retries', async t => {
+  const { url, attempts } = await createFakeRegistry(t, res => {
+    res.writeHead(503)
+    res.end('Service Unavailable')
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 2,
+    retryDelay: 10
+  })
+
+  const error = (await fetchSchema(registry, 1).catch((error: Error) => error)) as MultipleErrors
+
+  strictEqual(MultipleErrors.isMultipleErrors(error), true)
+  strictEqual(error.message, 'Failed to fetch a schema after 3 attempts.')
+  strictEqual(error.errors.length, 3)
+  strictEqual(attempts(), 3)
+  strictEqual(error.errors[0].message, 'Failed to fetch a schema: [HTTP 503]')
+})
+
+test('does not retry schema registry requests which fail with a non retriable status', async t => {
+  const { url, attempts } = await createFakeRegistry(t, res => {
+    res.writeHead(404)
+    res.end('Not Found')
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 3,
+    retryDelay: 10
+  })
+
+  const error = (await fetchSchema(registry, 1).catch((error: Error) => error)) as UserError
+
+  strictEqual(error instanceof UserError, true)
+  strictEqual(error.message, 'Failed to fetch a schema: [HTTP 404]')
+  strictEqual(error.response, 'Not Found')
+  strictEqual(attempts(), 1)
+})
+
+test('supports a retryDelay function', async t => {
+  const { url, attempts } = await createFakeRegistry(t, (res, attempt) => {
+    if (attempt < 3) {
+      res.writeHead(429)
+      res.end('Too Many Requests')
+      return
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(avroStringSchema)
+  })
+
+  const delays: [number, number, string][] = []
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 3,
+    retryDelay (attempt, retries, error) {
+      delays.push([attempt, retries, error.message])
+      return attempt * 5
+    }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(attempts(), 3)
+  deepStrictEqual(delays, [
+    [1, 3, 'Failed to fetch a schema: [HTTP 429]'],
+    [2, 3, 'Failed to fetch a schema: [HTTP 429]']
+  ])
+})
+
+test('reports network failures as NetworkError', async t => {
+  const { url } = await createFakeRegistry(t, res => {
+    res.destroy()
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    retries: 0
+  })
+
+  const error = (await fetchSchema(registry, 1).catch((error: Error) => error)) as NetworkError
+
+  strictEqual(error instanceof NetworkError, true)
+  strictEqual(error.message, 'Failed to fetch a schema.')
+  ok(error.cause)
 })

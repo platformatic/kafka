@@ -2,6 +2,7 @@ import { Ajv, type AnySchema, type AnySchemaObject, type ErrorObject, type Optio
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { type parse, type Root } from 'protobufjs'
 import { type Callback } from '../apis/definitions.ts'
 import {
@@ -17,7 +18,16 @@ import {
   stringDeserializer,
   stringSerializer
 } from '../clients/serde.ts'
-import { type CredentialProvider, EMPTY_BUFFER, UnsupportedFormatError, UserError } from '../index.ts'
+import {
+  type CredentialProvider,
+  EMPTY_BUFFER,
+  type GenericError,
+  MultipleErrors,
+  NetworkError,
+  TimeoutError,
+  UnsupportedFormatError,
+  UserError
+} from '../index.ts'
 import { type MessageToConsume, type MessageToProduce } from '../protocol/records.ts'
 import { getCredential } from '../protocol/sasl/utils.ts'
 import { AbstractSchemaRegistry } from './abstract.ts'
@@ -49,6 +59,8 @@ export type ConfluentSchemaRegistryHeadersProvider = () =>
   | ConfluentSchemaRegistryHeaders
   | Promise<ConfluentSchemaRegistryHeaders>
 
+export type ConfluentSchemaRegistryRetryDelayGetter = (attempt: number, retries: number, error: Error) => number
+
 export interface ConfluentSchemaRegistryOptions {
   url: string
   auth?: {
@@ -57,10 +69,22 @@ export interface ConfluentSchemaRegistryOptions {
     token?: string | CredentialProvider
   }
   headers?: ConfluentSchemaRegistryHeaders | ConfluentSchemaRegistryHeadersProvider
+  timeout?: number
+  retries?: number
+  retryDelay?: number | ConfluentSchemaRegistryRetryDelayGetter
   protobufTypeMapper?: ConfluentSchemaRegistryProtobufTypeMapper
   jsonValidateSend?: boolean
   jsonAjvOptions?: Options
 }
+
+export const defaultConfluentSchemaRegistryOptions = {
+  timeout: 5000,
+  retries: 3,
+  retryDelay: 1000
+}
+
+// Statuses which are worth retrying: the registry is overloaded, restarting or behind a proxy which is
+export const retriableSchemaRegistryStatuses = [408, 425, 429, 500, 502, 503, 504]
 
 export type SchemaValidationPhase = 'serialization' | 'deserialization'
 
@@ -124,6 +148,9 @@ export class ConfluentSchemaRegistry<
   #pendingFetches: Map<number, Promise<void>>
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
   #headers: ConfluentSchemaRegistryOptions['headers'] | undefined
+  #timeout: number
+  #retries: number
+  #retryDelay: number | ConfluentSchemaRegistryRetryDelayGetter
 
   constructor (options: ConfluentSchemaRegistryOptions) {
     super()
@@ -138,6 +165,9 @@ export class ConfluentSchemaRegistry<
     this.#jsonAjvDraft04 = new AjvDraft04(jsonAjvOptions)
     this.#auth = options.auth
     this.#headers = options.headers
+    this.#timeout = options.timeout ?? defaultConfluentSchemaRegistryOptions.timeout
+    this.#retries = options.retries ?? defaultConfluentSchemaRegistryOptions.retries
+    this.#retryDelay = options.retryDelay ?? defaultConfluentSchemaRegistryOptions.retryDelay
     this.#pendingFetches = new Map()
   }
 
@@ -282,7 +312,7 @@ export class ConfluentSchemaRegistry<
     return headers
   }
 
-  async #fetchSchema (id: number) {
+  async #requestSchema (id: number): Promise<{ schemaType?: string; schema: string }> {
     const requestInit: RequestInit = {}
     const headers = await this.#requestHeaders()
 
@@ -290,13 +320,65 @@ export class ConfluentSchemaRegistry<
       requestInit.headers = headers
     }
 
-    const response = await fetch(`${this.#url}/schemas/ids/${id}`, requestInit)
-
-    if (!response.ok) {
-      throw new UserError(`Failed to fetch a schema: [HTTP ${response.status}]`, { response: await response.text() })
+    if (this.#timeout > 0) {
+      requestInit.signal = AbortSignal.timeout(this.#timeout)
     }
 
-    const responseBody = (await response.json()) as { schemaType?: string; schema: string }
+    let response: Response
+    try {
+      response = await fetch(`${this.#url}/schemas/ids/${id}`, requestInit)
+    } catch (error) {
+      if ((error as Error).name === 'TimeoutError') {
+        throw new TimeoutError(`Fetching a schema timed out after ${this.#timeout} ms.`, {
+          canRetry: true,
+          cause: error
+        })
+      }
+
+      throw new NetworkError('Failed to fetch a schema.', { cause: error })
+    }
+
+    if (!response.ok) {
+      throw new UserError(`Failed to fetch a schema: [HTTP ${response.status}]`, {
+        response: await response.text(),
+        canRetry: retriableSchemaRegistryStatuses.includes(response.status)
+      })
+    }
+
+    return (await response.json()) as { schemaType?: string; schema: string }
+  }
+
+  async #requestSchemaWithRetries (id: number): Promise<{ schemaType?: string; schema: string }> {
+    const errors: Error[] = []
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.#requestSchema(id)
+      } catch (error) {
+        errors.push(error as Error)
+
+        if (attempt >= this.#retries || (error as GenericError).canRetry !== true) {
+          if (errors.length === 1) {
+            throw errors[0]
+          }
+
+          throw new MultipleErrors(`Failed to fetch a schema after ${errors.length} attempts.`, errors)
+        }
+
+        const delay =
+          typeof this.#retryDelay === 'function'
+            ? this.#retryDelay(attempt + 1, this.#retries, error as Error)
+            : this.#retryDelay
+
+        if (delay > 0) {
+          await sleep(delay)
+        }
+      }
+    }
+  }
+
+  async #fetchSchema (id: number) {
+    const responseBody = await this.#requestSchemaWithRetries(id)
     const { schema } = responseBody
     const schemaType = responseBody.schemaType ?? 'AVRO'
 

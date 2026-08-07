@@ -364,6 +364,33 @@ const message = {
 }
 ```
 
+## Message Metadata (Consumer)
+
+The schema IDs used to decode a consumed message are exposed on its metadata, alongside the consumer
+information the stream already adds:
+
+```typescript
+for await (const message of stream) {
+  // { value: 2 }
+  console.log(message.metadata.schemas)
+}
+```
+
+The shape mirrors the one used when producing:
+
+```typescript
+message.metadata.schemas = {
+  key?: number,
+  value?: number
+}
+```
+
+Only the payloads which actually carry a Confluent wire format header appear there, so a message
+consumed without a schema has no `schemas` entry at all.
+
+The IDs are recorded before the schema is fetched and before the payload is decoded, so they are
+still available when either step fails.
+
 ## Schema Types
 
 ### AVRO Schema

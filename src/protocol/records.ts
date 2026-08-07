@@ -118,6 +118,11 @@ export interface KafkaRecord {
 export interface MessageToConsume extends KafkaRecord {
   topic: string
   partition: number
+  /*
+    Deserializers and before-deserialization hooks can populate this to enrich the metadata of the
+    message which is eventually pushed to the consumer stream.
+  */
+  metadata?: Record<string, unknown>
 }
 
 /*

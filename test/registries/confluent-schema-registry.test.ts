@@ -1714,3 +1714,80 @@ test('exposes the original key and value byte lengths on the message metadata', 
   // Each message gets its own metadata object
   ok(messages[0].metadata !== messages[1].metadata)
 })
+
+test('continues consuming with the raw payload when a message cannot be decoded', async t => {
+  const topic = await createTopic(t, true)
+  const consumerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'JSON',
+    JSON.stringify({
+      type: 'object',
+      properties: {
+        id: { type: 'integer' },
+        name: { type: 'string' }
+      },
+      required: ['id', 'name'],
+      additionalProperties: false
+    })
+  )
+
+  const schemaHeader = Buffer.alloc(5)
+  schemaHeader.writeInt32BE(schemaId, 1)
+
+  const producer = createProducer<string, string>(t, {
+    serializers: {
+      key: stringSerializer,
+      value (value) {
+        return Buffer.concat([schemaHeader, Buffer.from(value!)])
+      }
+    }
+  })
+
+  const invalidPayload = JSON.stringify({ id: 1, name: 'Alice', foo: 'bar' })
+
+  await producer.send({
+    messages: [
+      { topic, key: 'schema-invalid', value: invalidPayload },
+      { topic, key: 'valid', value: JSON.stringify({ id: 2, name: 'Bob' }) }
+    ]
+  })
+
+  const failures: DeserializationErrorContext[] = []
+  const consumer = createConsumer(t, { registry: consumerRegistry })
+  const stream = await consumer.consume({
+    topics: [topic],
+    maxFetches: 1,
+    mode: MessagesStreamModes.EARLIEST,
+    onDeserializationError (context) {
+      failures.push(context)
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  // Nothing is lost and the stream is not aborted
+  strictEqual(messages.length, 2)
+  strictEqual(failures.length, 1)
+
+  // The undecodable message is delivered with its original bytes
+  const degraded = messages[0]
+  strictEqual(degraded.key, 'schema-invalid')
+  deepStrictEqual(degraded.value, Buffer.concat([schemaHeader, Buffer.from(invalidPayload)]))
+
+  const { error, payloadType } = degraded.metadata.deserializationError as {
+    error: Error
+    payloadType: string
+  }
+  strictEqual(payloadType, 'value')
+  strictEqual(error instanceof SchemaValidationError, true)
+
+  // The messages which could be decoded are unaffected
+  deepStrictEqual(structuredClone(messages[1].value), { id: 2, name: 'Bob' })
+  strictEqual(messages[1].metadata.deserializationError, undefined)
+})

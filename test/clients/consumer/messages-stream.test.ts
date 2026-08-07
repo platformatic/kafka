@@ -14,6 +14,7 @@ import {
   consumerReceivesChannel,
   type Deserializers,
   DeserializationErrorActions,
+  type DeserializationErrorContext,
   instancesChannel,
   jsonDeserializer,
   type KafkaRecord,
@@ -1990,4 +1991,99 @@ test('should expose the metadata added by deserializers on the consumed messages
   // The metadata added by the consumer is preserved and each message gets its own object
   strictEqual((messages[0].metadata.consumer as { groupId: string }).groupId, groupId)
   ok(messages[0].metadata !== messages[1].metadata)
+})
+
+test('should deliver the raw payload when deserialization errors are continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  const producer = createProducer(t, { serializers: stringSerializers })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { headerKey: 'headerValue-0' } },
+      { topic, key: 'key-1', value: '{"a":1}', headers: { headerKey: 'headerValue-1' } }
+    ],
+    acks: ProduceAcks.LEADER
+  })
+
+  const failures: DeserializationErrorContext[] = []
+  const consumer = createConsumer(t, groupId, {
+    deserializers: {
+      ...stringDeserializers,
+      value: jsonDeserializer
+    } as unknown as Deserializers<string, string, string, string>
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError (context) {
+      failures.push(context)
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  strictEqual(messages.length, 2)
+  strictEqual(failures.length, 1)
+  strictEqual(failures[0].payloadType, 'value')
+
+  // The value which could not be parsed is delivered as it was received
+  deepStrictEqual(messages[0].value, Buffer.from('value-0'))
+  deepStrictEqual(messages[0].metadata.deserializationError, {
+    error: failures[0].error,
+    payloadType: 'value'
+  })
+
+  // Whatever was deserialized before the failure is kept
+  strictEqual(messages[0].key, 'key-0')
+  deepStrictEqual(Array.from(messages[0].headers.entries()), [['headerKey', 'headerValue-0']])
+
+  // The messages which could be deserialized are unaffected
+  deepStrictEqual(messages[1].value, { a: 1 })
+  strictEqual(messages[1].metadata.deserializationError, undefined)
+})
+
+test('should deliver the whole message raw when a key deserialization error is continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  const producer = createProducer(t, { serializers: stringSerializers })
+  await producer.send({
+    messages: [{ topic, key: 'key-0', value: 'value-0', headers: { headerKey: 'headerValue-0' } }],
+    acks: ProduceAcks.LEADER
+  })
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: {
+      ...stringDeserializers,
+      key () {
+        throw new Error('Cannot deserialize the key.')
+      }
+    } as unknown as Deserializers<string, string, string, string>
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError () {
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  strictEqual(messages.length, 1)
+
+  // The key failed, so it and the value which was never attempted are raw, the headers are kept
+  deepStrictEqual(messages[0].key, Buffer.from('key-0'))
+  deepStrictEqual(messages[0].value, Buffer.from('value-0'))
+  deepStrictEqual(Array.from(messages[0].headers.entries()), [['headerKey', 'headerValue-0']])
+  strictEqual(
+    (messages[0].metadata.deserializationError as { payloadType: string }).payloadType,
+    'key'
+  )
 })

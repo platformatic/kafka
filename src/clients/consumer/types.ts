@@ -39,7 +39,8 @@ export interface PreferredReadReplica {
 
 export const DeserializationErrorActions = {
   FAIL: 'fail',
-  SKIP: 'skip'
+  SKIP: 'skip',
+  CONTINUE: 'continue'
 } as const
 
 export type DeserializationErrorAction =
@@ -54,6 +55,12 @@ export interface DeserializationErrorContext {
   offset: bigint
   timestamp: bigint
   commit: Message['commit']
+}
+
+// Added to the metadata of the messages delivered after a DeserializationErrorActions.CONTINUE
+export interface MessageDeserializationError {
+  error: unknown
+  payloadType: BeforeHookPayloadType
 }
 
 export type DeserializationErrorHandler = (context: DeserializationErrorContext) => DeserializationErrorAction

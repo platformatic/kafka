@@ -41,6 +41,7 @@ import {
   type DeserializationErrorContext,
   type DeserializationErrorHandler,
   type GroupAssignment,
+  type MessageDeserializationError,
   type Offsets
 } from './types.ts'
 import { partitionKey } from './utils.ts'
@@ -889,6 +890,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               let payloadType: BeforeHookPayloadType = 'headerKey'
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
+              let deserializationError: MessageDeserializationError | undefined
 
               try {
                 for (const [headerKey, headerValue] of record.headers) {
@@ -917,8 +919,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   timestamp: firstTimestamp + record.timestampDelta,
                   commit: commit as Message['commit']
                 }
-                const shouldDestroy = this.#deserializationErrorHandler
-                  ? this.#deserializationErrorHandler(context) !== DeserializationErrorActions.SKIP
+                const action = this.#deserializationErrorHandler
+                  ? this.#deserializationErrorHandler(context)
                   : this.#corruptedMessageHandler(
                     record,
                     topic,
@@ -928,16 +930,48 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                     commit as Message['commit'],
                     error
                   )
+                    ? DeserializationErrorActions.FAIL
+                    : DeserializationErrorActions.SKIP
 
-                if (shouldDestroy) {
+                if (action === DeserializationErrorActions.CONTINUE) {
+                  /*
+                    Deliver the message in a degraded form, so that nothing is lost: whatever was
+                    already deserialized is kept, while the payload which failed and the ones which
+                    were never attempted, since deserialization goes headers, key and then value,
+                    are delivered as the original bytes.
+
+                    The error is reported on the message metadata and published on the diagnostic
+                    channel, which is where callers should react to it: logging here would be a log
+                    storm waiting to happen.
+                  */
+                  diagnosticContext.error = error
+                  consumerReceivesChannel.error.publish(diagnosticContext)
+
+                  const headersFailed = payloadType === 'headerKey' || payloadType === 'headerValue'
+
+                  if (headersFailed) {
+                    headers.clear()
+
+                    for (const [headerKey, headerValue] of record.headers) {
+                      headers.set(headerKey as HeaderKey, headerValue as HeaderValue)
+                    }
+                  }
+
+                  if (headersFailed || payloadType === 'key') {
+                    deserializedKey = (record.key ?? undefined) as Key | undefined
+                  }
+
+                  deserializedValue = (record.value ?? undefined) as Value | undefined
+                  deserializationError = { error, payloadType }
+                } else if (action === DeserializationErrorActions.SKIP) {
+                  continue
+                } else {
                   diagnosticContext.error = error
                   consumerReceivesChannel.error.publish(diagnosticContext)
 
                   this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
                   return
                 }
-
-                continue
               }
 
               this.#metricsConsumedMessages?.inc()
@@ -952,9 +986,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 offset,
                 commit,
                 // Deserializers and hooks can enrich the metadata of the message they processed
-                metadata: messageToConsume.metadata
-                  ? { ...messageMetadata, ...messageToConsume.metadata }
-                  : messageMetadata,
+                metadata: deserializationError
+                  ? { ...messageMetadata, ...messageToConsume.metadata, deserializationError }
+                  : messageToConsume.metadata
+                    ? { ...messageMetadata, ...messageToConsume.metadata }
+                    : messageMetadata,
                 toJSON: messageToJSON
               } as Message
 

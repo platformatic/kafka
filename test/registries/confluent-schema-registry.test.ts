@@ -1,6 +1,9 @@
 import { deepStrictEqual, match, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
-import test from 'node:test'
+import { once } from 'node:events'
+import { createServer, type IncomingHttpHeaders } from 'node:http'
+import { type AddressInfo } from 'node:net'
+import test, { type TestContext } from 'node:test'
 import { UserError } from '../../src/errors.ts'
 import {
   type DeserializationErrorContext,
@@ -1032,4 +1035,122 @@ test('supports Bearer token authentication', async t => {
   })
 
   strictEqual(res.offsets![0].topic, topic)
+})
+
+async function createFakeRegistry (t: TestContext): Promise<{ url: string; requests: IncomingHttpHeaders[] }> {
+  const requests: IncomingHttpHeaders[] = []
+
+  const server = createServer((req, res) => {
+    requests.push(req.headers)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ schemaType: 'AVRO', schema: JSON.stringify({ type: 'string' }) }))
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+
+  t.after(() => {
+    return new Promise<void>(resolve => {
+      server.close(() => resolve())
+    })
+  })
+
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests }
+}
+
+function fetchSchema (registry: ConfluentSchemaRegistry<string, Datum, string, string>, id: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    registry.fetchSchema(id, error => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve()
+    })
+  })
+}
+
+test('sends additional custom headers on schema registry requests', async t => {
+  const { url, requests } = await createFakeRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    headers: {
+      'Confluent-Identity-Pool-Id': 'pool-123',
+      'target-sr-cluster': 'lsrc-456'
+    }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(requests.length, 1)
+  strictEqual(requests[0]['confluent-identity-pool-id'], 'pool-123')
+  strictEqual(requests[0]['target-sr-cluster'], 'lsrc-456')
+  strictEqual(requests[0].authorization, undefined)
+})
+
+test('supports a custom headers provider, invoked on each request', async t => {
+  const { url, requests } = await createFakeRegistry(t)
+
+  let invocations = 0
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    async headers () {
+      invocations++
+      return { 'Confluent-Identity-Pool-Id': `pool-${invocations}` }
+    }
+  })
+
+  await fetchSchema(registry, 1)
+  await fetchSchema(registry, 2)
+
+  strictEqual(invocations, 2)
+  strictEqual(requests[0]['confluent-identity-pool-id'], 'pool-1')
+  strictEqual(requests[1]['confluent-identity-pool-id'], 'pool-2')
+})
+
+test('merges custom headers with authentication headers', async t => {
+  const { url, requests } = await createFakeRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    auth: { token: 'TOKEN' },
+    headers: { 'Confluent-Identity-Pool-Id': 'pool-123' }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(requests[0].authorization, 'Bearer TOKEN')
+  strictEqual(requests[0]['confluent-identity-pool-id'], 'pool-123')
+})
+
+test('gives precedence to authentication options over custom headers', async t => {
+  const { url, requests } = await createFakeRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    auth: { username: 'user', password: 'password' },
+    headers: { Authorization: 'Bearer IGNORED' }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(requests[0].authorization, `Basic ${Buffer.from('user:password').toString('base64')}`)
+})
+
+test('does not mutate the custom headers object', async t => {
+  const { url, requests } = await createFakeRegistry(t)
+
+  const headers = { 'Confluent-Identity-Pool-Id': 'pool-123' }
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    auth: { token: 'TOKEN' },
+    headers
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(requests[0].authorization, 'Bearer TOKEN')
+  deepStrictEqual(headers, { 'Confluent-Identity-Pool-Id': 'pool-123' })
 })

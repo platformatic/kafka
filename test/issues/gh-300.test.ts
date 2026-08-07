@@ -1,6 +1,6 @@
 // Related issue: https://github.com/platformatic/kafka/issues/300
 
-import { ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { test } from 'node:test'
 import { MessagesStreamModes, stringDeserializers } from '../../src/index.ts'
@@ -35,18 +35,36 @@ for (const groupProtocol of ['classic', 'consumer'] as const) {
       mode: MessagesStreamModes.LATEST,
       maxWaitTime: 200
     })
+    // createConsumer registered its own `consumer.close(true)` hook before this one and hooks run in
+    // registration order, so the consumer is closed while this stream is still consuming. That is
+    // deliberate: Consumer.close(true) must close the active streams itself.
     t.after(() => stream.close())
     stream.on('data', () => {})
 
+    // The stream has no other error listener, so without this one any stream error would be
+    // rethrown by Node.js as an unhandled 'error' event. The test runner reports that as an
+    // uncaught exception rather than as a failed assertion, which hides what actually went wrong.
+    const errors: Error[] = []
+    stream.on('error', error => errors.push(error))
+
     // The construct refresh hasn't finished yet, so the offsets map is empty
-    strictEqual(stream.offsetsToFetch.size, 0)
+    strictEqual(
+      stream.offsetsToFetch.size,
+      0,
+      'the initial offsets refresh should still be in flight right after consume()'
+    )
 
     stream.pause()
     stream.resume()
 
     await sleep(2000)
 
-    strictEqual(stream.errored, null)
-    ok(stream.offsetsToFetch.size > 0)
+    deepStrictEqual(
+      errors.map(error => error.message),
+      [],
+      'the stream must not emit any error'
+    )
+    strictEqual(stream.errored, null, `the stream must not be destroyed, got ${stream.errored}`)
+    ok(stream.offsetsToFetch.size > 0, 'the initial offsets refresh should have completed by now')
   })
 }

@@ -1559,3 +1559,93 @@ test('reuses a single dispatcher across schema fetches', async t => {
   strictEqual(registry.get(1)?.type, 'avro')
   strictEqual(registry.get(2)?.type, 'avro')
 })
+
+test('exposes the schema IDs used while consuming on the message metadata', async t => {
+  const topic = await createTopic(t, true)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const producer = await createProducer(t, { registry })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } },
+      { topic, key: 'key-2', value: { id: 2, name: 'Bob' }, metadata: { schemas: { value: schemaId } } }
+    ]
+  })
+
+  const consumer = createConsumer(t, { registry })
+  const stream = await consumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  deepStrictEqual(messages[0].metadata.schemas, { value: schemaId })
+  deepStrictEqual(messages[1].metadata.schemas, { value: schemaId })
+
+  // The metadata added by the registry does not replace the one added by the consumer
+  strictEqual((messages[0].metadata.consumer as { groupId: string }).groupId, consumer.groupId)
+
+  // Each message gets its own metadata object
+  ok(messages[0].metadata !== messages[1].metadata)
+})
+
+test('exposes the schema IDs when the registry deserializers are used without the hook', async t => {
+  const topic = await createTopic(t, true)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const producer = await createProducer(t, { registry })
+  await producer.send({
+    messages: [{ topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } }]
+  })
+
+  // Preload the schema, as there is no hook to fetch it before deserializing
+  await new Promise<void>((resolve, reject) => {
+    registry.fetchSchema(schemaId, error => (error ? reject(error) : resolve()))
+  })
+
+  const consumer = createConsumer(t, { deserializers: registry.getDeserializers() })
+  const stream = await consumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  deepStrictEqual(structuredClone(messages[0].value), { id: 1, name: 'Alice' })
+  deepStrictEqual(messages[0].metadata.schemas, { value: schemaId })
+})

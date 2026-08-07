@@ -96,7 +96,7 @@ export function createUndiciAgent (options: UndiciAgentOptions): UndiciDispatche
 }
 
 export interface ConfluentSchemaRegistryMetadata {
-  schemas?: Record<BeforeHookPayloadType, number>
+  schemas?: Partial<Record<BeforeHookPayloadType, number>>
 }
 
 export type ConfluentSchemaRegistryProtobufTypeMapper = (
@@ -173,6 +173,21 @@ export interface Schema {
   id: number
   type: 'avro' | 'protobuf' | 'json'
   schema: Type | Root | ValidateFunction
+}
+
+export function trackConsumedSchemaId (
+  message: MessageToConsume | undefined,
+  type: BeforeHookPayloadType,
+  schemaId: number
+): void {
+  /* c8 ignore next 3 - The message is always provided for keys and values */
+  if (!message) {
+    return
+  }
+
+  const metadata = (message.metadata ??= {}) as ConfluentSchemaRegistryMetadata
+  metadata.schemas ??= {}
+  metadata.schemas[type] = schemaId
 }
 
 /* c8 ignore next 8 */
@@ -325,7 +340,7 @@ export class ConfluentSchemaRegistry<
     return function beforeDeserialization (
       payload: Buffer | null,
       type: BeforeHookPayloadType,
-      _message: MessageToConsume,
+      message: MessageToConsume,
       callback: Callback<void>
     ) {
       // Extract the schema ID from the message metadata
@@ -336,6 +351,12 @@ export class ConfluentSchemaRegistry<
         callback(null)
         return
       }
+
+      /*
+        Track the schema ID before fetching, so that it is exposed on the message metadata even when
+        the schema cannot be fetched or the payload cannot be decoded.
+      */
+      trackConsumedSchemaId(message, type, schemaId)
 
       // The schema is already fetch
       if (registry.get(schemaId)) {
@@ -564,7 +585,9 @@ export class ConfluentSchemaRegistry<
       return EMPTY_BUFFER
     }
 
-    if (type === 'headerKey' || type === 'headerValue') {
+    const isHeader = type === 'headerKey' || type === 'headerValue'
+
+    if (isHeader) {
       message = headers as unknown as MessageToConsume
     }
 
@@ -572,6 +595,14 @@ export class ConfluentSchemaRegistry<
 
     if (!schemaId) {
       return fallbackDeserializer(data as any)
+    }
+
+    /*
+      Also track the schema ID here, so that it is exposed on the message metadata even when the
+      deserializers are used without the before-deserialization hook of this registry.
+    */
+    if (!isHeader) {
+      trackConsumedSchemaId(message, type, schemaId)
     }
 
     const schema = this.#schemas.get(schemaId)

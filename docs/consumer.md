@@ -255,8 +255,37 @@ When using a schema registry:
 - The registry fetches and caches schemas as needed
 - JSON schemas are validated on receive (and optionally on send)
 - Supports AVRO, Protocol Buffers, and JSON Schema formats
+- The schema IDs used to decode each message are exposed as `message.metadata.schemas`
 
 For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
+
+### Adding custom message metadata
+
+Deserializers and `beforeDeserialization` hooks receive the message being processed and can assign a
+`metadata` object to it. Those properties are merged into the `metadata` of the message pushed to the
+stream, on top of the `consumer` information the stream always adds:
+
+```typescript
+const consumer = new Consumer({
+  groupId: 'my-consumer-group',
+  clientId: 'my-consumer',
+  bootstrapBrokers: ['localhost:9092'],
+  deserializers: {
+    ...stringDeserializers,
+    value (data, headers, message) {
+      message.metadata = { valueLength: data.length }
+      return stringDeserializers.value(data)
+    }
+  }
+})
+
+for await (const message of stream) {
+  console.log(message.metadata.valueLength)
+}
+```
+
+Each message gets its own metadata object, so mutating it never affects the other messages of the
+same batch.
 
 ## Rack-aware fetching
 

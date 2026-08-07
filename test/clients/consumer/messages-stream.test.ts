@@ -18,6 +18,7 @@ import {
   jsonDeserializer,
   type KafkaRecord,
   kNoopCallbackReturnValue,
+  type MessageToConsume,
   type Message,
   MessagesStream,
   MessagesStreamFallbackModes,
@@ -1953,4 +1954,40 @@ test('should handle async beforeDeserialization hooks errors', async t => {
   } finally {
     process.emitWarning = originalEmitWarning
   }
+})
+
+test('should expose the metadata added by deserializers on the consumed messages', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 2)
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: {
+      ...stringDeserializers,
+      value (data?: Buffer, _?: Map<string, string>, message?: MessageToConsume) {
+        message!.metadata = { valueLength: data!.length }
+        return stringDeserializers.value(data)
+      }
+    } as unknown as Deserializers<string, string, string, string>
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  const messages: Message<string, string, string, string>[] = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  strictEqual(messages.length, 2)
+  strictEqual(messages[0].metadata.valueLength, 7)
+  strictEqual(messages[1].metadata.valueLength, 7)
+
+  // The metadata added by the consumer is preserved and each message gets its own object
+  strictEqual((messages[0].metadata.consumer as { groupId: string }).groupId, groupId)
+  ok(messages[0].metadata !== messages[1].metadata)
 })

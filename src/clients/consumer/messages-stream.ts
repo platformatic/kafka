@@ -19,7 +19,7 @@ import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
-import { kAutocommit, kGetFetchNode, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import { kAutocommit, kDeserializationError, kGetFetchNode, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
 import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
@@ -55,6 +55,11 @@ export function noopDeserializer (data?: Buffer): Buffer | undefined {
 
 export function defaultCorruptedMessageHandler (): boolean {
   return true
+}
+
+// A message whose before-deserialization hook failed, tracked until #pushRecords can report it
+type MessageToConsumeWithDeserializationError = MessageToConsume & {
+  [kDeserializationError]?: MessageDeserializationError
 }
 
 function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, Value, HeaderKey, HeaderValue>) {
@@ -864,7 +869,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
           // Process messages
           for (const record of batch.records) {
-            const messageToConsume: MessageToConsume = { ...record, topic, partition }
+            const messageToConsume: MessageToConsumeWithDeserializationError = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
             if (offset < requestedOffsets.get(key)!) {
@@ -891,8 +896,17 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
               let deserializationError: MessageDeserializationError | undefined
+              let hookFailed = false
 
               try {
+                // A before-deserialization hook already failed for this message, report it as is
+                const hookError = messageToConsume[kDeserializationError]
+                if (hookError) {
+                  hookFailed = true
+                  payloadType = hookError.payloadType
+                  throw hookError.error
+                }
+
                 for (const [headerKey, headerValue] of record.headers) {
                   payloadType = 'headerKey'
                   /* c8 ignore next - Hard to test */
@@ -947,7 +961,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   diagnosticContext.error = error
                   consumerReceivesChannel.error.publish(diagnosticContext)
 
-                  const headersFailed = payloadType === 'headerKey' || payloadType === 'headerValue'
+                  // A hook failure happens before anything is deserialized, so nothing can be kept
+                  const headersFailed = hookFailed || payloadType === 'headerKey' || payloadType === 'headerValue'
 
                   if (headersFailed) {
                     headers.clear()
@@ -969,7 +984,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   diagnosticContext.error = error
                   consumerReceivesChannel.error.publish(diagnosticContext)
 
-                  this.destroy(new UserError('Failed to deserialize a message.', { cause: error }))
+                  this.destroy(
+                    hookFailed ? (error as Error) : new UserError('Failed to deserialize a message.', { cause: error })
+                  )
                   return
                 }
               }
@@ -1297,7 +1314,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     response: FetchResponse,
     requestedOffsets: Map<string, bigint>
   ) {
-    const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsume][] = []
+    const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsumeWithDeserializationError][] = []
 
     // Create the pre-deserialization requests
     for (const topicResponse of response.responses) {
@@ -1322,7 +1339,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             continue
           }
 
-          for (const message of batch.records as MessageToConsume[]) {
+          for (const message of batch.records as MessageToConsumeWithDeserializationError[]) {
             message.topic = topic
             message.partition = partition
 
@@ -1347,10 +1364,26 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       (request, cb) => {
         const [data, type, message] = request
 
-        const result = hook(data, type, message, cb) as Promise<void>
+        /*
+          Without an error handler a failing hook destroys the stream, as it always did. With one,
+          the failure is recorded on the message it belongs to and reported to the handler in
+          #pushRecords, together with everything else which can fail while deserializing, so that
+          the caller can skip or degrade that single message instead of losing the stream.
+        */
+        const onHookSettled: Callback<void> = error => {
+          if (error && this.#deserializationErrorHandler) {
+            message[kDeserializationError] ??= { error, payloadType: type }
+            cb(null)
+            return
+          }
+
+          cb(error)
+        }
+
+        const result = hook(data, type, message, onHookSettled) as Promise<void>
 
         if (typeof result?.then === 'function') {
-          result.then(() => cb(null), cb)
+          result.then(() => onHookSettled(null), onHookSettled)
         }
       },
       requests,

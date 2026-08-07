@@ -2087,3 +2087,99 @@ test('should deliver the whole message raw when a key deserialization error is c
     'key'
   )
 })
+
+test('should continue past a failing beforeDeserialization hook when errors are continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 2)
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: stringDeserializers as unknown as Deserializers<string, string, string, string>,
+    beforeDeserialization (_payload, type, _message, callback) {
+      callback(type === 'value' ? new UserError('Hook failed.') : null)
+    }
+  })
+
+  const failures: DeserializationErrorContext[] = []
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError (context) {
+      failures.push(context)
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  strictEqual(messages.length, 2)
+  strictEqual(failures.length, 2)
+  strictEqual(failures[0].payloadType, 'value')
+  strictEqual((failures[0].error as UserError).message, 'Hook failed.')
+
+  // Nothing was deserialized, so the whole message is delivered raw
+  deepStrictEqual(messages[0].key, Buffer.from('key-0'))
+  deepStrictEqual(messages[0].value, Buffer.from('value-0'))
+  deepStrictEqual(Array.from(messages[0].headers.entries()), [[Buffer.from('headerKey'), Buffer.from('headerValue-0')]])
+})
+
+test('should skip messages whose beforeDeserialization hook failed when errors are skipped', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 2)
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: stringDeserializers as unknown as Deserializers<string, string, string, string>,
+    beforeDeserialization (_payload, type, _message, callback) {
+      callback(type === 'value' ? new UserError('Hook failed.') : null)
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError () {
+      return DeserializationErrorActions.SKIP
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+  strictEqual(messages.length, 0)
+})
+
+test('should destroy the stream with the original error when a hook failure is not continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 1)
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: stringDeserializers as unknown as Deserializers<string, string, string, string>,
+    beforeDeserialization (_payload, type, _message, callback) {
+      callback(type === 'value' ? new UserError('Hook failed.') : null)
+    }
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError () {
+      return DeserializationErrorActions.FAIL
+    }
+  })
+
+  const error = (await Array.fromAsync(stream).catch((error: Error) => error)) as UserError
+
+  /*
+    Routing hook failures through the handler must not change the error the caller already saw:
+    a hook failure which is not continued still surfaces as the error the hook produced.
+  */
+  strictEqual(error instanceof UserError, true)
+  strictEqual(error.message, 'Hook failed.')
+  strictEqual(error.cause, undefined)
+})

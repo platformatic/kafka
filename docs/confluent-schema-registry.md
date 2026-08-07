@@ -42,6 +42,8 @@ Options:
 | `auth.username`      | `string \| CredentialProvider` | No       | Username for Basic authentication                                            |
 | `auth.password`      | `string \| CredentialProvider` | No       | Password for Basic authentication                                            |
 | `auth.token`         | `string \| CredentialProvider` | No       | Token for Bearer authentication                                              |
+| `tls`                | `object`                       | No       | TLS options for HTTPS registries, as accepted by `tls.connect`               |
+| `ssl`                | `object`                       | No       | Alias for `tls`                                                              |
 | `headers`            | `object \| function`           | No       | Additional HTTP headers sent with every registry request                     |
 | `timeout`            | `number`                       | No       | Request timeout in milliseconds, `0` disables it (default: `5000`)           |
 | `retries`            | `number`                       | No       | Amount of retries for failed requests (default: `3`)                         |
@@ -296,6 +298,49 @@ const registry = new ConfluentSchemaRegistry({
   retryDelay: attempt => 2 ** attempt * 100
 })
 ```
+
+## TLS
+
+Enterprise registries are rarely served by a certificate signed by a public CA. The `tls` option
+(aliased as `ssl`, like in the client options) accepts everything
+[`tls.connect`](https://nodejs.org/api/tls.html#tlsconnectoptions-callback) does and applies it to
+every Schema Registry request:
+
+```typescript
+const registry = new ConfluentSchemaRegistry({
+  url: 'https://schema-registry.internal:8081',
+  tls: {
+    ca: await readFile('/etc/ssl/internal-ca.pem')
+  }
+})
+```
+
+Mutual TLS, SNI and TLS version bounds are configured the same way:
+
+```typescript
+const registry = new ConfluentSchemaRegistry({
+  url: 'https://schema-registry.internal:8081',
+  tls: {
+    ca: await readFile('/etc/ssl/internal-ca.pem'),
+    cert: await readFile('/etc/ssl/client.pem'),
+    key: await readFile('/etc/ssl/client.key'),
+    servername: 'schema-registry.internal',
+    minVersion: 'TLSv1.3'
+  }
+})
+```
+
+Certificate validation can be disabled with `rejectUnauthorized: false`. Do not do this outside
+development: it accepts any certificate, which defeats the point of using TLS.
+
+Under the hood the options are handed to an [undici](https://undici.nodejs.org) `Agent`, which is
+passed to `fetch()` as its dispatcher. The agent is created once per registry, so schema fetches keep
+reusing the same pooled connection. Node bundles undici but does not export it, so the `Agent` class
+is read from the constructor of the global dispatcher `fetch()` itself uses; nothing needs to be
+installed.
+
+Since TLS options are meaningless on a plaintext connection, providing them together with a non
+`https:` URL throws a `UserError` from the constructor rather than silently ignoring them.
 
 ## Message Metadata (Producer)
 

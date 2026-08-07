@@ -3,6 +3,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type parse, type Root } from 'protobufjs'
 import { type Callback } from '../apis/definitions.ts'
 import {
@@ -43,6 +44,57 @@ const draft06MetaSchema = require('ajv/dist/refs/json-schema-draft-06.json') as 
 
 type ConfluentSchemaRegistryMessageToProduce = MessageToProduce<unknown, unknown, unknown, unknown>
 
+/*
+  Node bundles undici but does not export it, so the Agent class cannot be imported. It is taken from
+  the constructor of the global dispatcher, which is the very dispatcher fetch() uses by default.
+*/
+export type UndiciDispatcher = NonNullable<RequestInit['dispatcher']>
+
+export interface UndiciAgentOptions {
+  connect: TLSConnectionOptions
+}
+
+export type UndiciAgentConstructor = new (options: UndiciAgentOptions) => UndiciDispatcher
+
+const undiciGlobalDispatcherSymbol = /^undici\.globalDispatcher\.(\d+)$/
+
+export function createUndiciAgent (options: UndiciAgentOptions): UndiciDispatcher {
+  /*
+    The undici globals are installed the first time undici is loaded, which creating a Request is
+    enough to do and which performs no I/O.
+  */
+  new Request('http://localhost') // eslint-disable-line no-new
+
+  /*
+    The symbol is versioned and more than one version is registered at the same time, pointing at
+    different objects: on Node 26 undici.globalDispatcher.1 is a backwards compatibility wrapper and
+    only undici.globalDispatcher.2 is the Agent. The highest version available therefore wins.
+  */
+  const globals = globalThis as unknown as Record<symbol, { constructor: UndiciAgentConstructor } | undefined>
+  let version = -1
+  let Agent: UndiciAgentConstructor | undefined
+
+  for (const symbol of Object.getOwnPropertySymbols(globalThis)) {
+    const symbolVersion = symbol.description?.match(undiciGlobalDispatcherSymbol)?.[1]
+
+    if (typeof symbolVersion === 'undefined' || Number(symbolVersion) <= version) {
+      continue
+    }
+
+    version = Number(symbolVersion)
+    Agent = globals[symbol]?.constructor
+  }
+
+  /* c8 ignore next 6 - Only reachable on a Node.js build which does not bundle undici */
+  if (typeof Agent !== 'function') {
+    throw new UserError(
+      'Cannot access the undici Agent bundled with Node.js, which is required to configure TLS for the Schema Registry.'
+    )
+  }
+
+  return new Agent(options)
+}
+
 export interface ConfluentSchemaRegistryMetadata {
   schemas?: Record<BeforeHookPayloadType, number>
 }
@@ -72,6 +124,8 @@ export interface ConfluentSchemaRegistryOptions {
   timeout?: number
   retries?: number
   retryDelay?: number | ConfluentSchemaRegistryRetryDelayGetter
+  tls?: TLSConnectionOptions
+  ssl?: TLSConnectionOptions // Alias for tls
   protobufTypeMapper?: ConfluentSchemaRegistryProtobufTypeMapper
   jsonValidateSend?: boolean
   jsonAjvOptions?: Options
@@ -151,6 +205,8 @@ export class ConfluentSchemaRegistry<
   #timeout: number
   #retries: number
   #retryDelay: number | ConfluentSchemaRegistryRetryDelayGetter
+  #tls: TLSConnectionOptions | undefined
+  #tlsDispatcher: UndiciDispatcher | undefined
 
   constructor (options: ConfluentSchemaRegistryOptions) {
     super()
@@ -168,7 +224,12 @@ export class ConfluentSchemaRegistry<
     this.#timeout = options.timeout ?? defaultConfluentSchemaRegistryOptions.timeout
     this.#retries = options.retries ?? defaultConfluentSchemaRegistryOptions.retries
     this.#retryDelay = options.retryDelay ?? defaultConfluentSchemaRegistryOptions.retryDelay
+    this.#tls = options.tls ?? options.ssl
     this.#pendingFetches = new Map()
+
+    if (this.#tls && new URL(this.#url).protocol !== 'https:') {
+      throw new UserError('TLS options can only be used with a HTTPS Schema Registry URL.', { url: this.#url })
+    }
   }
 
   getSchemaId (
@@ -318,6 +379,12 @@ export class ConfluentSchemaRegistry<
 
     if (headers) {
       requestInit.headers = headers
+    }
+
+    if (this.#tls) {
+      // Created once per registry, so that connections are pooled across schema fetches
+      this.#tlsDispatcher ??= createUndiciAgent({ connect: this.#tls })
+      requestInit.dispatcher = this.#tlsDispatcher
     }
 
     if (this.#timeout > 0) {

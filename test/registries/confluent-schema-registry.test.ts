@@ -1,7 +1,9 @@
-import { deepStrictEqual, match, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, match, ok, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { createServer, type IncomingHttpHeaders, type ServerResponse } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer, type ServerOptions as HttpsServerOptions } from 'node:https'
 import { type AddressInfo } from 'node:net'
 import test, { type TestContext } from 'node:test'
 import { MultipleErrors, NetworkError, TimeoutError, UserError } from '../../src/errors.ts'
@@ -14,7 +16,7 @@ import {
   stringDeserializer,
   stringSerializer
 } from '../../src/index.ts'
-import { ConfluentSchemaRegistry } from '../../src/registries/confluent-schema-registry.ts'
+import { ConfluentSchemaRegistry, createUndiciAgent } from '../../src/registries/confluent-schema-registry.ts'
 import {
   confluentSchemaRegistryAuthBasicUrl,
   confluentSchemaRegistryBearerUrl,
@@ -1335,4 +1337,225 @@ test('reports network failures as NetworkError', async t => {
   strictEqual(error instanceof NetworkError, true)
   strictEqual(error.message, 'Failed to fetch a schema.')
   ok(error.cause)
+})
+
+let tlsFolder = '../../test/fixtures/schema-registry-tls/'
+
+/* c8 ignore next 3 - Only relevant when the tests are executed from the compiled sources */
+if (import.meta.url.includes('dist')) {
+  tlsFolder = '../' + tlsFolder
+}
+
+function readTlsFixture (name: string): Buffer {
+  return readFileSync(new URL(tlsFolder + name, import.meta.url))
+}
+
+const tlsFixtures = {
+  ca: readTlsFixture('ca.pem'),
+  serverCert: readTlsFixture('server.pem'),
+  serverKey: readTlsFixture('server-key.pem'),
+  clientCert: readTlsFixture('client.pem'),
+  clientKey: readTlsFixture('client-key.pem')
+}
+
+async function createTlsRegistry (
+  t: TestContext,
+  options: HttpsServerOptions = {}
+): Promise<{ url: string; requests: IncomingMessage[]; serverNames: (string | undefined)[] }> {
+  const requests: IncomingMessage[] = []
+  const serverNames: (string | undefined)[] = []
+
+  const server = createHttpsServer(
+    {
+      cert: tlsFixtures.serverCert,
+      key: tlsFixtures.serverKey,
+      SNICallback (serverName, callback) {
+        serverNames.push(serverName)
+        callback(null)
+      },
+      ...options
+    },
+    (req, res) => {
+      requests.push(req)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ schemaType: 'AVRO', schema: JSON.stringify({ type: 'string' }) }))
+    }
+  )
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+
+  t.after(() => {
+    return new Promise<void>(resolve => {
+      server.closeAllConnections()
+      server.close(() => resolve())
+    })
+  })
+
+  return { url: `https://127.0.0.1:${(server.address() as AddressInfo).port}`, requests, serverNames }
+}
+
+test('fetches schemas over TLS using a custom CA', async t => {
+  const { url, requests } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { ca: tlsFixtures.ca, servername: 'localhost' }
+  })
+
+  await fetchSchema(registry, 7)
+
+  strictEqual(registry.get(7)?.type, 'avro')
+  strictEqual(requests[0].url, '/schemas/ids/7')
+})
+
+test('supports ssl as an alias for tls', async t => {
+  const { url } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    ssl: { ca: tlsFixtures.ca, servername: 'localhost' }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('rejects Schema Registry certificates which are not trusted', async t => {
+  const { url } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { servername: 'localhost' },
+    retries: 0
+  })
+
+  const error = (await fetchSchema(registry, 1).catch((error: Error) => error)) as NetworkError
+
+  // fetch reports transport failures as a TypeError carrying the original error as its cause
+  strictEqual(error instanceof NetworkError, true)
+  strictEqual((error.cause as Error).message, 'fetch failed')
+  strictEqual(((error.cause as Error).cause as NodeJS.ErrnoException).code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE')
+})
+
+test('supports disabling Schema Registry certificate validation', async t => {
+  const { url } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { rejectUnauthorized: false }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('forwards the configured servername to the Schema Registry', async t => {
+  const { url, serverNames } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { ca: tlsFixtures.ca, servername: 'localhost' }
+  })
+
+  await fetchSchema(registry, 1)
+
+  deepStrictEqual(serverNames, ['localhost'])
+})
+
+test('supports mutual TLS against the Schema Registry', async t => {
+  const { url } = await createTlsRegistry(t, {
+    ca: tlsFixtures.ca,
+    requestCert: true,
+    rejectUnauthorized: true
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: {
+      ca: tlsFixtures.ca,
+      cert: tlsFixtures.clientCert,
+      key: tlsFixtures.clientKey,
+      servername: 'localhost'
+    }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(registry.get(1)?.type, 'avro')
+})
+
+test('fails mutual TLS when no client certificate is provided', async t => {
+  const { url } = await createTlsRegistry(t, {
+    ca: tlsFixtures.ca,
+    requestCert: true,
+    rejectUnauthorized: true
+  })
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { ca: tlsFixtures.ca, servername: 'localhost' },
+    retries: 0
+  })
+
+  const error = await fetchSchema(registry, 1).catch((error: Error) => error)
+
+  ok(error instanceof NetworkError)
+})
+
+test('sends authentication headers over the TLS transport', async t => {
+  const { url, requests } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    auth: { token: 'TOKEN' },
+    tls: { ca: tlsFixtures.ca, servername: 'localhost' }
+  })
+
+  await fetchSchema(registry, 1)
+
+  strictEqual(requests[0].headers.authorization, 'Bearer TOKEN')
+})
+
+test('refuses TLS options on a non HTTPS Schema Registry URL', () => {
+  throws(
+    () => {
+      // eslint-disable-next-line no-new
+      new ConfluentSchemaRegistry<string, Datum, string, string>({
+        url: confluentSchemaRegistryUrl,
+        tls: { rejectUnauthorized: false }
+      })
+    },
+    (error: UserError) => {
+      strictEqual(error instanceof UserError, true)
+      strictEqual(error.message, 'TLS options can only be used with a HTTPS Schema Registry URL.')
+      strictEqual(error.url, confluentSchemaRegistryUrl)
+      return true
+    }
+  )
+})
+
+test('resolves the undici Agent bundled with Node.js', () => {
+  const agent = createUndiciAgent({ connect: { rejectUnauthorized: false } })
+
+  // Guards the versioned undici.globalDispatcher.<n> symbol lookup across the supported Node versions
+  strictEqual(agent.constructor.name, 'Agent')
+  strictEqual(typeof (agent as { dispatch?: unknown }).dispatch, 'function')
+})
+
+test('reuses a single dispatcher across schema fetches', async t => {
+  const { url } = await createTlsRegistry(t)
+
+  const registry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url,
+    tls: { ca: tlsFixtures.ca, servername: 'localhost' }
+  })
+
+  await fetchSchema(registry, 1)
+  await fetchSchema(registry, 2)
+
+  strictEqual(registry.get(1)?.type, 'avro')
+  strictEqual(registry.get(2)?.type, 'avro')
 })

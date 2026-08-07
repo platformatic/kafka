@@ -37,7 +37,7 @@ import {
 } from '../../src/index.ts'
 import { defaultCrypto, type ScramAlgorithm } from '../../src/protocol/sasl/scram-sha.ts'
 import { createScramUsers } from '../fixtures/create-users.ts'
-import { createAuthenticator } from '../fixtures/kerberos-authenticator.ts'
+import { createAuthenticator, type KerberosCredentials } from '../fixtures/kerberos-authenticator.ts'
 import {
   createCreationChannelVerifier,
   createTracingChannelVerifier,
@@ -1131,6 +1131,17 @@ test('Connection.connect should not connect to SASL protected broker by default'
   await rejects(() => metadataV12.api.async(connection, []))
 })
 
+const kerberosPrincipal: KerberosCredentials = { username: 'admin-password@EXAMPLE.COM', password: 'admin' }
+const kerberosAdmin: KerberosCredentials = { username: 'admin', password: 'admin' }
+
+/*
+  The GSSAPI handshake talks to the KDC before the connection is considered ready, so it is bounded
+  by connectTimeout. The default 5s is not enough on a loaded CI machine.
+*/
+function connectionOptionsFor (mechanism: SASLMechanismValue): { connectTimeout?: number } {
+  return mechanism === SASLMechanisms.GSSAPI ? { connectTimeout: 30000 } : {}
+}
+
 for (const mechanism of allowedSASLMechanisms) {
   let sasl: SASLOptions
   let saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
@@ -1143,9 +1154,14 @@ for (const mechanism of allowedSASLMechanisms) {
       saslBroker = parseBroker(kafkaSaslKerberosBootstrapServers[0])
       sasl = {
         mechanism,
-        username: 'admin-password@EXAMPLE.COM',
-        password: 'admin',
-        authenticate: await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
+        username: kerberosPrincipal.username,
+        password: kerberosPrincipal.password,
+        authenticate: await createAuthenticator(
+          'broker@broker-sasl-kerberos',
+          'EXAMPLE.COM',
+          'localhost:8000',
+          kerberosPrincipal
+        )
       }
       break
     default:
@@ -1153,13 +1169,21 @@ for (const mechanism of allowedSASLMechanisms) {
   }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism}`, async t => {
-    const connection = new Connection('clientId', { sasl })
+    const connection = new Connection('clientId', { sasl, ...connectionOptionsFor(mechanism) })
     t.after(() => connection.close())
 
     await connection.connect(saslBroker.host, saslBroker.port)
     await metadataV12.api.async(connection, [])
   })
 }
+
+// Created once, and not per mechanism, as only the GSSAPI iteration ever invokes it
+const gssapiAuthenticate = await createAuthenticator(
+  'broker@broker-sasl-kerberos',
+  'EXAMPLE.COM',
+  'localhost:8000',
+  kerberosAdmin
+)
 
 for (const mechanism of allowedSASLMechanisms) {
   const sasl: SASLOptions =
@@ -1169,8 +1193,6 @@ for (const mechanism of allowedSASLMechanisms) {
     mechanism === SASLMechanisms.GSSAPI
       ? parseBroker(kafkaSaslKerberosBootstrapServers[0])
       : parseBroker(kafkaSaslBootstrapServers[0])
-
-  const gssapiAuthenticate = await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
 
   sasl.authenticate = async function customSaslAuthenticate (
     mechanism: SASLMechanismValue,
@@ -1215,7 +1237,7 @@ for (const mechanism of allowedSASLMechanisms) {
   }
 
   test(`Connection.connect should connect to SASL protected broker using SASL/${mechanism} using a custom implementation`, async t => {
-    const connection = new Connection('clientId', { sasl })
+    const connection = new Connection('clientId', { sasl, ...connectionOptionsFor(mechanism) })
     t.after(() => connection.close())
 
     await connection.connect(broker.host, broker.port)

@@ -1,6 +1,7 @@
 import krb, { type KerberosClient } from 'kerberos'
 import { execSync } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { rmSync } from 'node:fs'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve as resolvePaths } from 'node:path'
 import {
@@ -18,6 +19,11 @@ import {
 
 type SaslAuthenticateResponse = saslAuthenticateV2.SaslAuthenticateResponse
 type SASLAuthenticationAPI = saslAuthenticateV2.SASLAuthenticationAPI
+
+export interface KerberosCredentials {
+  username: string
+  password: string
+}
 
 function createKerberosAuthenticationError (message: string, kerberosError: string): AuthenticationError {
   return new AuthenticationError(message, { kerberosError })
@@ -82,33 +88,64 @@ function performChallenge (
   })
 }
 
-async function restoreEnvironment (
-  callback: Callback<SaslAuthenticateResponse>,
-  kerberosRoot: string,
-  originalKrb5Config: string | undefined,
-  originalKrbCCName: string | undefined,
-  error: Error | null,
-  response?: SaslAuthenticateResponse
-): Promise<void> {
-  if (typeof originalKrb5Config !== 'undefined') {
-    process.env.KRB5_CONFIG = originalKrb5Config
-  } else {
-    delete process.env.KRB5_CONFIG
+/*
+  KRB5_CONFIG and KRB5CCNAME are process wide, so they are only set while the Kerberos tooling needs
+  them and the previous values are put back afterwards.
+*/
+function useKerberosEnvironment (kerberosRoot: string): () => void {
+  const { KRB5_CONFIG, KRB5CCNAME } = process.env
+
+  process.env.KRB5_CONFIG = `${kerberosRoot}/krb5.conf`
+  process.env.KRB5CCNAME = `${kerberosRoot}/krb5.cache`
+
+  return function restoreKerberosEnvironment () {
+    if (typeof KRB5_CONFIG !== 'undefined') {
+      process.env.KRB5_CONFIG = KRB5_CONFIG
+    } else {
+      delete process.env.KRB5_CONFIG
+    }
+
+    if (typeof KRB5CCNAME !== 'undefined') {
+      process.env.KRB5CCNAME = KRB5CCNAME
+    } else {
+      delete process.env.KRB5CCNAME
+    }
+  }
+}
+
+/*
+  Populates the credentials cache in kerberosRoot. This spawns up to two processes and performs a
+  round trip to the KDC, all of it blocking the event loop, so the caller decides when to pay for it.
+*/
+async function acquireTicket (kerberosRoot: string, username: string, password: string): Promise<void> {
+  // On MIT Kerberos, kinit does not support reading password from stdin or a password file
+  // so we convert it to a keytab file if needed using ktutil
+  if (!password.startsWith('keytab:')) {
+    if (process.platform !== 'darwin') {
+      execSync(`ktutil --keytab ${kerberosRoot}/keytab`, {
+        input: `addent -password -p ${username} -k 1 -f \n${password}\nwkt ${kerberosRoot}/keytab\nquit\n`
+      })
+
+      password = `keytab:${kerberosRoot}/keytab`
+      /* c8 ignore next 4 - Only executed on MacOS */
+    } else {
+      // On MacOS, we can use a password file directly since it uses Heimdal Kerberos
+      await writeFile(`${kerberosRoot}/password`, password, 'utf-8')
+    }
   }
 
-  if (typeof originalKrbCCName !== 'undefined') {
-    process.env.KRB5CCNAME = originalKrbCCName
-  } else {
-    delete process.env.KRB5CCNAME
-  }
+  /* c8 ignore next - The password file branch is only executed on MacOS */
+  const args = password.startsWith('keytab:')
+    ? `-kt ${password.slice(7)}`
+    : `--password-file=${kerberosRoot}/password`
 
-  await rm(kerberosRoot, { recursive: true, force: true })
-  callback(error, response)
+  execSync(`kinit ${args} ${username}`, { stdio: 'pipe', env: process.env })
 }
 
 async function authenticate (
   service: string,
   kerberosRoot: string,
+  hasTicket: boolean,
   _m: SASLMechanismValue,
   connection: Connection,
   authenticate: saslAuthenticateV2.SASLAuthenticationAPI,
@@ -117,64 +154,50 @@ async function authenticate (
   _t: string | CredentialProvider | undefined,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): Promise<void> {
-  const afterRestoreCallback = restoreEnvironment.bind(
-    null,
-    callback,
-    kerberosRoot,
-    process.env.KRB5_CONFIG,
-    process.env.KRB5CCNAME
-  )
+  let restoreKerberosEnvironment: (() => void) | undefined
+
+  const afterRestoreCallback: Callback<SaslAuthenticateResponse> = (error, response) => {
+    restoreKerberosEnvironment?.()
+    callback(error, response)
+  }
 
   try {
-    const username = await saslUtils.getCredential('SASL/GSSAPI username', usernameProvider!)
-    let password = await saslUtils.getCredential('SASL/GSSAPI password', passwordProvider!)
+    /* c8 ignore next 6 - Only executed when the ticket was not acquired upfront */
+    let username: string | undefined
+    let password: string | undefined
 
-    process.env.KRB5_CONFIG = `${kerberosRoot}/krb5.conf`
-    process.env.KRB5CCNAME = `${kerberosRoot}/krb5.cache`
-
-    // Using a password
-    if (!password.startsWith('keytab:')) {
-      // On MIT Kerberos, kinit does not support reading password from stdin or a password file
-      // so we convert it to a keytab file if needed using ktutil
-      if (process.platform !== 'darwin') {
-        execSync(`ktutil --keytab ${kerberosRoot}/keytab`, {
-          input: `addent -password -p ${username} -k 1 -f \n${password}\nwkt ${kerberosRoot}/keytab\nquit\n`
-        })
-
-        password = `keytab:${kerberosRoot}/keytab`
-      } else {
-        // On MacOS, we can use a password file directly since it uses Heimdal Kerberos
-        await writeFile(`${kerberosRoot}/password`, password, 'utf-8')
-      }
+    if (!hasTicket) {
+      username = await saslUtils.getCredential('SASL/GSSAPI username', usernameProvider!)
+      password = await saslUtils.getCredential('SASL/GSSAPI password', passwordProvider!)
     }
 
-    let args = ''
-    if (password.startsWith('keytab:')) {
-      args = `-kt ${password.slice(7)}`
-    } else {
-      args = `--password-file=${kerberosRoot}/password`
-    }
+    restoreKerberosEnvironment = useKerberosEnvironment(kerberosRoot)
 
-    // Import the password via kinit
-    execSync(`kinit ${args} ${username}`, { stdio: 'pipe', env: process.env })
+    /* c8 ignore next 3 - Only executed when the ticket was not acquired upfront */
+    if (!hasTicket) {
+      await acquireTicket(kerberosRoot, username!, password!)
+    }
 
     krb.initializeClient(service, {}, (error, client) => {
+      /* c8 ignore next 4 - Hard to test */
       if (error) {
-        callback(createKerberosAuthenticationError('Cannot initialize Kerberos client.', error))
+        afterRestoreCallback(createKerberosAuthenticationError('Cannot initialize Kerberos client.', error))
         return
       }
 
       performChallenge(connection, authenticate, client, '', afterRestoreCallback)
     })
+    /* c8 ignore next 3 - Hard to test */
   } catch (error) {
-    await afterRestoreCallback(error)
+    afterRestoreCallback(error as Error)
   }
 }
 
 export async function createAuthenticator (
   service: string,
   realm: string,
-  kdc: string
+  kdc: string,
+  credentials?: KerberosCredentials
 ): Promise<SASLCustomAuthenticator> {
   const tmpDir = await mkdtemp(resolvePaths(tmpdir(), 'sasl-gssapi-'))
 
@@ -199,5 +222,28 @@ export async function createAuthenticator (
     'utf-8'
   )
 
-  return authenticate.bind(null, service, tmpDir)
+  /*
+    The configuration and the credentials cache have to outlive a single authentication, since the
+    same authenticator serves every connection it is attached to, so they are only removed on exit.
+  */
+  process.once('exit', () => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  /*
+    Acquiring the ticket upfront keeps ktutil, kinit and their KDC round trip out of the connection
+    handshake, which is bounded by connectTimeout. Doing it while authenticating used to push slow
+    CI machines past that deadline and fail the connection with a timeout.
+  */
+  if (credentials) {
+    const restoreKerberosEnvironment = useKerberosEnvironment(tmpDir)
+
+    try {
+      await acquireTicket(tmpDir, credentials.username, credentials.password)
+    } finally {
+      restoreKerberosEnvironment()
+    }
+  }
+
+  return authenticate.bind(null, service, tmpDir, !!credentials)
 }

@@ -445,4 +445,12 @@ JSON schemas are validated using AJV:
 }
 ```
 
+### Surviving decode failures
+
+Set `onDeserializationError` to return `DeserializationErrorActions.CONTINUE` to keep consuming when a
+message cannot be decoded. The message is delivered with its original bytes and the failure is
+reported on `message.metadata.deserializationError`, instead of the stream being destroyed or the
+message being dropped. See
+[Handling deserialization errors](./consumer.md#handling-deserialization-errors).
+
 JSON validation failures produce a `SchemaValidationError`, which extends `UserError`. The error is passed directly to `onDeserializationError`. When serialization or deserialization fails the operation instead, its outer `UserError` exposes the `SchemaValidationError` as `cause`. The validation error includes `schemaId`, `schemaType`, `phase`, `payloadType`, the decoded `data`, and AJV `validationErrors` so applications can distinguish schema-invalid data from malformed JSON.

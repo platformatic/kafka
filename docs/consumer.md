@@ -171,7 +171,54 @@ const stream = await consumer.consume({
 })
 ```
 
-The callback is synchronous. If it returns `SKIP`, the record is not emitted and consumption continues. With autocommit enabled, its offset remains eligible for commit. `onDeserializationError` and the deprecated `onCorruptedMessage` cannot be configured together.
+The callback is synchronous and must return one of:
+
+| Action     | Behaviour                                                                                       |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `FAIL`     | The stream is destroyed with a `UserError` whose `cause` is the original error.                  |
+| `SKIP`     | The record is not emitted and consumption continues.                                             |
+| `CONTINUE` | The record is emitted in a degraded form and consumption continues.                              |
+
+With autocommit enabled, the offset of a skipped or continued record remains eligible for commit.
+`onDeserializationError` and the deprecated `onCorruptedMessage` cannot be configured together.
+
+#### Continuing with the raw payload
+
+`CONTINUE` trades strict schema enforcement for availability: neither the message nor the stream is
+lost when a payload cannot be decoded, which is what you want when a Schema Registry is temporarily
+unreachable or when a subset of the messages is undecodable.
+
+The delivered message keeps whatever was deserialized before the failure and carries the original
+bytes for the payload which failed and for the ones which were never attempted, since deserialization
+proceeds through headers, key and then value. The failure itself is reported on the metadata:
+
+```typescript
+const stream = await consumer.consume({
+  topics: ['events'],
+  onDeserializationError () {
+    return DeserializationErrorActions.CONTINUE
+  }
+})
+
+for await (const message of stream) {
+  const failure = message.metadata.deserializationError
+
+  if (failure) {
+    // message.value is the raw Buffer, failure.payloadType says which payload failed
+    deadLetters.send({ topic: 'events-dlq', value: message.value })
+    continue
+  }
+
+  handle(message.value)
+}
+```
+
+Because the payload types are no longer guaranteed, always check
+`message.metadata.deserializationError` before trusting `key`, `value` or `headers`.
+
+Nothing is logged when a message is continued: at scale that would be a log storm. The error is
+published on the [`plt:kafka:consumer:receives`](./diagnostic.md) diagnostic channel and exposed on
+the message metadata, so applications can report it at whatever rate they choose.
 
 `MessagesStreamModes` modes:
 

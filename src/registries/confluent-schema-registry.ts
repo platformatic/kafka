@@ -43,6 +43,12 @@ export type ConfluentSchemaRegistryProtobufTypeMapper = (
   context: ConfluentSchemaRegistryMessageToProduce | MessageToConsume
 ) => string
 
+export type ConfluentSchemaRegistryHeaders = Record<string, string>
+
+export type ConfluentSchemaRegistryHeadersProvider = () =>
+  | ConfluentSchemaRegistryHeaders
+  | Promise<ConfluentSchemaRegistryHeaders>
+
 export interface ConfluentSchemaRegistryOptions {
   url: string
   auth?: {
@@ -50,6 +56,7 @@ export interface ConfluentSchemaRegistryOptions {
     password?: string | CredentialProvider
     token?: string | CredentialProvider
   }
+  headers?: ConfluentSchemaRegistryHeaders | ConfluentSchemaRegistryHeadersProvider
   protobufTypeMapper?: ConfluentSchemaRegistryProtobufTypeMapper
   jsonValidateSend?: boolean
   jsonAjvOptions?: Options
@@ -116,6 +123,7 @@ export class ConfluentSchemaRegistry<
   #jsonAjvDraft04: JsonSchemaValidator
   #pendingFetches: Map<number, Promise<void>>
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
+  #headers: ConfluentSchemaRegistryOptions['headers'] | undefined
 
   constructor (options: ConfluentSchemaRegistryOptions) {
     super()
@@ -129,6 +137,7 @@ export class ConfluentSchemaRegistry<
     this.#jsonAjvDraft7.addMetaSchema(draft06MetaSchema)
     this.#jsonAjvDraft04 = new AjvDraft04(jsonAjvOptions)
     this.#auth = options.auth
+    this.#headers = options.headers
     this.#pendingFetches = new Map()
   }
 
@@ -247,24 +256,38 @@ export class ConfluentSchemaRegistry<
     }
   }
 
-  async #fetchSchema (id: number) {
-    const requestInit: RequestInit = {}
+  async #requestHeaders (): Promise<ConfluentSchemaRegistryHeaders | undefined> {
+    let headers: ConfluentSchemaRegistryHeaders | undefined
 
+    if (this.#headers) {
+      headers = { ...(typeof this.#headers === 'function' ? await this.#headers() : this.#headers) }
+    }
+
+    // Authentication headers are applied last so that auth options always win over custom headers
     if (this.#auth) {
+      headers ??= {}
+
       if (this.#auth.token) {
         const token = await getCredential('token', this.#auth.token)
 
-        requestInit.headers = {
-          Authorization: `Bearer ${token}`
-        }
+        headers.Authorization = `Bearer ${token}`
       } else {
         const username = await getCredential('username', this.#auth.username)
         const password = await getCredential('password', this.#auth.password)
 
-        requestInit.headers = {
-          Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
-        }
+        headers.Authorization = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
       }
+    }
+
+    return headers
+  }
+
+  async #fetchSchema (id: number) {
+    const requestInit: RequestInit = {}
+    const headers = await this.#requestHeaders()
+
+    if (headers) {
+      requestInit.headers = headers
     }
 
     const response = await fetch(`${this.#url}/schemas/ids/${id}`, requestInit)

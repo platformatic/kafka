@@ -1656,7 +1656,45 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
-  #leaveGroupConsumerProtocol (_: boolean, callback: CallbackWithPromise<void>): void {
+  #leaveGroupConsumerProtocol (force: boolean, callback: CallbackWithPromise<void>): void {
+    // Remove streams that might have been exited in the meanwhile
+    for (const stream of this.#streams) {
+      if (stream.closed || stream.destroyed) {
+        this.#streams.delete(stream)
+      }
+    }
+
+    // Active streams must be closed before leaving the group, exactly like in the classic protocol.
+    // Their fetch loop keeps running until they are closed and, since Consumer.close marks the client
+    // as closed before leaving, any fetch scheduled in the meanwhile would fail with "Client is closed."
+    // and destroy the stream with an error the user never asked for.
+    if (this.#streams.size) {
+      if (!force) {
+        callback(new UserError('Cannot leave group while consuming messages.'))
+        return
+      }
+
+      runConcurrentCallbacks(
+        'Closing streams failed.',
+        this.#streams,
+        (stream, concurrentCallback) => {
+          stream.close(concurrentCallback)
+        },
+        error => {
+          /* c8 ignore next 4 - Hard to test */
+          if (error) {
+            callback(error)
+            return
+          }
+
+          // All streams are closed, try the operation again without force
+          this.#leaveGroupConsumerProtocol(false, callback)
+        }
+      )
+
+      return
+    }
+
     // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
     this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(

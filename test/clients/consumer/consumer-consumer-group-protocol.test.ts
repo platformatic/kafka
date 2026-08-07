@@ -1,4 +1,4 @@
-import { ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
@@ -11,6 +11,7 @@ import {
   sleep,
   TimeoutError,
   UnsupportedApiError,
+  UserError,
   type CallbackWithPromise,
   type ClusterMetadata,
   type MessageToProduce,
@@ -111,6 +112,44 @@ test(
     await Promise.all([stream1.close(), stream2.close()])
   }
 )
+
+test('consumer.close should close active streams with new consumer protocol', skipConsumerGroupProtocol, async t => {
+  const topic = await createTopic(t, true, 3)
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
+
+  const stream = await consumer.consume({ topics: [topic] })
+  const errors: Error[] = []
+  stream.on('data', () => {})
+  stream.on('error', error => errors.push(error))
+
+  // Wait for the fetch loop to be running against a real assignment
+  await waitFor(() => ok(consumer.assignments?.length), { timeout: 5000 })
+  await once(stream, 'fetch')
+
+  // Without force the consumer refuses to leave the group, as documented and as the classic protocol does
+  await rejects(
+    () => consumer.close(),
+    (error: Error) => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Cannot leave group while consuming messages.')
+      return true
+    }
+  )
+  strictEqual(consumer.closed, false, 'a failed close must leave the consumer usable')
+  strictEqual(stream.closed, false, 'a failed close must leave the stream running')
+
+  // With force the streams are closed before leaving the group. If they were not, their fetch loop
+  // would keep running against a closed client and destroy them with "Client is closed."
+  await consumer.close(true)
+
+  strictEqual(stream.closed, true, 'close(true) must close all the active streams')
+  strictEqual(stream.errored, null, `the stream must not be destroyed with an error, got ${stream.errored}`)
+  deepStrictEqual(
+    errors.map(error => error.message),
+    [],
+    'closing the consumer must not emit any error on its streams'
+  )
+})
 
 test('consumer should handle fenced member epoch error', skipConsumerGroupProtocol, async t => {
   const topic = await createTopic(t, true)

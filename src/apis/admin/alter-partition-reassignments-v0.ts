@@ -1,12 +1,12 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 
 export interface AlterPartitionReassignmentsRequestPartition {
   partitionIndex: number
-  replicas: number[]
+  replicas: Nullable<number[]>
 }
 
 export interface AlterPartitionReassignmentsRequestTopic {
@@ -29,6 +29,7 @@ export interface AlterPartitionReassignmentsResponseResponse {
 
 export interface AlterPartitionReassignmentsResponse {
   throttleTimeMs: number
+  allowReplicationFactorChange: boolean
   errorCode: number
   errorMessage: NullableString
   responses: AlterPartitionReassignmentsResponseResponse[]
@@ -88,10 +89,11 @@ export function parseResponse (
 
   const response: AlterPartitionReassignmentsResponse = {
     throttleTimeMs,
+    allowReplicationFactorChange: true,
     errorCode,
     errorMessage,
     responses: reader.readArray((r, i) => {
-      return {
+      const topic = {
         name: r.readString(),
         partitions: r.readArray((r, j) => {
           const partition = {
@@ -107,8 +109,11 @@ export function parseResponse (
           return partition
         })
       }
+      return topic
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

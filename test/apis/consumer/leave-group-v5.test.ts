@@ -51,6 +51,17 @@ test('createRequest serializes basic parameters correctly', () => {
   )
 })
 
+test('createRequest preserves empty nullable fields distinctly from null', () => {
+  const reader = Reader.from(createRequest('test-group', [{ memberId: 'test-member-1', groupInstanceId: '', reason: '' }]))
+  reader.readString()
+  const members = reader.readArray(r => ({
+    memberId: r.readString(),
+    groupInstanceId: r.readNullableString(),
+    reason: r.readNullableString()
+  }))
+  deepStrictEqual(members, [{ memberId: 'test-member-1', groupInstanceId: '', reason: '' }])
+})
+
 test('createRequest with group instance ID', () => {
   const groupId = 'test-group'
   const members = [
@@ -72,8 +83,8 @@ test('createRequest with group instance ID', () => {
   // Read members array
   const membersArray = reader.readArray(() => {
     const memberId = reader.readString()
-    const groupInstanceId = reader.readString()
-    const reason = reader.readString()
+    const groupInstanceId = reader.readNullableString()
+    const reason = reader.readNullableString()
 
     return { memberId, groupInstanceId, reason }
   })
@@ -103,8 +114,8 @@ test('createRequest with reason', () => {
   // Read members array
   const membersArray = reader.readArray(() => {
     const memberId = reader.readString()
-    const groupInstanceId = reader.readString()
-    const reason = reader.readString()
+    const groupInstanceId = reader.readNullableString()
+    const reason = reader.readNullableString()
 
     return { memberId, groupInstanceId, reason }
   })
@@ -139,8 +150,8 @@ test('createRequest with multiple members', () => {
   // Read members array
   const membersArray = reader.readArray(() => {
     const memberId = reader.readString()
-    const groupInstanceId = reader.readString()
-    const reason = reader.readString()
+    const groupInstanceId = reader.readNullableString()
+    const reason = reader.readNullableString()
 
     return { memberId, groupInstanceId, reason }
   })
@@ -149,8 +160,8 @@ test('createRequest with multiple members', () => {
   deepStrictEqual(membersArray, [
     {
       memberId: 'test-member-1',
-      groupInstanceId: '', // Note: readString() without nullable would return '' not null
-      reason: ''
+      groupInstanceId: null,
+      reason: null
     },
     {
       memberId: 'test-member-2',
@@ -160,7 +171,7 @@ test('createRequest with multiple members', () => {
   ])
 })
 
-test('parseResponse correctly processes a successful response', () => {
+test('parseResponse reads a non-null member ID', () => {
   // Create a successful response
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs

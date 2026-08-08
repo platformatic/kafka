@@ -1,0 +1,135 @@
+# Apache Kafka 1.1.0, the oldest broker this package claims to support.
+#
+# This is a standalone stack rather than an override of docker-compose.yml: pre-KRaft brokers need a
+# ZooKeeper ensemble and must NOT receive the KAFKA_PROCESS_ROLES, CLUSTER_ID and KAFKA_CONTROLLER_*
+# settings the modern stack uses, and a compose override can add environment keys but never remove
+# them. The ports match the modern stack so the compatibility sweeps run unchanged:
+#
+#   docker compose -f docker-compose.legacy.yml up -d --wait
+#   npm run test:compat
+#
+# Rule of thumb: Confluent Platform version = Apache Kafka version + 3.0. 4.1.0 is Kafka 1.1.0.
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:${LEGACY_KAFKA_VERSION:-4.1.0}
+    container_name: legacy-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: '2181'
+      ZOOKEEPER_TICK_TIME: '2000'
+    healthcheck:
+      test: ['CMD-SHELL', 'echo ruok | nc -w 2 localhost 2181 | grep -q imok']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  broker-single:
+    image: &image confluentinc/cp-kafka:${LEGACY_KAFKA_VERSION:-4.1.0}
+    container_name: broker-single
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - '9001:9092'
+    healthcheck: &health_check
+      test: ['CMD', 'kafka-broker-api-versions', '--bootstrap-server', 'localhost:19092']
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    environment: &common_config
+      # Each logical cluster gets its own ZooKeeper chroot. Without this every broker below joins
+      # a single Kafka cluster, and a client bootstrapping on one of them receives metadata for all
+      # of the others, including listeners it cannot speak.
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181/single'
+      KAFKA_BROKER_ID: '1'
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,DOCKER://:19092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9001,DOCKER://broker-single:19092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'DOCKER'
+      KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
+      KAFKA_MIN_INSYNC_REPLICAS: '1'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      # Kafka 1.1 creates __consumer_offsets lazily and answers FindCoordinator with
+      # COORDINATOR_NOT_AVAILABLE until it exists, so keep the partition count small to shorten it.
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: '3'
+
+  broker-sasl:
+    image: *image
+    container_name: broker-sasl
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - '9002:9092'
+      - '19002:19092'
+    healthcheck: *health_check
+    environment:
+      <<: *common_config
+      KAFKA_BROKER_ID: '2'
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181/sasl'
+      KAFKA_LISTENERS: 'SASL://:9092,DOCKER://:19092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL:SASL_PLAINTEXT,DOCKER:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:9002,DOCKER://broker-sasl:19092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'DOCKER'
+      # Configured per listener rather than through a JAAS file: setting
+      # java.security.auth.login.config in KAFKA_OPTS also applies to the image's ZooKeeper
+      # readiness check, which then fails to connect and aborts startup.
+      KAFKA_LISTENER_NAME_SASL_PLAIN_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin" user_admin="admin";'
+      KAFKA_SASL_ENABLED_MECHANISMS: 'PLAIN'
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+      KAFKA_SUPER_USERS: 'User:admin'
+      # Delegation tokens exist from Kafka 1.1 (KIP-48) but the setting was named
+      # delegation.token.master.key until it was renamed to .secret.key in 3.0.
+      KAFKA_DELEGATION_TOKEN_MASTER_KEY: 'compat-delegation-token-secret'
+
+  broker-cluster-1:
+    image: *image
+    container_name: broker-cluster-1
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - '9011:9092'
+    healthcheck: *health_check
+    environment: &cluster_config
+      <<: *common_config
+      KAFKA_BROKER_ID: '11'
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181/cluster'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9011,DOCKER://broker-cluster-1:19092'
+      KAFKA_DEFAULT_REPLICATION_FACTOR: '3'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '3'
+      # StandardAuthorizer is KRaft only; the ZooKeeper era equivalent is SimpleAclAuthorizer.
+      KAFKA_AUTHORIZER_CLASS_NAME: 'kafka.security.auth.SimpleAclAuthorizer'
+      KAFKA_SUPER_USERS: 'User:ANONYMOUS'
+
+  broker-cluster-2:
+    image: *image
+    container_name: broker-cluster-2
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - '9012:9092'
+    healthcheck: *health_check
+    environment:
+      <<: *cluster_config
+      KAFKA_BROKER_ID: '12'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9012,DOCKER://broker-cluster-2:19092'
+
+  broker-cluster-3:
+    image: *image
+    container_name: broker-cluster-3
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - '9013:9092'
+    healthcheck: *health_check
+    environment:
+      <<: *cluster_config
+      KAFKA_BROKER_ID: '13'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9013,DOCKER://broker-cluster-3:19092'

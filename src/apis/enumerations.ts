@@ -49,7 +49,13 @@ export type FetchIsolationLevelValue = (typeof FetchIsolationLevels)[FetchIsolat
 /** @deprecated Use FetchIsolationLevelLabel */
 export type FetchIsolationLevel = FetchIsolationLevelLabel
 
-export const ListOffsetTimestamps = { LATEST: -1n, EARLIEST: -2n } as const
+export const ListOffsetTimestamps = {
+  LATEST: -1n,
+  EARLIEST: -2n,
+  MAX: -3n,
+  EARLIEST_LOCAL: -4n,
+  LATEST_TIERED: -5n
+} as const
 export const allowedListOffsetTimestamps = Object.values(ListOffsetTimestamps)
 export type ListOffsetTimestampLabel = keyof typeof ListOffsetTimestamps
 export type ListOffsetTimestampValue = (typeof ListOffsetTimestamps)[ListOffsetTimestampLabel]
@@ -115,6 +121,8 @@ export type AclPermissionType = AclPermissionTypeLabel
 // ./admin/*-configs.ts
 export const ConfigSources = {
   UNKNOWN: 0,
+  DYNAMIC_TOPIC_CONFIG: 1,
+  /** @deprecated Use ConfigSources.DYNAMIC_TOPIC_CONFIG, which is the name Kafka uses for this source. */
   TOPIC_CONFIG: 1,
   DYNAMIC_BROKER_CONFIG: 2,
   DYNAMIC_DEFAULT_BROKER_CONFIG: 3,
@@ -124,7 +132,9 @@ export const ConfigSources = {
   CLIENT_METRICS_CONFIG: 7,
   GROUP_CONFIG: 8
 } as const
-export const allowedConfigSources = Object.values(ConfigSources)
+// DYNAMIC_TOPIC_CONFIG and its TOPIC_CONFIG alias share the value 1, so the values must be deduplicated:
+// a JSON Schema enum requires unique items and a duplicate would also break any value to label lookup.
+export const allowedConfigSources = Array.from(new Set(Object.values(ConfigSources)))
 export type ConfigSourceLabel = keyof typeof ConfigSources
 export type ConfigSourceValue = (typeof ConfigSources)[ConfigSourceLabel]
 /** @deprecated Use ConfigSourceLabel */
@@ -172,7 +182,7 @@ export type ClientQuotaMatchTypeValue = (typeof ClientQuotaMatchTypes)[ClientQuo
 /** @deprecated Use ClientQuotaMatchTypeValue */
 export type ClientQuotaMatchType = ClientQuotaMatchTypeValue
 
-export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user' } as const
+export const ClientQuotaEntityTypes = { CLIENT_ID: 'client-id', USER: 'user', IP: 'ip' } as const
 export const allowedClientQuotaEntityTypes = Object.values(ClientQuotaEntityTypes)
 export type ClientQuotaEntityTypeLabel = keyof typeof ClientQuotaEntityTypes
 export type ClientQuotaEntityTypeValue = (typeof ClientQuotaEntityTypes)[ClientQuotaEntityTypeLabel]
@@ -182,7 +192,9 @@ export type ClientQuotaEntityType = ClientQuotaEntityTypeValue
 export const ClientQuotaKeys = {
   PRODUCER_BYTE_RATE: 'producer_byte_rate',
   CONSUMER_BYTE_RATE: 'consumer_byte_rate',
-  REQUEST_PERCENTAGE: 'request_percentage'
+  REQUEST_PERCENTAGE: 'request_percentage',
+  CONNECTION_CREATION_RATE: 'connection_creation_rate',
+  CONTROLLER_MUTATION_RATE: 'controller_mutation_rate'
 } as const
 export const allowedClientQuotaKeys = Object.values(ClientQuotaKeys)
 export type ClientQuotaKeyLabel = keyof typeof ClientQuotaKeys
@@ -207,10 +219,45 @@ export type DescribeClusterEndpointTypeValue = (typeof DescribeClusterEndpointTy
 export type DescribeClusterEndpointType = DescribeClusterEndpointTypeLabel
 
 // ./admin/list-groups.ts
-export const ConsumerGroupStates = ['PREPARING_REBALANCE', 'COMPLETING_REBALANCE', 'STABLE', 'DEAD', 'EMPTY'] as const
-export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number]
+// These are the values Kafka puts on the wire and therefore the values reported back to callers.
+// Note that brokers match the ListGroups states filter case insensitively but not underscore
+// insensitively, so 'PREPARING_REBALANCE' never matches anything: see legacyConsumerGroupStates.
+export const ConsumerGroupStates = [
+  'Unknown',
+  'PreparingRebalance',
+  'CompletingRebalance',
+  'Stable',
+  'Dead',
+  'Empty',
+  'Assigning',
+  'Reconciling',
+  'NotReady'
+] as const
+export type ConsumerGroupStateValue = (typeof ConsumerGroupStates)[number] | KafkaConsumerGroupStateValue
 /** @deprecated Use ConsumerGroupStateValue */
 export type ConsumerGroupState = ConsumerGroupStateValue
+
+// The names of the constants in Kafka's Java ConsumerGroupState enum, which this package used to
+// report and accept. They are still accepted as filters, but are translated to the wire values above.
+export const KafkaConsumerGroupStates = [
+  'PREPARING_REBALANCE',
+  'COMPLETING_REBALANCE',
+  'STABLE',
+  'DEAD',
+  'EMPTY'
+] as const
+export type KafkaConsumerGroupStateValue = (typeof KafkaConsumerGroupStates)[number]
+
+export const legacyConsumerGroupStates: Readonly<Record<KafkaConsumerGroupStateValue, string>> = {
+  PREPARING_REBALANCE: 'PreparingRebalance',
+  COMPLETING_REBALANCE: 'CompletingRebalance',
+  STABLE: 'Stable',
+  DEAD: 'Dead',
+  EMPTY: 'Empty'
+}
+
+export const GroupTypes = ['classic', 'consumer', 'share', 'streams'] as const
+export type GroupTypeValue = (typeof GroupTypes)[number]
 
 // ./admin/list-transactions.ts
 export const TransactionStates = [
@@ -223,6 +270,18 @@ export const TransactionStates = [
   'COMPLETE_ABORT'
 ] as const
 export type TransactionState = (typeof TransactionStates)[number]
+
+export const KafkaTransactionStates = [
+  'Empty',
+  'Ongoing',
+  'PrepareCommit',
+  'PrepareAbort',
+  'CompleteCommit',
+  'CompleteAbort',
+  'Dead',
+  'PrepareEpochFence'
+] as const
+export type KafkaTransactionState = (typeof KafkaTransactionStates)[number]
 
 // ./admin/update-features.ts
 export const FeatureUpgradeTypes = { UPGRADE: 1, SAFE_DOWNGRADE: 2, UNSAFE_DOWNGRADE: 3 } as const

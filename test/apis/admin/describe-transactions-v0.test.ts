@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeTransactionsV0 } from '../../../src/index.ts'
 
@@ -20,6 +20,21 @@ test('createRequest serializes empty transactional IDs array correctly', () => {
 
   // Verify serialized data
   deepStrictEqual(transactionalIdsArray, [], 'Empty transactional IDs array should be serialized correctly')
+})
+
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([], () => {})
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 65, 0, reader), { throttleTimeMs: 0, transactionStates: [] })
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes single transactional ID correctly', () => {

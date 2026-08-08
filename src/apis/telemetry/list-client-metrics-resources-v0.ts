@@ -2,32 +2,34 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import { ConfigResourceTypes, type ConfigResourceTypeValue } from '../enumerations.ts'
 
 export type ListClientMetricsResourcesRequest = Parameters<typeof createRequest>
 
 export interface ListClientMetricsResourcesResource {
-  name: string
+  resourceName: string
+  resourceType: ConfigResourceTypeValue
 }
 
 export interface ListClientMetricsResourcesResponse {
   throttleTimeMs: number
   errorCode: number
-  clientMetricsResources: ListClientMetricsResourcesResource[]
+  configResources: ListClientMetricsResourcesResource[]
 }
 
 /*
   ListClientMetricsResources Request (Version: 0) => TAG_BUFFER
 */
-export function createRequest (): Writer {
+export function createRequest (_resourceTypes?: ConfigResourceTypeValue[]): Writer {
   return Writer.create().appendTaggedFields()
 }
 
 /*
-ListClientMetricsResources Response (Version: 0) => throttle_time_ms error_code [client_metrics_resources] TAG_BUFFER
+ ListClientMetricsResources Response (Version: 0) => throttle_time_ms error_code [config_resources] TAG_BUFFER
   throttle_time_ms => INT32
   error_code => INT16
-  client_metrics_resources => name TAG_BUFFER
-    name => COMPACT_STRING
+  config_resources => resource_name TAG_BUFFER
+    resource_name => COMPACT_STRING
 */
 export function parseResponse (
   _correlationId: number,
@@ -38,12 +40,16 @@ export function parseResponse (
   const response: ListClientMetricsResourcesResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    clientMetricsResources: reader.readArray(r => {
-      return {
-        name: r.readString()
+    configResources: reader.readArray(r => {
+      const resource = {
+        resourceName: r.readString(),
+        resourceType: ConfigResourceTypes.CLIENT_METRICS
       }
-    })
+      r.readTaggedFields()
+      return resource
+    }, true, false)
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

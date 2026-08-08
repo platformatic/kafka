@@ -3,7 +3,26 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type TransactionState } from '../enumerations.ts'
+
+export const TransactionStates = [
+  'EMPTY',
+  'ONGOING',
+  'PREPARE_ABORT',
+  'COMMITTING',
+  'ABORTING',
+  'COMPLETE_COMMIT',
+  'COMPLETE_ABORT'
+] as const
+export type KafkaTransactionState =
+  | 'Empty'
+  | 'Ongoing'
+  | 'PrepareCommit'
+  | 'PrepareAbort'
+  | 'CompleteCommit'
+  | 'CompleteAbort'
+  | 'Dead'
+  | 'PrepareEpochFence'
+export type TransactionState = (typeof TransactionStates)[number] | KafkaTransactionState
 
 export type ListTransactionsRequest = Parameters<typeof createRequest>
 
@@ -26,13 +45,13 @@ export interface ListTransactionsResponse {
     producer_id_filters => INT64
 */
 export function createRequest (
-  stateFilters: TransactionState[],
+  stateFilters: Array<TransactionState | KafkaTransactionState>,
   producerIdFilters: bigint[],
   _durationFilter: bigint,
   _transactionalIdPattern: NullableString
 ): Writer {
   return Writer.create()
-    .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
+    .appendArray(stateFilters, (w, state) => w.appendString(normalizeState(state)), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)
     .appendTaggedFields()
 }
@@ -66,11 +85,26 @@ export function parseResponse (
     })
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response
+}
+
+function normalizeState (state: TransactionState | KafkaTransactionState): KafkaTransactionState {
+  switch (state) {
+    case 'EMPTY': return 'Empty'
+    case 'ONGOING': return 'Ongoing'
+    case 'PREPARE_ABORT': return 'PrepareAbort'
+    case 'COMMITTING': return 'PrepareCommit'
+    case 'ABORTING': return 'PrepareAbort'
+    case 'COMPLETE_COMMIT': return 'CompleteCommit'
+    case 'COMPLETE_ABORT': return 'CompleteAbort'
+    default: return state
+  }
 }
 
 export const api = createAPI<ListTransactionsRequest, ListTransactionsResponse>(66, 0, createRequest, parseResponse)

@@ -3,6 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import type { MetadataRequestTopic } from './metadata-v12.ts'
 
 export type MetadataRequest = Parameters<typeof createRequest>
 
@@ -38,10 +39,11 @@ export interface MetadataResponse {
   clusterId: NullableString
   controllerId: number
   topics: MetadataResponseTopic[]
+  clusterAuthorizedOperations: number
 }
 
 /*
-  Metadata Request (Version: 10) => [topics] allow_auto_topic_creation include_topic_authorized_operations TAG_BUFFER
+  Metadata Request (Version: 10) => [topics] allow_auto_topic_creation include_cluster_authorized_operations include_topic_authorized_operations TAG_BUFFER
     topics => topic_id name TAG_BUFFER
       topic_id => UUID
       name => COMPACT_NULLABLE_STRING
@@ -50,20 +52,27 @@ export interface MetadataResponse {
     include_topic_authorized_operations => BOOLEAN
 */
 export function createRequest (
-  topics: string[] | null,
-  allowAutoTopicCreation: boolean = false,
-  includeTopicAuthorizedOperations: boolean = false
+  topics: Array<string | MetadataRequestTopic> | null,
+  allowAutoTopicCreation: boolean = true,
+  includeTopicAuthorizedOperations: boolean = false,
+  includeClusterAuthorizedOperations: boolean = false
 ): Writer {
   return Writer.create()
-    .appendArray(topics, (w, topic) => w.appendUUID(null).appendString(topic))
+    .appendArray(topics, (w, topic) => {
+      if (typeof topic === 'string') {
+        return w.appendUUID(null).appendString(topic)
+      }
+
+      return w.appendUUID(null).appendString(topic.name ?? '')
+    })
     .appendBoolean(allowAutoTopicCreation)
-    .appendBoolean(false) // include_cluster_authorized_operations (not supported from newer versions)
+    .appendBoolean(includeClusterAuthorizedOperations)
     .appendBoolean(includeTopicAuthorizedOperations)
     .appendTaggedFields()
 }
 
 /*
-  Metadata Response (Version: 10) => throttle_time_ms [brokers] cluster_id controller_id [topics] TAG_BUFFER
+  Metadata Response (Version: 10) => throttle_time_ms [brokers] cluster_id controller_id [topics] cluster_authorized_operations TAG_BUFFER
     throttle_time_ms => INT32
     brokers => node_id host port rack TAG_BUFFER
       node_id => INT32
@@ -74,7 +83,7 @@ export function createRequest (
     controller_id => INT32
     topics => error_code name topic_id is_internal [partitions] topic_authorized_operations TAG_BUFFER
       error_code => INT16
-      name => COMPACT_NULLABLE_STRING
+       name => COMPACT_STRING
       topic_id => UUID
       is_internal => BOOLEAN
       partitions => error_code partition_index leader_id leader_epoch [replica_nodes] [isr_nodes] [offline_replicas] TAG_BUFFER
@@ -86,7 +95,7 @@ export function createRequest (
         isr_nodes => INT32
         offline_replicas => INT32
       topic_authorized_operations => INT32
-    cluster_authorized_operations => BOOLEAN
+    cluster_authorized_operations => INT32
 */
 export function parseResponse (
   _correlationId: number,
@@ -98,51 +107,71 @@ export function parseResponse (
 
   const response: MetadataResponse = {
     throttleTimeMs: reader.readInt32(),
-    brokers: reader.readArray(r => {
-      return {
-        nodeId: r.readInt32(),
-        host: r.readString(),
-        port: r.readInt32(),
-        rack: r.readNullableString()
-      }
-    }),
+    brokers: reader.readArray(
+      r => {
+        const broker = {
+          nodeId: r.readInt32(),
+          host: r.readString(),
+          port: r.readInt32(),
+          rack: r.readNullableString()
+        }
+        r.readTaggedFields()
+        return broker
+      },
+      true,
+      false
+    ),
     clusterId: reader.readNullableString(),
     controllerId: reader.readInt32(),
-    topics: reader.readArray((r, i) => {
-      const errorCode = r.readInt16()
+    clusterAuthorizedOperations: -2147483648,
+    topics: reader.readArray(
+      (r, i) => {
+        const errorCode = r.readInt16()
 
-      if (errorCode !== 0) {
-        errors.push([`/topics/${i}`, [errorCode, null]])
-      }
+        if (errorCode !== 0) {
+          errors.push([`/topics/${i}`, [errorCode, null]])
+        }
 
-      return {
-        errorCode,
-        name: r.readNullableString(),
-        topicId: r.readUUID(),
-        isInternal: r.readBoolean(),
-        partitions: r.readArray((r, j) => {
-          const errorCode = r.readInt16()
+        const topic = {
+          errorCode,
+          name: r.readString(),
+          topicId: r.readUUID(),
+          isInternal: r.readBoolean(),
+          partitions: r.readArray(
+            (r, j) => {
+              const errorCode = r.readInt16()
 
-          if (errorCode !== 0) {
-            errors.push([`/topics/${i}/partitions/${j}`, [errorCode, null]])
-          }
+              if (errorCode !== 0) {
+                errors.push([`/topics/${i}/partitions/${j}`, [errorCode, null]])
+              }
 
-          return {
-            errorCode,
-            partitionIndex: r.readInt32(),
-            leaderId: r.readInt32(),
-            leaderEpoch: r.readInt32(),
-            replicaNodes: r.readArray(() => r.readInt32(), true, false)!,
-            isrNodes: r.readArray(() => r.readInt32(), true, false)!,
-            offlineReplicas: r.readArray(() => r.readInt32(), true, false)!
-          }
-        }),
-        topicAuthorizedOperations: reader.readInt32()
-      }
-    })
+              const partition = {
+                errorCode,
+                partitionIndex: r.readInt32(),
+                leaderId: r.readInt32(),
+                leaderEpoch: r.readInt32(),
+                replicaNodes: r.readArray(() => r.readInt32(), true, false)!,
+                isrNodes: r.readArray(() => r.readInt32(), true, false)!,
+                offlineReplicas: r.readArray(() => r.readInt32(), true, false)!
+              }
+              r.readTaggedFields()
+              return partition
+            },
+            true,
+            false
+          ),
+          topicAuthorizedOperations: r.readInt32()
+        }
+        r.readTaggedFields()
+        return topic
+      },
+      true,
+      false
+    )
   }
 
-  reader.readBoolean() // Skip cluster_authorized_operations
+  response.clusterAuthorizedOperations = reader.readInt32()
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

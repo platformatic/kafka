@@ -347,7 +347,7 @@ test('parseResponse handles top-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 24, 5, Reader.from(writer))
+      parseResponse(1, 24, 4, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type
@@ -407,7 +407,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 24, 5, Reader.from(writer))
+      parseResponse(1, 24, 4, Reader.from(writer))
     },
     (err: any) => {
       // Verify error is the right type

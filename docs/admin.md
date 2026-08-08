@@ -71,11 +71,22 @@ Lists consumer groups.
 
 The return value is a list of groups, each containing the `id`, `state`, `groupType` and `protocolType` properties.
 
+> [!IMPORTANT]
+> The `state` values reported by `listGroups` and `describeGroups` are the values Kafka puts on the
+> wire, which are written in Pascal case: `PreparingRebalance`, `CompletingRebalance`, `Stable`,
+> `Dead`, `Empty`, plus `Unknown`, `Assigning`, `Reconciling` and `NotReady`. They are listed in the
+> `ConsumerGroupStates` enumeration.
+>
+> Earlier releases upper cased these values, which produced `PREPARINGREBALANCE` and
+> `COMPLETINGREBALANCE` — values that matched neither the enumeration nor anything Kafka defines.
+> Code comparing against `'STABLE'`, `'DEAD'` or `'EMPTY'` needs to be updated to `'Stable'`,
+> `'Dead'` and `'Empty'`.
+
 Options:
 
 | Property | Type                   | Description                                                                                                     |
 | -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are defined in the `ConsumerGroupStates` enumeration. |
+| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are defined in the `ConsumerGroupStates` enumeration. The constant names of Kafka's Java `ConsumerGroupState` enumeration, listed in `KafkaConsumerGroupStates`, are also accepted and translated. |
 | types    | `string[]`             | Types of the groups to return.<br/><br/>Default is `['consumer']`.                                              |
 
 ### `describeGroups(options[, callback])`

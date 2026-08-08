@@ -2,6 +2,7 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import { type TelemetryCompressionType } from './compression-types.ts'
 
 export type PushTelemetryRequest = Parameters<typeof createRequest>
 
@@ -22,7 +23,7 @@ export function createRequest (
   clientInstanceId: string,
   subscriptionId: number,
   terminating: boolean,
-  compressionType: number,
+  compressionType: TelemetryCompressionType,
   metrics: Buffer
 ): Writer {
   return Writer.create()
@@ -49,6 +50,7 @@ export function parseResponse (
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16()
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

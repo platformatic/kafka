@@ -1,12 +1,13 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeClusterV1 } from '../../../src/index.ts'
+import { DescribeClusterEndpointTypes } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeClusterV1
 
 test('createRequest serializes parameters correctly', () => {
   const includeClusterAuthorizedOperations = true
-  const endpointType = 1
+  const endpointType = DescribeClusterEndpointTypes.BROKERS
 
   const writer = createRequest(includeClusterAuthorizedOperations, endpointType)
 
@@ -30,7 +31,7 @@ test('createRequest serializes parameters correctly', () => {
     },
     {
       includeClusterAuthorizedOperations: true,
-      endpointType: 1
+      endpointType: DescribeClusterEndpointTypes.BROKERS
     },
     'Serialized data should match expected values'
   )
@@ -38,7 +39,7 @@ test('createRequest serializes parameters correctly', () => {
 
 test('createRequest serializes false include_cluster_authorized_operations correctly', () => {
   const includeClusterAuthorizedOperations = false
-  const endpointType = 0
+  const endpointType = DescribeClusterEndpointTypes.BROKERS
 
   const writer = createRequest(includeClusterAuthorizedOperations, endpointType)
   const reader = Reader.from(writer)
@@ -51,12 +52,12 @@ test('createRequest serializes false include_cluster_authorized_operations corre
 
   // Verify serialized data
   ok(includeClusterAuthorizedOpsValue === false, 'includeClusterAuthorizedOperations should be set to false')
-  ok(endpointTypeValue === 0, 'endpointType should be set to 0')
+  ok(endpointTypeValue === DescribeClusterEndpointTypes.BROKERS, 'endpointType should be set to BROKERS')
 })
 
 test('createRequest serializes different endpoint types correctly', () => {
   const includeClusterAuthorizedOperations = true
-  const endpointType = 2
+  const endpointType = DescribeClusterEndpointTypes.CONTROLLERS
 
   const writer = createRequest(includeClusterAuthorizedOperations, endpointType)
   const reader = Reader.from(writer)
@@ -68,7 +69,7 @@ test('createRequest serializes different endpoint types correctly', () => {
   const endpointTypeValue = reader.readInt8()
 
   // Verify endpointType
-  deepStrictEqual(endpointTypeValue, 2, 'Should serialize different endpoint types correctly')
+  deepStrictEqual(endpointTypeValue, DescribeClusterEndpointTypes.CONTROLLERS, 'Should serialize different endpoint types correctly')
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -105,7 +106,7 @@ test('parseResponse correctly processes a successful response', () => {
       throttleTimeMs: 0,
       errorCode: 0,
       errorMessage: null,
-      endpointType: 1,
+      endpointType: DescribeClusterEndpointTypes.BROKERS,
       clusterId: 'test-cluster',
       controllerId: 1,
       brokers: [

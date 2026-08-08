@@ -58,8 +58,10 @@ export function createRequest (groups: OffsetFetchRequestGroup[], requireStable:
     .appendArray(groups, (w, g) => {
       w.appendString(g.groupId).appendArray(g.topics, (w, t) => {
         w.appendString(t.name).appendArray(t.partitionIndexes, (w, i) => w.appendInt32(i), true, false)
-      })
-    })
+        w.appendTaggedFields()
+      }, true, false)
+      w.appendTaggedFields()
+    }, true, false)
     .appendBoolean(requireStable)
     .appendTaggedFields()
 }
@@ -122,6 +124,7 @@ export function parseResponse (
       return group
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

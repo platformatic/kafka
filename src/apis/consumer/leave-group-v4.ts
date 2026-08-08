@@ -13,7 +13,7 @@ export interface LeaveGroupRequestMember {
 export type LeaveGroupRequest = Parameters<typeof createRequest>
 
 export interface LeaveGroupResponseMember {
-  memberId: NullableString
+  memberId: string
   groupInstanceId: NullableString
   errorCode: number
 }
@@ -36,7 +36,8 @@ export function createRequest (groupId: string, members: LeaveGroupRequestMember
     .appendString(groupId)
     .appendArray(members, (w, m) => {
       w.appendString(m.memberId).appendString(m.groupInstanceId)
-    })
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -70,7 +71,7 @@ export function parseResponse (
     errorCode,
     members: reader.readArray((r, i) => {
       const member: LeaveGroupResponseMember = {
-        memberId: r.readNullableString(),
+        memberId: r.readString(),
         groupInstanceId: r.readNullableString(),
         errorCode: r.readInt16()
       }
@@ -82,6 +83,7 @@ export function parseResponse (
       return member
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

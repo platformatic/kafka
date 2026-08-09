@@ -1791,3 +1791,113 @@ test('continues consuming with the raw payload when a message cannot be decoded'
   deepStrictEqual(structuredClone(messages[1].value), { id: 2, name: 'Bob' })
   strictEqual(messages[1].metadata.deserializationError, undefined)
 })
+
+test('continues consuming with the raw payload when the Schema Registry is unreachable', async t => {
+  const topic = await createTopic(t, true)
+
+  const producerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const producer = await createProducer(t, { registry: producerRegistry })
+  await producer.send({
+    messages: [
+      {
+        topic,
+        key: 'key-1',
+        value: { id: 1, name: 'Alice' },
+        headers: { header1: 'value1' },
+        metadata: { schemas: { value: schemaId } }
+      }
+    ]
+  })
+
+  // A registry which cannot be reached, simulating an outage. Retries are disabled as the failure
+  // is the point of the test and each attempt would only add its backoff to the runtime.
+  const consumerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: 'http://127.0.0.1:1',
+    retries: 0
+  })
+
+  const failures: DeserializationErrorContext[] = []
+  const consumer = createConsumer(t, { registry: consumerRegistry })
+  const stream = await consumer.consume({
+    topics: [topic],
+    maxFetches: 1,
+    mode: MessagesStreamModes.EARLIEST,
+    onDeserializationError (context) {
+      failures.push(context)
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  strictEqual(messages.length, 1)
+  strictEqual(failures.length, 1)
+  strictEqual(failures[0].payloadType, 'value')
+
+  // The message carries the bytes as they were received, headers included
+  const rawValue = messages[0].value as unknown as Buffer
+  deepStrictEqual(rawValue.subarray(0, 5), Buffer.from([0, 0, 0, 0, schemaId]))
+  deepStrictEqual(messages[0].key, Buffer.from('key-1'))
+  deepStrictEqual(Array.from(messages[0].headers.entries()), [[Buffer.from('header1'), Buffer.from('"value1"')]])
+  ok(messages[0].metadata.deserializationError)
+
+  // The schema ID is still readable from the Confluent wire format header
+  strictEqual(consumerRegistry.getSchemaId(rawValue, 'value'), schemaId)
+})
+
+test('still destroys the stream on Schema Registry failures without an error handler', async t => {
+  const topic = await createTopic(t, true)
+
+  const producerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: confluentSchemaRegistryUrl
+  })
+
+  const subject = createSubject()
+  const schemaId = await registerSchema(
+    confluentSchemaRegistryUrl,
+    subject,
+    'AVRO',
+    JSON.stringify({
+      type: 'record',
+      name: subject,
+      fields: [
+        { name: 'id', type: 'int' },
+        { name: 'name', type: 'string' }
+      ]
+    })
+  )
+
+  const producer = await createProducer(t, { registry: producerRegistry })
+  await producer.send({
+    messages: [{ topic, key: 'key-1', value: { id: 1, name: 'Alice' }, metadata: { schemas: { value: schemaId } } }]
+  })
+
+  const consumerRegistry = new ConfluentSchemaRegistry<string, Datum, string, string>({
+    url: 'http://127.0.0.1:1',
+    retries: 0
+  })
+
+  const consumer = createConsumer(t, { registry: consumerRegistry })
+  const stream = await consumer.consume({ topics: [topic], maxFetches: 1, mode: MessagesStreamModes.EARLIEST })
+
+  const error = await Array.fromAsync(stream).catch((error: Error) => error)
+  ok(error instanceof Error)
+})

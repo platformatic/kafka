@@ -10,7 +10,8 @@ import {
   connectionsPoolGetsChannel,
   ConnectionStatuses,
   GenericError,
-  instancesChannel
+  instancesChannel,
+  parseBroker
 } from '../../src/index.ts'
 import {
   createCreationChannelVerifier,
@@ -20,7 +21,7 @@ import {
   mockMethod
 } from '../helpers.ts'
 
-function createServer (t: TestContext): Promise<{ server: Server; port: number }> {
+function createServer (t: TestContext, host?: string): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
   const { promise, resolve, reject } = Promise.withResolvers<{ server: Server; port: number }>()
   const sockets: Socket[] = []
@@ -38,7 +39,7 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
     server.close(cb)
   })
 
-  server.listen(0)
+  server.listen(0, host)
   return promise
 }
 
@@ -71,6 +72,18 @@ test('get should return a connection for a broker', async t => {
   const broker = { host: 'localhost', port }
 
   const connection = await connectionPool.get(broker)
+  ok(connection instanceof Connection)
+  deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+  await connection.close()
+})
+
+test('get should connect to a parsed IPv6 bootstrap broker', async t => {
+  const { port } = await createServer(t, '::1')
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const connection = await connectionPool.get(parseBroker(`[::1]:${port}`))
   ok(connection instanceof Connection)
   deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
   await connection.close()
@@ -316,18 +329,21 @@ test('get fail when the pool is closed', async t => {
   t.after(() => connectionPool.close())
   await connectionPool.close()
 
-  await rejects(() => connectionPool.get(broker) as Promise<unknown>, error => {
-    strictEqual((error as Error).message, 'Connection pool is closed.')
+  await rejects(
+    () => connectionPool.get(broker) as Promise<unknown>,
+    error => {
+      strictEqual((error as Error).message, 'Connection pool is closed.')
 
-    // The clients classify errors via findBy, which only exists on GenericError subclasses.
-    ok(GenericError.isGenericError(error as Error))
-    strictEqual((error as GenericError).code, 'PLT_KFK_NETWORK')
-    strictEqual((error as GenericError).canRetry, false)
-    strictEqual((error as GenericError).closed, true)
-    deepStrictEqual((error as GenericError).broker, broker)
-    strictEqual((error as GenericError).findBy('code', 'PLT_KFK_NETWORK'), error)
-    return true
-  })
+      // The clients classify errors via findBy, which only exists on GenericError subclasses.
+      ok(GenericError.isGenericError(error as Error))
+      strictEqual((error as GenericError).code, 'PLT_KFK_NETWORK')
+      strictEqual((error as GenericError).canRetry, false)
+      strictEqual((error as GenericError).closed, true)
+      deepStrictEqual((error as GenericError).broker, broker)
+      strictEqual((error as GenericError).findBy('code', 'PLT_KFK_NETWORK'), error)
+      return true
+    }
+  )
 })
 
 test('get should reject with a retriable error when the broker is missing from stale metadata', async t => {

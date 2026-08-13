@@ -25,7 +25,7 @@ Creates a new base client.
 | Property             | Type                   | Default   | Description                                                                                                                                                        |
 | -------------------- | ---------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `clientId`           | `string`               |           | Client ID.                                                                                                                                                         |
-| `clientRack`         | `string`               |           | Client rack identifier sent by consumers as the Fetch and ConsumerGroupHeartbeat rack ID.                                                                            |
+| `clientRack`         | `string`               |           | Client rack identifier sent by consumers as the Fetch and ConsumerGroupHeartbeat rack ID.                                                                          |
 | `bootstrapBrokers`   | `(Broker \| string)[]` |           | Bootstrap brokers.<br/><br/>Each broker can be either an object with `host` and `port` properties or a string in the format `$host:$port`.                         |
 | `timeout`            | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`            | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
@@ -43,6 +43,8 @@ Creates a new base client.
 | `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
 | `context`            | `unknown`              |           | Opaque user data forwarded to internally created `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                |
+
+IPv6 bootstrap hosts must be wrapped in brackets, e.g. `[::1]:9092` or `[2001:db8::1]:9092`. Unbracketed IPv6 addresses are treated as host-only and use the default port.
 
 The readonly `context` getter exposes the same opaque value on the client instance.
 

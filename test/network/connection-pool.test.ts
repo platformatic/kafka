@@ -1,5 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
+import { networkInterfaces } from 'node:os'
 import { mock, test, type TestContext } from 'node:test'
 import {
   type Broker,
@@ -20,6 +21,11 @@ import {
   mockedOperationId,
   mockMethod
 } from '../helpers.ts'
+
+// Machines with IPv6 disabled cannot bind to the loopback address, so tests using it are skipped there.
+const hasIPv6Loopback = Object.values(networkInterfaces())
+  .flat()
+  .some(info => info?.address === '::1')
 
 function createServer (t: TestContext, host?: string): Promise<{ server: Server; port: number }> {
   const server = createNetworkServer()
@@ -77,7 +83,7 @@ test('get should return a connection for a broker', async t => {
   await connection.close()
 })
 
-test('get should connect to a parsed IPv6 bootstrap broker', async t => {
+test('get should connect to a parsed IPv6 bootstrap broker', { skip: !hasIPv6Loopback }, async t => {
   const { port } = await createServer(t, '::1')
 
   const connectionPool = new ConnectionPool('test-client')

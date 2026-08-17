@@ -664,8 +664,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       this.getLag(options, () => this.#lagMonitoring!.refresh())
     }, interval)
-  }
-  
+  }  
 
   stopLagMonitoring (): void {
     clearTimeout(this.#lagMonitoring!)

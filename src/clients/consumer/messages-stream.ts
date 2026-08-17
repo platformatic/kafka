@@ -1117,7 +1117,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return
     }
 
-
     this.#autocommitInflight = true
     const offsets = Array.from(this.#offsetsToCommit.values())
     this.#offsetsToCommit.clear()

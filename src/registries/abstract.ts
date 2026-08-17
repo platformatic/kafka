@@ -34,22 +34,49 @@ export function runAsyncSeries<V> (
   index: number,
   callback: Callback<void>
 ): void {
-  if (collection.length === 0 || index >= collection.length) {
+  const length = collection.length
+
+  if (length === 0 || index >= length) {
     callback(null)
     return
   }
 
-  operation(collection[index], error => {
-    if (error) {
-      callback(error)
-      return
-    } else if (index === collection.length - 1) {
-      callback(null)
+  while (index < length) {
+    let invocationReturned = false
+    let cbCalled = false
+    let cbError: Error | null | undefined
+
+    operation(collection[index], error => {
+      if (invocationReturned) {
+        // The callback was invoked asynchronously, so continuing recursively does not grow the current stack.
+        if (error) {
+          callback(error)
+          return
+        }
+        runAsyncSeries(operation, collection, index + 1, callback)
+        return
+      }
+
+      cbCalled = true
+      cbError = error
+    })
+
+    invocationReturned = true
+
+    if (!cbCalled) {
+      // Wait for the async callback to continue the series.
       return
     }
 
-    runAsyncSeries(operation, collection, index + 1, callback)
-  })
+    if (cbError) {
+      callback(cbError)
+      return
+    }
+
+    index++
+  }
+
+  callback(null)
 }
 
 /* c8 ignore start */

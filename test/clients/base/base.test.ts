@@ -3,7 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test } from 'node:test'
 import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
-import { kConnections, kGetApi, kGetBootstrapConnection, kOptions, kPerformWithRetry } from '../../../src/clients/base/base.ts'
+import {
+  kBootstrapBrokers,
+  kConnections,
+  kGetApi,
+  kGetBootstrapConnection,
+  kOptions,
+  kPerformWithRetry
+} from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV3,
@@ -39,6 +46,21 @@ test('constructor should properly set getters', () => {
   deepStrictEqual(base.clientId, 'clientId')
   deepStrictEqual(base.closed, false)
   deepStrictEqual(base.type, 'base')
+})
+
+test('constructor should parse IPv6 bootstrap broker strings', () => {
+  const base = new Base({
+    clientId: 'clientId',
+    bootstrapBrokers: ['[::1]:9092', '[2001:db8::1]:19092', '::1'],
+    retries: false,
+    strict: true
+  })
+
+  deepStrictEqual(base[kBootstrapBrokers], [
+    { host: '::1', port: 9092 },
+    { host: '2001:db8::1', port: 19092 },
+    { host: '::1', port: 9092 }
+  ])
 })
 
 test('constructor should preserve defaults when options are explicitly set to undefined', t => {

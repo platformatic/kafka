@@ -151,6 +151,7 @@ The types of the `key`, `value` and `headers` fields are determined by the curre
 | `timestamp` | `bigint`                      | The timestamp of the message. When producing, it defaults to the current timestamp.                 |
 | `headers`   | `Map<HeaderKey, HeaderValue>` | A map with the message headers.                                                                     |
 | `offset`    | `bigint`                      | The message offset                                                                                  |
+| `leaderEpoch` | `number`                    | The leader epoch of the record batch containing the message, or `-1` when unknown. It is suitable as the `leaderEpoch` when committing offsets manually via [`Consumer.commit`](./consumer.md#commitoptions-callback).                     |
 | `commit`    | () => Promise<void>           | A function to commit the offset. This is a no-op if consumer's `autocommit` option was not `false`. |
 
 `Message` also provides a `.toJSON()` method for debugging and logging.

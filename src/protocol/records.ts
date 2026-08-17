@@ -54,6 +54,7 @@ export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown
   partition: number
   timestamp: string
   offset: string
+  leaderEpoch: number
   metadata: Record<string, unknown>
 }
 
@@ -63,6 +64,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
 > {
   headers: Map<HeaderKey, HeaderValue>
   offset: bigint
+  leaderEpoch: number
   metadata: Record<string, unknown>
   commit (callback?: (error?: Error) => void): void | Promise<void>
   toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue>

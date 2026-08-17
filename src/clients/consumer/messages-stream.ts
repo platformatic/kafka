@@ -484,7 +484,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   _construct (callback: (error?: Error) => void) {
-    this.#refreshOffsets(callback as Callback<void>)
+    this.#refreshOffsetsInflight = true
+    this.#refreshOffsets(error => {
+      const wasPending = this.#refreshOffsetsPending
+      this.#refreshOffsetsInflight = false
+      this.#refreshOffsetsPending = false
+
+      if (!error && wasPending) {
+        this.#scheduleRefreshOffsetsAndFetch()
+      }
+
+      callback(error ?? undefined)
+    })
   }
 
   _destroy (error: Error | null, callback: (error?: Error | null) => void): void {
@@ -928,7 +939,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
 
         if (!topics.length) {
-          this.#assignOffsets(offsets!, new Map(), callback)
+          // No assignment yet: do not seed fallback offsets for the whole topic.
+          // consumer:group:join will refresh once partitions are assigned.
+          this.emit('offsets')
+          callback(null)
           return
         }
 
@@ -963,6 +977,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#refreshOffsets(error => {
       const shouldDestroyOnError = this.#refreshOffsetsDestroyOnError
+      const wasPending = this.#refreshOffsetsPending
       this.#refreshOffsetsInflight = false
       this.#refreshOffsetsDestroyOnError = false
       this.#refreshOffsetsPending = false
@@ -977,8 +992,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       // A new one was scheduled while the previous one was inflight, we need to run it immediately
-      /* c8 ignore next 4 - Hard to test */
-      if (this.#refreshOffsetsPending) {
+      if (wasPending) {
         this.#scheduleRefreshOffsetsAndFetch(shouldDestroyOnError)
         return
       }

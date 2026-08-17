@@ -71,6 +71,7 @@ function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, V
     partition: this.partition,
     timestamp: this.timestamp.toString(),
     offset: this.offset.toString(),
+    leaderEpoch: this.leaderEpoch,
     metadata: this.metadata
   }
 }
@@ -1001,6 +1002,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 partition,
                 timestamp: firstTimestamp + record.timestampDelta,
                 offset,
+                // The batch header epoch is the epoch of the record itself, which is what
+                // OffsetCommit expects as committedLeaderEpoch (KIP-320).
+                leaderEpoch: batch.partitionLeaderEpoch,
                 commit,
                 // Deserializers and hooks can enrich the metadata of the message they processed
                 metadata: deserializationError

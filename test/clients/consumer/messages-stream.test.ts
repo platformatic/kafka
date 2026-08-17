@@ -331,6 +331,8 @@ test('should support diagnostic channels', async t => {
       const message = context.result as Message
       ok(typeof message.timestamp, 'bigint')
       message.timestamp = 0n
+      ok(message.leaderEpoch >= 0, 'leaderEpoch should be non-negative')
+      message.leaderEpoch = 0
 
       deepStrictEqual(context.result, {
         key: 'key-0',
@@ -340,6 +342,7 @@ test('should support diagnostic channels', async t => {
         partition: 0,
         timestamp: 0n,
         offset: 0n,
+        leaderEpoch: 0,
         metadata: message.metadata,
         commit: noopCallback,
         toJSON: message.toJSON
@@ -407,6 +410,7 @@ test('should expose message.toJSON for easy serialization', async t => {
 
   strictEqual(typeof payload.offset, 'string')
   strictEqual(typeof payload.timestamp, 'string')
+  strictEqual(typeof payload.leaderEpoch, 'number')
   deepStrictEqual(payload.headers, [['headerKey', 'headerValue-0']])
 })
 
@@ -502,6 +506,33 @@ test('should support manual commits', async t => {
   deepStrictEqual(secondBatch[1].key, 'key-2', 'Second message in second batch should be key-2')
 })
 
+test('should expose the record batch leader epoch for manual batched commits', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+  for (const message of messages) {
+    ok(message.leaderEpoch >= 0, 'Each message should carry the record batch leader epoch')
+  }
+
+  // Commit the last processed offset using the exposed epoch, as a batching application would
+  const last = messages.at(-1)!
+  await consumer.commit({
+    offsets: [{ topic, partition: last.partition, offset: last.offset + 1n, leaderEpoch: last.leaderEpoch }]
+  })
+
+  const offsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(offsets.get(topic), [last.offset + 1n], 'Committed offset should be the last offset + 1')
+})
+
 test('should consume messages with LATEST mode', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)
@@ -569,6 +600,7 @@ test('should consume messages with EARLIEST mode', async t => {
     strictEqual(messages[i].topic, topic, `Message ${i} should have correct topic`)
     strictEqual(typeof messages[i].offset, 'bigint', `Message ${i} should have bigint offset`)
     strictEqual(typeof messages[i].timestamp, 'bigint', `Message ${i} should have bigint timestamp`)
+    ok(messages[i].leaderEpoch >= 0, `Message ${i} should have a non-negative leader epoch`)
     strictEqual(typeof messages[i].commit, 'function', `Message ${i} should have commit function`)
   }
 })

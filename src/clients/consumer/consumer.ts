@@ -111,6 +111,7 @@ import {
   type ConsumerGroupRebalancePayload,
   type ConsumerHeartbeatErrorPayload,
   type ConsumerHeartbeatPayload,
+  type ConsumerHeartbeatStalledPayload,
   type ConsumerOptions,
   type ExtendedGroupProtocolSubscription,
   type FetchOptions,
@@ -151,6 +152,7 @@ export interface ConsumerEvents extends BaseEvents {
   'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:error': (payload: ConsumerHeartbeatErrorPayload) => void
+  'consumer:heartbeat:stalled': (payload: ConsumerHeartbeatStalledPayload) => void
   'consumer:lag': (lag: Offsets) => void
   'consumer:lag:error': (error: Error) => void
 }
@@ -175,6 +177,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeatIntervalMs: number
   #lastHeartbeat: Date | null
+  #heartbeatStallTimer: NodeJS.Timeout | null
+  #heartbeatStallStart: number | null
+  #heartbeatStalled: boolean
+  #heartbeatStallError: Error | undefined
   #useConsumerGroupProtocol: boolean
   #memberEpoch: number
   #groupRemoteAssignor: string | null
@@ -227,6 +233,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
     this.#lastHeartbeatIntervalMs = 0
     this.#lastHeartbeat = null
+    this.#heartbeatStallTimer = null
+    this.#heartbeatStallStart = null
+    this.#heartbeatStalled = false
+    this.#heartbeatStallError = undefined
     this.#streams = new Set()
     this.#lagMonitoring = null
     this.#memberEpoch = 0
@@ -299,6 +309,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kClosed] = true
     clearTimeout(this.#lagMonitoring!)
+    this.#resetHeartbeatStall()
 
     let closer: (force: boolean, callback: CallbackWithPromise<void>) => void
     if (this.#useConsumerGroupProtocol) {
@@ -753,6 +764,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#membershipActive = false
+    this.#resetHeartbeatStall()
     this.#leaveGroupClassicProtocol(force as boolean, error => {
       if (error) {
         this.#membershipActive = true
@@ -1407,6 +1419,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
+        this.#trackHeartbeatStall(options)
 
         this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (error, api) => {
           if (error) {
@@ -1428,6 +1441,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.#cancelHeartbeat()
 
           if (this.#getRejoinError(error)) {
+            // A rejoin can legitimately block up to rebalanceTimeout:
+            // - extend the stall window by that bound rather than pausing it
+            // - a rejoin that never completes still surfaces as a stall
+            this.#resetHeartbeatStall()
+            this.#trackHeartbeatStall(options, error, options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options))
+
             this[kPerformWithRetry](
               'rejoinGroup',
               retryCallback => {
@@ -1436,6 +1455,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               error => {
                 if (error) {
                   this.emitWithDebug(null, 'error', error)
+
+                  if (!this.#heartbeatStalled) {
+                    // No more heartbeats will be scheduled: restart the stall window without
+                    // the rejoin grace, keeping the triggering heartbeat error as lastError.
+                    const heartbeatError = this.#heartbeatStallError
+                    this.#resetHeartbeatStall()
+                    this.#trackHeartbeatStall(options, heartbeatError)
+                  }
+                } else {
+                  // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                  this.#resetHeartbeatStall()
                 }
 
                 this.emitWithDebug('consumer', 'rejoin')
@@ -1453,8 +1483,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }, options.heartbeatInterval)
 
           this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          this.#trackHeartbeatStall(options, error)
         } else {
           this.#lastHeartbeat = new Date()
+          this.#resetHeartbeatStall()
           this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
         }
 
@@ -1466,6 +1498,57 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #cancelHeartbeat (): void {
     clearTimeout(this.#heartbeatInterval!)
     this.#heartbeatInterval = null
+  }
+
+  #heartbeatStallTimeoutFor (options: GroupOptions): number {
+    return (
+      options.heartbeatStallTimeout ??
+      this[kOptions].heartbeatStallTimeout ??
+      options.rebalanceTimeout ??
+      this[kOptions].rebalanceTimeout ??
+      defaultConsumerOptions.rebalanceTimeout
+    )
+  }
+
+  // Opens the stall window on the first heartbeat attempt after the last success.
+  // The window survives retries and only #resetHeartbeatStall closes it.
+  #trackHeartbeatStall (options: GroupOptions, error?: Error, timeout?: number): void {
+    if (error) {
+      this.#heartbeatStallError = error
+    }
+
+    if (this.#heartbeatStalled || this.#heartbeatStallTimer) {
+      return
+    }
+
+    timeout ??= this.#heartbeatStallTimeoutFor(options)
+    this.#heartbeatStallStart = Date.now()
+    this.#heartbeatStallTimer = setTimeout(() => {
+      this.#heartbeatStallTimer = null
+      // Emit once per stall episode. The next successful heartbeat re-arms the tracking.
+      this.#heartbeatStalled = true
+
+      if (this[kClosed] || !this.#membershipActive) {
+        return
+      }
+
+      this.emitWithDebug('consumer:heartbeat', 'stalled', {
+        lastError: this.#heartbeatStallError,
+        lastHeartbeat: this.#lastHeartbeat,
+        stalledFor: Date.now() - this.#heartbeatStallStart!
+      })
+    }, timeout)
+  }
+
+  #resetHeartbeatStall (): void {
+    if (this.#heartbeatStallTimer) {
+      clearTimeout(this.#heartbeatStallTimer)
+      this.#heartbeatStallTimer = null
+    }
+
+    this.#heartbeatStallStart = null
+    this.#heartbeatStalled = false
+    this.#heartbeatStallError = undefined
   }
 
   #consumerGroupHeartbeat (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
@@ -1486,6 +1569,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       'consumerGroupHeartbeat',
       (connection, groupCallback) => {
         this.emitWithDebug('consumer:heartbeat', 'start')
+        this.#trackHeartbeatStall(options)
         this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
           error,
           api
@@ -1515,6 +1599,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, response) => {
         if (this[kClosed]) {
+          this.#resetHeartbeatStall()
           this.emitWithDebug('consumer:heartbeat', 'end')
           callback(null)
           return
@@ -1523,6 +1608,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         if (error) {
           this.#cancelHeartbeat()
           this.emitWithDebug('consumer:heartbeat', 'error', { error })
+          this.#trackHeartbeatStall(options, error)
 
           const fenced = (error as any).response?.errorCode === protocolErrors.FENCED_MEMBER_EPOCH.code
           if (fenced) {
@@ -1544,6 +1630,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.#lastHeartbeat = new Date()
+        this.#resetHeartbeatStall()
 
         this.#memberEpoch = response!.memberEpoch
 

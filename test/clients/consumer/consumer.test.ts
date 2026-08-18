@@ -22,6 +22,7 @@ import {
   ConfluentSchemaRegistry,
   type Connection,
   Consumer,
+  type ConsumerHeartbeatStalledPayload,
   consumerCommitsChannel,
   consumerConsumesChannel,
   consumerFetchesChannel,
@@ -35,6 +36,7 @@ import {
   FetchIsolationLevels,
   fetchV17,
   findCoordinatorV6,
+  findErrorBy,
   GenericError,
   type GroupPartitionsAssignments,
   heartbeatV4,
@@ -5060,6 +5062,159 @@ test('#heartbeat should emit events when it was cancelled while waiting for API 
   await consumer.joinGroup()
   await once(consumer, 'consumer:heartbeat:start')
   await once(consumer, 'consumer:heartbeat:cancel')
+})
+
+test('#heartbeat should emit a stalled event when heartbeats stop succeeding', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 500, heartbeatStallTimeout: 1000 })
+
+  await consumer.joinGroup()
+  await once(consumer, 'consumer:heartbeat:end')
+
+  mockUnavailableAPI(consumer, 'Heartbeat', false)
+
+  const [payload] = await once(consumer, 'consumer:heartbeat:stalled')
+
+  strictEqual(payload.lastError instanceof UnsupportedApiError, true)
+  strictEqual(payload.lastError.message.includes('Unsupported API Heartbeat.'), true)
+  ok(payload.lastHeartbeat instanceof Date)
+  ok(payload.stalledFor >= 900)
+})
+
+test('#heartbeat should not emit a stalled event while heartbeats succeed', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 300, heartbeatStallTimeout: 800 })
+
+  let stalled = false
+  consumer.on('consumer:heartbeat:stalled', () => {
+    stalled = true
+  })
+
+  await consumer.joinGroup()
+  await sleep(1600)
+
+  strictEqual(stalled, false)
+})
+
+test('#heartbeat should emit a stalled event when a rejoin fails', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 500, heartbeatStallTimeout: 1000 })
+
+  // A failed rejoin also emits a consumer level error, which would reject events.once
+  consumer.on('error', () => {})
+  const stalled = new Promise(resolve => {
+    consumer.once('consumer:heartbeat:stalled', resolve)
+  })
+
+  await consumer.joinGroup()
+  await once(consumer, 'consumer:heartbeat:end')
+
+  mockUnavailableAPI(consumer, 'JoinGroup', false)
+  mockAPI(consumer[kConnections], heartbeatV4.api.key, new ProtocolError('REBALANCE_IN_PROGRESS'))
+
+  const payload = (await stalled) as ConsumerHeartbeatStalledPayload
+
+  // lastError remains the heartbeat error which triggered the rejoin, not the JoinGroup failure
+  ok(findErrorBy(payload.lastError!, 'rebalanceInProgress', true))
+  strictEqual(payload.lastError!.message.includes('Unsupported API'), false)
+  ok(payload.lastHeartbeat instanceof Date)
+  ok(payload.stalledFor >= 900)
+})
+
+test('#heartbeat should emit a stalled event when a rejoin retries indefinitely', async t => {
+  const consumer = createConsumer(t, {
+    heartbeatInterval: 500,
+    heartbeatStallTimeout: 1000,
+    retries: 100,
+    retryDelay: 250
+  })
+
+  consumer.on('error', () => {})
+  const stalled = new Promise(resolve => {
+    consumer.once('consumer:heartbeat:stalled', resolve)
+  })
+
+  await consumer.joinGroup()
+  await once(consumer, 'consumer:heartbeat:end')
+
+  // Fail every JoinGroup lookup with a retriable error so the rejoin loop never terminates
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (original, ...args) => {
+      const [name, callback] = args
+
+      if (name === 'JoinGroup') {
+        callback(new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage)], { canRetry: true }))
+        return true
+      }
+
+      original(...args)
+      return true
+    }
+  )
+  mockAPI(consumer[kConnections], heartbeatV4.api.key, new ProtocolError('REBALANCE_IN_PROGRESS'))
+
+  const payload = (await stalled) as ConsumerHeartbeatStalledPayload
+
+  ok(payload.lastError)
+  // The rejoin pause is bounded: rebalanceTimeout (6 seconds in these tests) plus the stall timeout
+  ok(payload.stalledFor >= 6900)
+})
+
+test('#heartbeat should not emit a stalled event when a rejoin succeeds within the extended window', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 3000, heartbeatStallTimeout: 300 })
+
+  let stalled = false
+  consumer.on('consumer:heartbeat:stalled', () => {
+    stalled = true
+  })
+  consumer.on('error', () => {})
+
+  await consumer.joinGroup()
+  await once(consumer, 'consumer:heartbeat:end')
+
+  // Delay the first rejoin attempt so it succeeds close to the rebalance bound
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (original, ...args) => {
+      const [name] = args
+
+      if (name === 'JoinGroup') {
+        setTimeout(() => original(...args), 4000)
+        return false
+      }
+
+      original(...args)
+      return true
+    }
+  )
+  mockAPI(consumer[kConnections], heartbeatV4.api.key, new ProtocolError('REBALANCE_IN_PROGRESS'))
+
+  await once(consumer, 'consumer:group:join')
+  // Cover the rest of the extended window (rejoin entry + rebalanceTimeout + stall timeout)
+  await sleep(3500)
+
+  strictEqual(stalled, false)
+})
+
+test('#heartbeat should honor a per-operation heartbeatStallTimeout', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 500 })
+
+  await consumer.joinGroup({ heartbeatStallTimeout: 1000 })
+  await once(consumer, 'consumer:heartbeat:end')
+
+  mockUnavailableAPI(consumer, 'Heartbeat', false)
+
+  const started = Date.now()
+  const [payload] = await once(consumer, 'consumer:heartbeat:stalled')
+
+  ok(payload.stalledFor >= 900)
+  ok(Date.now() - started < 4000)
 })
 
 test('#heartbeat should emit events when it was cancelled while waiting for Heartbeat API response', async t => {

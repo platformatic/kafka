@@ -9,6 +9,7 @@ export const groupOptionsProperties = {
   sessionTimeout: { type: 'number', minimum: 0 },
   rebalanceTimeout: { type: 'number', minimum: 0 },
   heartbeatInterval: { type: 'number', minimum: 0 },
+  heartbeatStallTimeout: { type: 'number', minimum: 0 },
   groupProtocol: { type: 'string', enum: allowedGroupProtocols },
   groupRemoteAssignor: { type: 'string' },
   protocols: {

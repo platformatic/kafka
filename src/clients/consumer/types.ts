@@ -122,6 +122,7 @@ export interface GroupOptions {
   sessionTimeout?: number
   rebalanceTimeout?: number
   heartbeatInterval?: number
+  heartbeatStallTimeout?: number
   protocols?: GroupProtocolSubscription[]
   protocolsMetadata?: GroupProtocolsMetadataCallback
   partitionAssigner?: GroupPartitionsAssigner
@@ -133,6 +134,7 @@ export interface ConsumerGroupOptions {
   groupInstanceId?: string
   groupRemoteAssignor?: string
   rebalanceTimeout?: number
+  heartbeatStallTimeout?: number
   assignmentUserData?: Buffer
 }
 
@@ -231,4 +233,10 @@ export interface ConsumerHeartbeatPayload {
 
 export interface ConsumerHeartbeatErrorPayload extends ConsumerHeartbeatPayload {
   error: Error
+}
+
+export interface ConsumerHeartbeatStalledPayload {
+  lastError?: Error
+  lastHeartbeat: Date | null
+  stalledFor: number
 }

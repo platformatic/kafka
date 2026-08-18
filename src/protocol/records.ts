@@ -63,6 +63,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   MessageBase<Key, Value>
 > {
   headers: Map<HeaderKey, HeaderValue>
+  headerEntries: Array<[HeaderKey, HeaderValue]>
   offset: bigint
   leaderEpoch: number
   metadata: Record<string, unknown>

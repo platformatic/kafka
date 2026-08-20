@@ -95,7 +95,7 @@ import {
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { findErrorBy, MultipleErrors, UserError } from '../../errors.ts'
+import { findErrorBy, MultipleErrors, NetworkError, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
 import { Reader } from '../../protocol/reader.ts'
 import {
@@ -945,7 +945,13 @@ export class Admin extends Base<AdminOptions> {
 
   #getControllerConnection (callback: Callback<Connection>): void {
     if (this.#controller) {
-      this[kConnections].get(this.#controller, callback)
+      this[kConnections].get(this.#controller, (error, connection) => {
+        if (NetworkError.isRetryable(error)) {
+          this.#controller = null
+        }
+
+        callback(error, connection)
+      })
     } else {
       this[kGetBootstrapConnection](callback)
     }

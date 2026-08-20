@@ -170,6 +170,11 @@ export class AuthenticationError extends GenericError {
 export class NetworkError extends GenericError {
   static code: ErrorCode = 'PLT_KFK_NETWORK'
 
+  static isRetryable (error: Error | null | undefined): boolean {
+    const networkError = findErrorBy(error, 'code', NetworkError.code)
+    return networkError?.canRetry === true
+  }
+
   constructor (message: string, properties: ErrorProperties = {}) {
     super(NetworkError.code, message, { canRetry: true, ...properties })
   }

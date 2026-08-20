@@ -1479,6 +1479,67 @@ test('send should repeat the operation in case of stale metadata', async t => {
   })
 })
 
+test('send should refresh metadata after a network error from the partition leader', async t => {
+  const producer = createProducer(t, { retries: 1, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  const forceUpdates: boolean[] = []
+  const brokerHosts: string[] = []
+  let metadataCalls = 0
+
+  mockMethod(
+    producer,
+    kMetadata,
+    () => true,
+    null,
+    undefined,
+    (_original, options, callback) => {
+      metadataCalls++
+      forceUpdates.push(options.forceUpdate ?? false)
+
+      const metadata = createProducerMetadata(testTopic)
+      metadata.brokers.set(1, { host: 'new-leader', port: 9093, rack: null })
+      metadata.topics.get(testTopic)!.partitions[0].leader = metadataCalls <= 2 ? 0 : 1
+      callback(null, metadata)
+      return true
+    }
+  )
+
+  mockMethod(
+    producer,
+    kGetConnection,
+    () => true,
+    null,
+    undefined,
+    (_original, broker, callback) => {
+      brokerHosts.push(broker.host)
+      callback(null, {} as Connection)
+      return true
+    }
+  )
+
+  let produceCalls = 0
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (_connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      produceCalls++
+
+      if (produceCalls === 1) {
+        apiCallback!(new NetworkError('Connection closed'))
+        return
+      }
+
+      apiCallback!(null, createProduceResponse(messages[0].topic, messages[0].partition!))
+    }
+  )
+
+  await producer.send({ messages: [{ topic: testTopic, partition: 0, value: Buffer.from('message') }] })
+
+  strictEqual(metadataCalls, 3)
+  deepStrictEqual(forceUpdates, [false, false, true])
+  deepStrictEqual(brokerHosts, ['localhost', 'new-leader'])
+})
+
 test('send should recover idempotent producer after UNKNOWN_PRODUCER_ID', async t => {
   const producer = createProducer(t, { idempotent: true })
   const testTopic = await createTopic(t)

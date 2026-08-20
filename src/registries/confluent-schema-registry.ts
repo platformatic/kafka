@@ -1,4 +1,6 @@
-import { Ajv, type AnySchema, type AnySchemaObject, type ErrorObject, type Options, type ValidateFunction } from 'ajv'
+import * as AjvDraft04Module from 'ajv-draft-04'
+import draft06MetaSchema from 'ajv/dist/refs/json-schema-draft-06.json' with { type: 'json' }
+import { Ajv, type AnySchema, type ErrorObject, type Options, type ValidateFunction } from 'ajv'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import avro, { type Type } from 'avsc'
 import { createRequire } from 'node:module'
@@ -38,9 +40,7 @@ type JsonSchemaValidator = {
   compile: (schema: AnySchema) => ValidateFunction
   errorsText: Ajv['errorsText']
 }
-
-const AjvDraft04 = require('ajv-draft-04') as new (options: Options) => JsonSchemaValidator
-const draft06MetaSchema = require('ajv/dist/refs/json-schema-draft-06.json') as AnySchemaObject
+const AjvDraft04 = AjvDraft04Module.default as unknown as new (options: Options) => JsonSchemaValidator
 
 type ConfluentSchemaRegistryMessageToProduce = MessageToProduce<unknown, unknown, unknown, unknown>
 

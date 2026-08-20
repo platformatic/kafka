@@ -854,15 +854,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<FetchResponse>
   ): void {
     const isolationLevel = options.isolationLevel ?? this[kOptions].isolationLevel!
+    let refreshMetadata = false
 
     this[kPerformWithRetry]<FetchResponse>(
       'fetch',
       retryCallback => {
-        this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+        this[kMetadata]({ topics: this.topics.current, forceUpdate: refreshMetadata }, (error, metadata) => {
           if (error) {
+            refreshMetadata = NetworkError.isRetryable(error)
             retryCallback(error)
             return
           }
+
+          refreshMetadata = false
 
           const topicIds = this.#topicIdsById(metadata!)
           const node = this.#fetchNodeForRequest(metadata!, options.node, options.topics, topicIds, Date.now())
@@ -877,6 +881,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           pool.get(broker, (error, connection) => {
             if (error) {
+              refreshMetadata = NetworkError.isRetryable(error)
               this.#clearPreferredReadReplicas(options.topics, topicIds)
               this.#fetchSessions.delete(node)
 
@@ -895,6 +900,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
             this[kGetApi]<FetchRequest, FetchResponse>('Fetch', (error, api) => {
               if (error) {
+                refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error)
                 return
               }
@@ -982,6 +988,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 this.#clientRack,
                 (error, result) => {
                   if (error) {
+                    refreshMetadata = NetworkError.isRetryable(error)
                     this.#clearPreferredReadReplicas(options.topics, topicIds)
 
                     if (
@@ -1112,7 +1119,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #listOffsets (
     withTimestamps: boolean,
     options: ListOffsetsOptions,
-    callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
+    callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>,
+    forceUpdateMetadata = false
   ): void {
     let topics = options.topics
 
@@ -1120,7 +1128,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       topics = this.topics.current
     }
 
-    this[kMetadata]({ topics }, (error, metadata) => {
+    this[kMetadata]({ topics, forceUpdate: forceUpdateMetadata }, (error, metadata) => {
       if (error) {
         callback(error)
         return
@@ -1200,6 +1208,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         },
         (error, responses) => {
           if (error) {
+            if (!forceUpdateMetadata && NetworkError.isRetryable(error)) {
+              this.clearMetadata()
+              this.#listOffsets(withTimestamps, options, callback, true)
+              return
+            }
+
             callback(this.#handleError(error))
             return
           }

@@ -5024,6 +5024,29 @@ test('#heartbeat should handle unavailable API errors', async t => {
   strictEqual(error.message.includes('Unsupported API Heartbeat.'), true)
 })
 
+test('#heartbeat should recover after a non-group error', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 500 })
+
+  await consumer.joinGroup()
+
+  // Fail a single heartbeat, then let the following ones succeed
+  mockUnavailableAPI(consumer, 'Heartbeat')
+
+  await once(consumer, 'consumer:heartbeat:error')
+  await once(consumer, 'consumer:heartbeat:end')
+})
+
+test('#heartbeat should keep scheduling heartbeats while a non-group error persists', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 500 })
+
+  await consumer.joinGroup()
+
+  mockUnavailableAPI(consumer, 'Heartbeat', false)
+
+  await once(consumer, 'consumer:heartbeat:error')
+  await once(consumer, 'consumer:heartbeat:error')
+})
+
 test('#heartbeat should emit events when it was cancelled while waiting for API response', async t => {
   const consumer = createConsumer(t)
 

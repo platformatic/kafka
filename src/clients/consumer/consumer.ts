@@ -1432,9 +1432,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          // The error was not group related, so we schedule another heartbeat.
+          // Do this before notifying listeners so they can still cancel it.
+          this.#heartbeatInterval = setTimeout(() => {
+            this.#heartbeat(options)
+          }, options.heartbeatInterval)
 
-          // Note that here we purposely do not return, since it was not a group related problem we schedule another heartbeat
+          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
         } else {
           this.#lastHeartbeat = new Date()
           this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)

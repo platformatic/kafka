@@ -31,7 +31,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 10
       - name: Install kinit for Kerberos
         run: |
           sudo apt-get update

@@ -1,2 +1,5 @@
 onlyBuiltDependencies:
+  - '@swc/core'
   - kerberos
+  - protobufjs
+  - unrs-resolver

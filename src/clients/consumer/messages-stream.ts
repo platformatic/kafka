@@ -923,12 +923,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   payloadType = 'headerValue'
                   /* c8 ignore next - Hard to test */
                   const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
-                  const entry: [HeaderKey, HeaderValue] = [
-                    deserializedHeaderKey as HeaderKey,
-                    deserializedHeaderValue as HeaderValue
-                  ]
-                  headerEntries.push(entry)
-                  headers.set(...entry)
+                  headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                  headerEntries.push([deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue])
                 }
 
                 payloadType = 'key'
@@ -983,9 +979,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                     headerEntries.length = 0
 
                     for (const [headerKey, headerValue] of record.headers) {
-                      const entry: [HeaderKey, HeaderValue] = [headerKey as HeaderKey, headerValue as HeaderValue]
-                      headerEntries.push(entry)
-                      headers.set(...entry)
+                      headers.set(headerKey as HeaderKey, headerValue as HeaderValue)
+                      headerEntries.push([headerKey as HeaderKey, headerValue as HeaderValue])
                     }
                   }
 

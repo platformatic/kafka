@@ -1,7 +1,5 @@
-allowBuilds:
-  '@swc/core': true
-  kerberos: true
-  protobufjs: true
-  unrs-resolver: true
-  '@confluentinc/kafka-javascript': false
-  '@platformatic/rdkafka': false
+onlyBuiltDependencies:
+  - '@swc/core'
+  - kerberos
+  - protobufjs
+  - unrs-resolver

@@ -670,6 +670,40 @@ test('createTopics using assignments', async t => {
   await admin.deleteTopics({ topics: [topicName] })
 })
 
+test('createTopics should support per-topic overrides alongside global defaults', async t => {
+  const admin = createAdmin(t)
+
+  const topicWithDefaults = `test-topic-${randomUUID()}`
+  const topicWithOverrides = `test-topic-${randomUUID()}`
+
+  const created = await admin.createTopics({
+    topics: [
+      topicWithDefaults,
+      {
+        topic: topicWithOverrides,
+        partitions: 5,
+        replicas: 1
+      }
+    ],
+    partitions: 2,
+    replicas: 1
+  })
+
+  const defaultsResult = created.find(({ name }) => name === topicWithDefaults)
+  const overridesResult = created.find(({ name }) => name === topicWithOverrides)
+
+  // The plain string entry must fall back to the global defaults ...
+  strictEqual(defaultsResult?.partitions, 2)
+  strictEqual(defaultsResult?.replicas, 1)
+
+  // ... while the object entry overrides only what it specifies.
+  strictEqual(overridesResult?.partitions, 5)
+  strictEqual(overridesResult?.replicas, 1)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicWithDefaults, topicWithOverrides] })
+})
+
 test('createTopics should retarget controller when needed', async t => {
   const admin = createAdmin(t)
 
@@ -823,6 +857,45 @@ test('createTopics should validate options in strict mode', async t => {
   } catch (error) {
     strictEqual(error.message.includes('must NOT have additional properties'), true)
   }
+
+  // Test with a per-topic object missing the required topic field
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createTopics({ topics: [{ partitions: 3 }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+
+  // Test with a per-topic object containing an unknown property
+  try {
+    // @ts-expect-error - Intentionally passing invalid options
+    await admin.createTopics({ topics: [{ topic: 'test-topic', invalidProperty: true }] })
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error.message.includes('topics'), true)
+  }
+})
+
+test('createTopics should accept a per-topic override object in strict mode', async t => {
+  const admin = createAdmin(t, { strict: true })
+
+  const topicName = `test-topic-${randomUUID()}`
+
+  const created = await admin.createTopics({
+    topics: [
+      {
+        topic: topicName,
+        partitions: 1,
+        replicas: 1
+      }
+    ]
+  })
+
+  strictEqual(created[0].name, topicName)
+
+  // Clean up
+  await admin.deleteTopics({ topics: [topicName] })
 })
 
 test('createTopics should handle errors from Connection.getFirstAvailable', async t => {

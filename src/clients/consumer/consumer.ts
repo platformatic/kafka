@@ -1960,8 +1960,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #performJoinGroup (
-    options: Required<GroupOptions>, 
-    callback: CallbackWithPromise<string>, 
+    options: Required<GroupOptions>,
+    callback: CallbackWithPromise<string>,
     rejoinAttempts: number = 0
   ): void {
     if (!this.#membershipActive) {
@@ -2038,7 +2038,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             }
 
             if (error) {
-            if (this.#getRejoinError(error) && rejoinAttempts < (this[kOptions].retries as number)) {
+              if (this.#getRejoinError(error) && rejoinAttempts < (this[kOptions].retries as number)) {
                 this.#performJoinGroup(options, callback, rejoinAttempts + 1)
                 return
               }

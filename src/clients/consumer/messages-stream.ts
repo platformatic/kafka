@@ -66,7 +66,7 @@ function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, V
   return {
     key: this.key,
     value: this.value,
-    headers: Array.from(this.headers.entries()),
+    headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
     topic: this.topic,
     partition: this.partition,
     timestamp: this.timestamp.toString(),
@@ -900,6 +900,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             try {
               const headers = new Map<HeaderKey, HeaderValue>()
+              const headerEntries: Array<[HeaderKey, HeaderValue]> = []
               let payloadType: BeforeHookPayloadType = 'headerKey'
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
@@ -923,6 +924,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   /* c8 ignore next - Hard to test */
                   const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
                   headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                  headerEntries.push([deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue])
                 }
 
                 payloadType = 'key'
@@ -974,9 +976,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
                   if (headersFailed) {
                     headers.clear()
+                    headerEntries.length = 0
 
                     for (const [headerKey, headerValue] of record.headers) {
                       headers.set(headerKey as HeaderKey, headerValue as HeaderValue)
+                      headerEntries.push([headerKey as HeaderKey, headerValue as HeaderValue])
                     }
                   }
 
@@ -1005,6 +1009,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 key: deserializedKey,
                 value: deserializedValue,
                 headers,
+                headerEntries,
                 topic,
                 partition,
                 timestamp: firstTimestamp + record.timestampDelta,

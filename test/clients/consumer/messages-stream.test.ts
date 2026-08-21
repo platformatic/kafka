@@ -338,6 +338,7 @@ test('should support diagnostic channels', async t => {
         key: 'key-0',
         value: 'value-0',
         headers: new Map([['headerKey', 'headerValue-0']]),
+        headerEntries: [['headerKey', 'headerValue-0']],
         topic,
         partition: 0,
         timestamp: 0n,
@@ -412,6 +413,89 @@ test('should expose message.toJSON for easy serialization', async t => {
   strictEqual(typeof payload.timestamp, 'string')
   strictEqual(typeof payload.leaderEpoch, 'number')
   deepStrictEqual(payload.headers, [['headerKey', 'headerValue-0']])
+})
+
+test('should preserve duplicate header keys and their order', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 1)
+
+  const consumer = createConsumer(t, groupId, {
+    beforeDeserialization (_payload, type, message, callback) {
+      if (type === 'key') {
+        message.headers = [
+          [Buffer.from('duplicate'), Buffer.from('first')],
+          [Buffer.from('duplicate'), Buffer.from('second')]
+        ]
+      }
+      callback(null)
+    }
+  })
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1
+  })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push(message)
+  }
+
+  strictEqual(messages.length, 1)
+  deepStrictEqual(messages[0].headerEntries, [
+    ['duplicate', 'first'],
+    ['duplicate', 'second']
+  ])
+  strictEqual(messages[0].headers.get('duplicate'), 'second')
+  const jsonHeaders = messages[0].toJSON().headers
+  deepStrictEqual(jsonHeaders, messages[0].headerEntries)
+  jsonHeaders.pop()
+  jsonHeaders[0][1] = 'changed'
+  strictEqual(messages[0].headerEntries.length, 2)
+  strictEqual(messages[0].headerEntries[0][1], 'first')
+})
+
+test('should preserve duplicate header keys when deserialization errors are continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic, 1)
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: {
+      ...stringDeserializers,
+      headerValue () {
+        throw new Error('Cannot deserialize the header value.')
+      }
+    },
+    beforeDeserialization (_payload, type, message, callback) {
+      if (type === 'key') {
+        message.headers = [
+          [Buffer.from('duplicate'), Buffer.from('first')],
+          [Buffer.from('duplicate'), Buffer.from('second')]
+        ]
+      }
+      callback(null)
+    }
+  })
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError () {
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+
+  strictEqual(messages.length, 1)
+  deepStrictEqual(messages[0].headerEntries, [
+    [Buffer.from('duplicate'), Buffer.from('first')],
+    [Buffer.from('duplicate'), Buffer.from('second')]
+  ])
 })
 
 test('should support timed autocommits', async t => {

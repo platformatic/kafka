@@ -8,7 +8,7 @@ export type Callback<ReturnType> = (error: Error | null, payload?: ReturnType) =
 
 export type CallbackArguments<ReturnType> = [cb: Callback<ReturnType>]
 
-export type RequestCreator = (...args: any[]) => Writer
+export type RequestCreator = (...args: any[]) => Writer | Promise<Writer>
 
 export type ResponseParser<ReturnType> = (
   correlationId: number,

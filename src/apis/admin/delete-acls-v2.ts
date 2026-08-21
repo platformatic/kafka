@@ -88,7 +88,7 @@ export function parseResponse (
         errors.push([`/filter_results/${i}`, [errorCode, errorMessage]])
       }
 
-      return {
+      const result = {
         errorCode,
         errorMessage,
         matchingAcls: r.readArray((r, j) => {
@@ -99,7 +99,7 @@ export function parseResponse (
             errors.push([`/filter_results/${i}/matching_acls/${j}`, [errorCode, errorMessage]])
           }
 
-          return {
+          const matchingAcl = {
             errorCode,
             errorMessage,
             resourceType: r.readInt8() as ResourceTypeValue,
@@ -110,10 +110,13 @@ export function parseResponse (
             operation: r.readInt8() as AclOperationValue,
             permissionType: r.readInt8() as AclPermissionTypeValue
           }
+          return matchingAcl
         })
       }
+      return result
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

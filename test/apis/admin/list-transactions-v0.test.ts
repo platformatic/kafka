@@ -1,8 +1,13 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, type TransactionState, Writer, listTransactionsV0 } from '../../../src/index.ts'
+import { TransactionStates } from '../../../src/apis/enumerations.ts'
+import { Reader, ResponseError, Writer, listTransactionsV0 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listTransactionsV0
+
+test('uses Kafka transaction state names', () => {
+  deepStrictEqual(TransactionStates, listTransactionsV0.TransactionStates)
+})
 
 test('createRequest serializes basic parameters correctly', () => {
   const stateFilters: [] = []
@@ -28,8 +33,25 @@ test('createRequest serializes basic parameters correctly', () => {
   deepStrictEqual(serializedProducerIdFilters, [], 'Empty producer ID filters array should be serialized correctly')
 })
 
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendInt16(0)
+      .appendArray([], () => {})
+      .appendArray([], () => {})
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 66, 0, reader).transactionStates, [])
+  strictEqual(reader.remaining, 0)
+})
+
 test('createRequest serializes state filters correctly', () => {
-  const stateFilters: TransactionState[] = ['ONGOING', 'COMPLETE_COMMIT', 'PREPARE_ABORT']
+  const stateFilters: listTransactionsV0.TransactionState[] = ['Ongoing', 'CompleteCommit', 'PrepareAbort']
   const producerIdFilters: bigint[] = []
 
   const writer = createRequest(stateFilters, producerIdFilters, 0n, null)
@@ -41,7 +63,7 @@ test('createRequest serializes state filters correctly', () => {
   // Verify state filters
   deepStrictEqual(
     serializedStateFilters,
-    ['ONGOING', 'COMPLETE_COMMIT', 'PREPARE_ABORT'],
+    ['Ongoing', 'CompleteCommit', 'PrepareAbort'],
     'State filters should be serialized correctly'
   )
 })

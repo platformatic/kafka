@@ -73,13 +73,16 @@ import {
   type OffsetFetchRequestGroup,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
+import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import {
   ConfigResourceTypes,
   FetchIsolationLevels,
   FindCoordinatorKeyTypes,
+  legacyConsumerGroupStates,
   type ConfigResourceTypeValue,
-  type ConsumerGroupStateValue
+  type ConsumerGroupStateValue,
+  type KafkaConsumerGroupStateValue
 } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
@@ -1089,13 +1092,18 @@ export class Admin extends Base<AdminOptions> {
             }
 
             const created: CreatedTopic[] = []
+            const topics = (response as CreateTopicsResponse).topics
 
-            for (const { name, topicId: id, numPartitions: partitions, replicationFactor: replicas, configs } of (
-              response as CreateTopicsResponse
-            ).topics) {
+            for (const {
+              name,
+              topicId: id = '',
+              numPartitions: partitions = -1,
+              replicationFactor: replicas = -1,
+              configs: topicConfigs
+            } of topics) {
               const configuration: CreatedTopic['configuration'] = {}
 
-              for (const { name, value } of configs) {
+              for (const { name, value } of topicConfigs ?? []) {
                 configuration[name] = value
               }
 
@@ -1228,8 +1236,14 @@ export class Admin extends Base<AdminOptions> {
                     return
                   }
 
+                  // Brokers filter on the values they put on the wire, so the legacy Java enum
+                  // constant names have to be translated or they would silently match nothing.
+                  const states = ((options.states as ConsumerGroupStateValue[]) ?? []).map(
+                    state => legacyConsumerGroupStates[state as KafkaConsumerGroupStateValue] ?? state
+                  )
+
                   /* c8 ignore next 5 */
-                  api!(connection!, (options.states as ConsumerGroupStateValue[]) ?? [], options.types!, retryCallback)
+                  api!(connection!, states as ConsumerGroupStateValue[], options.types!, retryCallback)
                 })
               },
               concurrentCallback,
@@ -1248,8 +1262,10 @@ export class Admin extends Base<AdminOptions> {
             for (const raw of result.groups) {
               groups.set(raw.groupId, {
                 id: raw.groupId,
-                state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
-                groupType: raw.groupType,
+                // ListGroups only carries group_state from v4, so below that the codec has nothing
+                // to report. 'Unknown' is the value Kafka itself uses for exactly this case.
+                state: (raw.groupState || 'Unknown') as ConsumerGroupStateValue,
+                groupType: raw.groupType || undefined,
                 protocolType: raw.protocolType
               })
             }
@@ -1327,7 +1343,7 @@ export class Admin extends Base<AdminOptions> {
                 for (const raw of result.groups) {
                   const group: Group = {
                     id: raw.groupId,
-                    state: raw.groupState.toUpperCase() as ConsumerGroupStateValue,
+                    state: raw.groupState as ConsumerGroupStateValue,
                     protocolType: raw.protocolType,
                     protocol: raw.protocolData,
                     members: new Map(),
@@ -1530,11 +1546,23 @@ export class Admin extends Base<AdminOptions> {
                 reason: typeof member === 'string' ? 'Not specified' : member.reason
               }))
 
-              api!(
-                connection!,
-                options.groupId,
+              if (api!.version >= 3) {
+                api!(
+                  connection!,
+                  options.groupId,
+                  members,
+                  retryCallback as Callback<unknown> as Callback<LeaveGroupResponse>
+                )
+                return
+              }
+
+              runConcurrentCallbacks<LeaveGroupResponse, LeaveGroupRequestMember>(
+                'Removing members from consumer group failed.',
                 members,
-                retryCallback as Callback<unknown> as Callback<LeaveGroupResponse>
+                (member, concurrentCallback) => {
+                  api!(connection!, options.groupId, [member], concurrentCallback)
+                },
+                error => retryCallback(error)
               )
             })
           })
@@ -1568,7 +1596,36 @@ export class Admin extends Base<AdminOptions> {
               return
             }
 
-            api!(connection!, options.keyType, options.keys, retryCallback)
+            if (api!.version >= 4) {
+              api!(connection!, options.keyType, options.keys, retryCallback)
+              return
+            }
+
+            runConcurrentCallbacks<FindCoordinatorResponse, string>(
+              'Finding coordinator failed.',
+              options.keys,
+              (key, concurrentCallback) => {
+                api!(connection!, options.keyType, [key], (error, response) => {
+                  if (response) {
+                    response.coordinators[0].key = key
+                  }
+
+                  concurrentCallback(error, response)
+                })
+              },
+              (error, responses) => {
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                retryCallback(null, {
+                  // The caller controls how many keys are looked up, so reduce rather than spread.
+                  throttleTimeMs: responses!.reduce((max, response) => Math.max(max, response.throttleTimeMs), 0),
+                  coordinators: responses!.flatMap(response => response.coordinators)
+                })
+              }
+            )
           })
         })
       },
@@ -1624,7 +1681,7 @@ export class Admin extends Base<AdminOptions> {
           return
         }
 
-        callback(null, (response as DescribeClientQuotasResponse).entries)
+        callback(null, (response as DescribeClientQuotasResponse).entries ?? [])
       },
       0
     )
@@ -1793,8 +1850,49 @@ export class Admin extends Base<AdminOptions> {
                         return
                       }
 
-                      /* c8 ignore next - Hard to test */
-                      api!(connection!, groupRequests, options.requireStable ?? false, retryCallback)
+                      if (api!.version >= 8) {
+                        api!(connection!, groupRequests, options.requireStable ?? false, retryCallback)
+                        return
+                      }
+
+                      runConcurrentCallbacks(
+                        'Listing consumer group offsets failed.',
+                        groupRequests,
+                        (groupRequest, groupCallback: Callback<OffsetFetchResponse>) => {
+                          api!(connection!, [groupRequest], options.requireStable ?? false, (error, response) => {
+                            if (error) {
+                              groupCallback(error)
+                              return
+                            }
+
+                            const legacyResponse = response as unknown as LegacyOffsetFetchResponse
+                            groupCallback(null, {
+                              throttleTimeMs: legacyResponse.throttleTimeMs,
+                              groups: [
+                                {
+                                  groupId: groupRequest.groupId,
+                                  topics: legacyResponse.topics,
+                                  errorCode: legacyResponse.errorCode
+                                }
+                              ]
+                            })
+                          })
+                        },
+                        (error, responses) => {
+                          if (error) {
+                            retryCallback(error)
+                            return
+                          }
+
+                          retryCallback(null, {
+                            throttleTimeMs: responses!.reduce(
+                              (max, response) => Math.max(max, response.throttleTimeMs),
+                              0
+                            ),
+                            groups: responses!.flatMap(response => response.groups)
+                          })
+                        }
+                      )
                     })
                   })
                 },

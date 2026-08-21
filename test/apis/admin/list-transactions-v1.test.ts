@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, type TransactionState, Writer, listTransactionsV1 } from '../../../src/index.ts'
+import { Reader, ResponseError, Writer, listTransactionsV1 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listTransactionsV1
 
@@ -35,7 +35,7 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes state filters correctly', () => {
-  const stateFilters: TransactionState[] = ['ONGOING', 'COMPLETE_COMMIT', 'PREPARE_ABORT']
+  const stateFilters: listTransactionsV1.TransactionState[] = ['Ongoing', 'CompleteCommit', 'PrepareAbort']
   const producerIdFilters: bigint[] = []
   const durationFilter = BigInt(0)
 
@@ -48,7 +48,7 @@ test('createRequest serializes state filters correctly', () => {
   // Verify state filters
   deepStrictEqual(
     serializedStateFilters,
-    ['ONGOING', 'COMPLETE_COMMIT', 'PREPARE_ABORT'],
+    ['Ongoing', 'CompleteCommit', 'PrepareAbort'],
     'State filters should be serialized correctly'
   )
 })

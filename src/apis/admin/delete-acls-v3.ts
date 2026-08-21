@@ -115,6 +115,8 @@ export function parseResponse (
     })
   }
 
+  reader.readTaggedFields()
+
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)
   }

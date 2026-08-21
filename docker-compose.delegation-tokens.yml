@@ -1,0 +1,17 @@
+# Enables delegation tokens on the SASL broker, which is what makes the CreateDelegationToken,
+# RenewDelegationToken, ExpireDelegationToken and DescribeDelegationToken codecs reachable at all:
+# without a secret key the broker rejects every one of them, and the requests additionally have to
+# arrive over an authenticated connection, which is why this targets broker-sasl.
+#
+# This is NOT part of docker-compose.yml because KRaft only gained delegation token support in
+# Apache Kafka 3.6 (KIP-900). On Confluent 7.5.0 (Kafka 3.5) the broker refuses to start outright:
+#
+#   java.lang.UnsupportedOperationException: Delegation tokens are not supported
+#
+# Apply it explicitly, and only on Confluent 7.6.0 or later:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.delegation-tokens.yml up -d --wait
+services:
+  broker-sasl:
+    environment:
+      KAFKA_DELEGATION_TOKEN_SECRET_KEY: 'compat-delegation-token-secret'

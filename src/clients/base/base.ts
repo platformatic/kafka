@@ -9,10 +9,10 @@ import {
 import { type API, type Callback } from '../../apis/definitions.ts'
 import * as apis from '../../apis/index.ts'
 import {
-  api as apiVersionsV3,
+  api as apiVersionsV1,
   type ApiVersionsResponse,
   type ApiVersionsResponseApi
-} from '../../apis/metadata/api-versions-v3.ts'
+} from '../../apis/metadata/api-versions-v1.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   baseApisChannel,
@@ -335,8 +335,14 @@ export class Base<
                 return
               }
 
-              // We use V3 to be able to get APIS from Kafka 2.4.0+
-              apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
+              // We use V1 because it is supported by Kafka 1.1.0+.
+              //
+              // The tradeoff is that clientSoftwareName and clientSoftwareVersion only exist from
+              // V3, so brokers cannot attribute client metrics to this package (KIP-511) and the
+              // two arguments below are accepted and discarded by the V1 codec. Removing the
+              // tradeoff requires negotiating down from V3 on UNSUPPORTED_VERSION rather than
+              // pinning a version: see https://github.com/platformatic/kafka/issues/343.
+              apiVersionsV1(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
             }, attempt)
           },
           (error, metadata) => {
@@ -636,7 +642,17 @@ export class Base<
                 // (e.g. MSK) authorize every topic operation and emit a CloudTrail
                 // AccessDenied per denied op (CreateTopic/DeleteTopic/...) — pure
                 // audit-log noise for permissions the client never exercises.
-                api!(connection!, topicsToFetch, autocreateTopics, false, retryCallback)
+                api!(connection!, topicsToFetch, autocreateTopics, false, (error, response) => {
+                  // Metadata v0-v8 do not carry topic UUIDs. Topic names are stable
+                  // surrogates for the consumer paths that use internal topic IDs.
+                  if (!error && api!.version <= 8) {
+                    for (const topic of response!.topics) {
+                      topic.topicId = topic.name!
+                    }
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             }, attempt)
           },

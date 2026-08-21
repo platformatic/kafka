@@ -1,12 +1,24 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { type DescribeConfigsResponseResult } from '../../../src/apis/admin/describe-configs-v3.ts'
+import {
+  type DescribeConfigsRequestResource,
+  type DescribeConfigsResponseResult
+} from '../../../src/apis/admin/describe-configs-v3.ts'
 import { Reader, ResponseError, Writer, describeConfigsV3 } from '../../../src/index.ts'
+import { ConfigSources, ConfigTypes } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeConfigsV3
 
+test('createRequest defaults optional filters to false', () => {
+  const reader = Reader.from(createRequest([]))
+  deepStrictEqual(reader.readArray(() => undefined, false, false), [])
+  strictEqual(reader.readBoolean(), false)
+  strictEqual(reader.readBoolean(), false)
+  strictEqual(reader.remaining, 0)
+})
+
 test('createRequest serializes basic parameters correctly', () => {
-  const resources = [
+  const resources: DescribeConfigsRequestResource[] = [
     {
       resourceType: 2, // TOPIC
       resourceName: 'test-topic',
@@ -65,7 +77,7 @@ test('createRequest serializes basic parameters correctly', () => {
 })
 
 test('createRequest serializes configurationKeys correctly', () => {
-  const resources = [
+  const resources: DescribeConfigsRequestResource[] = [
     {
       resourceType: 2, // TOPIC
       resourceName: 'test-topic',
@@ -98,8 +110,38 @@ test('createRequest serializes configurationKeys correctly', () => {
   )
 })
 
+test('createRequest serializes null, empty, and populated configuration keys', () => {
+  const reader = Reader.from(
+    createRequest(
+      [
+        { resourceType: 2, resourceName: 'all', configurationKeys: null },
+        { resourceType: 2, resourceName: 'none', configurationKeys: [] },
+        { resourceType: 2, resourceName: 'some', configurationKeys: ['cleanup.policy'] }
+      ],
+      false,
+      false
+    )
+  )
+
+  const resources = reader.readArray(
+    r => ({
+      resourceType: r.readInt8(),
+      resourceName: r.readString(false),
+      configurationKeys: r.readNullableArray(() => r.readString(false), false, false)
+    }),
+    false,
+    false
+  )
+
+  deepStrictEqual(
+    resources.map(resource => resource.configurationKeys),
+    [null, [], ['cleanup.policy']]
+  )
+  strictEqual(reader.remaining, 2)
+})
+
 test('createRequest serializes multiple resources correctly', () => {
-  const resources = [
+  const resources: DescribeConfigsRequestResource[] = [
     {
       resourceType: 2, // TOPIC
       resourceName: 'topic-1',
@@ -149,7 +191,7 @@ test('createRequest serializes multiple resources correctly', () => {
 })
 
 test('createRequest serializes include flags correctly', () => {
-  const resources = [
+  const resources: DescribeConfigsRequestResource[] = [
     {
       resourceType: 2,
       resourceName: 'test-topic',
@@ -218,16 +260,16 @@ test('parseResponse correctly processes a successful response with configs', () 
               name: 'cleanup.policy',
               value: 'delete',
               readOnly: false,
-              configSource: 1, // DYNAMIC_TOPIC_CONFIG
+              configSource: ConfigSources.DYNAMIC_TOPIC_CONFIG,
               isSensitive: false,
               synonyms: [
                 {
                   name: 'cleanup.policy',
                   value: 'delete',
-                  source: 1 // DYNAMIC_TOPIC_CONFIG
+                  source: ConfigSources.DYNAMIC_TOPIC_CONFIG
                 }
               ],
-              configType: 1, // STRING
+              configType: ConfigTypes.STRING,
               documentation: 'The cleanup policy for log segments'
             }
           ]
@@ -312,7 +354,7 @@ test('parseResponse correctly processes multiple config entries', () => {
               configSource: 1,
               isSensitive: false,
               synonyms: [],
-              configType: 1,
+              configType: ConfigTypes.STRING,
               documentation: 'The cleanup policy'
             },
             {
@@ -322,7 +364,7 @@ test('parseResponse correctly processes multiple config entries', () => {
               configSource: 1,
               isSensitive: false,
               synonyms: [],
-              configType: 1,
+              configType: ConfigTypes.STRING,
               documentation: 'The compression type'
             }
           ]
@@ -431,7 +473,7 @@ test('parseResponse handles multiple resources with mixed errors', () => {
               configSource: 1,
               isSensitive: false,
               synonyms: [],
-              configType: 1,
+              configType: ConfigTypes.STRING,
               documentation: null
             }
           ]

@@ -50,7 +50,7 @@ export interface OffsetCommitResponse {
 export function createRequest (
   groupId: string,
   generationIdOrMemberEpoch: number,
-  memberId: NullableString,
+  memberId: string,
   groupInstanceId: NullableString,
   topics: OffsetCommitRequestTopic[]
 ): Writer {
@@ -65,8 +65,10 @@ export function createRequest (
           .appendInt64(p.committedOffset)
           .appendInt32(p.committedLeaderEpoch)
           .appendString(p.committedMetadata)
-      })
-    })
+          .appendTaggedFields()
+      }, true, false)
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -107,6 +109,7 @@ export function parseResponse (
       }
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

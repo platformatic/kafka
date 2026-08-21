@@ -1,4 +1,4 @@
-import { ResponseError } from '../../errors.ts'
+import { ResponseError, UserError } from '../../errors.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
@@ -32,9 +32,16 @@ export interface InitProducerIdResponse {
 export function createRequest (
   transactionalId: NullableString,
   transactionTimeoutMs: number,
-  producerId: bigint,
-  producerEpoch: number
+  producerId?: bigint,
+  producerEpoch?: number
 ): Writer {
+  if (producerId === undefined && producerEpoch === undefined) {
+    producerId = -1n
+    producerEpoch = -1
+  } else if (producerId === undefined || producerEpoch === undefined) {
+    throw new UserError('InitProducerId requires both producerId and producerEpoch.')
+  }
+
   return Writer.create()
     .appendString(transactionalId, true)
     .appendInt32(transactionTimeoutMs)
@@ -62,6 +69,8 @@ export function parseResponse (
     producerId: reader.readInt64(),
     producerEpoch: reader.readInt16()
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

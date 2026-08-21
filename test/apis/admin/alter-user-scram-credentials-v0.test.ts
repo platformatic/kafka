@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { alterUserScramCredentialsV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -32,6 +32,8 @@ test('createRequest serializes deletions correctly', () => {
     // This should not be executed since the array is empty
     return {}
   })
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 
   // Verify serialized data
   deepStrictEqual(
@@ -50,6 +52,23 @@ test('createRequest serializes deletions correctly', () => {
     },
     'Serialized deletions should match expected values'
   )
+})
+
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendArray([{ user: 'testuser', errorCode: 0, errorMessage: null }], (writer, result) =>
+        writer.appendString(result.user).appendInt16(result.errorCode).appendString(result.errorMessage)
+      )
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 51, 0, reader).results, [{ user: 'testuser', errorCode: 0, errorMessage: null }])
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes upsertions correctly', () => {

@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { initProducerIdV5, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { initProducerIdV5, Reader, ResponseError, UserError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = initProducerIdV5
 
@@ -66,13 +66,8 @@ test('createRequest serializes parameters correctly without transactional ID', (
   )
 })
 
-test('createRequest with default values initializes a new producer', () => {
-  const writer = createRequest(
-    null, // No transactional ID
-    60000, // Default transaction timeout
-    -1n, // Default producer ID for new producers
-    -1 // Default producer epoch for new producers
-  )
+test('createRequest defaults producer identity to -1/-1', () => {
+  const writer = createRequest(null, 60000)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -95,6 +90,11 @@ test('createRequest with default values initializes a new producer', () => {
       producerEpoch: -1
     }
   )
+})
+
+test('createRequest rejects partial producer identity', () => {
+  throws(() => createRequest(null, 60000, 1n), UserError)
+  throws(() => createRequest(null, 60000, undefined, 1), UserError)
 })
 
 test('parseResponse correctly processes a successful response', () => {

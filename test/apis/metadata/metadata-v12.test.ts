@@ -1,79 +1,103 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { metadataV12, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import type { MetadataRequestTopic } from '../../../src/apis/metadata/metadata-v12.ts'
 
 const { createRequest, parseResponse } = metadataV12
 
-test('createRequest serializes request parameters correctly', () => {
-  // Values for the request
-  const topics = ['topic-1', 'topic-2']
-  const allowAutoTopicCreation = true
-  const includeTopicAuthorizedOperations = true
-
-  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations)
-
-  // Verify it returns a Writer
-  ok(writer instanceof Writer)
-
-  // Read the serialized data to verify correctness
+function readRequestTopics (writer: Writer) {
   const reader = Reader.from(writer)
-
-  // Read the entire request structure and verify in one assertion
   const serialized = {
     topics: reader.readArray(r => {
-      const uuid = r.readUUID() // Read UUID (will be null)
-      const topic = r.readString() // Read topic name
-      return { uuid, topic }
+      return { topicId: r.readUUID(), name: r.readNullableString() }
     }),
     allowAutoTopicCreation: reader.readBoolean(),
     includeTopicAuthorizedOperations: reader.readBoolean()
   }
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+  return serialized
+}
+
+test('createRequest serializes named topics with zero UUIDs', () => {
+  const allowAutoTopicCreation = true
+  const includeTopicAuthorizedOperations = true
+  const serialized = readRequestTopics(createRequest(['topic-1', 'topic-2'], allowAutoTopicCreation, includeTopicAuthorizedOperations))
 
   deepStrictEqual(
     serialized,
     {
       topics: [
-        { uuid: '00000000-0000-0000-0000-000000000000', topic: 'topic-1' },
-        { uuid: '00000000-0000-0000-0000-000000000000', topic: 'topic-2' }
+        { topicId: '00000000-0000-0000-0000-000000000000', name: 'topic-1' },
+        { topicId: '00000000-0000-0000-0000-000000000000', name: 'topic-2' }
       ],
       allowAutoTopicCreation,
       includeTopicAuthorizedOperations
-    },
-    'Serialized request should match expected structure'
+    }
   )
 })
 
-test('createRequest handles null topics', () => {
-  const topics = null
-  const allowAutoTopicCreation = false
-  const includeTopicAuthorizedOperations = false
+test('createRequest serializes ID-only topics', () => {
+  const serialized = readRequestTopics(createRequest([{ topicId: '11111111-2222-3333-4444-555555555555', name: null }]))
 
-  const writer = createRequest(topics, allowAutoTopicCreation, includeTopicAuthorizedOperations)
+  deepStrictEqual(serialized.topics, [{ topicId: '11111111-2222-3333-4444-555555555555', name: null }])
+})
 
-  // Verify it returns a Writer
+test('createRequest serializes name-only topics', () => {
+  const serialized = readRequestTopics(createRequest([{ name: 'named-topic' }]))
+
+  deepStrictEqual(serialized.topics, [{ topicId: '00000000-0000-0000-0000-000000000000', name: 'named-topic' }])
+})
+
+test('MetadataRequestTopic requires a topic ID or name', () => {
+  const topics: MetadataRequestTopic[] = [
+    { topicId: '11111111-2222-3333-4444-555555555555' },
+    { name: 'named-topic' },
+    { topicId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'named-topic' }
+  ]
+
+  // @ts-expect-error A topic must be identified by ID or name.
+  const invalidTopics: MetadataRequestTopic[] = [{}]
+  strictEqual(topics.length, 3)
+  strictEqual(invalidTopics.length, 1)
+})
+
+test('createRequest serializes mixed topic IDs and names', () => {
+  const serialized = readRequestTopics(
+    createRequest([
+      { topicId: '11111111-2222-3333-4444-555555555555', name: null },
+      { topicId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'named-topic' }
+    ])
+  )
+
+  deepStrictEqual(serialized.topics, [
+    { topicId: '11111111-2222-3333-4444-555555555555', name: null },
+    { topicId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'named-topic' }
+  ])
+})
+
+test('createRequest serializes null topics', () => {
+  const writer = createRequest(null, false, false)
   ok(writer instanceof Writer)
-
-  // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
 
-  // Read the entire request structure and verify in one assertion
-  const serialized = {
-    topics: reader.readNullableArray(() => {
-      throw new Error('This should not be called because topics is null')
-    }),
-    allowAutoTopicCreation: reader.readBoolean(),
-    includeTopicAuthorizedOperations: reader.readBoolean()
-  }
+  strictEqual(reader.readNullableArray(() => ''), null)
+  strictEqual(reader.readBoolean(), false)
+  strictEqual(reader.readBoolean(), false)
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+})
 
-  deepStrictEqual(
-    serialized,
-    {
-      topics: null,
-      allowAutoTopicCreation,
-      includeTopicAuthorizedOperations
-    },
-    'Serialized request with null topics should match expected structure'
-  )
+test('createRequest enables automatic topic creation by default and preserves explicit values', () => {
+  for (const allowAutoTopicCreation of [undefined, false, true]) {
+    const reader = Reader.from(createRequest(null, allowAutoTopicCreation))
+
+    strictEqual(reader.readNullableArray(() => ''), null)
+    strictEqual(reader.readBoolean(), allowAutoTopicCreation ?? true)
+    strictEqual(reader.readBoolean(), false)
+    reader.readTaggedFields()
+    strictEqual(reader.remaining, 0)
+  }
 })
 
 test('parseResponse correctly processes a successful response', () => {

@@ -16,10 +16,12 @@ test('any API should work in promise mode or callback mode', async t => {
 
   const promiseResponse = await api.async(connection, 'test-client', '1.0.0')
 
-  const callbackResponse = await new Promise((resolve, reject) => {
+  const callbackResponse = await new Promise<typeof promiseResponse>((resolve, reject) => {
     api(connection, 'test-client', '1.0.0', (error, response) => {
       if (error) {
         reject(error)
+      } else if (response === undefined) {
+        reject(new Error('API response is missing'))
       } else {
         resolve(response)
       }
@@ -29,6 +31,10 @@ test('any API should work in promise mode or callback mode', async t => {
   // This call has no callback but it will not fail
   api(connection, 'test-client', '1.0.0')
 
-  deepStrictEqual(promiseResponse, callbackResponse)
+  // Kafka can advance the finalized features epoch between these requests.
+  deepStrictEqual(
+    { ...promiseResponse, finalizedFeaturesEpoch: undefined },
+    { ...callbackResponse, finalizedFeaturesEpoch: undefined }
+  )
   deepStrictEqual(promiseResponse.apiKeys[0].name, 'Produce')
 })

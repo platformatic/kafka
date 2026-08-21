@@ -3,7 +3,10 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type TransactionState } from '../enumerations.ts'
+import { type KafkaTransactionState, type TransactionState } from './list-transactions-v0.ts'
+
+export { TransactionStates } from './list-transactions-v0.ts'
+export type { TransactionState } from './list-transactions-v0.ts'
 
 export type ListTransactionsRequest = Parameters<typeof createRequest>
 
@@ -16,7 +19,6 @@ export interface ListTransactionsResponseTransactionState {
 export interface ListTransactionsResponse {
   throttleTimeMs: number
   errorCode: number
-  errorMessage: NullableString
   unknownStateFilters: string[]
   transactionStates: ListTransactionsResponseTransactionState[]
 }
@@ -29,13 +31,13 @@ export interface ListTransactionsResponse {
     transactional_id_pattern => COMPACT_NULLABLE_STRING
 */
 export function createRequest (
-  stateFilters: TransactionState[],
+  stateFilters: Array<TransactionState | KafkaTransactionState>,
   producerIdFilters: bigint[],
   durationFilter: bigint,
   transactionalIdPattern: NullableString
 ): Writer {
   return Writer.create()
-    .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
+    .appendArray(stateFilters, (w, state) => w.appendString(normalizeState(state)), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)
     .appendInt64(durationFilter)
     .appendString(transactionalIdPattern)
@@ -43,10 +45,9 @@ export function createRequest (
 }
 
 /*
-  ListTransactions Response (Version: 2) => throttle_time_ms error_code error_message [unknown_state_filters] [transaction_states] TAG_BUFFER
+  ListTransactions Response (Version: 2) => throttle_time_ms error_code [unknown_state_filters] [transaction_states] TAG_BUFFER
     throttle_time_ms => INT32
     error_code => INT16
-    error_message => COMPACT_NULLABLE_STRING
     unknown_state_filters => COMPACT_STRING
     transaction_states => transactional_id producer_id transaction_state TAG_BUFFER
       transactional_id => COMPACT_STRING
@@ -62,7 +63,6 @@ export function parseResponse (
   const response: ListTransactionsResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readNullableString(),
     unknownStateFilters: reader.readArray(r => r.readString(), true, false)!,
     transactionStates: reader.readArray(r => {
       return {
@@ -73,11 +73,26 @@ export function parseResponse (
     })
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode !== 0) {
-    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)
+    throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response
+}
+
+function normalizeState (state: TransactionState | KafkaTransactionState): KafkaTransactionState {
+  switch (state) {
+    case 'EMPTY': return 'Empty'
+    case 'ONGOING': return 'Ongoing'
+    case 'PREPARE_ABORT': return 'PrepareAbort'
+    case 'COMMITTING': return 'PrepareCommit'
+    case 'ABORTING': return 'PrepareAbort'
+    case 'COMPLETE_COMMIT': return 'CompleteCommit'
+    case 'COMPLETE_ABORT': return 'CompleteAbort'
+    default: return state
+  }
 }
 
 export const api = createAPI<ListTransactionsRequest, ListTransactionsResponse>(66, 2, createRequest, parseResponse)

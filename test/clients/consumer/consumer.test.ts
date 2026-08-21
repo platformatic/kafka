@@ -3863,6 +3863,26 @@ test('startLagMonitoring should handle errors', async t => {
   ok(error.message.startsWith('Unknown topic '))
 })
 
+test('startLagMonitoring should skip checking lag while the consumer is not active', async t => {
+  const consumer = createConsumer(t)
+
+  // A freshly created consumer that never joined a group is not active — getLag would only
+  // add load to the cluster and compute a meaningless figure against absent assignments.
+  strictEqual(consumer.isActive(), false)
+
+  let getLagCalls = 0
+  consumer.getLag = ((_options: unknown, callback: CallbackWithPromise<unknown>) => {
+    getLagCalls++
+    callback(null, new Map())
+  }) as typeof consumer.getLag
+
+  consumer.startLagMonitoring({ topics: ['test-topic'] }, 20)
+  await new Promise(resolve => setTimeout(resolve, 100))
+  consumer.stopLagMonitoring()
+
+  strictEqual(getLagCalls, 0, 'getLag must not be called while the consumer is not active')
+})
+
 test('findGroupCoordinator should return the coordinator nodeId and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 

@@ -1113,6 +1113,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     if (this.#offsetsToCommit.size === 0) {
       return
     }
+    // Skip this tick while the consumer is mid-(re)join: a commit attempted here would fail
+    // with a rejoin-required error (ILLEGAL_GENERATION/UNKNOWN_MEMBER_ID/REBALANCE_IN_PROGRESS),
+    // and — since this runs on its own timer, independently of the group's own rejoin flow —
+    // each such failure calls joinGroup again. With a short autocommit interval and many
+    // consumers in the group, this can fire fresh JoinGroups fast enough that the group never
+    // completes a rebalance round. Leave the offsets queued; they are committed once the
+    // consumer becomes active again (next tick, or the final flush on close/destroy).
+    if (!this.#consumer.isActive()) {
+      return
+    }
 
     this.#autocommitInflight = true
     const offsets = Array.from(this.#offsetsToCommit.values())

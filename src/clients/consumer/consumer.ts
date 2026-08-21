@@ -665,6 +665,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#lagMonitoring = setTimeout(() => {
+      // Skip this tick while mid-(re)join: listOffsets adds load to a coordinator/cluster that
+      // may already be struggling, and any lag figure computed against stale/absent assignments
+      // would be meaningless anyway. Just reschedule and try again next tick.
+      if (!this.isActive()) {
+        this.#lagMonitoring!.refresh()
+        return
+      }
+
       this.getLag(options, () => this.#lagMonitoring!.refresh())
     }, interval)
   }
@@ -1616,7 +1624,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.assignments = []
             this.#syncPreferredReadReplicas()
             this.#memberEpoch = 0
-            this.#consumerGroupHeartbeat(options, () => {})
+            // Retry after a delay, not immediately: if many members get fenced around the same
+            // rebalance, resending ConsumerGroupHeartbeat with no delay at all can flood the
+            // coordinator faster than the group can converge.
+            this.#heartbeatInterval = setTimeout(() => {
+              this.#consumerGroupHeartbeat(options, () => {})
+            }, this.#lastHeartbeatIntervalMs || 1000)
             callback(error)
             return
           }

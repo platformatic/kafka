@@ -230,6 +230,60 @@ test('#consumerGroupHeartbeat should timeout and schedule another heartbeat', sk
   await stream.close()
 })
 
+test(
+  '#consumerGroupHeartbeat should emit a stalled event when heartbeats stop succeeding',
+  skipConsumerGroupProtocol,
+  async t => {
+    const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, heartbeatStallTimeout: 1000 })
+    const topic = await createTopic(t, true, 1)
+    const stream = await consumer.consume({ topics: [topic] })
+    t.after(() => stream.close())
+
+    await once(consumer, 'consumer:heartbeat:end')
+
+    mockUnavailableAPI(consumer, 'ConsumerGroupHeartbeat', false)
+
+    const [payload] = await once(consumer, 'consumer:heartbeat:stalled')
+
+    ok(payload.lastError instanceof UnsupportedApiError)
+    ok(payload.lastError.message.includes('Unsupported API ConsumerGroupHeartbeat.'))
+    ok(payload.lastHeartbeat instanceof Date)
+    ok(payload.stalledFor >= 900)
+
+    // Heartbeat handling is unchanged after the event: the retry loop keeps running
+    await once(consumer, 'consumer:heartbeat:error')
+  }
+)
+
+test(
+  '#consumerGroupHeartbeat should reset stall tracking after a successful heartbeat',
+  skipConsumerGroupProtocol,
+  async t => {
+    const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100, heartbeatStallTimeout: 1200 })
+    const topic = await createTopic(t, true, 1)
+    const stream = await consumer.consume({ topics: [topic] })
+    t.after(() => stream.close())
+
+    let stalled = false
+    consumer.on('consumer:heartbeat:stalled', () => {
+      stalled = true
+    })
+
+    // Fail a single heartbeat, then let the following ones succeed
+    mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, (...args) => {
+      const callback = args.at(-1) as (error: Error | null, response: null) => void
+      callback(new TimeoutError('Request timed out'), null)
+      return false
+    })
+
+    await once(consumer, 'consumer:heartbeat:error')
+    await once(consumer, 'consumer:heartbeat:end')
+    await sleep(1500)
+
+    strictEqual(stalled, false)
+  }
+)
+
 test('#leaveGroupNewProtocol should handle unavailable API errors', skipConsumerGroupProtocol, async t => {
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
   const topic = await createTopic(t, true, 1)

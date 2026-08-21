@@ -30,6 +30,7 @@
     "lint": "eslint --cache",
     "typecheck": "tsc -p . --noEmit",
     "format": "prettier -w benchmarks playground regression src test",
+    "prepare": "npm run build",
     "test": "c8 -c test/config/c8-local.json ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
     "test:ci": "./scripts/node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
     "test:integrity": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'regression/integrity/*.test.ts'",

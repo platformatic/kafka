@@ -25,6 +25,7 @@ Other KIPs up to Kafka 4.1.0 are likely supported, or at least have protocol/API
 | [KIP-255](https://cwiki.apache.org/confluence/display/KAFKA/KIP-255%3A+SASL+OAuth+Bearer+Tokens)                                                                     | Supported |
 | [KIP-339](https://cwiki.apache.org/confluence/display/KAFKA/KIP-339%3A+Create+a+new+IncrementalAlterConfigs+API)                                                     | Supported |
 | [KIP-345](https://cwiki.apache.org/confluence/display/KAFKA/KIP-345%3A+Introduce+static+membership+protocol+to+reduce+consumer+rebalances)                           | Supported |
+| [KIP-394](https://cwiki.apache.org/confluence/display/KAFKA/KIP-394%3A+Require+member.id+for+initial+join+group+request)                                            | Supported |
 | [KIP-368](https://cwiki.apache.org/confluence/display/KAFKA/KIP-368%3A+Allow+SASL+Connections+to+Periodically+Re-Authenticate)                                       | Supported |
 | [KIP-430](https://cwiki.apache.org/confluence/display/KAFKA/KIP-430%3A+Return+Authorized+Operations+in+Metadata%2C+Describe+Topics%2C+and+Describe+Groups+Responses) | Supported |
 | [KIP-455](https://cwiki.apache.org/confluence/display/KAFKA/KIP-455%3A+Create+an+Administrative+API+for+Replica+Reassignment)                                        | Supported |

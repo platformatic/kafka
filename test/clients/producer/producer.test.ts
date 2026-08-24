@@ -1089,6 +1089,21 @@ test('send should auto-initialize idempotent producer if needed', async t => {
   strictEqual(result.offsets?.length, 1)
 })
 
+test('send should use asynchronous gzip compression', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t)
+  const compressSync = t.mock.method(compressionsAlgorithms.gzip, 'compressSync', () => {
+    throw new Error('synchronous gzip should not be used')
+  })
+
+  await producer.send({
+    messages: [{ topic: testTopic, value: Buffer.from('async-gzip-message'.repeat(100)) }],
+    compression: 'gzip'
+  })
+
+  strictEqual(compressSync.mock.calls.length, 0)
+})
+
 test('send should handle synchronuous error during payload creation', async t => {
   const producer = createProducer(t, { strict: true })
   const testTopic = await createTopic(t)

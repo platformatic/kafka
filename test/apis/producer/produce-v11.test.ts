@@ -1,8 +1,16 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { type MessageRecord, ProduceAcks, produceV11, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import {
+  compressionsAlgorithms,
+  type MessageRecord,
+  ProduceAcks,
+  produceV11,
+  Reader,
+  ResponseError,
+  Writer
+} from '../../../src/index.ts'
 
-const { createRequest, parseResponse } = produceV11
+const { createRequest, createRequestAsync, parseResponse } = produceV11
 
 test('createRequest serializes basic parameters correctly', () => {
   const acks = 1
@@ -161,6 +169,44 @@ test('createRequest sets default partition and timestamp if not provided', () =>
     timestamp >= beforeTime && timestamp <= afterTime,
     `Timestamp ${timestamp} should be between ${beforeTime} and ${afterTime}`
   )
+})
+
+test('createRequestAsync creates gzip requests without synchronous compression', async t => {
+  const createMessages = (): MessageRecord[] => [
+    {
+      topic: 'test-topic-b',
+      partition: 1,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-b1'.repeat(100))
+    },
+    {
+      topic: 'test-topic-a',
+      partition: 0,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-a0'.repeat(100))
+    },
+    {
+      topic: 'test-topic-b',
+      partition: 0,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-b0'.repeat(100))
+    },
+    {
+      topic: 'test-topic-a',
+      partition: 1,
+      timestamp: 1720000000000n,
+      value: Buffer.from('value-a1'.repeat(100))
+    }
+  ]
+  const expected = createRequest(1, 30000, createMessages(), { compression: 'gzip' })
+  const compressSync = t.mock.method(compressionsAlgorithms.gzip, 'compressSync', () => {
+    throw new Error('synchronous gzip should not be used')
+  })
+
+  const actual = await createRequestAsync(1, 30000, createMessages(), { compression: 'gzip' })
+
+  strictEqual(compressSync.mock.calls.length, 0)
+  deepStrictEqual(actual.buffer, expected.buffer)
 })
 
 test('createRequest with transactional ID', () => {

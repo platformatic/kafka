@@ -2031,115 +2031,129 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #performJoinGroup (
-    options: Required<GroupOptions>,
-    callback: CallbackWithPromise<string>,
-    rejoinAttempts: number = 0
-  ): void {
+  #performJoinGroup (options: Required<GroupOptions>, callback: CallbackWithPromise<string>): void {
     if (!this.#membershipActive) {
       callback(null)
       return
     }
 
-    this.#cancelHeartbeat()
+    const attemptErrors: Error[] = []
 
-    this.#createJoinGroupProtocols(options, (error, protocols) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    this[kPerformWithRetry]<string>(
+      'joinGroup',
+      retryCallback => {
+        if (!this.#membershipActive) {
+          retryCallback(null)
+          return
+        }
 
-      this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
-        'joinGroup',
-        (connection, groupCallback) => {
-          this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
-            if (error) {
-              groupCallback(error)
-              return
-            }
+        this.#cancelHeartbeat()
 
-            api!(
-              connection,
-              this.groupId,
-              options.sessionTimeout,
-              options.rebalanceTimeout,
-              this.memberId ?? '',
-              this.groupInstanceId,
-              'consumer',
-              protocols!,
-              '',
-              groupCallback
-            )
-          })
-        },
-        (error, response) => {
-          if (!this.#membershipActive) {
-            callback(null)
-            return
-          }
-
+        this.#createJoinGroupProtocols(options, (error, protocols) => {
           if (error) {
-            if (this.#getRejoinError(error) && rejoinAttempts < (this[kOptions].retries as number)) {
-              this.#performJoinGroup(options, callback, rejoinAttempts + 1)
-              return
-            }
-
-            callback(error)
+            retryCallback(error)
             return
           }
 
-          // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
-          this.memberId = response!.memberId!
-          this.generationId = response!.generationId
-          this.#isLeader = response!.leader === this.memberId
-          this.#protocol = response!.protocolName!
+          this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
+            'joinGroup',
+            (connection, groupCallback) => {
+              this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
+                if (error) {
+                  groupCallback(error)
+                  return
+                }
 
-          this.#members = new Map()
-          for (const member of response!.members) {
-            this.#members.set(
-              member.memberId,
-              this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
-            )
-          }
-
-          // Send a syncGroup request
-          this.#syncGroup(options.partitionAssigner, (error, response) => {
-            if (!this.#membershipActive) {
-              callback(null)
-              return
-            }
-
-            if (error) {
-              if (this.#getRejoinError(error) && rejoinAttempts < (this[kOptions].retries as number)) {
-                this.#performJoinGroup(options, callback, rejoinAttempts + 1)
+                api!(
+                  connection,
+                  this.groupId,
+                  options.sessionTimeout,
+                  options.rebalanceTimeout,
+                  this.memberId ?? '',
+                  this.groupInstanceId,
+                  'consumer',
+                  protocols!,
+                  '',
+                  groupCallback
+                )
+              })
+            },
+            (error, response) => {
+              if (!this.#membershipActive) {
+                retryCallback(null)
                 return
               }
 
-              callback(error)
-              return
+              if (error) {
+                retryCallback(error)
+                return
+              }
+
+              // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
+              this.memberId = response!.memberId!
+              this.generationId = response!.generationId
+              this.#isLeader = response!.leader === this.memberId
+              this.#protocol = response!.protocolName!
+
+              this.#members = new Map()
+              for (const member of response!.members) {
+                this.#members.set(
+                  member.memberId,
+                  this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
+                )
+              }
+
+              // Send a syncGroup request
+              this.#syncGroup(options.partitionAssigner, (error, response) => {
+                if (!this.#membershipActive) {
+                  retryCallback(null)
+                  return
+                }
+
+                if (error) {
+                  retryCallback(error)
+                  return
+                }
+
+                this.assignments = response!
+                this.#syncPreferredReadReplicas()
+
+                this.#cancelHeartbeat()
+                this.#heartbeatInterval = setTimeout(() => {
+                  this.#heartbeat(options)
+                }, options.heartbeatInterval)
+
+                this.emitWithDebug('consumer', 'group:join', {
+                  groupId: this.groupId,
+                  memberId: this.memberId,
+                  generationId: this.generationId,
+                  isLeader: this.#isLeader,
+                  assignments: this.assignments
+                })
+
+                retryCallback(null, this.memberId!)
+              })
             }
-
-            this.assignments = response!
-            this.#syncPreferredReadReplicas()
-
-            this.#cancelHeartbeat()
-            this.#heartbeatInterval = setTimeout(() => {
-              this.#heartbeat(options)
-            }, options.heartbeatInterval)
-
-            this.emitWithDebug('consumer', 'group:join', {
-              groupId: this.groupId,
-              memberId: this.memberId,
-              generationId: this.generationId,
-              isLeader: this.#isLeader,
-              assignments: this.assignments
-            })
-
-            callback(null, this.memberId!)
-          })
+          )
+        })
+      },
+      (error, result) => {
+        if (error) {
+          // kPerformWithRetry wraps the error into "joinGroup failed N times" once more than one attempt
+          // happened, but attempt 0 alone routinely "fails" with MEMBER_ID_REQUIRED (KIP-394's normal
+          // first-join handshake). Unwrap to the real last error, unless it is itself still a rejoin signal.
+          const lastError = attemptErrors.at(-1)
+          callback(lastError && !findErrorBy(lastError, 'needsRejoin', true) ? lastError : error)
+          return
         }
-      )
-    })
+
+        callback(null, result)
+      },
+      0,
+      attemptErrors,
+      error => !this.#getRejoinError(error),
+      true
+    )
   }
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {

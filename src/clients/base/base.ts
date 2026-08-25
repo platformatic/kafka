@@ -419,15 +419,19 @@ export class Base<
     callback: CallbackWithPromise<ReturnType>,
     attempt: number = 0,
     errors: Error[] = [],
-    shouldSkipRetry?: (e: Error) => boolean
+    shouldSkipRetry?: (e: Error) => boolean,
+    ignoreCanRetry?: boolean
   ): void | Promise<ReturnType> {
     const retries = this[kOptions].retries! as number
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {
       if (error) {
-        // Only retry if all the errors in the chain are retriable
-        const retriable = !findErrorBy(error, 'canRetry', false)
+        // By default only retry if all the errors in the chain are retriable. Callers whose retry
+        // condition is not the generic canRetry flag (e.g. a consumer group rejoin signal, which is
+        // deliberately not canRetry since it requires redoing the handshake, not resending the request)
+        // can set ignoreCanRetry and drive the decision entirely through shouldSkipRetry.
+        const retriable = ignoreCanRetry || !findErrorBy(error, 'canRetry', false)
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
@@ -446,7 +450,7 @@ export class Base<
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             try {
-              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry, ignoreCanRetry)
             } catch (error) {
               errors.push(error)
               callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))

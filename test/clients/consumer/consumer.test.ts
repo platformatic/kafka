@@ -5461,6 +5461,24 @@ test('joinGroup should cancel when membership has been cancelled during rejoin (
   deepStrictEqual(await consumer.joinGroup(), undefined)
 })
 
+test('joinGroup should fail with a bounded error rather than retrying forever when the broker keeps requesting a rejoin', async t => {
+  const consumer = createConsumer(t, { retries: 1, retryDelay: 0 })
+
+  mockAPI(consumer[kConnections], syncGroupV5.api.key, null, null, (_original: Function, ...args: any[]) => {
+    const groupCallback = args.at(-1)
+    groupCallback(new ProtocolError('REBALANCE_IN_PROGRESS'))
+    return true // Keep mocking: the broker never stops asking for a rejoin
+  })
+
+  try {
+    await consumer.joinGroup()
+    throw new Error('Expected error not thrown')
+  } catch (error) {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'joinGroup failed 2 times.')
+  }
+})
+
 test('leaveGroup should reset group state and leave the consumer group and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 

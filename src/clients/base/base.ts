@@ -13,6 +13,7 @@ import {
   type ApiVersionsResponse,
   type ApiVersionsResponseApi
 } from '../../apis/metadata/api-versions-v1.ts'
+import { api as apiVersionsV3 } from '../../apis/metadata/api-versions-v3.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   baseApisChannel,
@@ -98,6 +99,7 @@ export class Base<
 
   #metadata: ClusterMetadata | undefined
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
+  #apiVersionsVersions: WeakMap<Connection, 1 | 3>
 
   constructor (options: OptionsType) {
     super()
@@ -107,6 +109,7 @@ export class Base<
     this[kInstance] = currentInstance++
     this[kApis] = []
     this[kContext] = options.context
+    this.#apiVersionsVersions = new WeakMap()
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType) as OptionsType
@@ -335,14 +338,34 @@ export class Base<
                 return
               }
 
-              // We use V1 because it is supported by Kafka 1.1.0+.
-              //
-              // The tradeoff is that clientSoftwareName and clientSoftwareVersion only exist from
-              // V3, so brokers cannot attribute client metrics to this package (KIP-511) and the
-              // two arguments below are accepted and discarded by the V1 codec. Removing the
-              // tradeoff requires negotiating down from V3 on UNSUPPORTED_VERSION rather than
-              // pinning a version: see https://github.com/platformatic/kafka/issues/343.
-              apiVersionsV1(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
+              const apiVersionsVersion = this.#apiVersionsVersions.get(connection!)
+
+              const listApisV1 = () => {
+                apiVersionsV1(connection!, clientSoftwareName, clientSoftwareVersion, (error, response) => {
+                  retryCallback(error, response)
+                })
+              }
+
+              if (apiVersionsVersion === 1) {
+                listApisV1()
+                return
+              }
+
+              apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, (error, response) => {
+                if (!error) {
+                  this.#apiVersionsVersions.set(connection!, 3)
+                  retryCallback(null, response)
+                  return
+                }
+
+                if (findErrorBy(error, 'apiId', 'UNSUPPORTED_VERSION')) {
+                  this.#apiVersionsVersions.set(connection!, 1)
+                  listApisV1()
+                  return
+                }
+
+                retryCallback(error)
+              })
             }, attempt)
           },
           (error, metadata) => {

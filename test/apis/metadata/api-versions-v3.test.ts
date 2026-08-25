@@ -171,14 +171,24 @@ test('parseResponse throws error on non-zero error code', () => {
       // Check that response is attached and has correct properties
       deepStrictEqual(err.response, {
         errorCode: 42,
-        throttleTimeMs: 0,
         apiKeys: [],
-        supportedFeatures: [],
-        finalizedFeaturesEpoch: -1n,
-        finalizedFeatures: [],
-        zkMigrationReady: false
+        throttleTimeMs: 0
       })
 
+      return true
+    }
+  )
+})
+
+test('parseResponse handles a v0-framed unsupported version response', () => {
+  const reader = Reader.from(Writer.create().appendInt16(35).appendInt32(0))
+
+  throws(
+    () => parseResponse(1, 18, 3, reader),
+    (err: any) => {
+      strictEqual(err instanceof ResponseError, true)
+      strictEqual(err.errors[0].apiId, 'UNSUPPORTED_VERSION')
+      strictEqual(reader.remaining, 4)
       return true
     }
   )

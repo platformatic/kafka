@@ -3,6 +3,7 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type ScramMechanismValue } from '../enumerations.ts'
 
 export interface DescribeUserScramCredentialsRequestUser {
   name: string
@@ -11,7 +12,7 @@ export interface DescribeUserScramCredentialsRequestUser {
 export type DescribeUserScramCredentialsRequest = Parameters<typeof createRequest>
 
 export interface DescribeUserScramCredentialsResponseResultCredentialInfo {
-  mechanism: number
+  mechanism: ScramMechanismValue
   iterations: number
 }
 
@@ -34,7 +35,7 @@ export interface DescribeUserScramCredentialsResponse {
     users => name TAG_BUFFER
       name => COMPACT_STRING
 */
-export function createRequest (users: DescribeUserScramCredentialsRequestUser[]): Writer {
+export function createRequest (users: DescribeUserScramCredentialsRequestUser[] | null): Writer {
   return Writer.create()
     .appendArray(users, (w, u) => w.appendString(u.name))
     .appendTaggedFields()
@@ -88,13 +89,15 @@ export function parseResponse (
         errorMessage,
         credentialInfos: r.readArray(r => {
           return {
-            mechanism: r.readInt8(),
+            mechanism: r.readInt8() as ScramMechanismValue,
             iterations: r.readInt32()
           }
         })
       }
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

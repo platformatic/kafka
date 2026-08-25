@@ -3,6 +3,7 @@ import { Reader } from '../../protocol/reader.ts'
 import { readRecordsBatches, type RecordsBatch } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { readKnownTaggedFields } from '../tagged-fields.ts'
 
 export interface FetchRequestPartition {
   partition: number
@@ -18,10 +19,9 @@ export interface FetchRequestTopic {
   partitions: FetchRequestPartition[]
 }
 
-export interface FetchRequestForgottenTopicsData {
-  topic: string
-  partitions: number[]
-}
+export type FetchRequestForgottenTopicsData =
+  | { topicId: string, /** @deprecated Use topicId instead. */ topic?: string, partitions: number[] }
+  | { /** @deprecated Use topicId instead. */ topic: string, topicId?: never, partitions: number[] }
 
 export type FetchRequest = Parameters<typeof createRequest>
 
@@ -30,15 +30,31 @@ export interface FetchResponsePartitionAbortedTransaction {
   firstOffset: bigint
 }
 
+export interface FetchResponsePartitionEpochEndOffset {
+  epoch: number
+  endOffset: bigint
+}
+
+export interface FetchResponsePartitionCurrentLeader {
+  leaderId: number
+  leaderEpoch: number
+}
+
 export interface FetchResponsePartition {
   partitionIndex: number
   errorCode: number
   highWatermark: bigint
   lastStableOffset: bigint
   logStartOffset: bigint
-  abortedTransactions: FetchResponsePartitionAbortedTransaction[]
+  // The largest epoch and end offset known to diverge from the requested fetch offset.
+  divergingEpoch?: FetchResponsePartitionEpochEndOffset
+  // The current partition leader, or -1 values when the leader is unknown.
+  currentLeader?: FetchResponsePartitionCurrentLeader
+  // The snapshot to use when the requested offset precedes the log start offset.
+  snapshotId?: FetchResponsePartitionEpochEndOffset
+  abortedTransactions: FetchResponsePartitionAbortedTransaction[] | null
   preferredReadReplica: number
-  records?: RecordsBatch[]
+  records?: RecordsBatch[] | null
 }
 
 export interface FetchResponseTopic {
@@ -104,7 +120,7 @@ export function createRequest (
       })
     })
     .appendArray(forgottenTopicsData, (w, t) => {
-      w.appendUUID(t.topic).appendArray(
+      w.appendUUID(t.topicId ?? t.topic).appendArray(
         t.partitions,
         (w, p) => {
           w.appendInt32(p)
@@ -124,12 +140,15 @@ export function createRequest (
     session_id => INT32
     responses => topic_id [partitions] TAG_BUFFER
       topic_id => UUID
-      partitions => partition_index error_code high_watermark last_stable_offset log_start_offset [aborted_transactions] preferred_read_replica records TAG_BUFFER
+        partitions => partition_index error_code high_watermark last_stable_offset log_start_offset diverging_epoch current_leader snapshot_id [aborted_transactions] preferred_read_replica records TAG_BUFFER
         partition_index => INT32
         error_code => INT16
         high_watermark => INT64
         last_stable_offset => INT64
         log_start_offset => INT64
+        diverging_epoch => epoch end_offset
+        current_leader => leader_id leader_epoch
+        snapshot_id => end_offset epoch
         aborted_transactions => producer_id first_offset TAG_BUFFER
           producer_id => INT64
           first_offset => INT64
@@ -165,13 +184,17 @@ export function parseResponse (
             highWatermark: r.readInt64(),
             lastStableOffset: r.readInt64(),
             logStartOffset: r.readInt64(),
-            abortedTransactions: r.readArray(r => {
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
+            abortedTransactions: r.readNullableArray(r => {
               return {
                 producerId: r.readInt64(),
                 firstOffset: r.readInt64()
               }
             }),
-            preferredReadReplica: r.readInt32()
+            preferredReadReplica: r.readInt32(),
+            records: []
           }
 
           if (partition.errorCode !== 0) {
@@ -179,18 +202,28 @@ export function parseResponse (
           }
 
           // We need to reduce the size by one to follow the COMPACT_RECORDS specification.
-          const recordsSize = r.readUnsignedVarInt() - 1
-
-          if (recordsSize > 0) {
+          let recordsSize = r.readUnsignedVarInt()
+          if (recordsSize === 0) {
+            partition.records = null
+          }
+          if (recordsSize > 1) {
+            recordsSize--
             partition.records = readRecordsBatches(Reader.from(r.buffer.subarray(r.position, r.position + recordsSize)))
             r.skip(recordsSize)
           }
 
+          readKnownTaggedFields(r, {
+            0: r => { partition.divergingEpoch = { epoch: r.readInt32(), endOffset: r.readInt64() } },
+            1: r => { partition.currentLeader = { leaderId: r.readInt32(), leaderEpoch: r.readInt32() } },
+            2: r => { partition.snapshotId = { endOffset: r.readInt64(), epoch: r.readInt32() } }
+          })
+
           return partition
-        })
+        }, true, false)
       }
     })
   }
+  readKnownTaggedFields(reader, {})
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

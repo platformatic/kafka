@@ -80,7 +80,7 @@ function mockTransactionCoordinator (producer: any, coordinatorId: number, endEr
     undefined,
     (_original, name, callback: Callback<API<FindCoordinatorRequest, FindCoordinatorResponse>>) => {
       if (name === 'FindCoordinator') {
-        callback(null, ((
+        const findCoordinator = (
           _connection: Connection,
           _keyType: number,
           keys: string[],
@@ -89,10 +89,19 @@ function mockTransactionCoordinator (producer: any, coordinatorId: number, endEr
           apiCallback(null, {
             throttleTimeMs: 0,
             coordinators: [
-              { key: keys[0], nodeId: coordinatorId, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+              {
+                key: keys[0],
+                nodeId: coordinatorId,
+                host: 'localhost',
+                port: 9092,
+                errorCode: 0,
+                errorMessage: null
+              }
             ]
           })
-        }) as any)
+        }
+        Object.assign(findCoordinator, { version: 6 })
+        callback(null, findCoordinator as unknown as API<FindCoordinatorRequest, FindCoordinatorResponse>)
         return true
       }
 

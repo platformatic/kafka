@@ -87,6 +87,8 @@ export function parseResponse (
     })
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, response.errorMessage] }, response)
   }

@@ -614,7 +614,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   return
                 }
 
-                api!(connection!, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], retryCallback)
+                api!(connection!, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], (error, response) => {
+                  if (response && api!.version < 4) {
+                    response.coordinators[0].key = transactionalId
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             }, attempt)
           },

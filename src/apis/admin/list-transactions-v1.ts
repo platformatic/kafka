@@ -3,7 +3,10 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import { type TransactionState } from '../enumerations.ts'
+import { type KafkaTransactionState, type TransactionState } from './list-transactions-v0.ts'
+
+export { TransactionStates } from './list-transactions-v0.ts'
+export type { TransactionState } from './list-transactions-v0.ts'
 
 export type ListTransactionsRequest = Parameters<typeof createRequest>
 
@@ -27,13 +30,13 @@ export interface ListTransactionsResponse {
     duration_filter => INT64
 */
 export function createRequest (
-  stateFilters: TransactionState[],
+  stateFilters: Array<TransactionState | KafkaTransactionState>,
   producerIdFilters: bigint[],
   durationFilter: bigint,
   _transactionalIdPattern: NullableString
 ): Writer {
   return Writer.create()
-    .appendArray(stateFilters, (w, t) => w.appendString(t), true, false)
+    .appendArray(stateFilters, (w, state) => w.appendString(normalizeState(state)), true, false)
     .appendArray(producerIdFilters, (w, p) => w.appendInt64(p), true, false)
     .appendInt64(durationFilter)
     .appendTaggedFields()
@@ -68,11 +71,26 @@ export function parseResponse (
     })
   }
 
+  reader.readTaggedFields()
+
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)
   }
 
   return response
+}
+
+function normalizeState (state: TransactionState | KafkaTransactionState): KafkaTransactionState {
+  switch (state) {
+    case 'EMPTY': return 'Empty'
+    case 'ONGOING': return 'Ongoing'
+    case 'PREPARE_ABORT': return 'PrepareAbort'
+    case 'COMMITTING': return 'PrepareCommit'
+    case 'ABORTING': return 'PrepareAbort'
+    case 'COMPLETE_COMMIT': return 'CompleteCommit'
+    case 'COMPLETE_ABORT': return 'CompleteAbort'
+    default: return state
+  }
 }
 
 export const api = createAPI<ListTransactionsRequest, ListTransactionsResponse>(66, 1, createRequest, parseResponse)

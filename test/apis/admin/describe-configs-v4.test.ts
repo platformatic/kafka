@@ -1,9 +1,17 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { type DescribeConfigsResponseResult } from '../../../src/apis/admin/describe-configs-v4.ts'
+import { ConfigSources, ConfigTypes } from '../../../src/apis/enumerations.ts'
 import { Reader, ResponseError, Writer, describeConfigsV4 } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = describeConfigsV4
+
+test('createRequest defaults optional filters to false', () => {
+  const reader = Reader.from(createRequest([]))
+  deepStrictEqual(reader.readArray(() => undefined), [])
+  strictEqual(reader.readBoolean(), false)
+  strictEqual(reader.readBoolean(), false)
+})
 
 test('createRequest serializes basic parameters correctly', () => {
   const includeSynonyms = true
@@ -215,16 +223,16 @@ test('parseResponse correctly processes a successful response with configs', () 
               name: 'cleanup.policy',
               value: 'delete',
               readOnly: false,
-              configSource: 1, // DYNAMIC_TOPIC_CONFIG
+              configSource: ConfigSources.DYNAMIC_TOPIC_CONFIG,
               isSensitive: false,
               synonyms: [
                 {
                   name: 'cleanup.policy',
                   value: 'delete',
-                  source: 1 // DYNAMIC_TOPIC_CONFIG
+                  source: ConfigSources.DYNAMIC_TOPIC_CONFIG
                 }
               ],
-              configType: 1, // STRING
+              configType: ConfigTypes.STRING,
               documentation: 'The cleanup policy for log segments'
             }
           ]
@@ -261,6 +269,8 @@ test('parseResponse correctly processes a successful response with configs', () 
   deepStrictEqual(response.results[0].configs[0].name, 'cleanup.policy', 'Config name should be parsed correctly')
 
   deepStrictEqual(response.results[0].configs[0].value, 'delete', 'Config value should be parsed correctly')
+
+  strictEqual(response.results[0].configs[0].configType, ConfigTypes.STRING)
 
   deepStrictEqual(
     response.results[0].configs[0].synonyms[0],

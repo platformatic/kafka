@@ -1,6 +1,8 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
+import { type DescribeUserScramCredentialsResponseResult } from '../../../src/apis/admin/describe-user-scram-credentials-v0.ts'
 import { Reader, ResponseError, Writer, describeUserScramCredentialsV0 } from '../../../src/index.ts'
+import { ScramMechanisms } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeUserScramCredentialsV0
 
@@ -23,6 +25,33 @@ test('createRequest serializes empty users array correctly', () => {
 
   // Verify serialized data
   deepStrictEqual(usersArray, [], 'Empty users array should be serialized correctly')
+})
+
+test('createRequest serializes null users with compact encoding and consumes root tags', () => {
+  const reader = Reader.from(createRequest(null))
+  strictEqual(
+    reader.readNullableArray(() => undefined),
+    null
+  )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
+})
+
+test('parses a complete flexible response with unknown top-level tags', () => {
+  const reader = Reader.from(
+    Writer.create()
+      .appendInt32(0)
+      .appendInt16(0)
+      .appendString(null)
+      .appendArray([], () => {})
+      .appendUnsignedVarInt(1)
+      .appendUnsignedVarInt(42)
+      .appendUnsignedVarInt(1)
+      .appendUnsignedInt8(0)
+  )
+
+  deepStrictEqual(parseResponse(1, 50, 0, reader).results, [])
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes single user correctly', () => {
@@ -131,7 +160,7 @@ test('parseResponse correctly processes a response with user credentials', () =>
           errorMessage: null,
           credentialInfos: [
             {
-              mechanism: 0, // SCRAM-SHA-256
+              mechanism: ScramMechanisms.SCRAM_SHA_256,
               iterations: 4096
             }
           ]
@@ -160,41 +189,42 @@ test('parseResponse correctly processes a response with user credentials', () =>
 
   // Verify credential infos
   deepStrictEqual(result.credentialInfos.length, 1, 'Should have one credential info')
-  deepStrictEqual(result.credentialInfos[0].mechanism, 0, 'Mechanism should be parsed correctly')
+  deepStrictEqual(result.credentialInfos[0].mechanism, ScramMechanisms.SCRAM_SHA_256, 'Mechanism should be parsed correctly')
   deepStrictEqual(result.credentialInfos[0].iterations, 4096, 'Iterations should be parsed correctly')
 })
 
 test('parseResponse correctly processes a response with multiple users', () => {
   // Create a response with multiple users
+  const results: DescribeUserScramCredentialsResponseResult[] = [
+    {
+      user: 'user1',
+      errorCode: 0,
+      errorMessage: null,
+      credentialInfos: [
+        {
+          mechanism: ScramMechanisms.SCRAM_SHA_256,
+          iterations: 4096
+        }
+      ]
+    },
+    {
+      user: 'user2',
+      errorCode: 0,
+      errorMessage: null,
+      credentialInfos: [
+        {
+          mechanism: ScramMechanisms.SCRAM_SHA_512,
+          iterations: 8192
+        }
+      ]
+    }
+  ]
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs
     .appendInt16(0) // errorCode
     .appendString(null) // errorMessage
     .appendArray(
-      [
-        {
-          user: 'user1',
-          errorCode: 0,
-          errorMessage: null,
-          credentialInfos: [
-            {
-              mechanism: 0, // SCRAM-SHA-256
-              iterations: 4096
-            }
-          ]
-        },
-        {
-          user: 'user2',
-          errorCode: 0,
-          errorMessage: null,
-          credentialInfos: [
-            {
-              mechanism: 1, // SCRAM-SHA-512
-              iterations: 8192
-            }
-          ]
-        }
-      ],
+      results,
       (w, result) => {
         w.appendString(result.user)
           .appendInt16(result.errorCode)
@@ -221,7 +251,7 @@ test('parseResponse correctly processes a response with multiple users', () => {
   // Verify credential mechanisms
   deepStrictEqual(
     response.results.map(r => r.credentialInfos[0].mechanism),
-    [0, 1],
+    [ScramMechanisms.SCRAM_SHA_256, ScramMechanisms.SCRAM_SHA_512],
     'Credential mechanisms should be parsed correctly'
   )
 
@@ -247,11 +277,11 @@ test('parseResponse correctly processes a response with multiple credential info
           errorMessage: null,
           credentialInfos: [
             {
-              mechanism: 0, // SCRAM-SHA-256
+              mechanism: ScramMechanisms.SCRAM_SHA_256,
               iterations: 4096
             },
             {
-              mechanism: 1, // SCRAM-SHA-512
+              mechanism: ScramMechanisms.SCRAM_SHA_512,
               iterations: 8192
             }
           ]
@@ -276,7 +306,7 @@ test('parseResponse correctly processes a response with multiple credential info
   // Verify credential mechanisms
   deepStrictEqual(
     response.results[0].credentialInfos.map(info => info.mechanism),
-    [0, 1],
+    [ScramMechanisms.SCRAM_SHA_256, ScramMechanisms.SCRAM_SHA_512],
     'Credential mechanisms should be parsed correctly'
   )
 

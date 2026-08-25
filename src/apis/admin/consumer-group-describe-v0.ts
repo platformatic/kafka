@@ -23,7 +23,7 @@ export interface ConsumerGroupDescribeResponseMember {
   memberEpoch: number
   clientId: string
   clientHost: string
-  subscribedTopicNames: string
+  subscribedTopicNames: string[]
   subscribedTopicRegex: NullableString
   assignment: ConsumerGroupDescribeResponseMemberAssignment
   targetAssignment: ConsumerGroupDescribeResponseMemberAssignment
@@ -38,6 +38,7 @@ export interface ConsumerGroupDescribeResponseGroup {
   assignmentEpoch: number
   assignorName: string
   members: ConsumerGroupDescribeResponseMember[]
+  authorizedOperations: number
 }
 
 export interface ConsumerGroupDescribeResponse {
@@ -107,7 +108,7 @@ export function parseResponse (
         errors.push([`/groups/${i}`, [errorCode, errorMessage]])
       }
 
-      return {
+      const group = {
         errorCode,
         errorMessage,
         groupId: r.readString(),
@@ -116,39 +117,63 @@ export function parseResponse (
         assignmentEpoch: r.readInt32(),
         assignorName: r.readString(),
         members: r.readArray(r => {
-          return {
-            memberId: r.readString(),
-            instanceId: r.readNullableString(),
-            rackId: r.readNullableString(),
-            memberEpoch: r.readInt32(),
-            clientId: r.readString(),
-            clientHost: r.readString(),
-            subscribedTopicNames: r.readString(),
-            subscribedTopicRegex: r.readNullableString(),
-            assignment: {
-              topicPartitions: r.readArray(r => {
-                return {
-                  topicId: r.readUUID(),
-                  topicName: r.readString(),
-                  partitions: r.readArray(() => r.readInt32(), true, false)
-                }
-              })
-            },
-            targetAssignment: {
-              topicPartitions: r.readArray(r => {
-                return {
-                  topicId: r.readUUID(),
-                  topicName: r.readString(),
-                  partitions: r.readArray(() => r.readInt32(), true, false)
-                }
-              })
-            }
+          const memberId = r.readString()
+          const instanceId = r.readNullableString()
+          const rackId = r.readNullableString()
+          const memberEpoch = r.readInt32()
+          const clientId = r.readString()
+          const clientHost = r.readString()
+          const subscribedTopicNames = r.readArray(r => r.readString(true), true, false)
+          const subscribedTopicRegex = r.readNullableString()
+          const assignment = {
+            topicPartitions: r.readArray(r => {
+              const topicPartition = {
+                topicId: r.readUUID(),
+                topicName: r.readString(),
+                partitions: r.readArray(() => r.readInt32(), true, false)
+              }
+              r.readTaggedFields()
+              return topicPartition
+            }, true, false)
           }
-        }),
+          r.readTaggedFields()
+
+          const targetAssignment = {
+            topicPartitions: r.readArray(r => {
+              const topicPartition = {
+                topicId: r.readUUID(),
+                topicName: r.readString(),
+                partitions: r.readArray(() => r.readInt32(), true, false)
+              }
+              r.readTaggedFields()
+              return topicPartition
+            }, true, false)
+          }
+          r.readTaggedFields()
+
+          const member = {
+            memberId,
+            instanceId,
+            rackId,
+            memberEpoch,
+            clientId,
+            clientHost,
+            subscribedTopicNames,
+            subscribedTopicRegex,
+            assignment,
+            targetAssignment
+          }
+          r.readTaggedFields()
+          return member
+        }, true, false),
         authorizedOperations: r.readInt32()
       }
-    })
+      r.readTaggedFields()
+      return group
+    }, true, false)
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

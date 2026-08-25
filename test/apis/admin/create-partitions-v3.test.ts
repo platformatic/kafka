@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { createPartitionsV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
@@ -61,6 +61,8 @@ test('createRequest serializes basic parameters correctly', () => {
     },
     'Serialized data should match expected values'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes topic with assignments correctly', () => {
@@ -105,6 +107,8 @@ test('createRequest serializes topic with assignments correctly', () => {
     [1, 2, 3],
     'Broker IDs in assignments should be serialized correctly'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes multiple topics correctly', () => {
@@ -159,6 +163,8 @@ test('createRequest serializes multiple topics correctly', () => {
     ],
     'Multiple topics should be serialized correctly'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes multiple assignments correctly', () => {
@@ -213,6 +219,8 @@ test('createRequest serializes multiple assignments correctly', () => {
     ],
     'Multiple assignments should be serialized correctly'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest serializes validateOnly flag correctly', () => {
@@ -248,6 +256,8 @@ test('createRequest serializes validateOnly flag correctly', () => {
 
   // Verify validateOnly flag
   ok(serializedValidateOnly === true, 'validateOnly flag should be set to true')
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {

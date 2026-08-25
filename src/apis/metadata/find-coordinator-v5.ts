@@ -53,23 +53,29 @@ export function parseResponse (
 
   const response: FindCoordinatorResponse = {
     throttleTimeMs: reader.readInt32(),
-    coordinators: reader.readArray((r, i) => {
-      const coordinator = {
-        key: r.readString(),
-        nodeId: r.readInt32(),
-        host: r.readString(),
-        port: r.readInt32(),
-        errorCode: r.readInt16(),
-        errorMessage: r.readNullableString()
-      }
+    coordinators: reader.readArray(
+      (r, i) => {
+        const coordinator = {
+          key: r.readString(),
+          nodeId: r.readInt32(),
+          host: r.readString(),
+          port: r.readInt32(),
+          errorCode: r.readInt16(),
+          errorMessage: r.readNullableString()
+        }
+        r.readTaggedFields()
 
-      if (coordinator.errorCode !== 0) {
-        errors.push([`/coordinators/${i}`, [coordinator.errorCode, coordinator.errorMessage]])
-      }
+        if (coordinator.errorCode !== 0) {
+          errors.push([`/coordinators/${i}`, [coordinator.errorCode, coordinator.errorMessage]])
+        }
 
-      return coordinator
-    })
+        return coordinator
+      },
+      true,
+      false
+    )
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

@@ -3,11 +3,12 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
+import { type FeatureUpgradeTypeValue } from '../enumerations.ts'
 
 export interface UpdateFeaturesRequestFeature {
   feature: string
   maxVersionLevel: number
-  upgradeType: number
+  upgradeType: FeatureUpgradeTypeValue
 }
 
 export type UpdateFeaturesRequest = Parameters<typeof createRequest>
@@ -92,6 +93,8 @@ export function parseResponse (
       return result
     })
   }
+
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

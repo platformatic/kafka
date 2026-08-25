@@ -1,13 +1,14 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
 import { Reader, ResponseError, Writer, describeClusterV0 } from '../../../src/index.ts'
+import { DescribeClusterEndpointTypes } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeClusterV0
 
 test('createRequest serializes parameters correctly', () => {
   const includeClusterAuthorizedOperations = true
 
-  const writer = createRequest(includeClusterAuthorizedOperations, 0)
+  const writer = createRequest(includeClusterAuthorizedOperations, DescribeClusterEndpointTypes.BROKERS)
 
   // Verify it returns a Writer
   ok(writer instanceof Writer, 'Should return a Writer instance')
@@ -29,7 +30,7 @@ test('createRequest serializes parameters correctly', () => {
 test('createRequest serializes false include_cluster_authorized_operations correctly', () => {
   const includeClusterAuthorizedOperations = false
 
-  const writer = createRequest(includeClusterAuthorizedOperations, 0)
+  const writer = createRequest(includeClusterAuthorizedOperations, DescribeClusterEndpointTypes.BROKERS)
   const reader = Reader.from(writer)
 
   // Read includeClusterAuthorizedOperations boolean
@@ -72,7 +73,7 @@ test('parseResponse correctly processes a successful response', () => {
       throttleTimeMs: 0,
       errorCode: 0,
       errorMessage: null,
-      endpointType: 0,
+      endpointType: DescribeClusterEndpointTypes.BROKERS,
       clusterId: 'test-cluster',
       controllerId: 1,
       brokers: [

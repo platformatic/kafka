@@ -54,8 +54,10 @@ export function createRequest (replica: number, isolationLevel: number, topics: 
         w.appendInt32(partition.partitionIndex)
           .appendInt32(partition.currentLeaderEpoch)
           .appendInt64(partition.timestamp)
-      })
-    })
+          .appendTaggedFields()
+      }, true, false)
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -102,6 +104,7 @@ export function parseResponse (
       }
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

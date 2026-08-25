@@ -16,7 +16,7 @@ await performAPICallWithRetry('FindCoordinator (GROUP)', () =>
 
 await performAPICallWithRetry('DescribeGroups', () => describeGroupsV5.async(connection, [groupId], true))
 
-await performAPICallWithRetry('ListGroups', () => listGroupsV5.async(connection, ['STABLE'], []))
+await performAPICallWithRetry('ListGroups', () => listGroupsV5.async(connection, ['Stable'], []))
 
 await performAPICallWithRetry('DeleteGroups', () => deleteGroupsV2.async(connection, [groupId]))
 

@@ -2,37 +2,21 @@ import { ResponseError } from '../../errors.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
+import type {
+  DescribeDelegationTokenRequestOwner,
+  DescribeDelegationTokenResponse,
+  DescribeDelegationTokenResponseRenewer,
+  DescribeDelegationTokenResponseToken
+} from './describe-delegation-token-v0.ts'
 
-export interface DescribeDelegationTokenRequestOwner {
-  principalType: string
-  principalName: string
+export type {
+  DescribeDelegationTokenRequestOwner,
+  DescribeDelegationTokenResponse,
+  DescribeDelegationTokenResponseRenewer,
+  DescribeDelegationTokenResponseToken
 }
 
 export type DescribeDelegationTokenRequest = Parameters<typeof createRequest>
-
-export interface DescribeDelegationTokenResponseRenewer {
-  principalType: string
-  principalName: string
-}
-
-export interface DescribeDelegationTokenResponseToken {
-  principalType: string
-  principalName: string
-  tokenRequesterPrincipalType: string
-  tokenRequesterPrincipalName: string
-  issueTimestamp: bigint
-  expiryTimestamp: bigint
-  maxTimestamp: bigint
-  tokenId: string
-  hmac: Buffer
-  renewers: DescribeDelegationTokenResponseRenewer[]
-}
-
-export interface DescribeDelegationTokenResponse {
-  errorCode: number
-  tokens: DescribeDelegationTokenResponseToken[]
-  throttleTimeMs: number
-}
 
 /*
   DescribeDelegationToken Request (Version: 3) => [owners] TAG_BUFFER
@@ -40,7 +24,7 @@ export interface DescribeDelegationTokenResponse {
       principal_type => COMPACT_STRING
       principal_name => COMPACT_STRING
 */
-export function createRequest (owners: DescribeDelegationTokenRequestOwner[]): Writer {
+export function createRequest (owners: DescribeDelegationTokenRequestOwner[] | null): Writer {
   return Writer.create()
     .appendArray(owners, (w, r) => w.appendString(r.principalType).appendString(r.principalName))
     .appendTaggedFields()
@@ -93,6 +77,8 @@ export function parseResponse (
     }),
     throttleTimeMs: reader.readInt32()
   }
+
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

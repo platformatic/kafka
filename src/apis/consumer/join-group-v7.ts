@@ -14,7 +14,7 @@ export type JoinGroupRequest = Parameters<typeof createRequest>
 export interface JoinGroupResponseMember {
   memberId: string
   groupInstanceId?: NullableString
-  metadata: Buffer | null
+  metadata: Buffer
 }
 
 export interface JoinGroupResponse {
@@ -25,7 +25,7 @@ export interface JoinGroupResponse {
   protocolName: NullableString
   leader: string
   skipAssignment: boolean
-  memberId: NullableString
+  memberId: string
   members: JoinGroupResponseMember[]
 }
 
@@ -60,7 +60,8 @@ export function createRequest (
     .appendString(protocolType)
     .appendArray(protocols, (w, protocol) => {
       w.appendString(protocol.name).appendBytes(protocol.metadata ? protocol.metadata : EMPTY_BUFFER)
-    })
+      w.appendTaggedFields()
+    }, true, false)
     .appendTaggedFields()
 }
 
@@ -93,15 +94,16 @@ export function parseResponse (
     protocolName: reader.readNullableString(),
     leader: reader.readString(),
     skipAssignment: false,
-    memberId: reader.readNullableString(),
+    memberId: reader.readString(),
     members: reader.readArray(r => {
       return {
         memberId: r.readString(),
         groupInstanceId: r.readNullableString(),
-        metadata: r.readNullableBytes()
+        metadata: r.readBytes()
       }
     })
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

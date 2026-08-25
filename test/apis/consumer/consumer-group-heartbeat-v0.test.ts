@@ -1,19 +1,19 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { consumerGroupHeartbeatV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = consumerGroupHeartbeatV0
 
-test('createRequest serializes basic parameters correctly', () => {
+test('createRequest serializes member subscription fields correctly', () => {
   const groupId = 'test-group'
   const memberId = 'test-member-1'
   const memberEpoch = 5
-  const instanceId = null
-  const rackId = null
+  const instanceId = 'test-instance-id'
+  const rackId = 'test-rack-id'
   const rebalanceTimeoutMs = 30000
   const subscribedTopicNames = ['topic1', 'topic2']
-  const serverAssignor = null
-  const topicPartitions: any[] = []
+  const serverAssignor = 'range'
+  const topicPartitions: NonNullable<Parameters<typeof createRequest>[9]> = []
 
   const writer = createRequest(
     groupId,
@@ -34,7 +34,6 @@ test('createRequest serializes basic parameters correctly', () => {
   // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
 
-  // Verify basic parameters
   deepStrictEqual(
     {
       groupId: reader.readString(),
@@ -54,23 +53,17 @@ test('createRequest serializes basic parameters correctly', () => {
     }
   )
 
-  // Verify topics array
-  const topicsArrayLength = reader.readUnsignedVarInt() - 1 // Get array length
+  const topicsArrayLength = reader.readUnsignedVarInt() - 1
   const topics = []
   for (let i = 0; i < topicsArrayLength; i++) {
     topics.push(reader.readString())
   }
   deepStrictEqual(topics, ['topic1', 'topic2'])
 
-  // Verify serverAssignor and other fields
-  deepStrictEqual(
-    {
-      serverAssignor: reader.readNullableString()
-    },
-    {
-      serverAssignor
-    }
-  )
+  strictEqual(reader.readNullableString(), serverAssignor)
+  strictEqual(reader.readUnsignedVarInt(), 1)
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with topic partitions', () => {
@@ -106,92 +99,46 @@ test('createRequest with topic partitions', () => {
     topicPartitions
   )
 
-  // Read the serialized data to verify correctness
   const reader = Reader.from(writer)
 
-  // Skip to topic partitions
-  reader.readString() // Group ID
-  reader.readString() // Member ID
-  reader.readInt32() // Member Epoch
-  reader.readString() // Instance ID
-  reader.readString() // Rack ID
-  reader.readInt32() // Rebalance Timeout Ms
-  reader.readUnsignedVarInt() // Empty subscribed topics array
-  reader.readString() // Server Assignor
+  reader.readString()
+  reader.readString()
+  reader.readInt32()
+  reader.readNullableString()
+  reader.readNullableString()
+  reader.readInt32()
+  strictEqual(reader.readUnsignedVarInt(), 0)
+  strictEqual(reader.readNullableString(), null)
 
-  // Verify topic partitions array
-  reader.readUnsignedVarInt()
-  // Not checking the exact value as implementation may include extra fields
-
-  // First topic partition - the UUID might be read differently due to endianness
-  const firstTopicUUID = reader.readUUID()
-  ok(typeof firstTopicUUID === 'string' && firstTopicUUID.includes('-'), 'Should read a valid UUID')
-
-  // First topic partitions
-  const partitionsLength1 = reader.readUnsignedVarInt() - 1
-  for (let i = 0; i < partitionsLength1; i++) {
-    deepStrictEqual(reader.readInt32(), topicPartitions[0].partitions[i])
+  strictEqual(reader.readUnsignedVarInt(), topicPartitions.length + 1)
+  for (const topicPartition of topicPartitions) {
+    strictEqual(reader.readUUID(), topicPartition.topicId)
+    strictEqual(reader.readUnsignedVarInt(), topicPartition.partitions.length + 1)
+    for (const partition of topicPartition.partitions) {
+      strictEqual(reader.readInt32(), partition)
+    }
+    reader.readTaggedFields()
   }
-
-  reader.readTaggedFields() // Skip to the next topic partition
-
-  // Second topic partition - the UUID might be read differently due to endianness
-  const secondTopicUUID = reader.readUUID()
-  ok(typeof secondTopicUUID === 'string' && secondTopicUUID.includes('-'), 'Should read a valid UUID')
-
-  // Second topic partitions
-  const partitionsLength2 = reader.readUnsignedVarInt() - 1
-  for (let i = 0; i < partitionsLength2; i++) {
-    deepStrictEqual(reader.readInt32(), topicPartitions[1].partitions[i])
-  }
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
-test('createRequest with instance ID and rack ID', () => {
-  const groupId = 'test-group'
-  const memberId = 'test-member-1'
-  const memberEpoch = 5
-  const instanceId = 'test-instance-id'
-  const rackId = 'test-rack-id'
-  const rebalanceTimeoutMs = 30000
-  const subscribedTopicNames: string[] = []
-  const serverAssignor = 'range'
-  const topicPartitions: any[] = []
-
-  const writer = createRequest(
-    groupId,
-    memberId,
-    memberEpoch,
-    instanceId,
-    rackId,
-    rebalanceTimeoutMs,
-    subscribedTopicNames,
-    null,
-    serverAssignor,
-    topicPartitions
-  )
-
-  // Read the serialized data to verify correctness
-  const reader = Reader.from(writer)
-
-  // Skip to instance ID and rack ID
-  reader.readString() // Group ID
-  reader.readString() // Member ID
-  reader.readInt32() // Member Epoch
-
-  // Verify instance ID, rack ID, and server assignor
-  deepStrictEqual(
-    {
-      instanceId: reader.readString(),
-      rackId: reader.readString(),
-      // Skip rebalanceTimeoutMs and empty topic array
-      serverAssignor: reader.readString() // After skipping rebalanceTimeoutMs and topics array via readInt32() and readUnsignedVarInt()
-    },
-    {
-      instanceId: 'test-instance-id',
-      rackId: 'test-rack-id',
-      serverAssignor: ''
-    }
-  )
+test('createRequest preserves null topic partitions distinctly from an empty array', () => {
+  const cases: Array<[Parameters<typeof createRequest>[9], number]> = [[null, 0], [[], 1]]
+  for (const [topicPartitions, expectedLength] of cases) {
+    const reader = Reader.from(createRequest('group', 'member', 1, null, null, 1, null, null, null, topicPartitions))
+    reader.readString()
+    reader.readString()
+    reader.readInt32()
+    reader.readNullableString()
+    reader.readNullableString()
+    reader.readInt32()
+    reader.readArray(() => null)
+    reader.readNullableString()
+    strictEqual(reader.readUnsignedVarInt(), expectedLength)
+    reader.readTaggedFields()
+    strictEqual(reader.remaining, 0)
+  }
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -204,10 +151,10 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(5) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
     .appendInt8(-1) // Assignment non-present (nullable struct indicator)
-    .appendInt8(0) // Assignment tagged fields
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 68, 0, Reader.from(writer))
+  const reader = Reader.from(writer)
+  const response = parseResponse(1, 68, 0, reader)
 
   // Verify structure
   deepStrictEqual(response, {
@@ -219,6 +166,7 @@ test('parseResponse correctly processes a successful response', () => {
     heartbeatIntervalMs: 3000,
     assignment: null
   })
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse with assignment', () => {
@@ -304,7 +252,6 @@ test('parseResponse throws error on non-zero error code', () => {
     .appendInt32(-1) // memberEpoch
     .appendInt32(3000) // heartbeatIntervalMs
     .appendInt8(-1) // Assignment non-present (nullable struct indicator)
-    .appendInt8(0) // Assignment tagged fields
     .appendInt8(0) // Root tagged fields
 
   // Verify that parsing throws ResponseError

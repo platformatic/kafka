@@ -71,8 +71,22 @@ export function parseResponse (
   apiVersion: number,
   reader: Reader
 ): ApiVersionsResponse {
+  const errorCode = reader.readInt16()
+
+  // Kafka returns an ApiVersions v0-framed response when v3 is unsupported.
+  // Stop before reading the compact array, which would interpret the legacy
+  // array length as flexible protocol data and desynchronize the response.
+  if (errorCode !== 0) {
+    throw new ResponseError(
+      apiKey,
+      apiVersion,
+      { '/': [errorCode, null] },
+      { errorCode, apiKeys: [], throttleTimeMs: 0 }
+    )
+  }
+
   const response: ApiVersionsResponse = {
-    errorCode: reader.readInt16(),
+    errorCode,
     apiKeys: reader.readArray(
       r => {
         const apiKey = r.readInt16()

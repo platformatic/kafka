@@ -1,6 +1,5 @@
 import { strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import * as apiVersionsV3 from '../../../src/apis/metadata/api-versions-v3.ts'
 import * as apiVersionsV4 from '../../../src/apis/metadata/api-versions-v4.ts'
 import * as findCoordinatorV4 from '../../../src/apis/metadata/find-coordinator-v4.ts'
 import * as findCoordinatorV5 from '../../../src/apis/metadata/find-coordinator-v5.ts'
@@ -23,7 +22,6 @@ function appendUnknownTag (writer: Writer): Writer {
 
 test('flexible metadata responses consume root tags before errors', async t => {
   for (const [version, api] of [
-    [3, apiVersionsV3],
     [4, apiVersionsV4]
   ] as const) {
     await t.test(`ApiVersions v${version}`, () => {
@@ -83,7 +81,6 @@ test('flexible metadata responses consume root tags before errors', async t => {
 
 test('flexible metadata responses consume nested tags before errors', async t => {
   for (const [version, api] of [
-    [3, apiVersionsV3],
     [4, apiVersionsV4]
   ] as const) {
     await t.test(`ApiVersions v${version}`, () => {

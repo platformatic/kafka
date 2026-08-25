@@ -17,6 +17,7 @@ import {
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV1,
+  apiVersionsV3,
   Base,
   baseApisChannel,
   baseMetadataChannel,
@@ -24,6 +25,7 @@ import {
   Connection,
   MultipleErrors,
   Reader,
+  ResponseError,
   metadataV0,
   metadataV1,
   metadataV10,
@@ -256,7 +258,7 @@ test('listApis should return a list of available APIs', async t => {
   ok(produceApi.maxVersion > 0)
 })
 
-test('listApis should bootstrap with the empty ApiVersions v1 payload', async t => {
+test('listApis should bootstrap with the ApiVersions v3 payload', async t => {
   const client = createBase(t)
   const connection = {
     send<ReturnType> (
@@ -268,10 +270,10 @@ test('listApis should bootstrap with the empty ApiVersions v1 payload', async t 
       responseTaggedFields: boolean,
       callback: Callback<ReturnType>
     ): void {
-      strictEqual(apiKey, apiVersionsV1.api.key)
-      strictEqual(apiVersion, apiVersionsV1.api.version)
-      strictEqual(payload().length, 0)
-      strictEqual(requestTaggedFields, false)
+      strictEqual(apiKey, apiVersionsV3.api.key)
+      strictEqual(apiVersion, apiVersionsV3.api.version)
+      strictEqual(payload().length > 0, true)
+      strictEqual(requestTaggedFields, true)
       strictEqual(responseTaggedFields, false)
       callback(null, {
         errorCode: 0,
@@ -287,7 +289,7 @@ test('listApis should bootstrap with the empty ApiVersions v1 payload', async t 
   deepStrictEqual(apis, [{ apiKey: 0, name: 'Produce', minVersion: 0, maxVersion: 9 }])
 })
 
-test('listApis should send the actual ApiVersions v1 bytes', async t => {
+test('listApis should send the actual ApiVersions v3 bytes', async t => {
   const client = createBase(t)
   let calls = 0
   const connection = {
@@ -301,9 +303,10 @@ test('listApis should send the actual ApiVersions v1 bytes', async t => {
       callback: Callback<ReturnType>
     ): void {
       calls++
-      strictEqual(apiKey, apiVersionsV1.api.key)
-      strictEqual(apiVersion, apiVersionsV1.api.version)
-      strictEqual(payload().buffer.toString('hex'), '')
+      strictEqual(apiKey, apiVersionsV3.api.key)
+      strictEqual(apiVersion, apiVersionsV3.api.version)
+      strictEqual(payload().buffer.toString('hex').length > 0, true)
+      strictEqual(_requestTags, true)
       callback(null, { errorCode: 0, apiKeys: [], throttleTimeMs: 0 } as ReturnType)
     }
   } as unknown as Connection
@@ -311,6 +314,40 @@ test('listApis should send the actual ApiVersions v1 bytes', async t => {
   client[kGetBootstrapConnection] = callback => callback(null, connection)
   deepStrictEqual(await client.listApis(), [])
   strictEqual(calls, 1)
+})
+
+test('listApis should downgrade to ApiVersions v1 when v3 is unsupported', async t => {
+  const client = createBase(t)
+  let calls = 0
+  const connection = {
+    send <ReturnType> (
+      apiKey: number,
+      apiVersion: number,
+      payload: () => Writer,
+      _parser: ResponseParser<ReturnType>,
+      _requestTags: boolean,
+      _responseTags: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      calls++
+      strictEqual(apiKey, apiVersionsV3.api.key)
+
+      if (apiVersion === apiVersionsV3.api.version) {
+        callback(new ResponseError(18, 3, { '/': [35, null] }, { errorCode: 35 }), undefined)
+        return
+      }
+
+      strictEqual(apiVersion, apiVersionsV1.api.version)
+      strictEqual(payload().length, 0)
+      callback(null, { errorCode: 0, apiKeys: [], throttleTimeMs: 0 } as ReturnType)
+    }
+  } as unknown as Connection
+
+  client[kGetBootstrapConnection] = callback => callback(null, connection)
+
+  deepStrictEqual(await client.listApis(), [])
+  deepStrictEqual(await client.listApis(), [])
+  strictEqual(calls, 3)
 })
 
 test('listApis should support diagnostic channels', async t => {

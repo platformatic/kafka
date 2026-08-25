@@ -2133,7 +2133,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
                 retryCallback(null, this.memberId!)
               })
-            }
+            },
+            // Rejoin protocol errors are not generally request-retriable, but the whole group
+            // operation must be retried while the broker completes its rebalance.
+            error => findErrorBy(error, 'needsRejoin', true) !== null
           )
         })
       },
@@ -2337,12 +2340,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performDeduplicateGroupOperaton<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
-    callback: CallbackWithPromise<ReturnType>
+    callback: CallbackWithPromise<ReturnType>,
+    ignoreCanRetry: boolean | ((e: Error) => boolean) = false
   ): void | Promise<ReturnType> {
     return this[kPerformDeduplicated](
       operationId,
       deduplicateCallback => {
-        this.#performGroupOperation<ReturnType>(operationId, operation, deduplicateCallback)
+        this.#performGroupOperation<ReturnType>(operationId, operation, deduplicateCallback, ignoreCanRetry)
       },
       callback
     )
@@ -2351,7 +2355,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performGroupOperation<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
-    callback: CallbackWithPromise<ReturnType>
+    callback: CallbackWithPromise<ReturnType>,
+    ignoreCanRetry: boolean | ((e: Error) => boolean) = false
   ): void | Promise<ReturnType> {
     this[kPerformWithRetry]<ReturnType>(
       operationId,
@@ -2383,7 +2388,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, result) => {
         callback(this.#handleError(error), result)
-      }
+      },
+      0,
+      [],
+      undefined,
+      ignoreCanRetry
     )
   }
 

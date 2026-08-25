@@ -420,7 +420,7 @@ export class Base<
     attempt: number = 0,
     errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean,
-    ignoreCanRetry?: boolean
+    ignoreCanRetry?: boolean | ((e: Error) => boolean)
   ): void | Promise<ReturnType> {
     const retries = this[kOptions].retries! as number
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
@@ -431,7 +431,9 @@ export class Base<
         // condition is not the generic canRetry flag (e.g. a consumer group rejoin signal, which is
         // deliberately not canRetry since it requires redoing the handshake, not resending the request)
         // can set ignoreCanRetry and drive the decision entirely through shouldSkipRetry.
-        const retriable = ignoreCanRetry || !findErrorBy(error, 'canRetry', false)
+        const retriable =
+          (typeof ignoreCanRetry === 'function' ? ignoreCanRetry(error) : ignoreCanRetry) ||
+          !findErrorBy(error, 'canRetry', false)
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {

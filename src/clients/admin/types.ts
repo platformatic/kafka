@@ -49,7 +49,7 @@ export interface GroupMember {
 export interface GroupBase {
   id: string
   state: ConsumerGroupStateValue
-  groupType: string
+  groupType?: string
   protocolType: string
 }
 
@@ -62,8 +62,15 @@ export interface Group extends Omit<GroupBase, 'groupType'> {
 // Currently empty but reserved for future use
 export interface AdminOptions extends BaseOptions {}
 
+export interface CreateTopicsTopicOptions {
+  topic: string
+  partitions?: number
+  replicas?: number
+  assignments?: BrokerAssignment[]
+}
+
 export interface CreateTopicsOptions {
-  topics: string[]
+  topics: (string | CreateTopicsTopicOptions)[]
   partitions?: number
   replicas?: number
   assignments?: BrokerAssignment[]

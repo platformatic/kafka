@@ -32,13 +32,13 @@ The return value is a list of created topics, each containing `id`, `name`, `par
 
 Options:
 
-| Property      | Type                               | Description                                                                                                  |
-| ------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `topics`      | `string[]`                         | Topics to create.                                                                                            |
-| `partitions`  | `number`                           | Number of partitions for each topic.                                                                         |
-| `replicas`    | `number`                           | Number of replicas for each topic.                                                                           |
-| `assignments` | `BrokerAssignment[]`               | Assignments of partitions.<br/><br/> Each assignment is an object with `partition` and `brokers` properties. |
-| `configs`     | `CreateTopicsRequestTopicConfig[]` | Topic configurations.<br/><br/> Each configuration is an object with `name` and `value` properties.          |
+| Property      | Type                                     | Description                                                                                                                                                                                                                          |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `topics`      | `(string \| CreateTopicsTopicOptions)[]` | Topics to create.<br/><br/> A plain string uses the top-level `partitions`, `replicas` and `assignments` as defaults. An object with a `topic` property overrides `partitions`, `replicas` and/or `assignments` for that topic only. |
+| `partitions`  | `number`                                 | Default number of partitions for each topic.                                                                                                                                                                                         |
+| `replicas`    | `number`                                 | Default number of replicas for each topic.                                                                                                                                                                                           |
+| `assignments` | `BrokerAssignment[]`                     | Default assignments of partitions.<br/><br/> Each assignment is an object with `partition` and `brokers` properties.                                                                                                                 |
+| `configs`     | `CreateTopicsRequestTopicConfig[]`       | Topic configurations.<br/><br/> Each configuration is an object with `name` and `value` properties.                                                                                                                                  |
 
 ### `deleteTopics(options[, callback])`
 
@@ -71,11 +71,22 @@ Lists consumer groups.
 
 The return value is a list of groups, each containing the `id`, `state`, `groupType` and `protocolType` properties.
 
+> [!IMPORTANT]
+> The `state` values reported by `listGroups` and `describeGroups` are the values Kafka puts on the
+> wire, which are written in Pascal case: `PreparingRebalance`, `CompletingRebalance`, `Stable`,
+> `Dead`, `Empty`, plus `Unknown`, `Assigning`, `Reconciling` and `NotReady`. They are listed in the
+> `ConsumerGroupStates` enumeration.
+>
+> Earlier releases upper cased these values, which produced `PREPARINGREBALANCE` and
+> `COMPLETINGREBALANCE` — values that matched neither the enumeration nor anything Kafka defines.
+> Code comparing against `'STABLE'`, `'DEAD'` or `'EMPTY'` needs to be updated to `'Stable'`,
+> `'Dead'` and `'Empty'`.
+
 Options:
 
 | Property | Type                   | Description                                                                                                     |
 | -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
-| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are defined in the `ConsumerGroupStates` enumeration. |
+| states   | `ConsumerGroupState[]` | States of the groups to return.<br/><br/>The valid values are defined in the `ConsumerGroupStates` enumeration. The constant names of Kafka's Java `ConsumerGroupState` enumeration, listed in `KafkaConsumerGroupStates`, are also accepted and translated. |
 | types    | `string[]`             | Types of the groups to return.<br/><br/>Default is `['consumer']`.                                              |
 
 ### `describeGroups(options[, callback])`

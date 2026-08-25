@@ -73,6 +73,7 @@ export function parseResponse (
     protocolName: reader.readNullableString(),
     assignment: reader.readBytes()
   }
+  reader.readTaggedFields()
 
   if (response.errorCode !== 0) {
     throw new ResponseError(apiKey, apiVersion, { '/': [response.errorCode, null] }, response)

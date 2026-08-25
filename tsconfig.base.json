@@ -9,6 +9,7 @@
     "outDir": "dist",
     "allowJs": false,
     "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,

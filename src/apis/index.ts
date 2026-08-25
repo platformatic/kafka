@@ -2,6 +2,7 @@
 export * from './callbacks.ts'
 export * from './definitions.ts'
 export * from './enumerations.ts'
+export * from './tagged-fields.ts'
 export * from './types.ts'
 
 // Low-level APIs

@@ -1,5 +1,5 @@
 import { ResponseError } from '../../errors.ts'
-import { type NullableString } from '../../protocol/definitions.ts'
+import { type Nullable, type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
@@ -11,7 +11,7 @@ export interface CreatePartitionsRequestAssignment {
 export interface CreatePartitionsRequestTopic {
   name: string
   count: number
-  assignments: CreatePartitionsRequestAssignment[]
+  assignments?: Nullable<CreatePartitionsRequestAssignment[]>
 }
 
 export type CreatePartitionsRequest = Parameters<typeof createRequest>
@@ -28,11 +28,11 @@ export interface CreatePartitionsResponse {
 }
 
 /*
-  CreatePartitions Request (Version: 1) => [topics] timeout_ms validate_only TAG_BUFFER
-    topics => name count [assignments] TAG_BUFFER
+  CreatePartitions Request (Version: 1) => [topics] timeout_ms validate_only
+    topics => name count [assignments]
       name => STRING
       count => INT32
-      assignments => [broker_ids] TAG_BUFFER
+      assignments => [broker_ids]
         broker_ids => INT32
     timeout_ms => INT32
     validate_only => BOOLEAN
@@ -63,9 +63,9 @@ export function createRequest (
 }
 
 /*
-  CreatePartitions Response (Version: 1) => throttle_time_ms [results] TAG_BUFFER
+  CreatePartitions Response (Version: 1) => throttle_time_ms [results]
     throttle_time_ms => INT32
-    results => name error_code error_message TAG_BUFFER
+    results => name error_code error_message
       name => STRING
       error_code => INT16
       error_message => NULLABLE_STRING

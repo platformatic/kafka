@@ -80,14 +80,16 @@ export function parseResponse (
         errors.push([`/responses/${i}`, [errorCode, errorMessage]])
       }
 
-      return {
+      const result = {
         errorCode,
         errorMessage,
         resourceType: r.readInt8() as ConfigResourceTypeValue,
         resourceName: r.readString()
       }
+      return result
     })
   }
+  reader.readTaggedFields()
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

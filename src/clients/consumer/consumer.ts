@@ -39,6 +39,7 @@ import {
   type OffsetFetchRequestTopic,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
+import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import {
   type SyncGroupRequest,
   type SyncGroupRequestAssignment,
@@ -57,7 +58,14 @@ import {
   consumerOffsetsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { findErrorBy, NetworkError, type ProtocolError, protocolErrors, UserError } from '../../errors.ts'
+import {
+  findErrorBy,
+  type GenericError,
+  NetworkError,
+  type ProtocolError,
+  protocolErrors,
+  UserError
+} from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { INT32_SIZE } from '../../protocol/definitions.ts'
@@ -111,6 +119,7 @@ import {
   type ConsumerGroupRebalancePayload,
   type ConsumerHeartbeatErrorPayload,
   type ConsumerHeartbeatPayload,
+  type ConsumerHeartbeatStalledPayload,
   type ConsumerOptions,
   type ExtendedGroupProtocolSubscription,
   type FetchOptions,
@@ -151,6 +160,7 @@ export interface ConsumerEvents extends BaseEvents {
   'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:error': (payload: ConsumerHeartbeatErrorPayload) => void
+  'consumer:heartbeat:stalled': (payload: ConsumerHeartbeatStalledPayload) => void
   'consumer:lag': (lag: Offsets) => void
   'consumer:lag:error': (error: Error) => void
 }
@@ -175,6 +185,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #heartbeatInterval: NodeJS.Timeout | null
   #lastHeartbeatIntervalMs: number
   #lastHeartbeat: Date | null
+  #heartbeatStallTimer: NodeJS.Timeout | null
+  #heartbeatStallStart: number | null
+  #heartbeatStalled: boolean
+  #heartbeatStallError: Error | undefined
   #useConsumerGroupProtocol: boolean
   #memberEpoch: number
   #groupRemoteAssignor: string | null
@@ -227,6 +241,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#heartbeatInterval = null
     this.#lastHeartbeatIntervalMs = 0
     this.#lastHeartbeat = null
+    this.#heartbeatStallTimer = null
+    this.#heartbeatStallStart = null
+    this.#heartbeatStalled = false
+    this.#heartbeatStallError = undefined
     this.#streams = new Set()
     this.#lagMonitoring = null
     this.#memberEpoch = 0
@@ -299,6 +317,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kClosed] = true
     clearTimeout(this.#lagMonitoring!)
+    this.#resetHeartbeatStall()
 
     let closer: (force: boolean, callback: CallbackWithPromise<void>) => void
     if (this.#useConsumerGroupProtocol) {
@@ -761,6 +780,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#membershipActive = false
+    this.#resetHeartbeatStall()
     this.#leaveGroupClassicProtocol(force as boolean, error => {
       if (error) {
         this.#membershipActive = true
@@ -862,15 +882,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<FetchResponse>
   ): void {
     const isolationLevel = options.isolationLevel ?? this[kOptions].isolationLevel!
+    let refreshMetadata = false
 
     this[kPerformWithRetry]<FetchResponse>(
       'fetch',
       retryCallback => {
-        this[kMetadata]({ topics: this.topics.current }, (error, metadata) => {
+        this[kMetadata]({ topics: this.topics.current, forceUpdate: refreshMetadata }, (error, metadata) => {
           if (error) {
+            refreshMetadata = NetworkError.isRetryable(error)
             retryCallback(error)
             return
           }
+
+          refreshMetadata = false
 
           const topicIds = this.#topicIdsById(metadata!)
           const node = this.#fetchNodeForRequest(metadata!, options.node, options.topics, topicIds, Date.now())
@@ -885,6 +909,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
           pool.get(broker, (error, connection) => {
             if (error) {
+              refreshMetadata = NetworkError.isRetryable(error)
               this.#clearPreferredReadReplicas(options.topics, topicIds)
               this.#fetchSessions.delete(node)
 
@@ -903,6 +928,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
             this[kGetApi]<FetchRequest, FetchResponse>('Fetch', (error, api) => {
               if (error) {
+                refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error)
                 return
               }
@@ -977,6 +1003,30 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 }
               }
 
+              // Fetch v12 identifies topics by name, while later versions use UUIDs.
+              const useTopicNames = api!.version <= 12
+              let topicIdsByName: Map<string, string> | undefined
+
+              if (useTopicNames) {
+                // Built here rather than in the response callback so that the fetch loop allocates
+                // it once per request instead of once per request and once per response.
+                topicIdsByName = new Map()
+                for (const [id, name] of topicIds) {
+                  topicIdsByName.set(name, id)
+                }
+
+                requestTopics = requestTopics.map(topic => ({
+                  ...topic,
+                  topicId: topicIds.get(topic.topicId) ?? topic.topicId
+                }))
+
+                for (const forgotten of forgottenTopicsData) {
+                  const topicId = forgotten.topicId ?? forgotten.topic
+                  forgotten.topicId = topicIds.get(topicId) ?? topicId
+                  delete forgotten.topic
+                }
+              }
+
               api!(
                 connection!,
                 options.maxWaitTime ?? this[kOptions].maxWaitTime!,
@@ -989,7 +1039,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 forgottenTopicsData,
                 this.#clientRack,
                 (error, result) => {
+                  const response = result ?? ((error as GenericError | null)?.response as FetchResponse | undefined)
+                  if (response && !response.nodeEndpoints) {
+                    response.nodeEndpoints = []
+                  }
+                  if (useTopicNames && response) {
+                    for (const topic of response.responses) {
+                      topic.topicId = topicIdsByName!.get(topic.topicId) ?? topic.topicId
+                    }
+                  }
+
                   if (error) {
+                    refreshMetadata = NetworkError.isRetryable(error)
                     this.#clearPreferredReadReplicas(options.topics, topicIds)
 
                     if (
@@ -1120,7 +1181,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #listOffsets (
     withTimestamps: boolean,
     options: ListOffsetsOptions,
-    callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>
+    callback: CallbackWithPromise<Offsets | OffsetsWithTimestamps>,
+    forceUpdateMetadata = false
   ): void {
     let topics = options.topics
 
@@ -1128,7 +1190,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       topics = this.topics.current
     }
 
-    this[kMetadata]({ topics }, (error, metadata) => {
+    this[kMetadata]({ topics, forceUpdate: forceUpdateMetadata }, (error, metadata) => {
       if (error) {
         callback(error)
         return
@@ -1208,6 +1270,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         },
         (error, responses) => {
           if (error) {
+            if (!forceUpdateMetadata && NetworkError.isRetryable(error)) {
+              this.clearMetadata()
+              this.#listOffsets(withTimestamps, options, callback, true)
+              return
+            }
+
             callback(this.#handleError(error))
             return
           }
@@ -1287,7 +1355,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               }
             ],
             false,
-            groupCallback
+            (error, response) => {
+              if (error || api!.version >= 8) {
+                groupCallback(error, response)
+                return
+              }
+
+              const legacyResponse = response as unknown as LegacyOffsetFetchResponse
+              groupCallback(null, {
+                throttleTimeMs: legacyResponse.throttleTimeMs,
+                groups: [{ groupId: this.groupId, topics: legacyResponse.topics, errorCode: legacyResponse.errorCode }]
+              })
+            }
           )
         })
       },
@@ -1401,6 +1480,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.emitWithDebug('consumer:heartbeat', 'start', eventPayload)
+        this.#trackHeartbeatStall(options)
 
         this[kGetApi]<HeartbeatRequest, HeartbeatResponse>('Heartbeat', (error, api) => {
           if (error) {
@@ -1422,6 +1502,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.#cancelHeartbeat()
 
           if (this.#getRejoinError(error)) {
+            // A rejoin can legitimately block up to rebalanceTimeout:
+            // - extend the stall window by that bound rather than pausing it
+            // - a rejoin that never completes still surfaces as a stall
+            this.#resetHeartbeatStall()
+            this.#trackHeartbeatStall(options, error, options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options))
+
             this[kPerformWithRetry](
               'rejoinGroup',
               retryCallback => {
@@ -1430,6 +1516,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               error => {
                 if (error) {
                   this.emitWithDebug(null, 'error', error)
+
+                  if (!this.#heartbeatStalled) {
+                    // No more heartbeats will be scheduled: restart the stall window without
+                    // the rejoin grace, keeping the triggering heartbeat error as lastError.
+                    const heartbeatError = this.#heartbeatStallError
+                    this.#resetHeartbeatStall()
+                    this.#trackHeartbeatStall(options, heartbeatError)
+                  }
+                } else {
+                  // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                  this.#resetHeartbeatStall()
                 }
 
                 this.emitWithDebug('consumer', 'rejoin')
@@ -1440,11 +1537,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          // The error was not group related, so we schedule another heartbeat.
+          // Do this before notifying listeners so they can still cancel it.
+          this.#heartbeatInterval = setTimeout(() => {
+            this.#heartbeat(options)
+          }, options.heartbeatInterval)
 
-          // Note that here we purposely do not return, since it was not a group related problem we schedule another heartbeat
+          this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
+          this.#trackHeartbeatStall(options, error)
         } else {
           this.#lastHeartbeat = new Date()
+          this.#resetHeartbeatStall()
           this.emitWithDebug('consumer:heartbeat', 'end', eventPayload)
         }
 
@@ -1456,6 +1559,57 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #cancelHeartbeat (): void {
     clearTimeout(this.#heartbeatInterval!)
     this.#heartbeatInterval = null
+  }
+
+  #heartbeatStallTimeoutFor (options: GroupOptions): number {
+    return (
+      options.heartbeatStallTimeout ??
+      this[kOptions].heartbeatStallTimeout ??
+      options.rebalanceTimeout ??
+      this[kOptions].rebalanceTimeout ??
+      defaultConsumerOptions.rebalanceTimeout
+    )
+  }
+
+  // Opens the stall window on the first heartbeat attempt after the last success.
+  // The window survives retries and only #resetHeartbeatStall closes it.
+  #trackHeartbeatStall (options: GroupOptions, error?: Error, timeout?: number): void {
+    if (error) {
+      this.#heartbeatStallError = error
+    }
+
+    if (this.#heartbeatStalled || this.#heartbeatStallTimer) {
+      return
+    }
+
+    timeout ??= this.#heartbeatStallTimeoutFor(options)
+    this.#heartbeatStallStart = Date.now()
+    this.#heartbeatStallTimer = setTimeout(() => {
+      this.#heartbeatStallTimer = null
+      // Emit once per stall episode. The next successful heartbeat re-arms the tracking.
+      this.#heartbeatStalled = true
+
+      if (this[kClosed] || !this.#membershipActive) {
+        return
+      }
+
+      this.emitWithDebug('consumer:heartbeat', 'stalled', {
+        lastError: this.#heartbeatStallError,
+        lastHeartbeat: this.#lastHeartbeat,
+        stalledFor: Date.now() - this.#heartbeatStallStart!
+      })
+    }, timeout)
+  }
+
+  #resetHeartbeatStall (): void {
+    if (this.#heartbeatStallTimer) {
+      clearTimeout(this.#heartbeatStallTimer)
+      this.#heartbeatStallTimer = null
+    }
+
+    this.#heartbeatStallStart = null
+    this.#heartbeatStalled = false
+    this.#heartbeatStallError = undefined
   }
 
   #consumerGroupHeartbeat (options: Required<GroupOptions>, callback: CallbackWithPromise<void>): void {
@@ -1476,6 +1630,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       'consumerGroupHeartbeat',
       (connection, groupCallback) => {
         this.emitWithDebug('consumer:heartbeat', 'start')
+        this.#trackHeartbeatStall(options)
         this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
           error,
           api
@@ -1505,6 +1660,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, response) => {
         if (this[kClosed]) {
+          this.#resetHeartbeatStall()
           this.emitWithDebug('consumer:heartbeat', 'end')
           callback(null)
           return
@@ -1513,6 +1669,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         if (error) {
           this.#cancelHeartbeat()
           this.emitWithDebug('consumer:heartbeat', 'error', { error })
+          this.#trackHeartbeatStall(options, error)
 
           const fenced = (error as any).response?.errorCode === protocolErrors.FENCED_MEMBER_EPOCH.code
           if (fenced) {
@@ -1539,6 +1696,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         this.#lastHeartbeat = new Date()
+        this.#resetHeartbeatStall()
 
         this.#memberEpoch = response!.memberEpoch
 
@@ -1846,7 +2004,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   return
                 }
 
-                api!(connection!, FindCoordinatorKeyTypes.GROUP, [this.groupId], retryCallback)
+                api!(connection!, FindCoordinatorKeyTypes.GROUP, [this.groupId], (error, response) => {
+                  if (response && api!.version < 4) {
+                    response.coordinators[0].key = this.groupId
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             })
           },
@@ -2407,13 +2571,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           continue
         }
 
-        if (partition.abortedTransactions.length) {
+        const abortedTransactions = partition.abortedTransactions ?? []
+        if (abortedTransactions.length) {
           const abortedRanges = new Map<bigint, [bigint, bigint]>()
 
           // Find first offsets
           // For last offsets we set -1n as special value. It allows us to detect open ranges, whichs means
           // that Kafka has not sent the control marker. In that case we ignore the range for safety.
-          for (const aborted of partition.abortedTransactions) {
+          for (const aborted of abortedTransactions) {
             abortedRanges.set(aborted.producerId, [aborted.firstOffset, -1n])
           }
 

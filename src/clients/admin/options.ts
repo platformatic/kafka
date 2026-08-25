@@ -8,6 +8,7 @@ import {
   allowedResourcePatternTypes,
   allowedResourceTypes,
   ConsumerGroupStates,
+  KafkaConsumerGroupStates,
   IncrementalAlterConfigOperationTypes
 } from '../../apis/enumerations.ts'
 import { ajv, listErrorMessage } from '../../utils.ts'
@@ -21,24 +22,56 @@ export const groupsProperties = {
   }
 }
 
+const createTopicAssignmentsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      partition: { type: 'number', minimum: 0 },
+      brokers: { type: 'array', items: { type: 'number' }, minItems: 1 }
+    },
+    required: ['partition', 'brokers'],
+    additionalProperties: false
+  },
+  minItems: 1
+}
+
 export const createTopicOptionsSchema = {
   type: 'object',
   properties: {
-    topics: { type: 'array', items: idProperty },
+    topics: {
+      type: 'array',
+      items: {
+        oneOf: [
+          idProperty,
+          {
+            type: 'object',
+            properties: {
+              topic: idProperty,
+              partitions: { type: 'number' },
+              replicas: { type: 'number' },
+              assignments: createTopicAssignmentsSchema
+            },
+            required: ['topic'],
+            additionalProperties: false
+          }
+        ]
+      }
+    },
     partitions: { type: 'number' },
     replicas: { type: 'number' },
-    assignments: {
+    assignments: createTopicAssignmentsSchema,
+    configs: {
       type: 'array',
       items: {
         type: 'object',
         properties: {
-          partition: { type: 'number', minimum: 0 },
-          brokers: { type: 'array', items: { type: 'number' }, minItems: 1 }
+          name: { type: 'string' },
+          value: { type: ['string', 'null'] }
         },
-        required: ['partition', 'brokers'],
+        required: ['name'],
         additionalProperties: false
-      },
-      minItems: 1
+      }
     }
   },
   required: ['topics'],
@@ -103,8 +136,8 @@ export const listGroupsOptionsSchema = {
       items: {
         type: 'string',
         enumeration: {
-          allowed: ConsumerGroupStates,
-          errorMessage: listErrorMessage(ConsumerGroupStates as unknown as string[])
+          allowed: [...ConsumerGroupStates, ...KafkaConsumerGroupStates],
+          errorMessage: listErrorMessage([...ConsumerGroupStates, ...KafkaConsumerGroupStates])
         }
       },
       minItems: 0

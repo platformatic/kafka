@@ -22,7 +22,7 @@ import {
   producerSendsChannel,
   producerTransactionsChannel
 } from '../../diagnostic.ts'
-import { findErrorBy, type GenericError, type ProtocolError, UserError } from '../../errors.ts'
+import { findErrorBy, type GenericError, NetworkError, type ProtocolError, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   type CreateRecordsBatchOptions,
@@ -614,7 +614,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   return
                 }
 
-                api!(connection!, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], retryCallback)
+                api!(connection!, FindCoordinatorKeyTypes.TRANSACTION, [transactionalId], (error, response) => {
+                  if (response && api!.version < 4) {
+                    response.coordinators[0].key = transactionalId
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             }, attempt)
           },
@@ -1216,104 +1222,111 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     recoverOnProducerStateLoss: boolean,
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
-    // Get the metadata with the topic/partitions informations
-    this[kMetadata]({ topics, autocreateTopics }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    const { topic, partition } = messages[0]
+    let refreshMetadata = false
 
-      const { topic, partition } = messages[0]
-      const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
+    this[kPerformWithRetry]<boolean | ProduceResponse>(
+      'produce',
+      retryCallback => {
+        this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata }, (error, metadata) => {
+          if (error) {
+            refreshMetadata = NetworkError.isRetryable(error)
+            retryCallback(error)
+            return
+          }
 
-      this[kPerformWithRetry]<boolean | ProduceResponse>(
-        'produce',
-        retryCallback => {
+          refreshMetadata = false
+          const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
+
           this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
             if (error) {
+              refreshMetadata = NetworkError.isRetryable(error)
               retryCallback(error)
               return
             }
 
             this[kGetApi]<ProduceRequest, ProduceResponse>('Produce', (error, api) => {
               if (error) {
+                refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error)
                 return
               }
 
-              api!(connection!, acks, timeout, messages, produceOptions, retryCallback)
+              api!(connection!, acks, timeout, messages, produceOptions, (error, response) => {
+                refreshMetadata = NetworkError.isRetryable(error)
+                retryCallback(error, response)
+              })
             })
           })
-        },
-        (error, results) => {
-          if (error) {
-            // If the last error was due to stale metadata, we retry the operation with this set of messages
-            // since the partition is already set, it should attempt on the new destination
-            /* c8 ignore next - Hard to test */
-            const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
+        })
+      },
+      (error, results) => {
+        if (error) {
+          // If the last error was due to stale metadata, we retry the operation with this set of messages
+          // since the partition is already set, it should attempt on the new destination
+          /* c8 ignore next - Hard to test */
+          const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
 
-            if (hasStaleMetadata && repeatOnStaleMetadata) {
-              this.clearMetadata()
+          if (hasStaleMetadata && repeatOnStaleMetadata) {
+            this.clearMetadata()
+            this.#performSingleDestinationSend(
+              topics,
+              messages,
+              timeout,
+              acks,
+              autocreateTopics,
+              false,
+              produceOptions,
+              recoverOnProducerStateLoss,
+              callback
+            )
+            return
+          }
+
+          if (recoverOnProducerStateLoss && !this.#transaction && this.#isProducerStateLost(error)) {
+            this.#recoverIdempotentProducer(messages, produceOptions, (error, recoveredProduceOptions) => {
+              if (error) {
+                callback(error)
+                return
+              }
+
               this.#performSingleDestinationSend(
                 topics,
                 messages,
                 timeout,
                 acks,
                 autocreateTopics,
+                repeatOnStaleMetadata,
+                recoveredProduceOptions!,
                 false,
-                produceOptions,
-                recoverOnProducerStateLoss,
                 callback
               )
-              return
-            }
-
-            if (recoverOnProducerStateLoss && !this.#transaction && this.#isProducerStateLost(error)) {
-              this.#recoverIdempotentProducer(messages, produceOptions, (error, recoveredProduceOptions) => {
-                if (error) {
-                  callback(error)
-                  return
-                }
-
-                this.#performSingleDestinationSend(
-                  topics,
-                  messages,
-                  timeout,
-                  acks,
-                  autocreateTopics,
-                  repeatOnStaleMetadata,
-                  recoveredProduceOptions!,
-                  false,
-                  callback
-                )
-              })
-              return
-            }
-
-            callback(error, results)
+            })
             return
           }
 
           callback(error, results)
-        },
-        0,
-        [],
-        error => {
-          /* c8 ignore next 3 - Hard to test */
-          if (!repeatOnStaleMetadata) {
-            return false
-          }
-
-          return !!findErrorBy(error, 'hasStaleMetadata', true)
+          return
         }
-      )
-    })
+
+        callback(error, results)
+      },
+      0,
+      [],
+      error => {
+        /* c8 ignore next 3 - Hard to test */
+        if (!repeatOnStaleMetadata) {
+          return false
+        }
+
+        return !!findErrorBy(error, 'hasStaleMetadata', true)
+      }
+    )
   }
 
   #isProducerStateLost (error: Error): boolean {
     return !!(
-      findErrorBy(error, 'apiId', 'UNKNOWN_PRODUCER_ID') ||
-      findErrorBy(error, 'apiId', 'OUT_OF_ORDER_SEQUENCE_NUMBER')
+      findErrorBy(error, 'apiId', 'UNKNOWN_PRODUCER_ID') || findErrorBy(error, 'apiId', 'OUT_OF_ORDER_SEQUENCE_NUMBER')
     )
   }
 

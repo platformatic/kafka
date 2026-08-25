@@ -66,7 +66,7 @@ function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, V
   return {
     key: this.key,
     value: this.value,
-    headers: Array.from(this.headers.entries()),
+    headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
     topic: this.topic,
     partition: this.partition,
     timestamp: this.timestamp.toString(),
@@ -499,7 +499,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   _construct (callback: (error?: Error) => void) {
     this.#refreshOffsetsInflight = true
     this.#refreshOffsets(error => {
+      const wasPending = this.#refreshOffsetsPending
       this.#refreshOffsetsInflight = false
+      this.#refreshOffsetsPending = false
+
+      if (!error && wasPending) {
+        this.#scheduleRefreshOffsetsAndFetch()
+      }
+
       callback(error ?? undefined)
     })
   }
@@ -893,6 +900,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             try {
               const headers = new Map<HeaderKey, HeaderValue>()
+              const headerEntries: Array<[HeaderKey, HeaderValue]> = []
               let payloadType: BeforeHookPayloadType = 'headerKey'
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
@@ -916,6 +924,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   /* c8 ignore next - Hard to test */
                   const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
                   headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                  headerEntries.push([deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue])
                 }
 
                 payloadType = 'key'
@@ -967,9 +976,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
                   if (headersFailed) {
                     headers.clear()
+                    headerEntries.length = 0
 
                     for (const [headerKey, headerValue] of record.headers) {
                       headers.set(headerKey as HeaderKey, headerValue as HeaderValue)
+                      headerEntries.push([headerKey as HeaderKey, headerValue as HeaderValue])
                     }
                   }
 
@@ -998,6 +1009,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 key: deserializedKey,
                 value: deserializedValue,
                 headers,
+                headerEntries,
                 topic,
                 partition,
                 timestamp: firstTimestamp + record.timestampDelta,
@@ -1190,7 +1202,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         }
 
         if (!topics.length) {
-          this.#assignOffsets(offsets!, new Map(), callback)
+          // No assignment yet: do not seed fallback offsets for the whole topic.
+          // consumer:group:join will refresh once partitions are assigned.
+          this.emit('offsets')
+          callback(null)
           return
         }
 
@@ -1225,6 +1240,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     this.#refreshOffsets(error => {
       const shouldDestroyOnError = this.#refreshOffsetsDestroyOnError
+      const wasPending = this.#refreshOffsetsPending
       this.#refreshOffsetsInflight = false
       this.#refreshOffsetsDestroyOnError = false
       this.#refreshOffsetsPending = false
@@ -1239,8 +1255,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       // A new one was scheduled while the previous one was inflight, we need to run it immediately
-      /* c8 ignore next 4 - Hard to test */
-      if (this.#refreshOffsetsPending) {
+      if (wasPending) {
         this.#scheduleRefreshOffsetsAndFetch(shouldDestroyOnError)
         return
       }

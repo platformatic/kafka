@@ -360,7 +360,7 @@ test('parseResponse correctly processes a successful response', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 2, 9, Reader.from(writer))
+  const response = parseResponse(1, 2, 8, Reader.from(writer))
 
   // Verify structure
   deepStrictEqual(response, {
@@ -419,7 +419,7 @@ test('parseResponse handles partition-level error code', () => {
   // Verify that parsing throws ResponseError
   throws(
     () => {
-      parseResponse(1, 2, 9, Reader.from(writer))
+      parseResponse(1, 2, 8, Reader.from(writer))
     },
     (err: any) => {
       ok(err instanceof ResponseError)
@@ -427,6 +427,7 @@ test('parseResponse handles partition-level error code', () => {
 
       // Check that errors object exists and has the correct type
       ok(err.errors && typeof err.errors === 'object')
+      ok(err.message.includes('ListOffsets(v8)'))
 
       // Verify that the response structure is preserved
       deepStrictEqual(err.response, {
@@ -505,7 +506,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     )
     .appendInt8(0) // Root tagged fields
 
-  const response = parseResponse(1, 2, 9, Reader.from(writer))
+  const response = parseResponse(1, 2, 8, Reader.from(writer))
 
   // Verify the response structure
   deepStrictEqual(response, {

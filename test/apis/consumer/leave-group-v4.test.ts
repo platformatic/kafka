@@ -119,7 +119,7 @@ test('createRequest with multiple members', () => {
   ])
 })
 
-test('parseResponse correctly processes a successful response', () => {
+test('parseResponse reads a non-null member ID', () => {
   // Create a successful response
   const writer = Writer.create()
     .appendInt32(0) // throttleTimeMs

@@ -1,6 +1,7 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { pushTelemetryV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { gzipSync } from 'node:zlib'
+import { pushTelemetryV0, Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = pushTelemetryV0
 
@@ -8,7 +9,7 @@ test('createRequest serializes parameters correctly', () => {
   const clientInstanceId = '12345678-1234-1234-1234-123456789abc'
   const subscriptionId = 123
   const terminating = false
-  const compressionType = 0 // NONE
+  const compressionType = TelemetryCompressionTypes.NONE
   const metrics = Buffer.from('metric data')
 
   const writer = createRequest(clientInstanceId, subscriptionId, terminating, compressionType, metrics)
@@ -40,14 +41,16 @@ test('createRequest serializes parameters correctly', () => {
     },
     'Serialized request should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with terminating flag true', () => {
   const clientInstanceId = '12345678-1234-1234-1234-123456789abc'
   const subscriptionId = 123
   const terminating = true // Set terminating to true
-  const compressionType = 1 // GZIP
-  const metrics = Buffer.from('compressed metric data')
+  const compressionType = TelemetryCompressionTypes.GZIP
+  const metrics = gzipSync('compressed metric data')
 
   const writer = createRequest(clientInstanceId, subscriptionId, terminating, compressionType, metrics)
 
@@ -74,17 +77,19 @@ test('createRequest with terminating flag true', () => {
       subscriptionId,
       terminating,
       compressionType,
-      metrics: Buffer.from('compressed metric data')
+      metrics
     },
     'Serialized request with terminating flag should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest with empty metrics', () => {
   const clientInstanceId = '12345678-1234-1234-1234-123456789abc'
   const subscriptionId = 123
   const terminating = false
-  const compressionType = 0 // NONE
+  const compressionType = TelemetryCompressionTypes.NONE
   const metrics = Buffer.alloc(0) // Empty metrics
 
   const writer = createRequest(clientInstanceId, subscriptionId, terminating, compressionType, metrics)
@@ -116,6 +121,8 @@ test('createRequest with empty metrics', () => {
     },
     'Serialized request with empty metrics should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {

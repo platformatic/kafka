@@ -1,6 +1,6 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { fetchV17, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { createRecordsBatch, crc32c, fetchV17, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = fetchV17
 
@@ -122,6 +122,35 @@ test('createRequest serializes basic parameters correctly', () => {
   )
 })
 
+test('createRequest encodes replica directory IDs as partition tagged field zero', () => {
+  const writer = createRequest(0, 0, 0, 0, 0, 0, [{
+    topicId: '12345678-1234-1234-1234-123456789abc',
+    partitions: [
+      { partition: 0, currentLeaderEpoch: 0, fetchOffset: 0n, lastFetchedEpoch: 0, partitionMaxBytes: 1 },
+      { partition: 1, currentLeaderEpoch: 0, fetchOffset: 0n, lastFetchedEpoch: 0, partitionMaxBytes: 1, replicaDirectoryId: '87654321-4321-4321-4321-cba987654321' }
+    ]
+  }], [], '')
+  const reader = Reader.from(writer)
+  const partitionTagCounts: number[] = []
+
+  reader.skip(21)
+  reader.readArray(r => {
+    r.readUUID()
+    r.readArray(r => {
+      r.skip(32)
+      const tags = r.readUnsignedVarInt()
+      partitionTagCounts.push(tags)
+      if (tags === 0) {
+        return
+      }
+      deepStrictEqual(tags, 1)
+      deepStrictEqual([r.readUnsignedVarInt(), r.readUnsignedVarInt(), r.readUUID()], [0, 16, '87654321-4321-4321-4321-cba987654321'])
+    }, true, false)
+  })
+  deepStrictEqual(partitionTagCounts, [0, 1])
+  deepStrictEqual([reader.readArray(() => {}), reader.readString(), reader.readUnsignedVarInt()], [[], '', 0])
+})
+
 test('createRequest serializes multiple topics and partitions', () => {
   const maxWaitMs = 5000
   const minBytes = 1
@@ -223,8 +252,17 @@ test('createRequest handles forgotten topics data', () => {
   ]
   const forgottenTopicsData = [
     {
-      topic: '87654321-4321-4321-4321-cba987654321', // UUID as string
-      partitions: [0, 1] // The original partition numbers
+      topicId: '87654321-4321-4321-4321-cba987654321',
+      partitions: [0, 1]
+    },
+    {
+      topic: '11111111-1111-1111-1111-111111111111',
+      partitions: [2]
+    },
+    {
+      topicId: '22222222-2222-2222-2222-222222222222',
+      topic: '33333333-3333-3333-3333-333333333333',
+      partitions: [3]
     }
   ]
   const rackId = 'rack'
@@ -321,11 +359,11 @@ test('createRequest handles forgotten topics data', () => {
     return { topic, partitions }
   })
 
-  // Forgotten topics verification - just check topic and array length
-  deepStrictEqual(forgottenTopicsRead.length, 1, 'Should have 1 forgotten topic')
-  deepStrictEqual(forgottenTopicsRead[0].topic, '87654321-4321-4321-4321-cba987654321', 'Topic UUID should match')
-  deepStrictEqual(forgottenTopicsRead[0].partitions.length, 2, 'Should have 2 partitions')
-  deepStrictEqual(forgottenTopicsRead[0].partitions[0], 0, 'First partition should be 0')
+  deepStrictEqual(forgottenTopicsRead, [
+    { topic: '87654321-4321-4321-4321-cba987654321', partitions: [0, 1] },
+    { topic: '11111111-1111-1111-1111-111111111111', partitions: [2] },
+    { topic: '22222222-2222-2222-2222-222222222222', partitions: [3] }
+  ])
 
   // Rack ID
   const rackIdRead = reader.readString()
@@ -382,6 +420,7 @@ test('parseResponse correctly processes a successful simple response', () => {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 123,
+    nodeEndpoints: [],
     responses: [
       {
         topicId: '12345678-1234-1234-1234-123456789abc',
@@ -393,8 +432,11 @@ test('parseResponse correctly processes a successful simple response', () => {
             lastStableOffset: 100n,
             logStartOffset: 0n,
             abortedTransactions: [],
-            preferredReadReplica: -1
-            // records field should be undefined because no records were returned
+            preferredReadReplica: -1,
+            records: [],
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 }
           }
         ]
       }
@@ -429,6 +471,7 @@ test('parseResponse handles top-level error code', () => {
         errorCode: 27,
         throttleTimeMs: 0,
         sessionId: 0,
+        nodeEndpoints: [],
         responses: []
       })
 
@@ -497,6 +540,7 @@ test('parseResponse handles partition-level error code', () => {
         throttleTimeMs: 0,
         errorCode: 0, // Top-level is success
         sessionId: 123,
+        nodeEndpoints: [],
         responses: [
           {
             topicId: '12345678-1234-1234-1234-123456789abc',
@@ -508,7 +552,11 @@ test('parseResponse handles partition-level error code', () => {
                 lastStableOffset: 100n,
                 logStartOffset: 0n,
                 abortedTransactions: [],
-                preferredReadReplica: -1
+                preferredReadReplica: -1,
+                records: [],
+                divergingEpoch: { epoch: -1, endOffset: -1n },
+                currentLeader: { leaderId: -1, leaderEpoch: -1 },
+                snapshotId: { endOffset: -1n, epoch: -1 }
               }
             ]
           }
@@ -593,6 +641,7 @@ test('parseResponse handles multiple topics and partitions', () => {
     throttleTimeMs: 0,
     errorCode: 0,
     sessionId: 123,
+    nodeEndpoints: [],
     responses: [
       {
         topicId: '12345678-1234-1234-1234-123456789abc',
@@ -604,7 +653,11 @@ test('parseResponse handles multiple topics and partitions', () => {
             lastStableOffset: 100n,
             logStartOffset: 0n,
             abortedTransactions: [],
-            preferredReadReplica: -1
+            preferredReadReplica: -1,
+            records: [],
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 }
           },
           {
             partitionIndex: 1,
@@ -613,7 +666,11 @@ test('parseResponse handles multiple topics and partitions', () => {
             lastStableOffset: 200n,
             logStartOffset: 0n,
             abortedTransactions: [],
-            preferredReadReplica: -1
+            preferredReadReplica: -1,
+            records: [],
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 }
           }
         ]
       },
@@ -627,7 +684,11 @@ test('parseResponse handles multiple topics and partitions', () => {
             lastStableOffset: 300n,
             logStartOffset: 0n,
             abortedTransactions: [],
-            preferredReadReplica: -1
+            preferredReadReplica: -1,
+            records: [],
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 }
           }
         ]
       }
@@ -638,11 +699,6 @@ test('parseResponse handles multiple topics and partitions', () => {
 test('parseResponse handles aborted transactions', () => {
   // Prepare an empty records batch for correct serialization
   const emptyRecordsBatch = Writer.create()
-    .appendInt64(0n) // firstOffset
-    .appendInt32(20) // length - minimal value for an empty batch
-    .appendInt32(0) // partitionLeaderEpoch
-    .appendInt8(2) // magic (record format version)
-    .appendUnsignedInt32(0) // crc
     .appendInt16(0) // attributes
     .appendInt32(0) // lastOffsetDelta
     .appendInt64(0n) // firstTimestamp
@@ -651,6 +707,12 @@ test('parseResponse handles aborted transactions', () => {
     .appendInt16(0) // producerEpoch
     .appendInt32(0) // firstSequence
     .appendInt32(0) // number of records (0 for empty batch)
+
+  emptyRecordsBatch.appendUnsignedInt32(crc32c(emptyRecordsBatch.dynamicBuffer), false).appendInt8(2, false).appendInt32(0, false).prependLength().appendInt64(0n, false)
+  const emptyBatchReader = Reader.from(emptyRecordsBatch)
+  strictEqual(emptyBatchReader.readInt64(), 0n)
+  strictEqual(emptyBatchReader.readInt32(), 49)
+  strictEqual(emptyRecordsBatch.length, 61)
 
   // Create a response with aborted transactions
   const writer = Writer.create()
@@ -727,32 +789,10 @@ test('parseResponse handles aborted transactions', () => {
 })
 
 test('parseResponse parses record data', () => {
-  // Create a response with records data
-  // First create a record batch
-  const timestamp = BigInt(Date.now())
-  const recordsBatch = Writer.create()
-    // Record batch structure
-    .appendInt64(0n) // firstOffset
-    .appendInt32(60) // length - this would be dynamically computed in real usage
-    .appendInt32(0) // partitionLeaderEpoch
-    .appendInt8(2) // magic (record format version)
-    .appendUnsignedInt32(0) // crc - would be computed properly in real code
-    .appendInt16(0) // attributes
-    .appendInt32(0) // lastOffsetDelta
-    .appendInt64(timestamp) // firstTimestamp
-    .appendInt64(timestamp) // maxTimestamp
-    .appendInt64(-1n) // producerId - not specified
-    .appendInt16(0) // producerEpoch
-    .appendInt32(0) // firstSequence
-    .appendInt32(1) // number of records
-    // Single record
-    .appendVarInt(8) // length of the record
-    .appendInt8(0) // attributes
-    .appendVarInt64(0n) // timestampDelta
-    .appendVarInt(0) // offsetDelta
-    .appendVarIntBytes(null) // key
-    .appendVarIntBytes(Buffer.from('test-value')) // value
-    .appendVarIntArray([], () => {}) // No headers
+  const recordsBatch = createRecordsBatch([{ topic: 'test-topic', value: Buffer.from('test-value'), timestamp: 1720000000000n }])
+  const recordsBatchReader = Reader.from(recordsBatch)
+  strictEqual(recordsBatchReader.readInt64(), 0n)
+  strictEqual(recordsBatchReader.readInt32(), recordsBatch.length - 12)
 
   // Now create the full response
   const writer = Writer.create()
@@ -827,33 +867,12 @@ test('parseResponse parses record data', () => {
 })
 
 test('parseResponse handles truncated records', () => {
-  // Create a response with records data
-  // First create a record batch
-  const timestamp = BigInt(Date.now())
-  const recordsBatch = Writer.create()
-    // Record batch structure
-    .appendInt64(0n) // firstOffset
-    .appendInt32(60) // length - this would be dynamically computed in real usage
-    .appendInt32(0) // partitionLeaderEpoch
-    .appendInt8(2) // magic (record format version)
-    .appendUnsignedInt32(0) // crc - would be computed properly in real code
-    .appendInt16(0) // attributes
-    .appendInt32(0) // lastOffsetDelta
-    .appendInt64(timestamp) // firstTimestamp
-    .appendInt64(timestamp) // maxTimestamp
-    .appendInt64(-1n) // producerId - not specified
-    .appendInt16(0) // producerEpoch
-    .appendInt32(0) // firstSequence
-    .appendInt32(1) // number of records
-    // Single record
-    .appendVarInt(8) // length of the record
-    .appendInt8(0) // attributes
-    .appendVarInt64(0n) // timestampDelta
-    .appendVarInt(0) // offsetDelta
-    .appendVarIntBytes(null) // key
-    .appendVarIntBytes(Buffer.from('test-value')) // value
-    .appendVarIntArray([], () => {}) // No headers
-    // Truncated batch
+  const completeRecordsBatch = createRecordsBatch([{ topic: 'test-topic', value: Buffer.from('test-value'), timestamp: 1720000000000n }])
+  const completeBatchReader = Reader.from(completeRecordsBatch)
+  strictEqual(completeBatchReader.readInt64(), 0n)
+  strictEqual(completeBatchReader.readInt32(), completeRecordsBatch.length - 12)
+  const recordsBatch = Writer.create().appendFrom(completeRecordsBatch)
+    // The final batch is deliberately incomplete.
     .appendInt64(0n) // firstOffset
     .appendInt32(60) // length
 
@@ -927,4 +946,47 @@ test('parseResponse handles truncated records', () => {
 
   // Verify value is a Buffer
   ok(Buffer.isBuffer(record.value))
+})
+
+test('parseResponse preserves nullable aborted transactions', () => {
+  const response = parseResponse(1, 1, 17, Reader.from(Writer.create()
+    .appendInt32(0)
+    .appendInt16(0)
+    .appendInt32(0)
+    .appendArray([{ topic: '12345678-1234-1234-1234-123456789abc' }], w => w.appendUUID('12345678-1234-1234-1234-123456789abc').appendArray([null, [], [{ producerId: 1n, firstOffset: 2n }]], (w, abortedTransactions, partition) => w
+      .appendInt32(partition)
+      .appendInt16(0)
+      .appendInt64(10n)
+      .appendInt64(9n)
+      .appendInt64(0n)
+      .appendArray(abortedTransactions, (w, transaction) => w.appendInt64(transaction.producerId).appendInt64(transaction.firstOffset))
+      .appendInt32(-1)
+      .appendUnsignedVarInt(1)))
+    .appendTaggedFields()))
+
+  deepStrictEqual(response.responses[0]!.partitions.map(partition => partition.abortedTransactions), [null, [], [{ producerId: 1n, firstOffset: 2n }]])
+})
+
+test('parseResponse preserves nullable records', () => {
+  const batch = createRecordsBatch([{ topic: 'topic', value: Buffer.from('value') }])
+  const records = [null, Writer.create(), batch]
+  const recordsWire = Writer.create().appendUnsignedVarInt(0).appendUnsignedVarInt(1).appendUnsignedVarInt(batch.length + 1)
+  const recordsReader = Reader.from(recordsWire)
+  strictEqual(recordsReader.readUnsignedVarInt(), 0)
+  strictEqual(recordsReader.readUnsignedVarInt(), 1)
+  strictEqual(recordsReader.readUnsignedVarInt(), batch.length + 1)
+
+  const response = parseResponse(1, 1, 17, Reader.from(Writer.create().appendInt32(0).appendInt16(0).appendInt32(0).appendArray([{ topic: '12345678-1234-1234-1234-123456789abc' }], w => w.appendUUID('12345678-1234-1234-1234-123456789abc').appendArray(records, (w, records, partition) => {
+    w.appendInt32(partition).appendInt16(0).appendInt64(10n).appendInt64(9n).appendInt64(0n).appendArray([], () => {}).appendInt32(-1)
+    if (records === null) {
+      w.appendUnsignedVarInt(0)
+    } else {
+      w.appendUnsignedVarInt(records.length + 1)
+      if (records.length > 0) {
+        w.appendFrom(records)
+      }
+    }
+  })).appendTaggedFields()))
+
+  deepStrictEqual(response.responses[0]!.partitions.map(partition => partition.records?.length === 1 ? partition.records[0].records[0].value?.toString() : partition.records), [null, [], 'value'])
 })

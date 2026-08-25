@@ -6,12 +6,18 @@ import { Writer } from '../../protocol/writer.ts'
 import { groupByProperty } from '../../utils.ts'
 import { createAPI, type ResponseErrorWithLocation } from '../definitions.ts'
 import { ProduceAcks } from '../enumerations.ts'
+import { readKnownTaggedFields } from '../tagged-fields.ts'
 
 export type ProduceRequest = Parameters<typeof createRequest>
 
 export interface ProduceResponsePartitionRecordError {
   batchIndex: number
   batchIndexErrorMessage: NullableString
+}
+
+export interface ProduceResponseCurrentLeader {
+  leaderId: number
+  leaderEpoch: number
 }
 
 export interface ProduceResponsePartition {
@@ -22,6 +28,7 @@ export interface ProduceResponsePartition {
   logStartOffset: bigint
   recordErrors: ProduceResponsePartitionRecordError[]
   errorMessage: NullableString
+  currentLeader?: ProduceResponseCurrentLeader
 }
 
 export interface ProduceResponseTopic {
@@ -29,9 +36,17 @@ export interface ProduceResponseTopic {
   partitionResponses: ProduceResponsePartition[]
 }
 
+export interface ProduceResponseNodeEndpoint {
+  nodeId: number
+  host: string
+  port: number
+  rack: NullableString
+}
+
 export interface ProduceResponse {
   responses: ProduceResponseTopic[]
   throttleTimeMs: number
+  nodeEndpoints?: ProduceResponseNodeEndpoint[]
 }
 
 /*
@@ -102,7 +117,17 @@ export function createRequest (
           batch_index => INT32
           batch_index_error_message => COMPACT_NULLABLE_STRING
         error_message => COMPACT_NULLABLE_STRING
+        TAG 0 => current_leader
+          current_leader => leader_id leader_epoch
+            leader_id => INT32
+            leader_epoch => INT32
     throttle_time_ms => INT32
+    TAG 0 => node_endpoints
+      node_endpoints => node_id host port rack TAG_BUFFER
+        node_id => INT32
+        host => COMPACT_STRING
+        port => INT32
+        rack => COMPACT_NULLABLE_STRING
 */
 export function parseResponse (
   _correlationId: number,
@@ -117,7 +142,7 @@ export function parseResponse (
       const topicResponse = {
         name: r.readString(),
         partitionResponses: r.readArray((r, j) => {
-          const partitionResponse = {
+          const partitionResponse: ProduceResponsePartition = {
             index: r.readInt32(),
             errorCode: r.readInt16(),
             baseOffset: r.readInt64(),
@@ -128,6 +153,7 @@ export function parseResponse (
                 batchIndex: r.readInt32(),
                 batchIndexErrorMessage: r.readNullableString()
               }
+              r.readTaggedFields()
 
               if (recordError.batchIndexErrorMessage) {
                 errors.push([
@@ -137,9 +163,18 @@ export function parseResponse (
               }
 
               return recordError
-            }),
-            errorMessage: r.readNullableString()
+            }, true, false),
+            errorMessage: r.readNullableString(),
+            currentLeader: { leaderId: -1, leaderEpoch: -1 }
           }
+          readKnownTaggedFields(r, {
+            0: r => {
+              partitionResponse.currentLeader = {
+                leaderId: r.readInt32(),
+                leaderEpoch: r.readInt32()
+              }
+            }
+          })
 
           if (partitionResponse.errorCode !== 0) {
             errors.push([
@@ -149,13 +184,29 @@ export function parseResponse (
           }
 
           return partitionResponse
-        })
+        }, true, false)
       }
+      r.readTaggedFields()
 
       return topicResponse
-    }),
-    throttleTimeMs: reader.readInt32()
+    }, true, false),
+    throttleTimeMs: reader.readInt32(),
+    nodeEndpoints: []
   }
+  readKnownTaggedFields(reader, {
+    0: r => {
+      response.nodeEndpoints = r.readArray(r => {
+        const endpoint = {
+          nodeId: r.readInt32(),
+          host: r.readString(),
+          port: r.readInt32(),
+          rack: r.readNullableString()
+        }
+        r.readTaggedFields()
+        return endpoint
+      }, true, false)
+    }
+  })
 
   if (errors.length) {
     throw new ResponseError(apiKey, apiVersion, Object.fromEntries(errors), response)

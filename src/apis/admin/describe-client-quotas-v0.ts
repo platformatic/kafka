@@ -3,20 +3,18 @@ import { type NullableString } from '../../protocol/definitions.ts'
 import { type Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { createAPI } from '../definitions.ts'
-import {
-  type ClientQuotaEntityTypeValue,
-  type ClientQuotaKeyValue,
-  type ClientQuotaMatchTypes
-} from '../enumerations.ts'
+import type { ClientQuotaEntityType, ClientQuotaKey, ClientQuotaMatchTypes } from '../enumerations.ts'
+
+export type { ClientQuotaEntityType, ClientQuotaKey } from '../enumerations.ts'
 
 export interface DescribeClientQuotasRequestMatchComponent {
-  entityType: ClientQuotaEntityTypeValue
+  entityType: ClientQuotaEntityType
   matchType: typeof ClientQuotaMatchTypes.EXACT
-  match: string
+  match: NullableString
 }
 
 export interface DescribeClientQuotasRequestSpecialComponent {
-  entityType: ClientQuotaEntityTypeValue
+  entityType: ClientQuotaEntityType
   matchType: typeof ClientQuotaMatchTypes.DEFAULT | typeof ClientQuotaMatchTypes.ANY
 }
 
@@ -27,12 +25,12 @@ export type DescribeClientQuotasRequestComponent =
 export type DescribeClientQuotasRequest = Parameters<typeof createRequest>
 
 export interface DescribeClientQuotasResponseValue {
-  key: ClientQuotaKeyValue
+  key: ClientQuotaKey
   value: number
 }
 
 export interface DescribeClientQuotasResponseEntity {
-  entityType: ClientQuotaEntityTypeValue
+  entityType: ClientQuotaEntityType
   entityName: NullableString
 }
 
@@ -45,38 +43,43 @@ export interface DescribeClientQuotasResponse {
   throttleTimeMs: number
   errorCode: number
   errorMessage: NullableString
-  entries: DescribeClientQuotasResponseEntry[]
+  entries: DescribeClientQuotasResponseEntry[] | null
 }
 
 /*
-  DescribeClientQuotas Request (Version: 1) => [components] strict TAG_BUFFER
-    components => entity_type match_type match TAG_BUFFER
-      entity_type => COMPACT_STRING
+  DescribeClientQuotas Request (Version: 0) => [components] strict
+    components => entity_type match_type match
+      entity_type => STRING
       match_type => INT8
-      match => COMPACT_NULLABLE_STRING
+      match => NULLABLE_STRING
     strict => BOOLEAN
 */
 export function createRequest (components: DescribeClientQuotasRequestComponent[], strict: boolean): Writer {
   return Writer.create()
-    .appendArray(components, (w, c) => {
-      // @ts-ignore - TS complains that 'match' is not available in all variants of DescribeClientQuotasRequestComponent
-      w.appendString(c.entityType).appendInt8(c.matchType).appendString(c.match)
-    })
+    .appendArray(
+      components,
+      (w, c) => {
+        w.appendString(c.entityType, false)
+          .appendInt8(c.matchType)
+          .appendString('match' in c ? c.match : null, false)
+      },
+      false,
+      false
+    )
     .appendBoolean(strict)
-    .appendTaggedFields()
 }
 
 /*
-  DescribeClientQuotas Response (Version: 1) => throttle_time_ms error_code error_message [entries] TAG_BUFFER
+  DescribeClientQuotas Response (Version: 0) => throttle_time_ms error_code error_message [entries]
     throttle_time_ms => INT32
     error_code => INT16
-    error_message => COMPACT_NULLABLE_STRING
-    entries => [entity] [values] TAG_BUFFER
-      entity => entity_type entity_name TAG_BUFFER
-        entity_type => COMPACT_STRING
-        entity_name => COMPACT_NULLABLE_STRING
-      values => key value TAG_BUFFER
-        key => COMPACT_STRING
+    error_message => NULLABLE_STRING
+    entries => [entity] [values]
+      entity => entity_type entity_name
+        entity_type => STRING
+        entity_name => NULLABLE_STRING
+      values => key value
+        key => STRING
         value => FLOAT64
 */
 export function parseResponse (
@@ -88,20 +91,35 @@ export function parseResponse (
   const response: DescribeClientQuotasResponse = {
     throttleTimeMs: reader.readInt32(),
     errorCode: reader.readInt16(),
-    errorMessage: reader.readNullableString(),
-    entries: reader.readArray(r => {
-      return {
-        entity: r.readArray(r => {
-          return { entityType: r.readString() as ClientQuotaEntityTypeValue, entityName: r.readNullableString() }
-        }),
-        values: r.readArray(r => {
-          return {
-            key: r.readString() as ClientQuotaKeyValue,
-            value: r.readFloat64()
-          }
-        })
-      }
-    })
+    errorMessage: reader.readNullableString(false),
+    entries: reader.readNullableArray(
+      r => {
+        return {
+          entity: r.readArray(
+            r => {
+              return {
+                entityType: r.readString(false) as ClientQuotaEntityType,
+                entityName: r.readNullableString(false)
+              }
+            },
+            false,
+            false
+          ),
+          values: r.readArray(
+            r => {
+              return {
+                key: r.readString(false) as ClientQuotaKey,
+                value: r.readFloat64()
+              }
+            },
+            false,
+            false
+          )
+        }
+      },
+      false,
+      false
+    )
   }
 
   if (response.errorCode !== 0) {
@@ -113,7 +131,9 @@ export function parseResponse (
 
 export const api = createAPI<DescribeClientQuotasRequest, DescribeClientQuotasResponse>(
   48,
-  1,
+  0,
   createRequest,
-  parseResponse
+  parseResponse,
+  false,
+  false
 )

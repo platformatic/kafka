@@ -10,6 +10,8 @@ on:
 jobs:
   ci:
     strategy:
+      # A single flaky job should not cancel the other 23 and hide their results.
+      fail-fast: false
       matrix:
         node-version: [22.x, 24.x, 26.x]
         confluent-kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0, 8.1.0, 8.2.0]
@@ -44,3 +46,83 @@ jobs:
           KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
       - name: Run Tests
         run: 'pnpm run ci'
+
+  # The legacy API version codecs are only reachable by pinning the negotiated version, which the
+  # main suite does not do: against any broker the client always picks the newest version. This job
+  # sweeps them against a real broker.
+  #
+  # Both ends of the matrix are needed and neither is redundant: Kafka 4.0 raised the minimum
+  # accepted version of several APIs (KIP-896), so 7.5.0 reaches the oldest codecs (Fetch v0-v3,
+  # CreateTopics v0-v1, OffsetCommit v0-v1, ...) and 8.2.0 catches anything which assumes an old
+  # broker. One Node.js version is enough: these exercise wire formats, not runtime behaviour.
+  compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # KRaft only supports delegation tokens from Apache Kafka 3.6 (KIP-900). Setting a secret
+          # key on 7.5.0 makes the broker refuse to start, so the override is applied only where the
+          # feature exists; the delegation token sweeps skip themselves on the other broker.
+          - confluent-kafka-version: 7.5.0
+            compose-files: '-f docker-compose.yml'
+          - confluent-kafka-version: 8.2.0
+            compose-files: '-f docker-compose.yml -f docker-compose.delegation-tokens.yml'
+    name: 'API compatibility / Confluent Kafka ${{ matrix.confluent-kafka-version }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Restore cached dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: node-modules-${{ hashFiles('package.json') }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start Kafka (${{ matrix.confluent-kafka-version }}) Cluster
+        run: >
+          docker compose ${{ matrix.compose-files }} up --build --force-recreate -d --wait
+          broker-single broker-sasl broker-cluster-1 broker-cluster-2 broker-cluster-3
+        env:
+          KAFKA_VERSION: ${{ matrix.confluent-kafka-version }}
+      - name: Run API compatibility sweeps
+        run: 'pnpm run test:compat'
+
+  # Apache Kafka 1.1.0, the oldest broker this package claims to support. It is the only place the
+  # legacy codecs are the *negotiated* choice rather than a forced pin, and the only broker where
+  # ApiVersions maxes out at v1. Pre-KRaft, so it needs its own ZooKeeper based stack.
+  legacy-compatibility:
+    name: 'API compatibility / Apache Kafka 1.1.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Restore cached dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: node-modules-${{ hashFiles('package.json') }}
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start Kafka 1.1.0
+        run: docker compose -f docker-compose.legacy.yml up -d --wait
+      - name: Run API compatibility sweeps
+        run: 'pnpm run test:compat'

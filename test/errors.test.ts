@@ -54,6 +54,17 @@ test('GenericError.findBy', () => {
   deepStrictEqual(error.findBy('unknown', 'value'), null)
 })
 
+test('NetworkError.isRetryable', () => {
+  strictEqual(NetworkError.isRetryable(new NetworkError('retryable')), true)
+  strictEqual(NetworkError.isRetryable(new NetworkError('not retryable', { canRetry: false })), false)
+  strictEqual(NetworkError.isRetryable(new TimeoutError('timed out')), false)
+  strictEqual(
+    NetworkError.isRetryable(new MultipleErrors('multiple errors', [new NetworkError('retryable')])),
+    true
+  )
+  strictEqual(NetworkError.isRetryable(new Error('not a library error')), false)
+})
+
 test('MultipleErrors constructor', () => {
   const error1 = new GenericError('PLT_KFK_USER', 'error1')
   const error2 = new GenericError('PLT_KFK_NETWORK', 'error2')

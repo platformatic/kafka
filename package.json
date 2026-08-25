@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/kafka",
-  "version": "2.9.0",
+  "version": "2.2.0",
   "description": "Modern and performant client for Apache Kafka",
   "homepage": "https://github.com/platformatic/kafka",
   "author": "Platformatic Inc. <oss@platformatic.dev> (https://platformatic.dev)",
@@ -37,6 +37,7 @@
     "test:regression": "npm run test:integrity",
     "test:regression:all": "npm run test:integrity && npm run test:performance",
     "test:all": "npm test && npm run test:regression:all",
+    "test:compat": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/integration/*.compat-test.ts'",
     "test:memory": "NODE_OPTIONS='--expose-gc' ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/**/*.memory-test.ts'",
     "test:docker:up": "docker-compose up -d --wait",
     "test:docker:down": "docker-compose down",

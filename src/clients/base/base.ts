@@ -9,10 +9,11 @@ import {
 import { type API, type Callback } from '../../apis/definitions.ts'
 import * as apis from '../../apis/index.ts'
 import {
-  api as apiVersionsV3,
+  api as apiVersionsV1,
   type ApiVersionsResponse,
   type ApiVersionsResponseApi
-} from '../../apis/metadata/api-versions-v3.ts'
+} from '../../apis/metadata/api-versions-v1.ts'
+import { api as apiVersionsV3 } from '../../apis/metadata/api-versions-v3.ts'
 import { type MetadataRequest, type MetadataResponse } from '../../apis/metadata/metadata-v12.ts'
 import {
   baseApisChannel,
@@ -98,6 +99,7 @@ export class Base<
 
   #metadata: ClusterMetadata | undefined
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
+  #apiVersionsVersions: WeakMap<Connection, 1 | 3>
 
   constructor (options: OptionsType) {
     super()
@@ -107,6 +109,7 @@ export class Base<
     this[kInstance] = currentInstance++
     this[kApis] = []
     this[kContext] = options.context
+    this.#apiVersionsVersions = new WeakMap()
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType) as OptionsType
@@ -335,8 +338,34 @@ export class Base<
                 return
               }
 
-              // We use V3 to be able to get APIS from Kafka 2.4.0+
-              apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, retryCallback)
+              const apiVersionsVersion = this.#apiVersionsVersions.get(connection!)
+
+              const listApisV1 = () => {
+                apiVersionsV1(connection!, clientSoftwareName, clientSoftwareVersion, (error, response) => {
+                  retryCallback(error, response)
+                })
+              }
+
+              if (apiVersionsVersion === 1) {
+                listApisV1()
+                return
+              }
+
+              apiVersionsV3(connection!, clientSoftwareName, clientSoftwareVersion, (error, response) => {
+                if (!error) {
+                  this.#apiVersionsVersions.set(connection!, 3)
+                  retryCallback(null, response)
+                  return
+                }
+
+                if (findErrorBy(error, 'apiId', 'UNSUPPORTED_VERSION')) {
+                  this.#apiVersionsVersions.set(connection!, 1)
+                  listApisV1()
+                  return
+                }
+
+                retryCallback(error)
+              })
             }, attempt)
           },
           (error, metadata) => {
@@ -636,7 +665,17 @@ export class Base<
                 // (e.g. MSK) authorize every topic operation and emit a CloudTrail
                 // AccessDenied per denied op (CreateTopic/DeleteTopic/...) — pure
                 // audit-log noise for permissions the client never exercises.
-                api!(connection!, topicsToFetch, autocreateTopics, false, retryCallback)
+                api!(connection!, topicsToFetch, autocreateTopics, false, (error, response) => {
+                  // Metadata v0-v8 do not carry topic UUIDs. Topic names are stable
+                  // surrogates for the consumer paths that use internal topic IDs.
+                  if (!error && api!.version <= 8) {
+                    for (const topic of response!.topics) {
+                      topic.topicId = topic.name!
+                    }
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             }, attempt)
           },

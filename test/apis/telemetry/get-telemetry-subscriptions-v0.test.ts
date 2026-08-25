@@ -1,6 +1,6 @@
-import { deepStrictEqual, ok, throws } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { getTelemetrySubscriptionsV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { getTelemetrySubscriptionsV0, Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = getTelemetrySubscriptionsV0
 
@@ -24,6 +24,8 @@ test('createRequest with client instance ID', () => {
     },
     'Serialized request should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('createRequest without client instance ID uses default UUID', () => {
@@ -45,6 +47,8 @@ test('createRequest without client instance ID uses default UUID', () => {
     },
     'Serialized request with default UUID should match expected structure'
   )
+  reader.readTaggedFields()
+  strictEqual(reader.remaining, 0)
 })
 
 test('parseResponse correctly processes a successful response', () => {
@@ -56,7 +60,7 @@ test('parseResponse correctly processes a successful response', () => {
     .appendInt32(123) // subscriptionId
     // acceptedCompressionTypes array - compact format
     .appendArray(
-      [0, 1], // NONE, GZIP
+      [TelemetryCompressionTypes.GZIP],
       (w, compressionType) => {
         w.appendInt8(compressionType)
       },
@@ -85,7 +89,7 @@ test('parseResponse correctly processes a successful response', () => {
     errorCode: 0,
     clientInstanceId: '12345678-1234-1234-1234-123456789abc',
     subscriptionId: 123,
-    acceptedCompressionTypes: [0, 1],
+    acceptedCompressionTypes: [TelemetryCompressionTypes.GZIP],
     pushIntervalMs: 30000,
     telemetryMaxBytes: 1048576,
     deltaTemporality: true,
@@ -144,7 +148,7 @@ test('parseResponse handles response with throttling', () => {
     .appendInt32(123) // subscriptionId
     // acceptedCompressionTypes array - compact format
     .appendArray(
-      [0], // NONE
+      [TelemetryCompressionTypes.GZIP],
       (w, compressionType) => {
         w.appendInt8(compressionType)
       },
@@ -173,7 +177,7 @@ test('parseResponse handles response with throttling', () => {
     errorCode: 0,
     clientInstanceId: '12345678-1234-1234-1234-123456789abc',
     subscriptionId: 123,
-    acceptedCompressionTypes: [0],
+    acceptedCompressionTypes: [TelemetryCompressionTypes.GZIP],
     pushIntervalMs: 30000,
     telemetryMaxBytes: 1048576,
     deltaTemporality: true,

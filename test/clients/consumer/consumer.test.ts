@@ -5479,6 +5479,22 @@ test('joinGroup should fail with a bounded error rather than retrying forever wh
   }
 })
 
+test('joinGroup should bound retries when JoinGroup keeps requesting a rejoin', async t => {
+  const consumer = createConsumer(t, { retries: 1, retryDelay: 0 })
+
+  mockAPI(consumer[kConnections], joinGroupV5.api.key, null, null, (_original: Function, ...args: any[]) => {
+    const groupCallback = args.at(-1)
+    groupCallback(new ProtocolError('MEMBER_ID_REQUIRED'))
+    return true
+  })
+
+  await rejects(consumer.joinGroup(), error => {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'joinGroup failed 2 times.')
+    return true
+  })
+})
+
 test('leaveGroup should reset group state and leave the consumer group and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 

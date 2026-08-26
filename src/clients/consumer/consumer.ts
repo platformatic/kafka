@@ -61,6 +61,7 @@ import {
 import {
   findErrorBy,
   type GenericError,
+  MultipleErrors,
   NetworkError,
   type ProtocolError,
   protocolErrors,
@@ -1508,31 +1509,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.#resetHeartbeatStall()
             this.#trackHeartbeatStall(options, error, options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options))
 
-            this[kPerformWithRetry](
-              'rejoinGroup',
-              retryCallback => {
-                this.#joinGroup(options, retryCallback)
-              },
-              error => {
-                if (error) {
-                  this.emitWithDebug(null, 'error', error)
+            this.#joinGroup(options, error => {
+              if (error) {
+                this.emitWithDebug(null, 'error', error)
 
-                  if (!this.#heartbeatStalled) {
-                    // No more heartbeats will be scheduled: restart the stall window without
-                    // the rejoin grace, keeping the triggering heartbeat error as lastError.
-                    const heartbeatError = this.#heartbeatStallError
-                    this.#resetHeartbeatStall()
-                    this.#trackHeartbeatStall(options, heartbeatError)
-                  }
-                } else {
-                  // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                if (!this.#heartbeatStalled) {
+                  // No more heartbeats will be scheduled: restart the stall window without
+                  // the rejoin grace, keeping the triggering heartbeat error as lastError.
+                  const heartbeatError = this.#heartbeatStallError
                   this.#resetHeartbeatStall()
+                  this.#trackHeartbeatStall(options, heartbeatError)
                 }
+              } else {
+                // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                this.#resetHeartbeatStall()
+              }
 
-                this.emitWithDebug('consumer', 'rejoin')
-              },
-              0
-            )
+              this.emitWithDebug('consumer', 'rejoin')
+            })
 
             return
           }
@@ -2037,126 +2031,153 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
-    const attemptErrors: Error[] = []
+    this.#performJoinGroupAttempt(options, callback, 0, [])
+  }
 
-    this[kPerformWithRetry]<string>(
-      'joinGroup',
-      retryCallback => {
-        if (!this.#membershipActive) {
-          retryCallback(null)
-          return
-        }
+  #performJoinGroupAttempt (
+    options: Required<GroupOptions>,
+    callback: CallbackWithPromise<string>,
+    attempt: number,
+    attemptErrors: Error[]
+  ): void {
+    if (!this.#membershipActive) {
+      callback(null)
+      return
+    }
 
-        this.#cancelHeartbeat()
+    this.#cancelHeartbeat()
 
-        this.#createJoinGroupProtocols(options, (error, protocols) => {
-          if (error) {
-            retryCallback(error)
+    this.#createJoinGroupProtocols(options, (error, protocols) => {
+      if (error) {
+        this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
+        return
+      }
+
+      this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
+        'joinGroup',
+        (connection, groupCallback) => {
+          this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
+            if (error) {
+              groupCallback(error)
+              return
+            }
+
+            api!(
+              connection,
+              this.groupId,
+              options.sessionTimeout,
+              options.rebalanceTimeout,
+              this.memberId ?? '',
+              this.groupInstanceId,
+              'consumer',
+              protocols!,
+              '',
+              groupCallback
+            )
+          })
+        },
+        (error, response) => {
+          if (!this.#membershipActive) {
+            callback(null)
             return
           }
 
-          this.#performDeduplicateGroupOperaton<JoinGroupResponse>(
-            'joinGroup',
-            (connection, groupCallback) => {
-              this[kGetApi]<JoinGroupRequest, JoinGroupResponse>('JoinGroup', (error, api) => {
-                if (error) {
-                  groupCallback(error)
-                  return
-                }
+          if (error) {
+            this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
+            return
+          }
 
-                api!(
-                  connection,
-                  this.groupId,
-                  options.sessionTimeout,
-                  options.rebalanceTimeout,
-                  this.memberId ?? '',
-                  this.groupInstanceId,
-                  'consumer',
-                  protocols!,
-                  '',
-                  groupCallback
-                )
-              })
-            },
-            (error, response) => {
-              if (!this.#membershipActive) {
-                retryCallback(null)
-                return
-              }
+          // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
+          this.memberId = response!.memberId!
+          this.generationId = response!.generationId
+          this.#isLeader = response!.leader === this.memberId
+          this.#protocol = response!.protocolName!
 
-              if (error) {
-                retryCallback(error)
-                return
-              }
+          this.#members = new Map()
+          for (const member of response!.members) {
+            this.#members.set(
+              member.memberId,
+              this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
+            )
+          }
 
-              // This is for Azure Event Hubs compatibility, which does not respond with an error on the first join
-              this.memberId = response!.memberId!
-              this.generationId = response!.generationId
-              this.#isLeader = response!.leader === this.memberId
-              this.#protocol = response!.protocolName!
+          // Send a syncGroup request
+          this.#syncGroup(options.partitionAssigner, (error, response) => {
+            if (!this.#membershipActive) {
+              callback(null)
+              return
+            }
 
-              this.#members = new Map()
-              for (const member of response!.members) {
-                this.#members.set(
-                  member.memberId,
-                  this.#decodeProtocolSubscriptionMetadata(member.memberId, member.metadata!)
-                )
-              }
+            if (error) {
+              this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
+              return
+            }
 
-              // Send a syncGroup request
-              this.#syncGroup(options.partitionAssigner, (error, response) => {
-                if (!this.#membershipActive) {
-                  retryCallback(null)
-                  return
-                }
+            this.assignments = response!
+            this.#syncPreferredReadReplicas()
 
-                if (error) {
-                  retryCallback(error)
-                  return
-                }
+            this.#cancelHeartbeat()
+            this.#heartbeatInterval = setTimeout(() => {
+              this.#heartbeat(options)
+            }, options.heartbeatInterval)
 
-                this.assignments = response!
-                this.#syncPreferredReadReplicas()
+            this.emitWithDebug('consumer', 'group:join', {
+              groupId: this.groupId,
+              memberId: this.memberId,
+              generationId: this.generationId,
+              isLeader: this.#isLeader,
+              assignments: this.assignments
+            })
 
-                this.#cancelHeartbeat()
-                this.#heartbeatInterval = setTimeout(() => {
-                  this.#heartbeat(options)
-                }, options.heartbeatInterval)
-
-                this.emitWithDebug('consumer', 'group:join', {
-                  groupId: this.groupId,
-                  memberId: this.memberId,
-                  generationId: this.generationId,
-                  isLeader: this.#isLeader,
-                  assignments: this.assignments
-                })
-
-                retryCallback(null, this.memberId!)
-              })
-            },
-            // Rejoin protocol errors are not generally request-retriable, but the whole group
-            // operation must be retried while the broker completes its rebalance.
-            error => findErrorBy(error, 'needsRejoin', true) !== null
-          )
-        })
-      },
-      (error, result) => {
-        if (error) {
-          const lastError = attemptErrors.at(-1)
-          // Preserve the bounded retry error only when the operation itself requested a rejoin.
-          // Nested metadata errors must keep their original message and error type.
-          const rejoinRequested = (lastError as GenericError | undefined)?.needsRejoin === true
-          callback(lastError && !rejoinRequested ? lastError : error)
-          return
+            callback(null, this.memberId!)
+          })
         }
+      )
+    })
+  }
 
-        callback(null, result)
-      },
-      0,
-      attemptErrors,
-      error => !this.#getRejoinError(error),
-      true
-    )
+  #retryJoinGroup (
+    options: Required<GroupOptions>,
+    callback: CallbackWithPromise<string>,
+    attempt: number,
+    attemptErrors: Error[],
+    error: Error
+  ): void {
+    const retries = this[kOptions].retries! as number
+    attemptErrors.push(error)
+
+    if (!this.#getRejoinError(error)) {
+      if (error instanceof MultipleErrors && error.errors.length > 0) {
+        const nestedMessages = error.errors.map(error => error.message).join(' ')
+        callback(new MultipleErrors(`${error.message} ${nestedMessages}`, error.errors))
+      } else {
+        callback(error)
+      }
+      return
+    }
+
+    if (attempt >= retries) {
+      callback(attempt > 0 ? new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors) : error)
+      return
+    }
+
+    let delay = this[kOptions].retryDelay
+    if (typeof delay === 'function') {
+      delay = delay(this, 'joinGroup', attempt + 1, retries, error)
+    }
+
+    function onClose () {
+      clearTimeout(timeout)
+      attemptErrors.push(new UserError('Client closed while retrying joinGroup.'))
+      callback(new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors))
+    }
+
+    const timeout = setTimeout(() => {
+      this.removeListener('client:close', onClose)
+      this.#performJoinGroupAttempt(options, callback, attempt + 1, attemptErrors)
+    }, delay)
+
+    this.once('client:close', onClose)
   }
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {
@@ -2340,13 +2361,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performDeduplicateGroupOperaton<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
-    callback: CallbackWithPromise<ReturnType>,
-    ignoreCanRetry: boolean | ((e: Error) => boolean) = false
+    callback: CallbackWithPromise<ReturnType>
   ): void | Promise<ReturnType> {
     return this[kPerformDeduplicated](
       operationId,
       deduplicateCallback => {
-        this.#performGroupOperation<ReturnType>(operationId, operation, deduplicateCallback, ignoreCanRetry)
+        this.#performGroupOperation<ReturnType>(operationId, operation, deduplicateCallback)
       },
       callback
     )
@@ -2355,8 +2375,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performGroupOperation<ReturnType> (
     operationId: string,
     operation: (connection: Connection, callback: CallbackWithPromise<ReturnType>) => void,
-    callback: CallbackWithPromise<ReturnType>,
-    ignoreCanRetry: boolean | ((e: Error) => boolean) = false
+    callback: CallbackWithPromise<ReturnType>
   ): void | Promise<ReturnType> {
     this[kPerformWithRetry]<ReturnType>(
       operationId,
@@ -2388,11 +2407,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, result) => {
         callback(this.#handleError(error), result)
-      },
-      0,
-      [],
-      undefined,
-      ignoreCanRetry
+      }
     )
   }
 

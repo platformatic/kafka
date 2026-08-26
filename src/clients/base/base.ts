@@ -426,7 +426,7 @@ export class Base<
 
     operation((error, result) => {
       if (error) {
-        // Only retry if all the errors in the chain are retriable
+        // Only retry if all the errors in the chain are retriable.
         const retriable = !findErrorBy(error, 'canRetry', false)
         errors.push(error)
 

@@ -61,6 +61,7 @@ import {
 import {
   findErrorBy,
   type GenericError,
+  MultipleErrors,
   NetworkError,
   type ProtocolError,
   protocolErrors,
@@ -1508,31 +1509,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.#resetHeartbeatStall()
             this.#trackHeartbeatStall(options, error, options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options))
 
-            this[kPerformWithRetry](
-              'rejoinGroup',
-              retryCallback => {
-                this.#joinGroup(options, retryCallback)
-              },
-              error => {
-                if (error) {
-                  this.emitWithDebug(null, 'error', error)
+            this.#joinGroup(options, error => {
+              if (error) {
+                this.emitWithDebug(null, 'error', error)
 
-                  if (!this.#heartbeatStalled) {
-                    // No more heartbeats will be scheduled: restart the stall window without
-                    // the rejoin grace, keeping the triggering heartbeat error as lastError.
-                    const heartbeatError = this.#heartbeatStallError
-                    this.#resetHeartbeatStall()
-                    this.#trackHeartbeatStall(options, heartbeatError)
-                  }
-                } else {
-                  // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                if (!this.#heartbeatStalled) {
+                  // No more heartbeats will be scheduled: restart the stall window without
+                  // the rejoin grace, keeping the triggering heartbeat error as lastError.
+                  const heartbeatError = this.#heartbeatStallError
                   this.#resetHeartbeatStall()
+                  this.#trackHeartbeatStall(options, heartbeatError)
                 }
+              } else {
+                // Rejoin succeeded: drop the extended window; the next heartbeat opens the normal one.
+                this.#resetHeartbeatStall()
+              }
 
-                this.emitWithDebug('consumer', 'rejoin')
-              },
-              0
-            )
+              this.emitWithDebug('consumer', 'rejoin')
+            })
 
             return
           }
@@ -2037,11 +2031,25 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    this.#performJoinGroupAttempt(options, callback, 0, [])
+  }
+
+  #performJoinGroupAttempt (
+    options: Required<GroupOptions>,
+    callback: CallbackWithPromise<string>,
+    attempt: number,
+    attemptErrors: Error[]
+  ): void {
+    if (!this.#membershipActive) {
+      callback(null)
+      return
+    }
+
     this.#cancelHeartbeat()
 
     this.#createJoinGroupProtocols(options, (error, protocols) => {
       if (error) {
-        callback(error)
+        this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
         return
       }
 
@@ -2075,12 +2083,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           if (error) {
-            if (this.#getRejoinError(error)) {
-              this.#performJoinGroup(options, callback)
-              return
-            }
-
-            callback(error)
+            this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
             return
           }
 
@@ -2106,12 +2109,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             }
 
             if (error) {
-              if (this.#getRejoinError(error)) {
-                this.#performJoinGroup(options, callback)
-                return
-              }
-
-              callback(error)
+              this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
               return
             }
 
@@ -2136,6 +2134,60 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
       )
     })
+  }
+
+  #retryJoinGroup (
+    options: Required<GroupOptions>,
+    callback: CallbackWithPromise<string>,
+    attempt: number,
+    attemptErrors: Error[],
+    error: Error
+  ): void {
+    const retries = this[kOptions].retries! as number
+    const memberId = this.memberId
+    const rejoinError = this.#getRejoinError(error)
+
+    // MEMBER_ID_REQUIRED is the normal first-join handshake. The broker assigns a member ID and
+    // expects the JoinGroup request to be sent again; this progress must not consume a retry.
+    if (rejoinError?.apiId === 'MEMBER_ID_REQUIRED' && this.memberId !== memberId) {
+      this.#performJoinGroupAttempt(options, callback, attempt, attemptErrors)
+      return
+    }
+
+    attemptErrors.push(error)
+
+    if (!rejoinError) {
+      if (error instanceof MultipleErrors && error.errors.length > 0) {
+        const nestedMessages = error.errors.map(error => error.message).join(' ')
+        callback(new MultipleErrors(`${error.message} ${nestedMessages}`, error.errors))
+      } else {
+        callback(error)
+      }
+      return
+    }
+
+    if (attempt >= retries) {
+      callback(attempt > 0 ? new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors) : error)
+      return
+    }
+
+    let delay = this[kOptions].retryDelay
+    if (typeof delay === 'function') {
+      delay = delay(this, 'joinGroup', attempt + 1, retries, error)
+    }
+
+    function onClose () {
+      clearTimeout(timeout)
+      attemptErrors.push(new UserError('Client closed while retrying joinGroup.'))
+      callback(new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors))
+    }
+
+    const timeout = setTimeout(() => {
+      this.removeListener('client:close', onClose)
+      this.#performJoinGroupAttempt(options, callback, attempt + 1, attemptErrors)
+    }, delay)
+
+    this.once('client:close', onClose)
   }
 
   #performLeaveGroup (force: boolean, callback: CallbackWithPromise<void>): void {

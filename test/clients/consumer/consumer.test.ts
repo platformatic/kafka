@@ -5495,6 +5495,35 @@ test('joinGroup should bound retries when JoinGroup keeps requesting a rejoin', 
   })
 })
 
+test('joinGroup should not consume retries for the MEMBER_ID_REQUIRED handshake', async t => {
+  let retryDelayCalls = 0
+  const consumer = createConsumer(t, {
+    retries: 0,
+    retryDelay: () => {
+      retryDelayCalls++
+      return 1000
+    }
+  })
+  let joinGroupCalls = 0
+
+  mockAPI(consumer[kConnections], joinGroupV9.api.key, null, null, (_original: Function, ...args: any[]) => {
+    joinGroupCalls++
+    const groupCallback = args.at(-1)
+
+    if (joinGroupCalls === 1) {
+      groupCallback(new ProtocolError('MEMBER_ID_REQUIRED', null, {}, { memberId: 'assigned-member' }))
+      return true
+    }
+
+    groupCallback(new ProtocolError('MEMBER_ID_REQUIRED'))
+    return true
+  })
+
+  await rejects(consumer.joinGroup())
+  strictEqual(joinGroupCalls, 2)
+  strictEqual(retryDelayCalls, 0)
+})
+
 test('leaveGroup should reset group state and leave the consumer group and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
 

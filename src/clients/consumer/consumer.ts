@@ -2144,9 +2144,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     error: Error
   ): void {
     const retries = this[kOptions].retries! as number
+    const memberId = this.memberId
+    const rejoinError = this.#getRejoinError(error)
+
+    // MEMBER_ID_REQUIRED is the normal first-join handshake. The broker assigns a member ID and
+    // expects the JoinGroup request to be sent again; this progress must not consume a retry.
+    if (rejoinError?.apiId === 'MEMBER_ID_REQUIRED' && this.memberId !== memberId) {
+      this.#performJoinGroupAttempt(options, callback, attempt, attemptErrors)
+      return
+    }
+
     attemptErrors.push(error)
 
-    if (!this.#getRejoinError(error)) {
+    if (!rejoinError) {
       if (error instanceof MultipleErrors && error.errors.length > 0) {
         const nestedMessages = error.errors.map(error => error.message).join(' ')
         callback(new MultipleErrors(`${error.message} ${nestedMessages}`, error.errors))

@@ -2142,11 +2142,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, result) => {
         if (error) {
-          // kPerformWithRetry wraps the error into "joinGroup failed N times" once more than one attempt
-          // happened, but attempt 0 alone routinely "fails" with MEMBER_ID_REQUIRED (KIP-394's normal
-          // first-join handshake). Unwrap to the real last error, unless it is itself still a rejoin signal.
           const lastError = attemptErrors.at(-1)
-          callback(lastError && !findErrorBy(lastError, 'needsRejoin', true) ? lastError : error)
+          // Preserve the bounded retry error only when the operation itself requested a rejoin.
+          // Nested metadata errors must keep their original message and error type.
+          const rejoinRequested = (lastError as GenericError | undefined)?.needsRejoin === true
+          callback(lastError && !rejoinRequested ? lastError : error)
           return
         }
 

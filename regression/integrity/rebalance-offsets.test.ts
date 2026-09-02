@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import { setImmediate as tick } from 'node:timers/promises'
 import type { CallbackWithPromise } from '../../src/apis/callbacks.ts'
+import { kGetFetchNode } from '../../src/symbols.ts'
 import { kCreateConnectionPool, kPrometheus } from '../../src/clients/base/base.ts'
 import { MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../src/index.ts'
 
@@ -23,13 +24,17 @@ test('regression #223: rebalance does not fetch while committed offsets are refr
   consumer.onFetch = null
   consumer[kPrometheus] = undefined
   consumer[kCreateConnectionPool] = () => ({ close: (callback: CallbackWithPromise<void>) => callback(null) })
+  consumer[kGetFetchNode] = () => 1
 
   consumer.metadata = (_: object, callback: CallbackWithPromise<any>) => {
     callback(null, {
-      topics: new Map([['regression-topic', { id: 'regression-topic-id', partitions: [{ leader: 1, leaderEpoch: 0 }] }]])
+      topics: new Map([
+        ['regression-topic', { id: 'regression-topic-id', partitions: [{ leader: 1, leaderEpoch: 0 }] }]
+      ])
     })
   }
-  consumer.listOffsets = (_: object, callback: CallbackWithPromise<any>) => callback(null, new Map([['regression-topic', [0n]]]))
+  consumer.listOffsets = (_: object, callback: CallbackWithPromise<any>) =>
+    callback(null, new Map([['regression-topic', [0n]]]))
   let delayedCommittedOffsetsCallback: CallbackWithPromise<any> | null = null
   consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
     if (!consumer.delayNextCommittedOffsets) {
@@ -46,6 +51,11 @@ test('regression #223: rebalance does not fetch while committed offsets are refr
     consumer.onFetch?.()
   }
 
+  const refreshStarted = new Promise<void>(resolve => {
+    consumer.onDelayedCommittedOffsets = resolve
+  })
+
+  consumer.delayNextCommittedOffsets = true
   const stream = new MessagesStream(consumer, {
     topics: ['regression-topic'],
     mode: MessagesStreamModes.COMMITTED,
@@ -56,13 +66,8 @@ test('regression #223: rebalance does not fetch while committed offsets are refr
   })
 
   const baselineFetchCalls = consumer.fetchCalls
-  const refreshStarted = new Promise<void>(resolve => {
-    consumer.onDelayedCommittedOffsets = resolve
-  })
-
-  consumer.delayNextCommittedOffsets = true
-  consumer.emit('consumer:group:join')
   await refreshStarted
+  consumer.emit('consumer:group:join')
 
   stream.resume()
   await tick()

@@ -57,8 +57,28 @@ jobs:
       - name: Install NPM Dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Clean up previous Kafka Cluster
+        run: docker compose down --volumes --remove-orphans
+
       - name: Start Kafka Cluster
         run: docker compose up --build --force-recreate -d --wait
+
+      - name: Verify Kafka Cluster Readiness
+        run: |
+          for attempt in {1..30}; do
+            if docker compose exec -T broker-cluster-1 kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1 && \
+              docker compose exec -T broker-cluster-2 kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1 && \
+              docker compose exec -T broker-cluster-3 kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1; then
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo 'Kafka cluster did not become ready in time.'
+          docker compose ps
+          docker compose logs --no-color
+          exit 1
 
       - name: Build
         run: pnpm run build
@@ -148,3 +168,13 @@ jobs:
           name: regression-artifacts-${{ github.run_id }}
           path: regression/artifacts
           if-no-files-found: ignore
+
+      - name: Dump Kafka diagnostics
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --no-color
+
+      - name: Stop Kafka Cluster
+        if: always()
+        run: docker compose down --volumes

@@ -1009,7 +1009,9 @@ test('should ignore part of records batchs already consumed', async t => {
     autocommit: false
   })
 
-  await firstBatch[3].commit()
+  // The group coordinator can still be transitioning after the first join.
+  // Retry the same offset commit until the coordinator is ready.
+  await waitFor(() => firstBatch[3].commit(), { interval: 100, timeout: 10_000 })
 
   // Have the first consumer leave the group so that we are sure assignments are sent to the second consumer
   await firstStream.close()

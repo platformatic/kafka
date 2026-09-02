@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   regression:
-    name: Regression Suite    
+    name: Regression Suite
     runs-on: [self-hosted, kafka-regression]
     environment: regression
     timeout-minutes: 60
@@ -120,6 +120,27 @@ jobs:
             "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json" \
             "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/history/${GITHUB_SHA}.json"
 
+      - name: Stop Kafka Cluster
+        if: always()
+        run: docker compose down --volumes
+
+      - name: Create regression summary
+        if: success()
+        run: |
+          mkdir -p regression/artifacts
+          summary=regression/artifacts/regression-summary.md
+          {
+            printf '# Regression test summary\n\n'
+            printf -- '- Result: Passed\n'
+            printf -- '- Commit: [`%s`](%s)\n' "$GITHUB_SHA" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+            printf -- '- Workflow run: [#%s](%s)\n' "$GITHUB_RUN_NUMBER" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            printf -- '- Broker image: `confluentinc/cp-kafka:%s`\n' "$KAFKA_VERSION"
+            printf -- '- Node.js: `%s`\n' "$(node --version)"
+            printf -- '- Regression lane: `%s`\n' "$REGRESSION_LANE"
+            printf -- '- Runner: `%s`\n' "$RUNNER_NAME"
+          } > "$summary"
+          cp "$summary" "$GITHUB_STEP_SUMMARY"
+
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -127,7 +148,3 @@ jobs:
           name: regression-artifacts-${{ github.run_id }}
           path: regression/artifacts
           if-no-files-found: ignore
-
-      - name: Stop Kafka Cluster
-        if: always()
-        run: docker compose down --volumes

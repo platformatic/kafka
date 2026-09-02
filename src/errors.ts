@@ -203,12 +203,21 @@ export class ProtocolError extends GenericError {
         'NOT_LEADER_OR_FOLLOWER',
         'FENCED_LEADER_EPOCH'
       ].includes(id),
-      needsRejoin: ['MEMBER_ID_REQUIRED', 'UNKNOWN_MEMBER_ID', 'REBALANCE_IN_PROGRESS', 'ILLEGAL_GENERATION'].includes(
-        id
-      ),
+      needsRejoin: [
+        'MEMBER_ID_REQUIRED',
+        'UNKNOWN_MEMBER_ID',
+        'REBALANCE_IN_PROGRESS',
+        'ILLEGAL_GENERATION',
+        'FENCED_INSTANCE_ID'
+      ].includes(id),
       producerFenced: id === 'INVALID_PRODUCER_EPOCH',
       rebalanceInProgress: id === 'REBALANCE_IN_PROGRESS',
       unknownMemberId: id === 'UNKNOWN_MEMBER_ID',
+      // A fenced static member's id is permanently dead — another process already claimed
+      // this group.instance.id — so, like UNKNOWN_MEMBER_ID, the cached memberId must be
+      // dropped before rejoining. Without this, the client keeps resending the same invalid
+      // id and the broker rejects it forever (see #getRejoinError in consumer.ts).
+      fencedInstanceId: id === 'FENCED_INSTANCE_ID',
       memberId: (response as JoinGroupResponse)?.memberId as string | undefined,
       ...properties
     })

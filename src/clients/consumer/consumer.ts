@@ -2665,7 +2665,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
     }
 
-    if (protocolError.unknownMemberId) {
+    if (protocolError.unknownMemberId || protocolError.fencedInstanceId) {
       this.memberId = null
     } else if (protocolError.memberId! && !this.memberId) {
       this.memberId = protocolError.memberId!

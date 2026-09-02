@@ -212,6 +212,13 @@ test('ProtocolError ILLEGAL_GENERATION has needsRejoin set to true', () => {
   deepStrictEqual(error.apiId, 'ILLEGAL_GENERATION')
 })
 
+test('ProtocolError FENCED_INSTANCE_ID has needsRejoin and fencedInstanceId set to true', () => {
+  const error = new ProtocolError('FENCED_INSTANCE_ID', null, {}, {})
+  ok(error.needsRejoin, 'FENCED_INSTANCE_ID requires a group rejoin')
+  ok(error.fencedInstanceId, 'a fenced static member id must be dropped, like an unknown member id')
+  deepStrictEqual(error.apiId, 'FENCED_INSTANCE_ID')
+})
+
 test('ResponseError', () => {
   const apiName = 3 // Metadata
   const apiVersion = 1

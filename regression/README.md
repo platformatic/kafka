@@ -130,12 +130,29 @@ npm run test:performance
 
 Generated JSON artifacts are written under `regression/artifacts` and ignored by git.
 
+Successful CI runs also generate `regression-summary.md`, a concise record of the tested
+commit, broker image and Kafka version, Node.js version, regression lane, runner, and workflow URL.
+The same content is published in the GitHub Actions job summary.
+
 Performance artifacts contain:
 
 - aggregate median duration and throughput
 - raw per-sample `runs`
 - bytes/sec when available
 - resource samples for RSS, heap, CPU, and event loop delay
+
+## Notifications
+
+`.github/workflows/regression-notifications.yml` runs independently on a GitHub-hosted runner.
+It posts to Slack when a regression does not complete successfully and when a regression remains queued for two hours
+without another regression actively using the dedicated runner. Configure the repository secret
+`REGRESSION_SLACK_WEBHOOK_URL` with the target Slack incoming-webhook URL.
+
+## Release Gate
+
+The release workflow requires the latest regression for its pre-bump source commit to have completed successfully.
+It downloads that run's `regression-summary.md`, attaches it to the draft GitHub release, and only then publishes the
+release. A missing, pending, failed, or artifact-less regression blocks the release before the version is changed.
 
 ## Baselines
 

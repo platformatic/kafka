@@ -17,11 +17,53 @@ jobs:
     runs-on: ubuntu-latest
     environment: main
     permissions:
+      actions: read
       id-token: write
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Require successful regression
+        id: regression
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/regression.yml/runs" \
+            -f branch="$GITHUB_REF_NAME" \
+            -f head_sha="$GITHUB_SHA" \
+            -f per_page=100)
+          run=$(printf '%s' "$runs" | jq -c '.workflow_runs | sort_by(.created_at) | last // empty')
+
+          if [ -z "$run" ]; then
+            printf 'No regression run found for %s.\n' "$GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          run_id=$(printf '%s' "$run" | jq -r '.id')
+          status=$(printf '%s' "$run" | jq -r '.status')
+          conclusion=$(printf '%s' "$run" | jq -r '.conclusion')
+          run_url=$(printf '%s' "$run" | jq -r '.html_url')
+
+          if [ "$status" != 'completed' ] || [ "$conclusion" != 'success' ]; then
+            printf 'Regression run %s is not clean: status=%s, conclusion=%s\n%s\n' \
+              "$run_id" "$status" "$conclusion" "$run_url" >&2
+            exit 1
+          fi
+
+          mkdir -p release-artifacts
+          gh run download "$run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "regression-artifacts-${run_id}" \
+            --dir release-artifacts
+
+          if [ ! -s release-artifacts/regression-summary.md ]; then
+            printf 'Regression run %s has no regression-summary.md artifact.\n' "$run_id" >&2
+            exit 1
+          fi
+
+          printf 'run-id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'run-url=%s\n' "$run_url" >> "$GITHUB_OUTPUT"
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -48,6 +90,21 @@ jobs:
         run: npm install -g npm@11.16.0
       - name: Stage release on NPM
         run: pnpm stage publish --access public --tag ${{ inputs.prerelease == true && 'next' || 'latest' }} --provenance --publish-branch ${{ github.ref_name }} --no-git-checks
-      - name: 'Create release notes'
+      - name: Create draft release notes
         run: |
-          pnpx @matteo.collina/release-notes -a ${{ secrets.GH_RELEASE_TOKEN }} -t v${{ inputs.version }} -r kafka -o platformatic ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
+          pnpx @matteo.collina/release-notes -a ${{ secrets.GH_RELEASE_TOKEN }} -t v${{ inputs.version }} -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
+      - name: Attach regression summary
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: |
+          gh release upload "v${{ inputs.version }}" release-artifacts/regression-summary.md
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = 'true' ]; then
+            gh release edit "v${{ inputs.version }}" --draft=false
+          else
+            gh release edit "v${{ inputs.version }}" --draft=false --latest
+          fi

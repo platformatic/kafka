@@ -366,7 +366,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return false
     }
     if (this.#useConsumerGroupProtocol) {
-      return !!this.memberId && this.#memberEpoch >= 0
+      return !!this.memberId && this.#memberEpoch > 0
     }
     // We consider the group ready if we have a groupId, a memberId and heartbeat interval
     return this.#membershipActive && Boolean(this.groupId) && Boolean(this.memberId) && this.#heartbeatInterval !== null

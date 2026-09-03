@@ -32,13 +32,27 @@ test('regression #228: long-running batch consumer does not stop making progress
   })
   const progress = { consumed: 0, batches: 0 }
   const sampler = createResourceSampler(100)
-  const pipelinePromise = pipeline(consumerStream, batchStream).catch(() => {})
-  const consumePromise = consumeSlowBatches(batchStream, progress)
+  let pipelineError: unknown
+  const pipelinePromise = pipeline(consumerStream, batchStream).catch(error => {
+    pipelineError = error
+  })
+  let consumeError: unknown
+  const consumePromise = consumeSlowBatches(batchStream, progress).catch(error => {
+    consumeError = error
+  })
   let lastConsumed = 0
   let stalledIntervals = 0
 
-  while (progress.consumed < totalMessages) {
+  const startedAt = Date.now()
+  while (
+    progress.consumed < totalMessages &&
+    Date.now() - startedAt < 90_000
+  ) {
     await sleep(1000)
+
+    if (pipelineError || consumeError) {
+      break
+    }
 
     if (progress.consumed === lastConsumed) {
       stalledIntervals++
@@ -56,6 +70,8 @@ test('regression #228: long-running batch consumer does not stop making progress
 
   await writeRegressionArtifact('batch-stall-resource-stability', { samples, ...progress, totalMessages })
 
+  strictEqual(pipelineError, undefined)
+  strictEqual(consumeError, undefined)
   strictEqual(progress.consumed >= totalMessages, true)
   ok(progress.batches > 1)
   assertResourceStability(samples, { minSamples: 2 })

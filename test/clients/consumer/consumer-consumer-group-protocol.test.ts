@@ -180,6 +180,7 @@ test('consumer should handle fenced member epoch error', skipConsumerGroupProtoc
 
   const [{ error }] = await heartbeatError
   strictEqual(error.response.errorCode, 110)
+  strictEqual(consumer.isActive(), false)
   await stream.close()
 })
 

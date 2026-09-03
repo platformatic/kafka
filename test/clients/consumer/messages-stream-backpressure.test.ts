@@ -31,13 +31,15 @@ test('should not stall under backpressure with pipeline and batch stream', { tim
   })
 
   // pipeline(consumerStream, batchStream) — same as MQT's AbstractKafkaConsumer.start()
+  let pipelineError: unknown
   const pipelinePromise = pipeline(consumerStream, batchStream).catch(error => {
-    console.error('Pipeline error:', error)
+    pipelineError = error
   })
 
   // Consume with async handler — same as MQT's handleSyncStreamBatch
   let consumed = 0
   let batchesProcessed = 0
+  let consumeError: unknown
   const consumePromise = (async () => {
     for await (const messageBatch of batchStream) {
       const batch = messageBatch as DeserializedMessage[]
@@ -58,7 +60,9 @@ test('should not stall under backpressure with pipeline and batch stream', { tim
       const lastMessage = batch[batch.length - 1]!
       await lastMessage.commit()
     }
-  })()
+  })().catch(error => {
+    consumeError = error
+  })
 
   // Monitor progress with stall detection
   const consumeStart = performance.now()
@@ -66,13 +70,19 @@ test('should not stall under backpressure with pipeline and batch stream', { tim
   let lastConsumed = 0
   let stallTicks = 0
 
-  const result = await new Promise<'ok' | 'stall' | 'timeout'>(resolve => {
+  const result = await new Promise<'ok' | 'stall' | 'timeout' | 'error'>(resolve => {
     const check = setInterval(() => {
       const elapsed = performance.now() - consumeStart
 
       if (consumed >= totalMessages) {
         clearInterval(check)
         resolve('ok')
+        return
+      }
+
+      if (pipelineError || consumeError) {
+        clearInterval(check)
+        resolve('error')
         return
       }
 

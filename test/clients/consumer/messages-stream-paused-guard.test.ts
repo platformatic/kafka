@@ -2,6 +2,7 @@ import { ok } from 'node:assert'
 import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { setupBackpressureTest } from '../../helpers/backpressure.ts'
+import { mockMethod, waitFor } from '../../helpers.ts'
 
 /**
  * Verifies the fetch loop respects the #paused guard.
@@ -16,10 +17,24 @@ import { setupBackpressureTest } from '../../helpers/backpressure.ts'
  */
 
 test('fetch loop must stop when stream is paused', { timeout: 60_000 }, async t => {
-  const { consumerStream, producer, topics } = await setupBackpressureTest(t, {
+  const { consumer, consumerStream, producer, topics } = await setupBackpressureTest(t, {
     topicCount: 3,
     messagesPerTopic: 500,
     consumerHighWaterMark: 1024
+  })
+
+  let fetchCalls = 0
+  let inFlightFetches = 0
+  mockMethod(consumer, 'fetch', () => true, undefined, undefined, (original, ...args) => {
+    fetchCalls++
+    inFlightFetches++
+    const callback = args.at(-1)
+    args[args.length - 1] = (error: Error | null, response: unknown) => {
+      inFlightFetches--
+      callback(error, response)
+    }
+    original(...args)
+    return true
   })
 
   // Start flowing with a data listener so the fetch loop activates
@@ -30,26 +45,24 @@ test('fetch loop must stop when stream is paused', { timeout: 60_000 }, async t 
   consumerStream.on('data', onData)
 
   // Wait for messages to flow — confirms the fetch loop is active
-  while (receivedState.count < 100) {
-    await sleep(100)
-  }
+  await waitFor(() => {
+    if (receivedState.count < 100) {
+      throw new Error(`received ${receivedState.count}/100 messages`)
+    }
+  }, { interval: 100, timeout: 30_000 })
 
   // Pause the stream
   consumerStream.removeListener('data', onData)
   consumerStream.pause()
 
-  // Wait for in-flight fetch responses to complete. A fetch cycle involves:
-  // metadata (async) -> build requests -> send fetch (up to maxWaitTime=1000ms)
-  // -> response callback. 5 seconds covers the worst case of a metadata callback
-  // already in the event loop triggering one more fetch cycle.
-  await sleep(5000)
-
-  // Now start counting: fetch events and buffer growth during pause
-  let fetchesDuringPause = 0
-  const onFetch = () => {
-    fetchesDuringPause++
-  }
-  consumerStream.on('fetch', onFetch)
+  // Exclude responses already in flight when pause() was called. The invariant is that no new
+  // fetch request is started after the stream enters the paused state.
+  await waitFor(() => {
+    if (inFlightFetches > 0) {
+      throw new Error(`${inFlightFetches} fetches are still in flight`)
+    }
+  }, { interval: 100, timeout: 10_000 })
+  const fetchCallsBeforePause = fetchCalls
 
   const readableLengthBefore = consumerStream.readableLength
 
@@ -73,21 +86,24 @@ test('fetch loop must stop when stream is paused', { timeout: 60_000 }, async t 
     }
   })()
 
-  // Monitor for 10 seconds while paused
   const monitorDurationMs = 10_000
-  await sleep(monitorDurationMs)
+  let readableLengthAfter = readableLengthBefore
 
-  const readableLengthAfter = consumerStream.readableLength
+  try {
+    await sleep(monitorDurationMs)
+    readableLengthAfter = consumerStream.readableLength
+  } finally {
+    publishState.stopped = true
+    await producer.close().catch(() => {})
+    await publishLoop.catch(() => {})
+    await consumerStream.close().catch(() => {})
+  }
 
-  // Cleanup
-  consumerStream.removeListener('fetch', onFetch)
-  publishState.stopped = true
-  await publishLoop
-  await consumerStream.close()
+  const fetchesDuringPause = fetchCalls - fetchCallsBeforePause
 
   // Assert 1: No (or very few) fetch events while paused.
   ok(
-    fetchesDuringPause <= 3,
+    fetchesDuringPause === 0,
     'Fetch loop continued firing while stream was paused: ' +
       `${fetchesDuringPause} fetch events in ${monitorDurationMs / 1000}s. ` +
       'Expected near-zero when #paused guard is active.'

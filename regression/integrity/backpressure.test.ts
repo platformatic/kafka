@@ -27,10 +27,14 @@ test('regression #260: consumer pipeline backpressure keeps making progress with
     readableHighWaterMark: 8
   })
   const sampler = createResourceSampler(100)
-  const pipelinePromise = pipeline(consumerStream, batchStream).catch(() => {})
+  let pipelineError: unknown
+  const pipelinePromise = pipeline(consumerStream, batchStream).catch(error => {
+    pipelineError = error
+  })
 
   let consumed = 0
   let maxReadableLength = 0
+  let consumeError: unknown
   const consumePromise = consumeBatches(batchStream, async batch => {
     // Track the largest readable queue observed so the test fails on buffering
     // regressions, not only on complete stalls.
@@ -38,6 +42,8 @@ test('regression #260: consumer pipeline backpressure keeps making progress with
     consumed += batch.length
     await sleep(2)
     await batch.at(-1)!.commit()
+  }).catch(error => {
+    consumeError = error
   })
 
   const startedAt = Date.now()
@@ -45,7 +51,7 @@ test('regression #260: consumer pipeline backpressure keeps making progress with
   let noProgressIntervals = 0
 
   while (true) {
-    if (consumed >= totalMessages || Date.now() - startedAt >= 60_000) {
+    if (consumed >= totalMessages || pipelineError || consumeError || Date.now() - startedAt >= 60_000) {
       break
     }
 
@@ -70,6 +76,8 @@ test('regression #260: consumer pipeline backpressure keeps making progress with
   await writeRegressionArtifact('backpressure-resource-stability', { samples, consumed, totalMessages })
 
   // The two invariants are completion and bounded buffering while backpressured.
+  strictEqual(pipelineError, undefined)
+  strictEqual(consumeError, undefined)
   strictEqual(consumed >= totalMessages, true)
   ok(maxReadableLength <= 8, `readable buffer grew to ${maxReadableLength}`)
   assertResourceStability(samples, { minSamples: 2 })

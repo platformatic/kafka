@@ -184,6 +184,7 @@ jobs:
     needs: regression
     if: ${{ always() && needs.regression.result == 'failure' }}
     runs-on: ubuntu-latest
+    environment: regression
     steps:
       - name: Notify regression failure on Slack
         env:

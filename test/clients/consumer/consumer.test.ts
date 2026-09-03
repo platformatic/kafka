@@ -5489,7 +5489,7 @@ test('joinGroup should bound retries when JoinGroup keeps requesting a rejoin', 
   })
 
   await rejects(consumer.joinGroup(), error => {
-    strictEqual(error instanceof MultipleErrors, true)
+    ok(error instanceof MultipleErrors)
     strictEqual(error.message, 'joinGroup failed 2 times.')
     return true
   })

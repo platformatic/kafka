@@ -1,10 +1,11 @@
-import { deepStrictEqual, ok } from 'node:assert'
+import { deepStrictEqual, ok, strictEqual } from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { test } from 'node:test'
 import { ProtocolError } from '../../../src/errors.ts'
 import { kCreateConnectionPool, kPrometheus } from '../../../src/clients/base/base.ts'
 import { MessagesStream, MessagesStreamFallbackModes, MessagesStreamModes } from '../../../src/index.ts'
 import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
+import { mockMethod } from '../../helpers.ts'
 
 function createFakeConsumer (active: boolean) {
   const consumer = new EventEmitter() as any
@@ -78,6 +79,47 @@ test('kAutocommit commits normally once the consumer is active again', () => {
   ok(consumer.commitCalls === 1, 'commit must be attempted once the consumer is active')
   deepStrictEqual(stream.offsetsToCommit.size, 0)
 
+  stream.destroy()
+})
+
+test('kAutocommit keeps offsets queued after a transient commit error', () => {
+  const consumer = createFakeConsumer(true)
+  const error = new ProtocolError('NOT_COORDINATOR', null, {}, {})
+  mockMethod(consumer, 'commit', 1, error)
+  const stream = createStream(consumer)
+  const offset = { topic: 'test-topic', partition: 0, offset: 5n, leaderEpoch: 0 }
+  stream.offsetsToCommit.set('test-topic:0', offset)
+
+  stream[kAutocommit]()
+
+  deepStrictEqual(stream.offsetsToCommit.get('test-topic:0'), offset)
+  stream.destroy()
+})
+
+test('kAutocommit does not overlap an in-flight commit', () => {
+  const consumer = createFakeConsumer(true)
+  let commitCallback!: (error: Error | null) => void
+  let commitCalls = 0
+  mockMethod(consumer, 'commit', 1, undefined, undefined, (_original, ...args) => {
+    commitCalls++
+    commitCallback = args.at(-1)
+    return true
+  })
+  const stream = createStream(consumer)
+  stream.offsetsToCommit.set('test-topic:0', { topic: 'test-topic', partition: 0, offset: 5n, leaderEpoch: 0 })
+
+  stream[kAutocommit]()
+  stream.offsetsToCommit.set('test-topic:0', { topic: 'test-topic', partition: 0, offset: 6n, leaderEpoch: 0 })
+  stream[kAutocommit]()
+
+  strictEqual(commitCalls, 1)
+  commitCallback(null)
+  deepStrictEqual(stream.offsetsToCommit.get('test-topic:0'), {
+    topic: 'test-topic',
+    partition: 0,
+    offset: 6n,
+    leaderEpoch: 0
+  })
   stream.destroy()
 })
 

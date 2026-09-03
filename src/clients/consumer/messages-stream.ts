@@ -1115,7 +1115,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   [kAutocommit] (): void {
-    if (this.#offsetsToCommit.size === 0) {
+    if (this.#offsetsToCommit.size === 0 || this.#autocommitInflight) {
       return
     }
     // Skip this tick while the consumer is mid-(re)join: a commit attempted here would fail
@@ -1143,6 +1143,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // Transient coordinator errors must not tear down the consumption loop.
         if (findErrorBy(error, 'needsRejoin', true)) {
           this.destroy(error)
+        } else {
+          // Keep offsets produced while the commit was in flight, and retry the failed snapshot
+          // without replacing a newer offset for the same partition.
+          for (const offset of offsets) {
+            const key = partitionKey(offset.topic, offset.partition)
+            const current = this.#offsetsToCommit.get(key)
+            if (!current || current.offset < offset.offset) {
+              this.#offsetsToCommit.set(key, offset)
+            }
+          }
         }
         return
       }

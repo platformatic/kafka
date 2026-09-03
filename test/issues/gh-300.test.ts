@@ -1,10 +1,9 @@
 // Related issue: https://github.com/platformatic/kafka/issues/300
 
 import { deepStrictEqual, ok, strictEqual } from 'node:assert'
-import { setTimeout as sleep } from 'node:timers/promises'
 import { test } from 'node:test'
 import { MessagesStreamModes, stringDeserializers } from '../../src/index.ts'
-import { createConsumer, createTopic, isKafka } from '../helpers.ts'
+import { createConsumer, createTopic, isKafka, mockMethod, waitFor } from '../helpers.ts'
 
 const skipConsumerGroupProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
 
@@ -33,6 +32,18 @@ for (const groupProtocol of ['classic', 'consumer'] as const) {
     })
     await consumer.topics.trackAll(topic)
 
+    let releaseInitialRefresh!: () => void
+    const initialRefreshReleased = new Promise<void>(resolve => {
+      releaseInitialRefresh = resolve
+    })
+    const initialRefreshStarted = new Promise<void>(resolve => {
+      mockMethod(consumer, 'listOffsets', 1, undefined, undefined, (original, ...args) => {
+        resolve()
+        initialRefreshReleased.then(() => original(...args))
+        return false
+      })
+    })
+
     const stream = await consumer.consume({
       topics: [topic],
       mode: MessagesStreamModes.LATEST,
@@ -50,7 +61,9 @@ for (const groupProtocol of ['classic', 'consumer'] as const) {
     const errors: Error[] = []
     stream.on('error', error => errors.push(error))
 
-    // The construct refresh hasn't finished yet, so the offsets map is empty
+    await initialRefreshStarted
+
+    // The construct refresh is deliberately held in flight, so the offsets map is empty.
     strictEqual(
       stream.offsetsToFetch.size,
       0,
@@ -60,7 +73,8 @@ for (const groupProtocol of ['classic', 'consumer'] as const) {
     stream.pause()
     stream.resume()
 
-    await sleep(2000)
+    releaseInitialRefresh()
+    await waitFor(() => ok(stream.offsetsToFetch.size > 0), { timeout: 10_000 })
 
     deepStrictEqual(
       errors.map(error => error.message),

@@ -178,3 +178,24 @@ jobs:
       - name: Stop Kafka Cluster
         if: always()
         run: docker compose down --volumes
+
+  failure:
+    name: Report regression failure
+    needs: regression
+    if: ${{ always() && needs.regression.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify regression failure on Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REGRESSION_HEAD_SHA: ${{ github.sha }}
+        run: |
+          message=$(printf \
+            'Kafka regression tests failed.\nRepository: %s\nCommit: %.12s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$REGRESSION_RUN_URL")
+          jq -n --arg text "$message" '{ text: $text }' | \
+            curl --fail-with-body --retry 3 \
+              --header 'content-type: application/json' \
+              --data-binary @- \
+              "$SLACK_WEBHOOK_URL"

@@ -143,10 +143,15 @@ Performance artifacts contain:
 
 ## Notifications
 
-`.github/workflows/regression-notifications.yml` runs independently on a GitHub-hosted runner.
+`.github/workflows/regression-runner-health-check.yml` runs independently from the regression runner.
 It posts to Slack when a regression does not complete successfully and when a regression remains queued for two hours
 without another regression actively using the dedicated runner. Configure the repository secret
-`REGRESSION_SLACK_WEBHOOK_URL` with the target Slack incoming-webhook URL.
+`SLACK_WEBHOOK_URL` with the target Slack incoming-webhook URL.
+
+The queue watchdog uses the `regression-runner-health-check` GitHub Environment wait timer instead
+of sleeping on a runner. Configure that Environment in the repository settings with a 120-minute
+wait timer and no required reviewers. The `requested` workflow run creates the delayed watchdog;
+the `in_progress` event shares its concurrency group and cancels it when the regression starts.
 
 ## Release Gate
 

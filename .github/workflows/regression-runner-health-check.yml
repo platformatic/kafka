@@ -1,0 +1,68 @@
+---
+name: Regression Runner Health Check
+
+on:
+  workflow_run:
+    workflows:
+      - Regression Tests
+    branches:
+      - main
+    types:
+      - requested
+      - in_progress
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: regression-runner-health-check-${{ github.event.workflow_run.id }}
+  # The in-progress event supersedes the queue watchdog for the same regression run.
+  cancel-in-progress: true
+
+jobs:
+  runner-health-check:
+    name: Check regression runner health
+    if: github.event.action == 'requested'
+    runs-on: ubuntu-latest
+    # The environment wait timer keeps this job pending without allocating a runner.
+    environment: regression-runner-health-check
+    steps:
+      - name: Check regression job status
+        id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGRESSION_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          status=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${REGRESSION_RUN_ID}" --jq '.status')
+
+          if [ "$status" != 'queued' ]; then
+            exit 0
+          fi
+
+          active_runs=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/regression.yml/runs?branch=main&status=in_progress&per_page=1" \
+            --jq '.total_count')
+
+          # An active regression means the dedicated runner is available but intentionally busy.
+          if [ "$active_runs" -gt 0 ]; then
+            exit 0
+          fi
+
+          printf 'notify=true\n' >> "$GITHUB_OUTPUT"
+
+      - name: Notify regression runner timeout on Slack
+        if: steps.status.outputs.notify == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REGRESSION_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REGRESSION_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          message=$(printf \
+            'Kafka regression job has not picked up by a runner after within 2 hours.\nRepository: %s\nCommit: %.12s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$REGRESSION_RUN_URL")
+          jq -n --arg text "$message" '{ text: $text }' | \
+            curl --fail-with-body --retry 3 \
+              --header 'content-type: application/json' \
+              --data-binary @- \
+              "$SLACK_WEBHOOK_URL"

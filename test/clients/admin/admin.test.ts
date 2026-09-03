@@ -96,7 +96,8 @@ import {
   mockedOperationId,
   mockMetadata,
   mockUnavailableAPI,
-  retry
+  retry,
+  waitFor
 } from '../../helpers.ts'
 
 test('constructor should initialize properly', t => {
@@ -3931,6 +3932,17 @@ test('describeLogDirs should describe log directories for topics and support dia
     partitions: 4,
     replicas: 2
   })
+
+  // Topic creation can complete before all replicas have joined the ISR. Wait
+  // for the replicated topic to be ready before checking DescribeLogDirs.
+  await waitFor(async () => {
+    const metadata = await admin.metadata({ topics: [topicName2], forceUpdate: true })
+    const topic = metadata.topics.get(topicName2)
+
+    if (!topic || topic.partitions.length !== 4 || topic.partitions.some(partition => partition.replicas.length !== 2 || partition.isr.length !== 2)) {
+      throw new Error(`Topic ${topicName2} replicas are not ready.`)
+    }
+  }, { interval: 100, timeout: 30_000 })
 
   const options = {
     topics: [

@@ -1,2 +1,5 @@
 *.json
+*.log
+*-report.md
+regression-summary.md
 baselines/

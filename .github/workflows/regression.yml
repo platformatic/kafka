@@ -16,19 +16,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  regression:
-    name: Regression Suite
+  modern-regression:
+    name: Regression / Confluent Kafka ${{ matrix.kafka-version }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0, 8.1.0, 8.2.0]
     runs-on: [self-hosted, kafka-regression]
     environment: regression
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
-      KAFKA_VERSION: 8.1.0
-      REGRESSION_LANE: linux-kafka-8.1-node-24
-      REGRESSION_BASELINE_DIR: regression/artifacts/baselines
-      REGRESSION_BASELINE_S3_PREFIX: kafka/regression-baselines
-      REGRESSION_PERFORMANCE_MESSAGES: 5000
-      REGRESSION_PERFORMANCE_SAMPLES: 15
-      REGRESSION_PERFORMANCE_WARMUPS: 2
+      KAFKA_VERSION: ${{ matrix.kafka-version }}
+      REGRESSION_LANE: linux-kafka-${{ matrix.kafka-version }}-node-24
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -52,7 +52,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user awscli
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y krb5-user
 
       - name: Install NPM Dependencies
         run: pnpm install --frozen-lockfile
@@ -77,95 +77,20 @@ jobs:
 
           echo 'Kafka cluster did not become ready in time.'
           docker compose ps
-          docker compose logs --no-color
-          exit 1
+           docker compose logs --no-color
+           exit 1
 
       - name: Build
         run: pnpm run build
 
-      - name: Run integrity regressions
-        run: pnpm run test:integrity
-
-      - name: Run memory regressions
-        run: pnpm run test:memory
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
-        with:
-          role-to-assume: ${{ secrets.REGRESSION_AWS_ROLE_ARN }}
-          aws-region: ${{ vars.REGRESSION_AWS_REGION }}
-
-      - name: Download regression baseline
-        run: |
-          mkdir -p "$REGRESSION_BASELINE_DIR"
-          baseline_key="${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/latest.json"
-          head_output=$(aws s3api head-object --bucket "${{ secrets.REGRESSION_BASELINE_BUCKET }}" --key "$baseline_key" 2>&1) || head_status=$?
-
-          if [ "${head_status:-0}" -eq 0 ]; then
-            aws s3 cp \
-              "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${baseline_key}" \
-              "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json"
-          elif [[ "$head_output" == *"Not Found"* || "$head_output" == *"404"* || "$head_output" == *"NoSuchKey"* ]]; then
-            echo "::warning::No previous regression baseline found for ${REGRESSION_LANE}; skipping comparison."
-          else
-            printf '%s\n' "$head_output"
-            exit "$head_status"
-          fi
-
-      - name: Clear AWS credentials
-        run: |
-          {
-            printf 'AWS_ACCESS_KEY_ID=\n'
-            printf 'AWS_SECRET_ACCESS_KEY=\n'
-            printf 'AWS_SESSION_TOKEN=\n'
-            printf 'AWS_REGION=\n'
-            printf 'AWS_DEFAULT_REGION=\n'
-          } >> "$GITHUB_ENV"
-
-      - name: Compare and update performance baseline
-        run: pnpm run regression:baseline:update
-
-      - name: Configure AWS credentials for upload
-        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
-        with:
-          role-to-assume: ${{ secrets.REGRESSION_AWS_ROLE_ARN }}
-          aws-region: ${{ vars.REGRESSION_AWS_REGION }}
-
-      - name: Upload regression baseline
-        run: |
-          aws s3 cp \
-            "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json" \
-            "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/latest.json"
-          aws s3 cp \
-            "${REGRESSION_BASELINE_DIR}/${REGRESSION_LANE}.json" \
-            "s3://${{ secrets.REGRESSION_BASELINE_BUCKET }}/${REGRESSION_BASELINE_S3_PREFIX}/${REGRESSION_LANE}/history/${GITHUB_SHA}.json"
-
-      - name: Stop Kafka Cluster
-        if: always()
-        run: docker compose down --volumes
-
-      - name: Create regression summary
-        if: success()
-        run: |
-          mkdir -p regression/artifacts
-          summary=regression/artifacts/regression-summary.md
-          {
-            printf '# Regression test summary\n\n'
-            printf -- '- Result: Passed\n'
-            printf -- '- Commit: [`%s`](%s)\n' "$GITHUB_SHA" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
-            printf -- '- Workflow run: [#%s](%s)\n' "$GITHUB_RUN_NUMBER" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            printf -- '- Broker image: `confluentinc/cp-kafka:%s`\n' "$KAFKA_VERSION"
-            printf -- '- Node.js: `%s`\n' "$(node --version)"
-            printf -- '- Regression lane: `%s`\n' "$REGRESSION_LANE"
-            printf -- '- Runner: `%s`\n' "$RUNNER_NAME"
-          } > "$summary"
-          cp "$summary" "$GITHUB_STEP_SUMMARY"
+      - name: Run modern regression suites
+        run: bash ./scripts/run-regression-suite.sh modern "$KAFKA_VERSION" "$REGRESSION_LANE"
 
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: regression-artifacts-${{ github.run_id }}
+          name: regression-artifacts-modern-${{ matrix.kafka-version }}
           path: regression/artifacts
           if-no-files-found: ignore
 
@@ -179,14 +104,93 @@ jobs:
         if: always()
         run: docker compose down --volumes
 
-  failure:
-    name: Report regression failure
-    needs: regression
-    if: ${{ always() && needs.regression.result == 'failure' }}
-    runs-on: ubuntu-latest
+  legacy-regression:
+    name: Regression / Apache Kafka 1.1.0
+    needs: modern-regression
+    if: ${{ always() }}
+    runs-on: [self-hosted, kafka-regression]
     environment: regression
+    timeout-minutes: 180
+    env:
+      KAFKA_VERSION: 1.1.0
+      REGRESSION_LANE: linux-kafka-1.1-node-24
     steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Clean up Kafka clusters
+        run: docker compose -f docker-compose.legacy.yml down --volumes --remove-orphans
+      - name: Run legacy regression suites
+        run: bash ./scripts/run-regression-suite.sh legacy "$KAFKA_VERSION" "$REGRESSION_LANE"
+      - name: Upload legacy regression artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-artifacts-legacy
+          path: regression/artifacts
+          if-no-files-found: ignore
+
+  report:
+    name: Report regression results
+    needs: [modern-regression, legacy-regression]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download regression artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: regression-artifacts-*
+          path: regression/artifacts
+          merge-multiple: true
+      - name: Create aggregate regression summary
+        env:
+          MODERN_RESULT: ${{ needs.modern-regression.result }}
+          LEGACY_RESULT: ${{ needs.legacy-regression.result }}
+        run: |
+          summary=regression/artifacts/regression-summary.md
+          mkdir -p regression/artifacts
+          {
+            printf '# Regression test summary\n\n'
+            printf -- '- Commit: [`%s`](%s)\n' "$GITHUB_SHA" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+            printf -- '- Workflow run: [#%s](%s)\n\n' "$GITHUB_RUN_NUMBER" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            printf '## Modern Kafka versions\n\n'
+            printf -- '- Matrix result: `%s`\n\n' "$MODERN_RESULT"
+            for version in 7.5.0 7.6.0 7.7.0 7.8.0 7.9.0 8.0.0 8.1.0 8.2.0; do
+              report="regression/artifacts/linux-kafka-${version}-node-24-report.md"
+              if [ -f "$report" ]; then
+                cat "$report"
+              else
+                printf '### Kafka %s\n\n- Result: no lane report was produced.\n' "$version"
+              fi
+              printf '\n'
+            done
+            printf '\n## Legacy Sanity Check\n\n'
+            printf -- '- Job result: `%s`\n\n' "$LEGACY_RESULT"
+            if [ -f regression/artifacts/linux-kafka-1.1-node-24-report.md ]; then
+              cat regression/artifacts/linux-kafka-1.1-node-24-report.md
+            else
+              printf 'Legacy lane report was not produced.\n'
+            fi
+          } > "$summary"
+          cp "$summary" "$GITHUB_STEP_SUMMARY"
+      - name: Upload aggregate regression report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-artifacts-${{ github.run_id }}
+          path: regression/artifacts
+          if-no-files-found: ignore
       - name: Notify regression failure on Slack
+        if: ${{ needs.modern-regression.result == 'failure' || needs.legacy-regression.result == 'failure' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -200,3 +204,6 @@ jobs:
               --header 'content-type: application/json' \
               --data-binary @- \
               "$SLACK_WEBHOOK_URL"
+      - name: Fail aggregate job when a lane failed
+        if: ${{ needs.modern-regression.result == 'failure' || needs.legacy-regression.result == 'failure' }}
+        run: exit 1

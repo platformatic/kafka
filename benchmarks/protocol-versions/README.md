@@ -73,6 +73,7 @@ All optional.
 | `PROTOCOL_BENCH_WARMUPS` | `1` | Discarded runs per cell, on top of the global warmup |
 | `PROTOCOL_BENCH_SEED` | `0x5eed` | Shuffle seed for cell order. **Vary this** — see below |
 | `PROTOCOL_BENCH_ARTIFACT` | per script | Output filename under `regression/artifacts/` |
+| `PROTOCOL_BENCH_ARTIFACT_PREFIX` | empty | Prefix for the produce and consume artifact filenames |
 | `PROTOCOL_BENCH_PIN` | `true` | `false` lets the client negotiate naturally; this is what tier 2 uses |
 | `PROTOCOL_BENCH_SINGLE` | `20000` | Messages for the single-message producer workload |
 | `PROTOCOL_BENCH_BATCH` | `100000` | Messages for the batched producer workloads |

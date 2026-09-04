@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { once } from 'node:events'
 import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { mock, test, type TestContext } from 'node:test'
@@ -12,7 +13,8 @@ import {
   ConnectionStatuses,
   GenericError,
   instancesChannel,
-  parseBroker
+  parseBroker,
+  Writer
 } from '../../src/index.ts'
 import {
   createCreationChannelVerifier,
@@ -38,11 +40,15 @@ function createServer (t: TestContext, host?: string): Promise<{ server: Server;
     sockets.push(socket)
   })
 
-  t.after((_, cb) => {
+  // Promise-based hook completion (rather than the callback-style (_, cb) signature) avoids a
+  // node:test quirk where a callback-style t.after hook in a non-first test can be misreported
+  // as 'cancelledByParent' ("Promise resolution is still pending but the event loop has already
+  // resolved"), even though the hook itself completes correctly.
+  t.after(async () => {
     for (const socket of sockets) {
       socket.end()
     }
-    server.close(cb)
+    await new Promise<void>(resolve => server.close(() => resolve()))
   })
 
   server.listen(0, host)
@@ -264,6 +270,67 @@ test('get should handle connection disconnect event', async t => {
   ok(newConnection !== connection)
 
   await newConnection.close()
+})
+
+test('get should evict a connection whose request timed out', { timeout: 3000 }, async t => {
+  const { server, port } = await createServer(t)
+
+  // The accepted socket is destroyed explicitly below because it has no way to detect the
+  // client's abrupt destroy() on its own, which would otherwise leave createServer's t.after
+  // cleanup (server.close()) hanging.
+  let serverSocket: Socket | undefined
+  server.on('connection', socket => {
+    serverSocket = socket
+    socket.on('error', () => {})
+  })
+
+  const connectionPool = new ConnectionPool('test-client', { requestTimeout: 500 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  try {
+    await rejects(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          connection.send(
+            0, // apiKey
+            0, // apiVersion
+            payloadFn,
+            function () {
+              return 'Success'
+            }, // Dummy parser
+            false, // hasRequestHeaderTaggedFields
+            false, // hasResponseHeaderTaggedFields
+            (err, returnValue) => {
+              if (err) {
+                reject(err)
+              } else {
+                resolve(returnValue!)
+              }
+            }
+          )
+        }),
+      { message: 'Request timed out' }
+    )
+
+    await once(connectionPool, 'disconnect')
+
+    // The dead connection must be evicted so the next get() for the same broker opens a fresh one.
+    const newConnection = await connectionPool.get(broker)
+    ok(newConnection !== connection)
+
+    await newConnection.close()
+  } finally {
+    serverSocket?.destroy()
+  }
 })
 
 test('get should handle errors and remove connection', async t => {

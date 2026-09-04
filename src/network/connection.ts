@@ -520,7 +520,14 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
   #onRequestTimeout (request: Request): void {
     request.timedOut = true
-    request.callback(new TimeoutError('Request timed out'), null)
+    this.#inflightRequests.delete(request.correlationId)
+    this.#afterDrainRequests = this.#afterDrainRequests.filter(r => r !== request)
+
+    this.#status = ConnectionStatuses.CLOSING
+
+    request.callback(new TimeoutError('Request timed out', { canRetry: true }), null)
+
+    this.#socket?.destroy()
   }
 
   #authenticate (host: string, port: number, diagnosticContext: DiagnosticContext): void {
@@ -932,13 +939,15 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     const error = new NetworkError('Connection closed')
 
     for (const request of this.#afterDrainRequests) {
-      if (!request.noResponse) {
+      if (!request.noResponse && !request.timedOut) {
         request.callback(error, undefined)
       }
     }
 
     for (const inflight of this.#inflightRequests.values()) {
-      inflight.callback(error, undefined)
+      if (!inflight.timedOut) {
+        inflight.callback(error, undefined)
+      }
     }
   }
 

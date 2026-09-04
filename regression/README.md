@@ -130,7 +130,7 @@ npm run test:performance
 
 Generated JSON artifacts are written under `regression/artifacts` and ignored by git.
 
-Successful CI runs also generate `regression-summary.md`, a concise record of the tested
+CI runs also generate `regression-summary.md`, a concise record of the tested
 commit, broker image and Kafka version, Node.js version, regression lane, runner, and workflow URL.
 The same content is published in the GitHub Actions job summary.
 
@@ -152,6 +152,22 @@ The queue watchdog uses the `regression-runner-health-check` GitHub Environment 
 of sleeping on a runner. Configure that Environment in the repository settings with a 120-minute
 wait timer and no required reviewers. The `requested` workflow run creates the delayed watchdog;
 the `in_progress` event shares its concurrency group and cancels it when the regression starts.
+
+## CI Version Coverage
+
+The dedicated regression workflow runs sequentially on the same benchmark runner against every
+modern Confluent Kafka version used by the CI matrix: `7.5.0`, `7.6.0`, `7.7.0`, `7.8.0`, `7.9.0`,
+`8.0.0`, `8.1.0`, and `8.2.0`. Each modern lane runs the integrity, memory, performance, and protocol
+load suites.
+
+Apache Kafka `1.1.0` runs separately with `docker-compose.legacy.yml`. Its lane runs the compatibility
+tests and the unpinned protocol sanity checks only; modern KRaft and authentication regressions are not
+applicable to that stack.
+
+Every lane writes a report and keeps going after an individual suite fails. The aggregate workflow report
+is generated only after all modern lanes and the legacy lane have finished, with the legacy results shown
+under a separate Legacy Sanity Check section. Baselines and protocol artifacts are namespaced by lane and
+Kafka version and are not compared across broker versions.
 
 ## Release Gate
 

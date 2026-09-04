@@ -1,6 +1,7 @@
 import { strictEqual } from 'node:assert'
 import { test } from 'node:test'
 import { GroupProtocols, MessagesStreamFallbackModes, MessagesStreamModes } from '../../src/index.ts'
+import { usableVersions } from '../../test/helpers/api-versions.ts'
 import {
   assertCommittedOffset,
   assertContiguousIds,
@@ -25,6 +26,12 @@ function jsonDeserializers () {
 }
 
 test('regression #267/#248: consumer protocol resumes from committed offsets after member epoch churn', { timeout: 90_000 }, async t => {
+  const probe = createConsumer(t)
+  if (!(await usableVersions(probe, 'ConsumerGroupHeartbeat')).length) {
+    t.skip('broker does not support the consumer group protocol')
+    return
+  }
+
   // The first consumer commits half the topic, then leaves the group. The second
   // consumer rejoins with the consumer protocol and must resume from that commit.
   const topic = await createTopic(t, 1)

@@ -40,10 +40,6 @@ function createServer (t: TestContext, host?: string): Promise<{ server: Server;
     sockets.push(socket)
   })
 
-  // Promise-based hook completion (rather than the callback-style (_, cb) signature) avoids a
-  // node:test quirk where a callback-style t.after hook in a non-first test can be misreported
-  // as 'cancelledByParent' ("Promise resolution is still pending but the event loop has already
-  // resolved"), even though the hook itself completes correctly.
   t.after(async () => {
     for (const socket of sockets) {
       socket.end()

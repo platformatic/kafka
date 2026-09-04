@@ -63,11 +63,11 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
     sockets.push(socket)
   })
 
-  t.after((_, cb) => {
+  t.after(async () => {
     for (const socket of sockets) {
       socket.end()
     }
-    server.close(cb)
+    await new Promise<void>(resolve => server.close(() => resolve()))
   })
 
   server.listen(0)
@@ -561,6 +561,192 @@ test('Connection.send should time out eventually (custom timeout)', async t => {
     strictEqual(elapsed >= customTimeout, true, 'Should not time out before the custom timeout')
     // Allow 10% tolerance
     strictEqual(elapsed < customTimeout * 1.1, true, 'Should time out with custom timeout')
+  }
+})
+
+test('Connection.send should destroy the socket and close the connection when a request times out', { timeout: 3000 }, async t => {
+  const { server, port } = await createServer(t)
+  const customTimeout = 500
+  const connection = new Connection('test-client', { requestTimeout: customTimeout })
+  t.after(() => connection.close())
+
+  let serverSocket: Socket | undefined
+  server.on('connection', socket => {
+    serverSocket = socket
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  try {
+    let callCount = 0
+
+    await rejects(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          connection.send(
+            0, // apiKey
+            0, // apiVersion
+            payloadFn,
+            function () {
+              return 'Success'
+            }, // Dummy parser
+            false, // hasRequestHeaderTaggedFields
+            false, // hasResponseHeaderTaggedFields
+            (err, returnValue) => {
+              callCount++
+              if (err) {
+                reject(err)
+              } else {
+                resolve(returnValue!)
+              }
+            }
+          )
+        }),
+      { message: 'Request timed out' }
+    )
+
+    // The status flip happens synchronously inside #onRequestTimeout, before the async socket
+    // 'close' event ever fires — checking it here (rather than only after awaiting 'close' below)
+    // guards against a concurrent ConnectionPool#get() being handed this connection while it still
+    // reports CONNECTED despite already being torn down.
+    strictEqual(connection.status === ConnectionStatuses.CONNECTED, false, 'status must not still report CONNECTED once the timeout has fired')
+
+    // #onClose runs synchronously as part of the socket 'close' sequence, before the 'close'
+    // event that once() below is waiting for is emitted — so by the time this resolves, #onClose
+    // has already had its chance to (incorrectly) re-invoke this request's callback a second time
+    // if the #inflightRequests removal / !request.timedOut guard in #onRequestTimeout/#onClose regressed.
+    await once(connection, 'close')
+    strictEqual(connection.status, ConnectionStatuses.CLOSED)
+    strictEqual(callCount, 1, 'the timed-out request callback must not be invoked a second time by the close cascade')
+  } finally {
+    serverSocket?.destroy()
+  }
+})
+
+test('Connection.send should fail other in-flight requests immediately when a sibling request times out', { timeout: 5000 }, async t => {
+  const { server, port } = await createServer(t)
+  const customTimeout = 2000
+  const connection = new Connection('test-client', { requestTimeout: customTimeout, maxInflights: 2 })
+  t.after(() => connection.close())
+
+  let serverSocket: Socket | undefined
+  server.on('connection', socket => {
+    serverSocket = socket
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  function sendOne (): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      connection.send(
+        0, // apiKey
+        0, // apiVersion
+        payloadFn,
+        function () {
+          return 'Success'
+        }, // Dummy parser
+        false, // hasRequestHeaderTaggedFields
+        false, // hasResponseHeaderTaggedFields
+        (err, returnValue) => {
+          if (err) {
+            reject(err)
+          } else {
+            resolve(returnValue!)
+          }
+        }
+      )
+    })
+  }
+
+  try {
+    const startTime = performance.now()
+    const firstPromise = sendOne()
+
+    await scheduler.wait(customTimeout / 2)
+    const secondPromise = sendOne()
+
+    await rejects(() => firstPromise, { message: 'Request timed out' })
+    await rejects(() => secondPromise, { code: 'PLT_KFK_NETWORK', message: 'Connection closed' })
+
+    const secondElapsed = performance.now() - startTime
+    // Without the fix, the second request only fails once its OWN timer elapses at roughly
+    // (customTimeout / 2) + customTimeout = 3000ms. With the fix it fails via the close cascade
+    // shortly after the first request's timeout, i.e. around customTimeout = 2000ms.
+    strictEqual(secondElapsed < customTimeout * 1.3, true, `second request should fail via cascade (took ${secondElapsed}ms)`)
+  } finally {
+    serverSocket?.destroy()
+  }
+})
+
+test('Connection.send should deliver a retriable timeout error so the client can self-heal', { timeout: 3000 }, async t => {
+  const { server, port } = await createServer(t)
+  const customTimeout = 500
+  const connection = new Connection('test-client', { requestTimeout: customTimeout })
+  t.after(() => connection.close())
+
+  // Accept the connection but never respond. Destroyed explicitly below for the same reason as the
+  // preceding timeout tests — the accepted socket cannot detect the client's abrupt destroy().
+  let serverSocket: Socket | undefined
+  server.on('connection', socket => {
+    serverSocket = socket
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  try {
+    let capturedError: Error | null = null
+    await rejects(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          connection.send(
+            0, // apiKey
+            0, // apiVersion
+            payloadFn,
+            function () {
+              return 'Success'
+            }, // Dummy parser
+            false, // hasRequestHeaderTaggedFields
+            false, // hasResponseHeaderTaggedFields
+            (err, returnValue) => {
+              if (err) {
+                capturedError = err
+                reject(err)
+              } else {
+                resolve(returnValue!)
+              }
+            }
+          )
+        }),
+      { message: 'Request timed out' }
+    )
+
+    // The timeout error must be retriable so kPerformWithRetry (and the ListOffsets metadata-refresh
+    // gate) re-issues the request on a fresh connection, rather than surfacing a dead-end failure.
+    strictEqual((capturedError as unknown as { canRetry?: boolean } | null)?.canRetry, true, 'timeout error must carry canRetry === true')
+    strictEqual(NetworkError.isRetryable(capturedError), true, 'timeout error must be retriable per NetworkError.isRetryable')
+  } finally {
+    serverSocket?.destroy()
   }
 })
 

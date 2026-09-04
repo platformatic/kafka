@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { once } from 'node:events'
 import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { mock, test, type TestContext } from 'node:test'
@@ -12,7 +13,8 @@ import {
   ConnectionStatuses,
   GenericError,
   instancesChannel,
-  parseBroker
+  parseBroker,
+  Writer
 } from '../../src/index.ts'
 import {
   createCreationChannelVerifier,
@@ -35,12 +37,15 @@ function createServer (t: TestContext, host?: string): Promise<{ server: Server;
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
   server.once('error', reject)
   server.on('connection', socket => {
+    // Swallow socket errors (e.g. ECONNRESET) from a client that tears its connection down abruptly;
+    // without an 'error' listener the accepted socket would rethrow and crash the test process.
+    socket.on('error', () => {})
     sockets.push(socket)
   })
 
   t.after((_, cb) => {
     for (const socket of sockets) {
-      socket.end()
+      socket.destroy()
     }
     server.close(cb)
   })
@@ -260,6 +265,59 @@ test('get should handle connection disconnect event', async t => {
   deepStrictEqual(disconnectSpy.mock.calls.length, 1)
 
   // Try to get the connection again - should create a new one
+  const newConnection = await connectionPool.get(broker)
+  ok(newConnection !== connection)
+
+  await newConnection.close()
+})
+
+test('get should evict a connection whose request timed out', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client', { requestTimeout: 500 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  // Start listening for 'disconnect' BEFORE the request can time out. #onRequestTimeout invokes the
+  // callback and then destroys the socket, so the pool can emit 'disconnect' right after the timeout
+  // error rejects — attaching this listener only afterwards would race that emission.
+  const disconnected = once(connectionPool, 'disconnect')
+
+  await rejects(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        connection.send(
+          0, // apiKey
+          0, // apiVersion
+          payloadFn,
+          function () {
+            return 'Success'
+          }, // Dummy parser
+          false, // hasRequestHeaderTaggedFields
+          false, // hasResponseHeaderTaggedFields
+          (err, returnValue) => {
+            if (err) {
+              reject(err)
+            } else {
+              resolve(returnValue!)
+            }
+          }
+        )
+      }),
+    { message: 'Request timed out' }
+  )
+
+  await disconnected
+
+  // The dead connection must be evicted so the next get() for the same broker opens a fresh one.
   const newConnection = await connectionPool.get(broker)
   ok(newConnection !== connection)
 

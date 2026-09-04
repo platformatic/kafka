@@ -2,9 +2,9 @@
 
 set -o pipefail
 
-MODE="${1:?usage: run-regression-suite.sh <modern|legacy> <version> <lane>}"
-VERSION="${2:?usage: run-regression-suite.sh <modern|legacy> <version> <lane>}"
-LANE="${3:?usage: run-regression-suite.sh <modern|legacy> <version> <lane>}"
+MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
+VERSION="${2:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
+LANE="${3:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
 ARTIFACT_DIR="regression/artifacts"
 REPORT="$ARTIFACT_DIR/${LANE}-report.md"
 
@@ -21,7 +21,7 @@ run_suite () {
   local log="$ARTIFACT_DIR/${LANE}-${name}.log"
   local status
 
-  printf 'Running %s for Kafka %s\n' "$name" "$VERSION"
+  printf 'Running %s for %s\n' "$name" "$VERSION"
   if "$@" 2>&1 | tee "$log"; then
     status=0
   else
@@ -39,6 +39,13 @@ if [[ "$MODE" == modern ]]; then
   run_suite performance pnpm run test:performance
   run_suite protocol-load env PROTOCOL_BENCH_ARTIFACT_PREFIX="${LANE}-" \
     ./scripts/run-protocol-load-test.sh 1
+elif [[ "$MODE" == redpanda ]]; then
+  if ! docker compose -f docker-compose.redpanda.yml up -d --wait; then
+    printf 'Unable to start the Redpanda broker\n' >&2
+    overall=1
+  fi
+  run_suite e2e pnpm run test:e2e:redpanda
+  docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans
 elif [[ "$MODE" == legacy ]]; then
   if ! docker compose -f docker-compose.legacy.yml up -d --wait; then
     printf 'Unable to start the legacy Kafka broker\n' >&2
@@ -55,7 +62,7 @@ fi
 
 {
   printf '# Regression lane: %s\n\n' "$LANE"
-  printf -- '- Kafka: `%s`\n' "$VERSION"
+  printf -- '- Broker: `%s`\n' "$VERSION"
   printf -- '- Mode: `%s`\n\n' "$MODE"
   printf '| Suite | Result | Log |\n'
   printf '| --- | --- | --- |\n'

@@ -37,14 +37,17 @@ function createServer (t: TestContext, host?: string): Promise<{ server: Server;
   server.once('listening', () => resolve({ server, port: (server.address() as AddressInfo).port }))
   server.once('error', reject)
   server.on('connection', socket => {
+    // Swallow socket errors (e.g. ECONNRESET) from a client that tears its connection down abruptly;
+    // without an 'error' listener the accepted socket would rethrow and crash the test process.
+    socket.on('error', () => {})
     sockets.push(socket)
   })
 
-  t.after(async () => {
+  t.after((_, cb) => {
     for (const socket of sockets) {
-      socket.end()
+      socket.destroy()
     }
-    await new Promise<void>(resolve => server.close(() => resolve()))
+    server.close(cb)
   })
 
   server.listen(0, host)
@@ -269,16 +272,7 @@ test('get should handle connection disconnect event', async t => {
 })
 
 test('get should evict a connection whose request timed out', { timeout: 3000 }, async t => {
-  const { server, port } = await createServer(t)
-
-  // The accepted socket is destroyed explicitly below because it has no way to detect the
-  // client's abrupt destroy() on its own, which would otherwise leave createServer's t.after
-  // cleanup (server.close()) hanging.
-  let serverSocket: Socket | undefined
-  server.on('connection', socket => {
-    serverSocket = socket
-    socket.on('error', () => {})
-  })
+  const { port } = await createServer(t)
 
   const connectionPool = new ConnectionPool('test-client', { requestTimeout: 500 })
   t.after(() => connectionPool.close())
@@ -292,41 +286,42 @@ test('get should evict a connection whose request timed out', { timeout: 3000 },
     return writer
   }
 
-  try {
-    await rejects(
-      () =>
-        new Promise<string>((resolve, reject) => {
-          connection.send(
-            0, // apiKey
-            0, // apiVersion
-            payloadFn,
-            function () {
-              return 'Success'
-            }, // Dummy parser
-            false, // hasRequestHeaderTaggedFields
-            false, // hasResponseHeaderTaggedFields
-            (err, returnValue) => {
-              if (err) {
-                reject(err)
-              } else {
-                resolve(returnValue!)
-              }
+  // Start listening for 'disconnect' BEFORE the request can time out. #onRequestTimeout invokes the
+  // callback and then destroys the socket, so the pool can emit 'disconnect' right after the timeout
+  // error rejects — attaching this listener only afterwards would race that emission.
+  const disconnected = once(connectionPool, 'disconnect')
+
+  await rejects(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        connection.send(
+          0, // apiKey
+          0, // apiVersion
+          payloadFn,
+          function () {
+            return 'Success'
+          }, // Dummy parser
+          false, // hasRequestHeaderTaggedFields
+          false, // hasResponseHeaderTaggedFields
+          (err, returnValue) => {
+            if (err) {
+              reject(err)
+            } else {
+              resolve(returnValue!)
             }
-          )
-        }),
-      { message: 'Request timed out' }
-    )
+          }
+        )
+      }),
+    { message: 'Request timed out' }
+  )
 
-    await once(connectionPool, 'disconnect')
+  await disconnected
 
-    // The dead connection must be evicted so the next get() for the same broker opens a fresh one.
-    const newConnection = await connectionPool.get(broker)
-    ok(newConnection !== connection)
+  // The dead connection must be evicted so the next get() for the same broker opens a fresh one.
+  const newConnection = await connectionPool.get(broker)
+  ok(newConnection !== connection)
 
-    await newConnection.close()
-  } finally {
-    serverSocket?.destroy()
-  }
+  await newConnection.close()
 })
 
 test('get should handle errors and remove connection', async t => {

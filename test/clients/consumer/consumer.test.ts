@@ -2849,6 +2849,139 @@ for (const [name, compression] of Object.entries(CompressionAlgorithms)) {
   )
 }
 
+test('fetch with READ_COMMITTED should not crash on an abort marker with no matching aborted transaction', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t)
+  const pool = consumer[kCreateConnectionPool]()
+  const metadata = createPreferredReplicaMetadata(topic, topicId)
+
+  // The control batch is not included in abortedTransactions because the fetch starts
+  // after the transaction's first offset.
+  const abortMarker: RecordsBatch = {
+    firstOffset: 1n,
+    length: 0,
+    partitionLeaderEpoch: 0,
+    magic: 2,
+    crc: 0,
+    attributes: 32,
+    lastOffsetDelta: 0,
+    firstTimestamp: 0n,
+    maxTimestamp: 0n,
+    producerId: 5n,
+    producerEpoch: 0,
+    firstSequence: 0,
+    records: [
+      {
+        length: 0,
+        attributes: 0,
+        timestampDelta: 0n,
+        offsetDelta: 0,
+        key: Buffer.from([0, 0, 0, 0]),
+        value: null,
+        headers: []
+      }
+    ]
+  }
+  const committedBatch: RecordsBatch = {
+    firstOffset: 2n,
+    length: 0,
+    partitionLeaderEpoch: 0,
+    magic: 2,
+    crc: 0,
+    attributes: 0,
+    lastOffsetDelta: 0,
+    firstTimestamp: 0n,
+    maxTimestamp: 0n,
+    producerId: 5n,
+    producerEpoch: 0,
+    firstSequence: 0,
+    records: [
+      {
+        length: 0,
+        attributes: 0,
+        timestampDelta: 0n,
+        offsetDelta: 0,
+        key: Buffer.from('key'),
+        value: Buffer.from('committed'),
+        headers: []
+      }
+    ]
+  }
+  const response: FetchResponse = {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    nodeEndpoints: [],
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 3n,
+            lastStableOffset: 3n,
+            logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
+            abortedTransactions: [{ producerId: 99n, firstOffset: 0n }],
+            preferredReadReplica: -1,
+            records: [abortMarker, committedBatch]
+          }
+        ]
+      }
+    ]
+  }
+  const connection = {
+    instanceId: 1,
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: unknown,
+      _parser: unknown,
+      _requestTags: unknown,
+      _responseTags: unknown,
+      callback: CallbackWithPromise<FetchResponse>
+    ) {
+      callback(null, response)
+    }
+  }
+
+  t.after(() => pool.close())
+
+  mockMetadata(consumer, 1, null, metadata)
+  mockMethod(consumer, kGetApi, 1, null, fetchV17.api)
+  pool.get = ((_broker, callback) => {
+    callback(null, connection as any)
+  }) as typeof pool.get
+
+  const result = await consumer.fetch({
+    connectionPool: pool,
+    isolationLevel: FetchIsolationLevels.READ_COMMITTED,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 0,
+            fetchOffset: 1n,
+            lastFetchedEpoch: 0,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  const records = result.responses[0].partitions[0].records!
+  strictEqual(records.length, 2)
+  strictEqual(records[1].records[0].value!.toString(), 'committed')
+})
+
 test('commit should commit offsets to Kafka and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true)

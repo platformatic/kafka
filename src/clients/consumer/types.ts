@@ -13,6 +13,11 @@ export interface GroupProtocolSubscription {
   metadata?: Buffer | string
 }
 
+export interface TopicPartitionAssignment {
+  topic: string
+  partition: number
+}
+
 export interface GroupAssignment {
   topic: string
   partitions: number[]
@@ -25,6 +30,9 @@ export interface GroupPartitionsAssignments {
 
 export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSubscription, 'name'> {
   topics?: string[]
+  ownedPartitions?: GroupAssignment[]
+  generationId?: number
+  rackId?: string | null
   // This is only used in responses
   memberId: string
 }
@@ -223,6 +231,11 @@ export interface ConsumerGroupLeavePayload {
 
 export interface ConsumerGroupRebalancePayload {
   groupId: string
+}
+
+export interface ConsumerGroupAutocommitErrorPayload {
+  groupId: string
+  error: Error
 }
 
 export interface ConsumerHeartbeatPayload {

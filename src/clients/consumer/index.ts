@@ -1,5 +1,7 @@
 export * from './consumer.ts'
+export * from './consumer-protocol.ts'
 export * from './messages-stream.ts'
 export * from './options.ts'
+export * from './partitions-assigners.ts'
 export * from './topics-map.ts'
 export * from './types.ts'

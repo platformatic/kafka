@@ -2071,7 +2071,10 @@ test('describeGroups should describe consumer groups and support diagnostic chan
               groupInstanceId: null,
               id,
               metadata: {
+                generationId: -1,
                 metadata: EMPTY_BUFFER,
+                ownedPartitions: [],
+                rackId: null,
                 topics: [testTopic],
                 version: 1
               }

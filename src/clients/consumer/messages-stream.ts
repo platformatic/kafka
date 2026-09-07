@@ -236,7 +236,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Start the autocommit interval
     if (typeof autocommit === 'number' && autocommit > 0) {
-      this.#autocommitInterval = setInterval(this[kAutocommit].bind(this), autocommit as number)
+      // Invoke without a callback so the timer path keeps the mid-rejoin skip in [kAutocommit].
+      this.#autocommitInterval = setInterval(() => this[kAutocommit](), autocommit as number)
     } else {
       this.#autocommitInterval = null
     }
@@ -1114,10 +1115,36 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return callback[kCallbackPromise]!
   }
 
-  [kAutocommit] (): void {
-    if (this.#offsetsToCommit.size === 0 || this.#autocommitInflight) {
+  [kAutocommit] (callback?: Callback<void>): void {
+    // A commit is already running: report its outcome to the caller rather than
+    // starting a second one, so a cooperative rebalance waits for the in-flight
+    // commit instead of proceeding as if nothing was pending.
+    if (this.#autocommitInflight) {
+      if (callback) {
+        // A commit which fails with a rejoin-required error destroys the stream, and a destroyed
+        // stream never emits 'autocommit' again. Settle on whichever comes first so an awaiting
+        // rebalance cannot deadlock on a stream that is going away.
+        const onAutocommit = (error: Error | null): void => {
+          this.removeListener('close', onClose)
+          callback(error)
+        }
+        const onClose = (): void => {
+          this.removeListener('autocommit', onAutocommit)
+          callback(null)
+        }
+
+        this.once('autocommit', onAutocommit)
+        this.once('close', onClose)
+      }
+
       return
     }
+
+    if (this.#offsetsToCommit.size === 0) {
+      callback?.(null)
+      return
+    }
+
     // Skip this tick while the consumer is mid-(re)join: a commit attempted here would fail
     // with a rejoin-required error (ILLEGAL_GENERATION/UNKNOWN_MEMBER_ID/REBALANCE_IN_PROGRESS),
     // and — since this runs on its own timer, independently of the group's own rejoin flow —
@@ -1125,7 +1152,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // consumers in the group, this can fire fresh JoinGroups fast enough that the group never
     // completes a rebalance round. Leave the offsets queued; they are committed once the
     // consumer becomes active again (next tick, or the final flush on close/destroy).
-    if (!this.#consumer.isActive()) {
+    // A caller-supplied callback means an explicitly requested flush (the cooperative rebalance
+    // commits before revoking partitions) rather than a timer tick: it awaits this commit
+    // instead of rejoining on failure, so it must not be skipped or the revoked offsets are lost.
+    if (!callback && !this.#consumer.isActive()) {
       return
     }
 
@@ -1154,6 +1184,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             }
           }
         }
+        callback?.(error)
         return
       }
 
@@ -1162,6 +1193,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       this.emit('autocommit', null, offsets)
+      callback?.(null)
     })
   }
 

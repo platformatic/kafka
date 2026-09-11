@@ -91,16 +91,18 @@ jobs:
       - name: Stage release on NPM
         run: pnpm stage publish --access public --tag ${{ inputs.prerelease == true && 'next' || 'latest' }} --provenance --publish-branch ${{ github.ref_name }} --no-git-checks
       - name: Create draft release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          pnpx @matteo.collina/release-notes -a ${{ secrets.GH_RELEASE_TOKEN }} -t v${{ inputs.version }} -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
+          pnpx @matteo.collina/release-notes -t v${{ inputs.version }} -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
       - name: Attach regression summary
         env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "v${{ inputs.version }}" release-artifacts/regression-summary.md
       - name: Publish GitHub release
         env:
-          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           if [ "$PRERELEASE" = 'true' ]; then

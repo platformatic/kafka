@@ -1074,7 +1074,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                       this.#fetchSessions.delete(node)
                     }
 
-                    if (findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH')) {
+                    if (
+                      findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH') ||
+                      findErrorBy(error, 'apiId', 'NOT_LEADER_OR_FOLLOWER') ||
+                      findErrorBy(error, 'apiId', 'LEADER_NOT_AVAILABLE')
+                    ) {
                       this.#fetchSessions.delete(node)
                       this.clearMetadata()
                       for (const topic of options.topics) {

@@ -1966,6 +1966,114 @@ test('fetch should retry with a full fetch when the broker evicts the session', 
   ])
 })
 
+test('fetch should refresh metadata and reset leader epoch when leadership moves (NOT_LEADER_OR_FOLLOWER)', async t => {
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { retryDelay: 0 })
+  const pool = consumer[kCreateConnectionPool]()
+  const connection = { instanceId: 1, send () {} }
+  const fetchAttempts: { currentLeaderEpoch: number; lastFetchedEpoch: number }[] = []
+  let metadataCalls = 0
+  let metadataCleared = false
+
+  t.after(() => pool.close())
+
+  t.mock.method(consumer, 'clearMetadata', () => {
+    metadataCleared = true
+  })
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      metadataCalls++
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map()
+      })
+
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _maxWaitMs: number,
+        _minBytes: number,
+        _maxBytes: number,
+        _isolationLevel: number,
+        _sessionId: number,
+        _sessionEpoch: number,
+        topics: { partitions: { currentLeaderEpoch: number; lastFetchedEpoch: number }[] }[],
+        _forgottenTopicsData: unknown[],
+        _rackId: string,
+        callback: CallbackWithPromise<FetchResponse>
+      ) => {
+        const partition = topics[0].partitions[0]
+        fetchAttempts.push({ currentLeaderEpoch: partition.currentLeaderEpoch, lastFetchedEpoch: partition.lastFetchedEpoch })
+
+        // First attempt hits the (now stale) cached leader: the broker rejects it because
+        // leadership moved to a different node.
+        if (fetchAttempts.length === 1) {
+          const response = { throttleTimeMs: 0, errorCode: 0, sessionId: 0, nodeEndpoints: [], responses: [] }
+          callback(new ResponseError(1, 17, { '': [6, null] }, response), undefined)
+          return
+        }
+
+        callback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, nodeEndpoints: [], responses: [] })
+      }
+
+      callback(null, api)
+      return true
+    }
+  )
+
+  await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          {
+            partition: 0,
+            currentLeaderEpoch: 5,
+            fetchOffset: 0n,
+            lastFetchedEpoch: 3,
+            partitionMaxBytes: 1048576
+          }
+        ]
+      }
+    ]
+  })
+
+  // The retry must have cleared cached metadata (forcing a fresh lookup of the new leader)
+  // and reset the leader-epoch fence, instead of blindly repeating the same failing request.
+  strictEqual(metadataCleared, true)
+  ok(metadataCalls >= 2)
+  deepStrictEqual(fetchAttempts, [
+    { currentLeaderEpoch: 5, lastFetchedEpoch: 3 },
+    { currentLeaderEpoch: -1, lastFetchedEpoch: -1 }
+  ])
+})
+
 test('fetch should start a new session with no forgotten partitions when the broker drops the session', async t => {
   const topicId = '00000000-0000-0000-0000-000000000001'
   const consumer = createConsumer(t)

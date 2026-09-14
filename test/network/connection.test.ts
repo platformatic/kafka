@@ -471,7 +471,8 @@ test('Connection.send should enqueue request and process response', async t => {
 })
 
 test('Connection.send should await payloads without reordering requests', async t => {
-  const { port } = await createServer(t)
+  const { server, port } = await createServer(t)
+  server.on('connection', socket => socket.resume())
   const connection = new Connection('test-client')
   t.after(() => connection.close())
   await connection.connect('localhost', port)

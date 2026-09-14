@@ -3,15 +3,14 @@ import { lz4Compress, lz4Decompress, snappyCompress, snappyDecompress } from '@p
 import zlib from 'node:zlib'
 import { UnsupportedCompressionError } from '../errors.ts'
 
-const { zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
+const { gzip, zstdCompressSync, zstdDecompressSync, gzipSync, gunzipSync } = zlib
 
 export type SyncCompressionPhase = (data: Buffer | DynamicBuffer) => Buffer
+export type AsyncCompressionPhase = (data: Buffer | DynamicBuffer) => Promise<Buffer>
 export type CompressionOperation = (data: Buffer) => Buffer
 
-// Right now we support sync compressing only since the average time spent on compressing small sizes of
-// data will be smaller than transferring the same data between threads to perform async (de)comporession.
-// The interface naming already accounts for future expansion to async (de)compression.
 export interface CompressionAlgorithmSpecification {
+  compress?: AsyncCompressionPhase
   compressSync: SyncCompressionPhase
   decompressSync: SyncCompressionPhase
   bitmask: number
@@ -32,6 +31,20 @@ export type CompressionAlgorithmValue = (typeof CompressionAlgorithms)[keyof typ
 
 function ensureBuffer (data: Buffer | DynamicBuffer): Buffer {
   return DynamicBuffer.isDynamicBuffer(data) ? (data as DynamicBuffer).buffer : (data as Buffer)
+}
+
+function gzipAsync (data: Buffer | DynamicBuffer): Promise<Buffer> {
+  const { promise, resolve, reject } = Promise.withResolvers<Buffer>()
+
+  gzip(ensureBuffer(data), (error, result) => {
+    if (error) {
+      reject(error)
+    } else {
+      resolve(result)
+    }
+  })
+
+  return promise
 }
 
 const snappyCompressSync: CompressionOperation = snappyCompress
@@ -81,6 +94,7 @@ export const compressionsAlgorithms = {
     available: true
   },
   gzip: {
+    compress: gzipAsync,
     compressSync (data: Buffer | DynamicBuffer): Buffer {
       return gzipSync(ensureBuffer(data))
     },

@@ -255,9 +255,9 @@ jobs:
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
         run: |
-           message=$(printf \
-             'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nLegacy: %s\nRun: %s' \
-             "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$LEGACY_RESULT" "$REGRESSION_RUN_URL")
+          message=$(printf \
+            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nLegacy: %s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$LEGACY_RESULT" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \
               --header 'content-type: application/json' \

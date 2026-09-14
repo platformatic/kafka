@@ -61,6 +61,7 @@ function createServer (t: TestContext): Promise<{ server: Server; port: number }
   server.once('error', reject)
   server.on('connection', socket => {
     sockets.push(socket)
+    socket.resume()
   })
 
   t.after(async () => {
@@ -471,8 +472,7 @@ test('Connection.send should enqueue request and process response', async t => {
 })
 
 test('Connection.send should await payloads without reordering requests', async t => {
-  const { server, port } = await createServer(t)
-  server.on('connection', socket => socket.resume())
+  const { port } = await createServer(t)
   const connection = new Connection('test-client')
   t.after(() => connection.close())
   await connection.connect('localhost', port)

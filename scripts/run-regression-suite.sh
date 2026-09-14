@@ -15,6 +15,14 @@ declare -a names
 declare -a statuses
 overall=0
 
+cleanup_redpanda () {
+  docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans || true
+}
+
+cleanup_legacy () {
+  docker compose -f docker-compose.legacy.yml down --volumes --remove-orphans || true
+}
+
 run_suite () {
   local name="$1"
   shift
@@ -40,19 +48,19 @@ if [[ "$MODE" == modern ]]; then
   run_suite protocol-load env PROTOCOL_BENCH_ARTIFACT_PREFIX="${LANE}-" \
     ./scripts/run-protocol-load-test.sh 1
 elif [[ "$MODE" == redpanda ]]; then
+  trap cleanup_redpanda EXIT
   if ! docker compose -f docker-compose.redpanda.yml up -d --wait; then
     printf 'Unable to start the Redpanda broker\n' >&2
     overall=1
   fi
   run_suite e2e pnpm run test:e2e:redpanda
-  docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans
 elif [[ "$MODE" == legacy ]]; then
+  trap cleanup_legacy EXIT
   if ! docker compose -f docker-compose.legacy.yml up -d --wait; then
     printf 'Unable to start the legacy Kafka broker\n' >&2
     overall=1
   fi
   run_suite compatibility pnpm run test:compat
-  docker compose -f docker-compose.legacy.yml down --volumes
   run_suite protocol-load env PROTOCOL_BENCH_ARTIFACT_PREFIX="${LANE}-" \
     ./scripts/run-protocol-load-test.sh 2
 else

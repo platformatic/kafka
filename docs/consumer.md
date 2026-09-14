@@ -356,6 +356,58 @@ for await (const message of stream) {
 Each message gets its own metadata object, so mutating it never affects the other messages of the
 same batch.
 
+## Batch consumption
+
+`MessagesStream` can be combined with the [`hwp`](https://www.npmjs.com/package/hwp) batch operator when an
+application needs to process multiple messages together:
+
+```typescript
+import { batchIterator } from 'hwp'
+
+const stream = await consumer.consume({
+  autocommit: false,
+  topics: ['events']
+})
+
+try {
+  for await (const batch of batchIterator(stream[Symbol.asyncIterator](), 100, 1000)) {
+    await processBatch(batch)
+
+    const offsets = new Map()
+    for (const message of batch) {
+      offsets.set(`${message.topic}:${message.partition}`, {
+        topic: message.topic,
+        partition: message.partition,
+        offset: message.offset + 1n,
+        leaderEpoch: message.leaderEpoch
+      })
+    }
+
+    await consumer.commit({ offsets: [...offsets.values()] })
+  }
+} finally {
+  try {
+    await stream.close()
+  } finally {
+    await consumer.close(true)
+  }
+}
+```
+
+The batch is released when it reaches the maximum size or when the timeout expires. Since Kafka offsets are tracked
+per topic-partition, commit the highest successfully processed offset plus one for each partition in the batch. If
+processing fails before the commit, the uncommitted messages can be delivered again.
+
+The complete runnable example is available in [`examples/batching`](../examples/batching). Run it with:
+
+```bash
+KAFKA_BROKER=localhost:9092 ./scripts/node examples/batching/index.ts
+```
+
+Batch consumption will not be implemented as a separate API in the client. Keeping batching as an operator over the
+existing stream avoids duplicating stream lifecycle and offset semantics while allowing applications to choose their
+batch size, timeout and processing strategy.
+
 ## Rack-aware fetching
 
 When you set the [`clientRack`](./base.md) option, the consumer sends it as the Fetch request `rack_id` and honors any `preferred_read_replica` the broker returns. Subsequent fetches for that partition route to the preferred replica until the lease expires, the metadata changes, or the preferred fetch fails. This applies to both the `MessagesStream` fetch loop and direct `Consumer.fetch` calls when every requested partition resolves to the same target broker. Otherwise, the original `node` is used as a fallback.

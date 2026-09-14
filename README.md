@@ -108,6 +108,12 @@ await forEach(
 await consumer.close()
 ```
 
+### Consuming messages in batches
+
+The [`examples/batching`](./examples/batching) example uses the [`hwp`](https://www.npmjs.com/package/hwp)
+`batchIterator` operator to process messages in batches and commit offsets after each batch. The batch is emitted
+when it reaches the configured size or when its timeout expires, so the final batch can contain fewer messages.
+
 ### Admin
 
 ```typescript

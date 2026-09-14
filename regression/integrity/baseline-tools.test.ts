@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, rejects, strictEqual } from 'node:assert'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,7 +7,7 @@ import { FileBaselineStore, createBaselineDocument } from '../helpers/baseline-s
 import { runRegressionBenchmark } from '../helpers/benchmark-harness.ts'
 import { compareBenchmarkBaseline } from '../helpers/compare-baseline.ts'
 import type { BenchmarkResult } from '../helpers/index.ts'
-import { aggregateBenchmarkRuns } from '../performance/helpers.ts'
+import { aggregateBenchmarkRuns, compareWithStoredBaseline } from '../performance/helpers.ts'
 
 function createBenchmarkResult (name: string, messagesPerSecond: number, durationMs: number): BenchmarkResult {
   return {
@@ -74,4 +74,31 @@ test('performance aggregation uses median samples for stable comparisons', () =>
   strictEqual(aggregate.messagesPerSecond, 20)
   strictEqual(aggregate.durationMs, 500)
   strictEqual(aggregate.runs?.length, 3)
+})
+
+test('required performance baselines fail when a result has no stored baseline', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plt-kafka-regression-'))
+  const previousDirectory = process.env.REGRESSION_BASELINE_DIR
+  const previousRequired = process.env.REGRESSION_REQUIRE_BASELINE
+
+  try {
+    process.env.REGRESSION_BASELINE_DIR = root
+    process.env.REGRESSION_REQUIRE_BASELINE = '1'
+
+    await rejects(compareWithStoredBaseline(createBenchmarkResult('missing', 100, 1000)), /No regression baseline found/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+
+    if (previousDirectory === undefined) {
+      delete process.env.REGRESSION_BASELINE_DIR
+    } else {
+      process.env.REGRESSION_BASELINE_DIR = previousDirectory
+    }
+
+    if (previousRequired === undefined) {
+      delete process.env.REGRESSION_REQUIRE_BASELINE
+    } else {
+      process.env.REGRESSION_REQUIRE_BASELINE = previousRequired
+    }
+  }
 })

@@ -1,3 +1,4 @@
+import { fail } from 'node:assert'
 import type { TestContext } from 'node:test'
 import { MessagesStreamModes, ProduceAcks } from '../../src/index.ts'
 import { createBaselineStore } from '../helpers/baseline-store.ts'
@@ -142,6 +143,10 @@ export async function compareWithStoredBaseline (result: BenchmarkResult): Promi
 
   if (previous) {
     return compareBenchmarkBaseline(result, previous, performanceThresholds())
+  }
+
+  if (process.env.REGRESSION_REQUIRE_BASELINE === '1') {
+    fail(`No regression baseline found for ${performanceLane}/${result.name}.`)
   }
 
   console.warn(`No regression baseline found for ${performanceLane}/${result.name}; skipping comparison.`)

@@ -3509,6 +3509,89 @@ test('listOffsets should use custom isolation level when provided', async t => {
   strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
 })
 
+test('listOffsets should refresh metadata and retry when leadership moves (NOT_LEADER_OR_FOLLOWER)', async t => {
+  const topic = 'test-topic'
+  // retries: 0 isolates the outer forceUpdateMetadata retry (the fix under test) from
+  // kPerformWithRetry's own internal retry loop, which would otherwise resend the same
+  // request against the same stale leader before this code ever sees the error.
+  const consumer = createConsumer(t, { retryDelay: 0, retries: 0 })
+  const connection = { instanceId: 1, send () {} }
+  let apiCalls = 0
+  let metadataCleared = false
+
+  t.mock.method(consumer, 'clearMetadata', () => {
+    metadataCleared = true
+  })
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, {
+        brokers: new Map([[0, { nodeId: 0, ...broker }]]),
+        topics: new Map([[topic, { partitionsCount: 1, partitions: [{ leader: 0, leaderEpoch: 5 }] }]])
+      })
+
+      return true
+    }
+  )
+
+  mockConnectionPoolGet(
+    consumer[kConnections],
+    () => true,
+    null,
+    null,
+    (_original, _broker, callback: CallbackWithPromise<unknown>) => {
+      callback(null, connection)
+      return true
+    }
+  )
+
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (
+        _connection: unknown,
+        _replicaId: number,
+        _isolationLevel: number,
+        _topics: unknown[],
+        callback: CallbackWithPromise<unknown>
+      ) => {
+        apiCalls++
+
+        // First attempt hits the (now stale) cached leader: the broker rejects it because
+        // leadership moved to a different node.
+        if (apiCalls === 1) {
+          callback(new ResponseError(2, 9, { '': [6, null] }, { throttleTimeMs: 0, topics: [] }), undefined)
+          return
+        }
+
+        callback(null, {
+          throttleTimeMs: 0,
+          topics: [{ name: topic, partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: -1n, offset: 42n, leaderEpoch: 5 }] }]
+        })
+      }
+
+      callback(null, api)
+      return true
+    }
+  )
+
+  const offsets = await consumer.listOffsets({ topics: [topic] })
+
+  // The retry must have cleared cached metadata (forcing a fresh lookup of the new leader)
+  // and reissued the request, instead of surfacing the stale-leader error.
+  strictEqual(metadataCleared, true)
+  strictEqual(apiCalls, 2)
+  deepStrictEqual(offsets.get(topic), [42n])
+})
+
 test('listOffsetsWithTimestamps should return offset values for topics and partitions and support diagnostic channels', async t => {
   const consumer = createConsumer(t)
   const topic = await createTopic(t, true, 2)

@@ -6,9 +6,11 @@ import { Readable } from 'node:stream'
 import { test, type TestContext } from 'node:test'
 import * as Prometheus from 'prom-client'
 import { kConnections } from '../../../src/clients/base/base.ts'
+import { ProtocolError } from '../../../src/errors.ts'
 import {
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
+  type CommitOptions,
   Consumer,
   type ConsumerOptions,
   consumerReceivesChannel,
@@ -588,6 +590,162 @@ test('should support manual commits', async t => {
   strictEqual(secondBatch.length, 2, 'Should consume 2 messages in second batch')
   deepStrictEqual(secondBatch[0].key, 'key-1', 'First message in second batch should be key-1')
   deepStrictEqual(secondBatch[1].key, 'key-2', 'Second message in second batch should be key-2')
+})
+
+test('manual commits for the same partition must not let a stale response regress the committed offset', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+  // Simulate what a slow broker/network round-trip can do to two concurrent manual
+  // commits on the same partition: the request for the low offset (message[0]) is sent
+  // first and held back, and a second, higher-offset commit (message[2]) is requested
+  // while it is still in flight. Without any coordination, that second request would go
+  // out on the wire independently and could land before the stale low-offset response is
+  // released, which is later overwritten by it. kAutocommit protects against this with a
+  // per-partition monotonic merge and a single-flight guard; this test checks manual
+  // commit gets the same guarantee.
+  const originalCommit = consumer.commit.bind(consumer)
+  let heldCall: [CommitOptions, CallbackWithPromise<void>] | null = null
+
+  consumer.commit = ((options: CommitOptions, callback: CallbackWithPromise<void>) => {
+    if (options.offsets[0].offset === 1n && !heldCall) {
+      heldCall = [options, callback]
+      return
+    }
+
+    originalCommit(options, callback)
+  }) as typeof consumer.commit
+
+  // Fire the low-offset commit first, but its network call gets held back above.
+  const lowCommitPromise = messages[0].commit()
+  await waitFor(() => {
+    if (!heldCall) throw new Error('low-offset commit was not intercepted yet')
+  }, { interval: 10, timeout: 2000 })
+
+  // Fire the high-offset commit while the low one is still held. It must not race ahead
+  // with its own independent request: it should only be able to land after the held
+  // request settles, so do not await it yet or the test would deadlock on the response
+  // we are intentionally withholding below.
+  const highCommitPromise = messages[2].commit()
+
+  // Release the held, low-offset response.
+  consumer.commit = originalCommit
+  originalCommit(...(heldCall as unknown as [CommitOptions, CallbackWithPromise<void>]))
+
+  await lowCommitPromise
+  await highCommitPromise
+
+  const afterOffsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+
+  // The stale, lower-offset response must never be allowed to overwrite the higher offset
+  // requested while it was in flight — a silent regression that would cause reprocessing
+  // of already-handled messages on restart.
+  deepStrictEqual(afterOffsets.get(topic), [3n], 'Committed offset must never regress below the highest committed offset')
+})
+
+test('manual commit must reject, not hang, when its flush fails with a rejoin-required error', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, stream, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+  // The destroy triggered below emits 'error' on the stream; swallow it here so it doesn't
+  // surface as an unhandled exception — asserting the destroy itself is this test's concern.
+  stream.on('error', () => {})
+
+  // Simulate the broker requiring a group rejoin (e.g. ILLEGAL_GENERATION) right when the
+  // flush carrying this manual commit lands. The stream is destroyed in that case, and a
+  // destroyed stream never gets another chance to flush a queued commit — the waiter must
+  // be rejected immediately instead of being left to hang forever.
+  const rejoinError = new ProtocolError('ILLEGAL_GENERATION', null, {}, {})
+  consumer.commit = ((_options: CommitOptions, callback: CallbackWithPromise<void>) => {
+    callback(rejoinError)
+  }) as typeof consumer.commit
+
+  await rejects(messages[0].commit() as Promise<void>, (error: Error) => {
+    ok(error instanceof ProtocolError, 'must reject with the rejoin error, not hang')
+    return true
+  })
+
+  ok(stream.destroyed, 'the stream must be destroyed after a rejoin-required commit failure')
+})
+
+test('manual commit queued during a failed, non-rejoin flush gets its own follow-up attempt', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3, 'Should consume 3 messages')
+
+  const originalCommit = consumer.commit.bind(consumer)
+  let heldCall: [CommitOptions, CallbackWithPromise<void>] | null = null
+  let dispatchedCommits = 0
+
+  consumer.commit = ((options: CommitOptions, callback: CallbackWithPromise<void>) => {
+    if (options.offsets[0].offset === 1n && !heldCall) {
+      heldCall = [options, callback]
+      return
+    }
+
+    dispatchedCommits++
+    originalCommit(options, callback)
+  }) as typeof consumer.commit
+
+  // The low-offset commit starts a flush; its network call is held back so a second,
+  // higher-offset commit can be queued while it is still in flight — after the snapshot
+  // that flush already took, so it is not part of what is about to fail below.
+  const lowCommitPromise = messages[0].commit()
+  await waitFor(() => {
+    if (!heldCall) throw new Error('low-offset commit was not intercepted yet')
+  }, { interval: 10, timeout: 2000 })
+
+  const highCommitPromise = messages[2].commit()
+
+  // Without the fix's single-flight coalescing, the high-offset commit would dispatch its
+  // own independent request right here instead of waiting for the held flush to settle —
+  // which would make this test pass "by accident" regardless of whether the follow-up-flush
+  // logic under test actually runs. Catch that directly, not just via the eventual outcome.
+  strictEqual(dispatchedCommits, 0, 'the high-offset commit must not dispatch while the low one is still in flight')
+
+  // Fail the held flush with a transient, non-rejoin error. Autocommit is disabled, so
+  // there is no periodic timer to retry the still-queued high-offset commit: without a
+  // follow-up flush driven right after this failure, it would be stranded forever.
+  const transientError = new ProtocolError('NOT_COORDINATOR', null, {}, {})
+  const [, heldCallback] = heldCall as unknown as [CommitOptions, CallbackWithPromise<void>]
+  heldCallback(transientError)
+
+  await rejects(lowCommitPromise as Promise<void>, (error: Error) => {
+    ok(error instanceof ProtocolError, 'must reject with the transient error')
+    return true
+  })
+  await highCommitPromise
+
+  strictEqual(dispatchedCommits, 1, 'the high-offset commit must get exactly one follow-up dispatch after the failed flush')
+
+  const afterOffsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(afterOffsets.get(topic), [3n], 'The high-offset commit must land via its own follow-up flush')
 })
 
 test('should expose the record batch leader epoch for manual batched commits', async t => {

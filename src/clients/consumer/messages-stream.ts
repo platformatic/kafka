@@ -93,6 +93,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
+  #commitWaiters: Map<string, Array<{ offset: bigint, callback: Callback<void> }>>
   #partitionsEpochs: Map<string, number>
   #inflightNodes: Map<number, number>
   #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
@@ -182,6 +183,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
     this.#offsetsCommitted = new Map()
+    this.#commitWaiters = new Map()
     this.#partitionsEpochs = new Map()
     this.#paused = false
     this.#refreshOffsetsInflight = false
@@ -209,6 +211,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.#offsetsCommitted.clear()
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
+
+      // [kAutocommit] skips flushing while mid-rejoin to avoid triggering a rejoin storm (see
+      // below), leaving any queued offset waiting for the next tick of the autocommit timer.
+      // With autocommit disabled there is no such timer, so a manual commit requested during a
+      // rebalance would otherwise never resolve. Flush now that the rejoin has completed.
+      if (this.#offsetsToCommit.size > 0) {
+        this[kAutocommit]()
+      }
     }
 
     this.#onBrokerDisconnect = () => {
@@ -1089,7 +1099,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
   }
 
-  // This could optimized to only schedule once per tick on a topic-partition and only commit the latest offset
+  // Manual commits share offsetsToCommit/autocommitInflight with kAutocommit instead of
+  // calling Consumer#commit directly. A raw one-shot call here has no way to stop two
+  // concurrent commits on the same partition from racing: whichever response the broker
+  // processes last wins regardless of offset value, so a lower offset can silently overwrite
+  // a higher one that already landed. Funnelling through the same single-flight/monotonic-merge
+  // machinery as autocommit coalesces same-partition calls into one in-flight request.
   #commit (
     topic: string,
     partition: number,
@@ -1101,18 +1116,50 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       callback = createPromisifiedCallback<void>()
     }
 
-    this.#consumer.commit({ offsets: [{ topic, partition, offset, leaderEpoch }] }, error => {
-      /* c8 ignore next 4 - Hard to test */
-      if (error) {
-        callback!(error)
-        return
-      }
+    const key = partitionKey(topic, partition)
 
-      this.#updateCommittedOffset(topic, partition, offset)
-      callback!(null)
-    })
+    const current = this.#offsetsToCommit.get(key)
+    if (!current || current.offset < offset) {
+      this.#offsetsToCommit.set(key, { topic, partition, offset, leaderEpoch })
+    }
+
+    let waiters = this.#commitWaiters.get(key)
+    if (!waiters) {
+      waiters = []
+      this.#commitWaiters.set(key, waiters)
+    }
+    waiters.push({ offset, callback: callback! })
+
+    this[kAutocommit]()
 
     return callback[kCallbackPromise]!
+  }
+
+  // Settles every waiter whose requested offset is covered by a commit that just landed for
+  // its partition (offset is the monotonic max merged from possibly several manual commits, so
+  // it covers every waiter queued before this flush's snapshot was taken). A waiter added after
+  // the snapshot keeps waiting for the next flush, triggered by the caller of this method.
+  #settleCommitWaiters (topic: string, partition: number, offset: bigint, error: Error | null): void {
+    const key = partitionKey(topic, partition)
+    const waiters = this.#commitWaiters.get(key)
+    if (!waiters) {
+      return
+    }
+
+    const remaining: Array<{ offset: bigint, callback: Callback<void> }> = []
+    for (const waiter of waiters) {
+      if (waiter.offset <= offset) {
+        waiter.callback(error)
+      } else {
+        remaining.push(waiter)
+      }
+    }
+
+    if (remaining.length > 0) {
+      this.#commitWaiters.set(key, remaining)
+    } else {
+      this.#commitWaiters.delete(key)
+    }
   }
 
   [kAutocommit] (callback?: Callback<void>): void {
@@ -1137,6 +1184,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.once('close', onClose)
       }
 
+      // Any offset queued by a manual commit while this flush is in flight is picked up by
+      // the follow-up flush triggered right after this one settles (see below).
       return
     }
 
@@ -1172,6 +1221,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // (ILLEGAL_GENERATION, UNKNOWN_MEMBER_ID, REBALANCE_IN_PROGRESS).
         // Transient coordinator errors must not tear down the consumption loop.
         if (findErrorBy(error, 'needsRejoin', true)) {
+          // The stream is going away: every pending manual commit, for every partition, must be
+          // rejected now, since a destroyed stream never gets another chance to flush them.
+          for (const waiters of this.#commitWaiters.values()) {
+            for (const waiter of waiters) {
+              waiter.callback(error)
+            }
+          }
+          this.#commitWaiters.clear()
           this.destroy(error)
         } else {
           // Keep offsets produced while the commit was in flight, and retry the failed snapshot
@@ -1183,6 +1240,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               this.#offsetsToCommit.set(key, offset)
             }
           }
+
+          // Report the failure to whichever manual commits were part of this snapshot. The
+          // offset stays queued above and is retried by the next flush regardless.
+          for (const offset of offsets) {
+            this.#settleCommitWaiters(offset.topic, offset.partition, offset.offset, error)
+          }
+
+          // A manual commit queued for a different, newer offset while this flush was in
+          // flight was not part of the failed snapshot and must not wait on this stream's
+          // autocommit timer (or never, if autocommit is disabled) to get its own attempt.
+          if (this.#commitWaiters.size > 0) {
+            this[kAutocommit]()
+          }
         }
         callback?.(error)
         return
@@ -1190,10 +1260,18 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
       for (const { topic, partition, offset } of offsets) {
         this.#updateCommittedOffset(topic, partition, offset)
+        this.#settleCommitWaiters(topic, partition, offset, null)
       }
 
       this.emit('autocommit', null, offsets)
       callback?.(null)
+
+      // A manual commit queued while this flush was in flight is still waiting: its offset
+      // was not part of the snapshot above, so drive another flush now instead of leaving it
+      // stranded until the next autocommit tick.
+      if (this.#commitWaiters.size > 0) {
+        this[kAutocommit]()
+      }
     })
   }
 

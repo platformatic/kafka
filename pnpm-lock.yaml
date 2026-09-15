@@ -97,8 +97,8 @@ importers:
         specifier: ^6.0.2
         version: 6.2.4
       hwp:
-        specifier: ^0.4.1
-        version: 0.4.1
+        specifier: ^0.5.0
+        version: 0.5.0
       import-in-the-middle:
         specifier: ^3.4.0
         version: 3.5.1
@@ -1683,8 +1683,8 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
-  hwp@0.4.1:
-    resolution: {integrity: sha512-aN+FxnVyrNmIx6ULuAyefgQffE0NF9GRzW+lB5cAp5kxN5PBdjf8Ws+IvDHHJM1a7pyXTP9t0gwz7E/Z5ikj8w==}
+  hwp@0.5.0:
+    resolution: {integrity: sha512-IFWeFX72NsnHzCOTNdNLc+dN84d9oLMdLtqYsPLZeKwpO9S+1pztxJ7k88sqio/QZyRC5wrgY5xm16A0kscPHA==}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -4029,7 +4029,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hwp@0.4.1: {}
+  hwp@0.5.0: {}
 
   ieee754@1.2.1: {}
 

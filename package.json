@@ -88,7 +88,7 @@
     "cronometro": "^5.3.0",
     "eslint": "^9.35.0",
     "fast-jwt": "^6.0.2",
-    "hwp": "^0.4.1",
+    "hwp": "^0.5.0",
     "import-in-the-middle": "^3.4.0",
     "json5": "^2.2.3",
     "kafkajs": "^2.2.4",

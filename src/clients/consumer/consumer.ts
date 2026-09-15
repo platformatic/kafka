@@ -1074,7 +1074,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                       this.#fetchSessions.delete(node)
                     }
 
-                    if (findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH')) {
+                    // NOT_LEADER_OR_FOLLOWER/LEADER_NOT_AVAILABLE mean leadership just moved (broker
+                    // rebalance/leader election); without a refresh here, kPerformWithRetry repeats
+                    // the same request against the stale cached leader until retries exhaust.
+                    // UNKNOWN_TOPIC_OR_PARTITION also carries hasStaleMetadata but is deliberately
+                    // excluded: broadening this to it breaks deleted-topic handling (see git history).
+                    if (
+                      findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH') ||
+                      findErrorBy(error, 'apiId', 'NOT_LEADER_OR_FOLLOWER') ||
+                      findErrorBy(error, 'apiId', 'LEADER_NOT_AVAILABLE')
+                    ) {
                       this.#fetchSessions.delete(node)
                       this.clearMetadata()
                       for (const topic of options.topics) {
@@ -1283,7 +1292,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         },
         (error, responses) => {
           if (error) {
-            if (!forceUpdateMetadata && NetworkError.isRetryable(error)) {
+            // Mirrors the fetch() handling: right after a topic is created or its leadership moves,
+            // the cached leader is briefly stale and the broker answers with one of these three
+            // errors. Retrying once against fresh metadata clears the race instead of surfacing it.
+            // UNKNOWN_TOPIC_OR_PARTITION also carries hasStaleMetadata but is deliberately excluded,
+            // same as in fetch(), to avoid masking deleted-topic handling.
+            if (
+              !forceUpdateMetadata &&
+              (NetworkError.isRetryable(error) ||
+                findErrorBy(error, 'apiId', 'FENCED_LEADER_EPOCH') ||
+                findErrorBy(error, 'apiId', 'NOT_LEADER_OR_FOLLOWER') ||
+                findErrorBy(error, 'apiId', 'LEADER_NOT_AVAILABLE'))
+            ) {
               this.clearMetadata()
               this.#listOffsets(withTimestamps, options, callback, true)
               return

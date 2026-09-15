@@ -22,15 +22,15 @@ import {
   stringSerializer
 } from '../clients/serde.ts'
 import {
-  type CredentialProvider,
-  EMPTY_BUFFER,
   type GenericError,
   MultipleErrors,
   NetworkError,
   TimeoutError,
   UnsupportedFormatError,
   UserError
-} from '../index.ts'
+} from '../errors.ts'
+import { type CredentialProvider } from '../network/connection.ts'
+import { EMPTY_BUFFER } from '../protocol/definitions.ts'
 import { type MessageToConsume, type MessageToProduce } from '../protocol/records.ts'
 import { getCredential } from '../protocol/sasl/utils.ts'
 import { AbstractSchemaRegistry } from './abstract.ts'

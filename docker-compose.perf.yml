@@ -20,4 +20,5 @@ services:
       KAFKA_JMX_PORT: '9101'
       KAFKA_JMX_HOSTNAME: 'localhost'
     tmpfs:
-      - /tmpfs-logs:size=8g
+      # Docker remounts tmpfs as root-owned on restart, while Kafka runs as a non-root user.
+      - /tmpfs-logs:size=8g,mode=1777

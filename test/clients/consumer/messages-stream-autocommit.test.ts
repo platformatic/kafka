@@ -68,6 +68,26 @@ test('kAutocommit skips committing while the consumer is not active (mid-rebalan
   stream.destroy()
 })
 
+test('kAutocommit flushes offsets queued during a rebalance once the group join completes', () => {
+  const consumer = createFakeConsumer(false)
+  const stream = createStream(consumer)
+
+  stream.offsetsToCommit.set('test-topic:0', { topic: 'test-topic', partition: 0, offset: 5n, leaderEpoch: 0 })
+
+  stream[kAutocommit]()
+  ok(!consumer.commitCalls, 'commit must not be attempted while the consumer is not active')
+
+  // With autocommit disabled there is no periodic timer to retry this offset: without a
+  // rejoin-driven flush, it (and any manual commit queued behind it) would be stuck forever.
+  consumer.isActive = () => true
+  consumer.emit('consumer:group:join', {})
+
+  ok(consumer.commitCalls === 1, 'commit must be attempted once the rejoin completes')
+  deepStrictEqual(stream.offsetsToCommit.size, 0)
+
+  stream.destroy()
+})
+
 test('kAutocommit commits normally once the consumer is active again', () => {
   const consumer = createFakeConsumer(true)
   const stream = createStream(consumer)

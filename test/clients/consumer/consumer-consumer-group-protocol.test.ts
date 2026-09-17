@@ -113,6 +113,93 @@ test(
   }
 )
 
+test(
+  'an initially idle consumer exposes an empty assignment and later receives partitions',
+  skipConsumerGroupProtocol,
+  async t => {
+    const topic = await createTopic(t, true, 2)
+    const groupId = `test-consumer-group-${randomUUID()}`
+    const consumer1 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
+    const stream1 = await consumer1.consume({ topics: [topic], mode: 'committed', fallbackMode: 'earliest' })
+    t.after(() => stream1.close())
+    await waitFor(() => strictEqual(consumer1.assignments?.[0]?.partitions.length, 2))
+
+    const consumer2 = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
+    const stream2 = await consumer2.consume({ topics: [topic], mode: 'committed', fallbackMode: 'earliest' })
+    t.after(() => stream2.close())
+    await waitFor(() => {
+      strictEqual(consumer1.assignments?.[0]?.partitions.length, 1)
+      strictEqual(consumer2.assignments?.[0]?.partitions.length, 1)
+    })
+
+    const idle = createConsumer(t, { groupId, groupProtocol: 'consumer', maxWaitTime: 100 })
+    strictEqual(idle.assignments, null)
+    const stream = await idle.consume({ topics: [topic], mode: 'committed', fallbackMode: 'earliest' })
+    t.after(() => stream.close())
+    await waitFor(() => deepStrictEqual(idle.assignments, []))
+
+    await consumer1.close(true)
+    await waitFor(() => strictEqual(idle.assignments?.[0]?.partitions.length, 1))
+    const producer = createProducer(t)
+    await producer.send({
+      messages: [{ topic, partition: idle.assignments![0].partitions[0], value: Buffer.from('assigned') }],
+      acks: ProduceAcks.LEADER
+    })
+    const [message] = await once(stream, 'data')
+    strictEqual(message.value.toString(), 'assigned')
+  }
+)
+
+test(
+  'an omitted assignment stays unknown until a later explicit empty assignment',
+  skipConsumerGroupProtocol,
+  async t => {
+    const topic = await createTopic(t, true, 1)
+    const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })
+    let explicitEmpty = false
+    mockAPI(consumer[kConnections], consumerGroupHeartbeatV0.api.key, null, null, (
+      originalSend,
+      apiKey,
+      apiVersion,
+      payload,
+      responseParser,
+      hasRequestHeaderTaggedFields,
+      hasResponseHeaderTaggedFields,
+      callback
+    ) => {
+      originalSend(
+        apiKey,
+        apiVersion,
+        payload,
+        responseParser,
+        hasRequestHeaderTaggedFields,
+        hasResponseHeaderTaggedFields,
+        (error: Error | null, response: Record<string, unknown>) => {
+          callback(
+            error,
+            error
+              ? response
+              : {
+                  ...response,
+                  assignment: explicitEmpty ? { topicPartitions: [] } : null
+                }
+          )
+        }
+      )
+      return true
+    })
+    const stream = await consumer.consume({ topics: [topic], mode: 'committed', fallbackMode: 'earliest' })
+    t.after(() => stream.close())
+    await once(stream, 'offsets')
+    strictEqual(consumer.assignments, null)
+
+    const refreshed = once(stream, 'offsets')
+    explicitEmpty = true
+    await refreshed
+    deepStrictEqual(consumer.assignments, [])
+  }
+)
+
 test('consumer.close should close active streams with new consumer protocol', skipConsumerGroupProtocol, async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t, { groupProtocol: 'consumer', maxWaitTime: 100 })

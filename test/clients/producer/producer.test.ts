@@ -729,39 +729,52 @@ test('initIdempotentProducer fails over to a healthy broker when the bootstrap b
   // is actually executed against it.
   const hungHost = 'broker-a'
   const triedHeads: string[] = []
-  mockConnectionPoolGetFirstAvailable(producer[kConnections], () => true, null, undefined, (_original, brokers, callback) => {
-    const head = brokers[0]
-    triedHeads.push(head.host)
-    callback(null, { host: head.host } as Connection)
-    return true
-  })
-
-  mockMethod(producer, kGetApi, () => true, null, undefined, (original, name, callback) => {
-    if (name === 'InitProducerId') {
-      const api = (
-        connection: Connection,
-        _transactionalId: string | undefined,
-        _timeout: number,
-        _producerId: bigint,
-        _producerEpoch: number,
-        apiCallback: Callback<unknown>
-      ) => {
-        if (connection.host === hungHost) {
-          // TCP-reachable but never responds: surfaces as a retriable connection reset.
-          apiCallback(new NetworkError('Connection closed'))
-          return
-        }
-
-        apiCallback(null, { throttleTimeMs: 0, errorCode: 0, producerId: 42n, producerEpoch: 0 })
-      }
-
-      callback(null, api as any)
+  mockConnectionPoolGetFirstAvailable(
+    producer[kConnections],
+    () => true,
+    null,
+    undefined,
+    (_original, brokers, callback) => {
+      const head = brokers[0]
+      triedHeads.push(head.host)
+      callback(null, { host: head.host } as Connection)
       return true
     }
+  )
 
-    original(name, callback)
-    return true
-  })
+  mockMethod(
+    producer,
+    kGetApi,
+    () => true,
+    null,
+    undefined,
+    (original, name, callback) => {
+      if (name === 'InitProducerId') {
+        const api = (
+          connection: Connection,
+          _transactionalId: string | undefined,
+          _timeout: number,
+          _producerId: bigint,
+          _producerEpoch: number,
+          apiCallback: Callback<unknown>
+        ) => {
+          if (connection.host === hungHost) {
+            // TCP-reachable but never responds: surfaces as a retriable connection reset.
+            apiCallback(new NetworkError('Connection closed'))
+            return
+          }
+
+          apiCallback(null, { throttleTimeMs: 0, errorCode: 0, producerId: 42n, producerEpoch: 0 })
+        }
+
+        callback(null, api as any)
+        return true
+      }
+
+      original(name, callback)
+      return true
+    }
+  )
 
   const info = await producer.initIdempotentProducer({})
 
@@ -1498,6 +1511,7 @@ test('send should refresh metadata after a network error from the partition lead
   const producer = createProducer(t, { retries: 1, retryDelay: 0 })
   const testTopic = await createTopic(t)
   const forceUpdates: boolean[] = []
+  const metadataRetryPolicies: (number | undefined)[] = []
   const brokerHosts: string[] = []
   let metadataCalls = 0
 
@@ -1510,6 +1524,7 @@ test('send should refresh metadata after a network error from the partition lead
     (_original, options, callback) => {
       metadataCalls++
       forceUpdates.push(options.forceUpdate ?? false)
+      metadataRetryPolicies.push(options.retries)
 
       const metadata = createProducerMetadata(testTopic)
       metadata.brokers.set(1, { host: 'new-leader', port: 9093, rack: null })
@@ -1552,6 +1567,7 @@ test('send should refresh metadata after a network error from the partition lead
 
   strictEqual(metadataCalls, 3)
   deepStrictEqual(forceUpdates, [false, false, true])
+  deepStrictEqual(metadataRetryPolicies, [undefined, 0, 0])
   deepStrictEqual(brokerHosts, ['localhost', 'new-leader'])
 })
 

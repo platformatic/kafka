@@ -60,7 +60,7 @@ runs against it, and it is the only broker which reaches the delegation token v0
 - **Errors**: Extend GenericError class with descriptive error codes prefixed with `PLT_KFK_`
 - **Error Handling**: Use try/catch with specific error types.
 - **API Design**: Consistent API interface with options objects and promise-based returns.
-- **Testing**: Node.js test runner with deep assertions. Use `deepStrictEqual` when appropriate. Never modify the `src` folder. The test file for `src/foo/bar/baz.ts` is `test/foo/bar/baz.test.ts`
+- **Testing**: Node.js test runner with deep assertions. Use `deepStrictEqual` when appropriate. The test file for `src/foo/bar/baz.ts` is `test/foo/bar/baz.test.ts`
 
 ## Node Requirements
 

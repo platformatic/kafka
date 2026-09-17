@@ -419,9 +419,10 @@ export class Base<
     callback: CallbackWithPromise<ReturnType>,
     attempt: number = 0,
     errors: Error[] = [],
-    shouldSkipRetry?: (e: Error) => boolean
+    shouldSkipRetry?: (e: Error) => boolean,
+    retryLimit?: number
   ): void | Promise<ReturnType> {
-    const retries = this[kOptions].retries! as number
+    const retries = retryLimit ?? (this[kOptions].retries! as number)
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {
@@ -446,7 +447,7 @@ export class Base<
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             try {
-              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry)
+              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry, retries)
             } catch (error) {
               errors.push(error)
               callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
@@ -642,7 +643,7 @@ export class Base<
 
     this[kPerformDeduplicated](
       // Unique key to avoid mixing callbacks
-      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}`,
+      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}-${options.retries ?? 'default'}`,
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
@@ -761,7 +762,10 @@ export class Base<
             this.emitWithDebug('client', 'metadata', updatedMetadata)
             deduplicateCallback(null, updatedMetadata)
           },
-          0
+          0,
+          [],
+          undefined,
+          options.retries
         )
       },
       callback

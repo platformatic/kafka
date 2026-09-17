@@ -11,6 +11,7 @@ import {
   kConnections,
   kGetApi,
   kGetBootstrapConnection,
+  kMetadata,
   kOptions,
   kPerformWithRetry
 } from '../../../src/clients/base/base.ts'
@@ -24,6 +25,7 @@ import {
   type Callback,
   Connection,
   MultipleErrors,
+  NetworkError,
   Reader,
   ResponseError,
   metadataV0,
@@ -261,7 +263,7 @@ test('listApis should return a list of available APIs', async t => {
 test('listApis should bootstrap with the ApiVersions v3 payload', async t => {
   const client = createBase(t)
   const connection = {
-    send<ReturnType> (
+    send <ReturnType>(
       apiKey: number,
       apiVersion: number,
       payload: () => Writer,
@@ -320,7 +322,7 @@ test('listApis should downgrade to ApiVersions v1 when v3 is unsupported', async
   const client = createBase(t)
   let calls = 0
   const connection = {
-    send <ReturnType> (
+    send <ReturnType>(
       apiKey: number,
       apiVersion: number,
       payload: () => Writer,
@@ -436,6 +438,37 @@ test('metadata should fetch cluster metadata', async t => {
   strictEqual(typeof firstBroker.port, 'number')
 })
 
+test('metadata should support disabling its retry loop', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0 })
+  let attempts = 0
+
+  mockConnectionPoolGetFirstAvailable(
+    client[kConnections],
+    () => true,
+    undefined,
+    undefined,
+    (_original, _brokers, callback) => {
+      attempts++
+      callback(new NetworkError('Connection closed'))
+      return true
+    }
+  )
+
+  await rejects(
+    new Promise<void>((resolve, reject) => {
+      client[kMetadata]({ topics: [], retries: 0 }, error => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        resolve()
+      })
+    })
+  )
+  strictEqual(attempts, 1)
+})
+
 test('metadata should fetch topic metadata', async t => {
   const client = createBase(t)
 
@@ -510,25 +543,34 @@ test('metadata parses legacy response bytes into the base metadata shape', async
   ]) {
     await t.test(`Metadata v${version}`, async t => {
       const client = createBase(t)
-      const responseBytes = Writer.create()
-        .appendArray([{ nodeId: 1, host: 'localhost', port: 9092 }], (writer, broker) => {
+      const responseBytes = Writer.create().appendArray(
+        [{ nodeId: 1, host: 'localhost', port: 9092 }],
+        (writer, broker) => {
           writer.appendInt32(broker.nodeId).appendString(broker.host, false).appendInt32(broker.port)
           if (version === 1) {
             writer.appendString(null, false)
           }
-        }, false, false)
+        },
+        false,
+        false
+      )
 
       if (version === 1) {
         responseBytes.appendInt32(1)
       }
 
-      responseBytes.appendArray([{ name: 'legacy-topic' }], (writer, topic) => {
-        writer.appendInt16(0).appendString(topic.name, false)
-        if (version === 1) {
-          writer.appendBoolean(false)
-        }
-        writer.appendArray([], () => {}, false, false)
-      }, false, false)
+      responseBytes.appendArray(
+        [{ name: 'legacy-topic' }],
+        (writer, topic) => {
+          writer.appendInt16(0).appendString(topic.name, false)
+          if (version === 1) {
+            writer.appendBoolean(false)
+          }
+          writer.appendArray([], () => {}, false, false)
+        },
+        false,
+        false
+      )
 
       const connection = {
         send (
@@ -984,7 +1026,9 @@ test('kGetApi should fail on unsupported API version', (t, done) => {
 
 test('every API version advertised in apis-status is exported and selectable', async t => {
   const status = await readFile(new URL('../../../docs/internals/apis-status.md', import.meta.url), 'utf8')
-  const advertised = Array.from(status.matchAll(/^\|\s*(?:[A-Za-z]+\s*\|\s*)?([A-Za-z]+)\s*\|\s*\d+\s*\|\s*(\d+)(?:-(\d+))?\s*\|$/gm))
+  const advertised = Array.from(
+    status.matchAll(/^\|\s*(?:[A-Za-z]+\s*\|\s*)?([A-Za-z]+)\s*\|\s*\d+\s*\|\s*(\d+)(?:-(\d+))?\s*\|$/gm)
+  )
 
   for (const [, name, minVersion, maxVersion] of advertised) {
     const client = createBase(t)

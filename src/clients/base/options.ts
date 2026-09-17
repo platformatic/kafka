@@ -73,7 +73,8 @@ export const metadataOptionsSchema = {
     topics: { type: 'array', items: idProperty },
     autocreateTopics: { type: 'boolean' },
     forceUpdate: { type: 'boolean' },
-    metadataMaxAge: { type: 'number', minimum: 0 }
+    metadataMaxAge: { type: 'number', minimum: 0 },
+    retries: { type: 'number', minimum: 0 }
   },
   additionalProperties: false
 }

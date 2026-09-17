@@ -1228,7 +1228,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kPerformWithRetry]<boolean | ProduceResponse>(
       'produce',
       retryCallback => {
-        this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata }, (error, metadata) => {
+        this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata, retries: 0 }, (error, metadata) => {
           if (error) {
             refreshMetadata = NetworkError.isRetryable(error)
             retryCallback(error)

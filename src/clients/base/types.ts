@@ -62,4 +62,5 @@ export interface MetadataOptions {
   autocreateTopics?: boolean
   forceUpdate?: boolean
   metadataMaxAge?: number
+  retries?: number
 }

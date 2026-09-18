@@ -1,0 +1,58 @@
+---
+name: Event Hubs resource recovery
+on:
+  workflow_run:
+    workflows: [Regression Tests]
+    branches: [main]
+    types: [completed]
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: eventhubs-resource-recovery
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: eventhubs
+    timeout-minutes: 45
+    steps:
+      # Recovery always uses trusted main, never code or artifacts from the triggering run.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: main
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Sign in to Azure using OIDC
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Recover resources from completed regression runs
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/eventhubs-resources.ts recover
+      - name: Notify recovery failure on Slack
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          message="Event Hubs resource recovery failed. Resources may still be billable. Inspect ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n --arg text "$message" '{ text: $text }' | \
+            curl --fail-with-body --retry 3 \
+              --header 'content-type: application/json' \
+              --data-binary @- \
+              "$SLACK_WEBHOOK_URL"

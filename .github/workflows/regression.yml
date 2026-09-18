@@ -152,6 +152,75 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans
 
+  eventhubs-regression:
+    name: Regression / Azure Event Hubs
+    needs: redpanda-regression
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: eventhubs
+    timeout-minutes: 45
+    env:
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'northeurope' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Sign in to Azure using OIDC
+        id: login
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Provision Event Hubs resources
+        id: provision
+        timeout-minutes: 15
+        run: node scripts/eventhubs-resources.ts provision
+      - name: Retrieve temporary Event Hubs credentials
+        run: node scripts/eventhubs-resources.ts credentials
+      - name: Run Event Hubs regression suite
+        id: smoke
+        timeout-minutes: 6
+        run: bash ./scripts/run-regression-suite.sh eventhubs Standard linux-eventhubs-node-24
+      - name: Delete and verify Event Hubs resources
+        id: cleanup
+        if: ${{ always() && steps.login.outcome == 'success' && steps.provision.outcome != 'skipped' }}
+        timeout-minutes: 15
+        run: node scripts/eventhubs-resources.ts cleanup
+      - name: Record Event Hubs lifecycle results
+        if: always()
+        env:
+          PROVISION_RESULT: ${{ steps.provision.outcome }}
+          SMOKE_RESULT: ${{ steps.smoke.outcome }}
+          CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
+        run: |
+          mkdir -p regression/artifacts
+          {
+            printf '\n## Azure resource lifecycle\n\n'
+            printf -- '- Provisioning: `%s`\n' "$PROVISION_RESULT"
+            printf -- '- Smoke: `%s`\n' "$SMOKE_RESULT"
+            printf -- '- Verified cleanup: `%s`\n' "$CLEANUP_RESULT"
+            printf -- '- Subscription: `%s`\n' "$AZURE_SUBSCRIPTION_ID"
+            printf -- '- Resource tags: repository=`%s`, run=`%s`, attempt=`%s`\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          } >> regression/artifacts/linux-eventhubs-node-24-report.md
+      - name: Upload Event Hubs regression artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-artifacts-eventhubs
+          path: regression/artifacts
+          if-no-files-found: ignore
+
   legacy-regression:
     name: Regression / Apache Kafka 1.1.0
     needs: [modern-regression, redpanda-regression]
@@ -189,7 +258,8 @@ jobs:
 
   report:
     name: Report regression results
-    needs: [modern-regression, redpanda-regression, legacy-regression]
+    environment: regression
+    needs: [modern-regression, redpanda-regression, eventhubs-regression, legacy-regression]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -203,6 +273,7 @@ jobs:
         env:
           MODERN_RESULT: ${{ needs.modern-regression.result }}
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
+          EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
         run: |
           summary=regression/artifacts/regression-summary.md
@@ -229,6 +300,13 @@ jobs:
             else
               printf 'Redpanda regression report was not produced.\n'
             fi
+            printf '\n## Event Hubs Smoke Check\n\n'
+            printf -- '- Job result: `%s`\n\n' "$EVENTHUBS_RESULT"
+            if [ -f regression/artifacts/linux-eventhubs-node-24-report.md ]; then
+              cat regression/artifacts/linux-eventhubs-node-24-report.md
+            else
+              printf 'Event Hubs regression report was not produced. Check the recovery workflow for resource cleanup.\n'
+            fi
             printf '\n## Legacy Sanity Check\n\n'
             printf -- '- Job result: `%s`\n\n' "$LEGACY_RESULT"
             if [ -f regression/artifacts/linux-kafka-1.1-node-24-report.md ]; then
@@ -246,23 +324,24 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
       - name: Notify regression failure on Slack
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.legacy-regression.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success') }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REGRESSION_HEAD_SHA: ${{ github.sha }}
           MODERN_RESULT: ${{ needs.modern-regression.result }}
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
+          EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
         run: |
           message=$(printf \
-            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nLegacy: %s\nRun: %s' \
-            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$LEGACY_RESULT" "$REGRESSION_RUN_URL")
+            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nLegacy: %s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$LEGACY_RESULT" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \
               --header 'content-type: application/json' \
               --data-binary @- \
               "$SLACK_WEBHOOK_URL"
       - name: Fail aggregate job when a lane failed
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.legacy-regression.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success') }}
         run: exit 1

@@ -1820,6 +1820,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #assignPartitions (newAssignment: TopicPartition[]): void {
     const toAssign = this.#diffAssignments(newAssignment, this.#assignments)
     if (toAssign.length === 0) {
+      // An explicit empty initial assignment confirms an idle member, even though
+      // there are no partitions to add. An omitted assignment must remain unknown.
+      if (this.assignments === null && newAssignment.length === 0) {
+        this.assignments = []
+        for (const stream of this.#streams) {
+          stream[kRefreshOffsetsAndFetch]()
+        }
+      }
       return
     }
     this.#updateAssignments(newAssignment, error => {

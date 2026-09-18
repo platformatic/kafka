@@ -34,6 +34,13 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      # The script imports src/errors.ts, which reaches the protocol layer and its runtime deps.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Sign in to Azure using OIDC
         uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6
         with:

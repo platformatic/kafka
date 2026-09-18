@@ -2,9 +2,9 @@
 
 set -o pipefail
 
-MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
-VERSION="${2:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
-LANE="${3:?usage: run-regression-suite.sh <modern|redpanda|legacy> <version> <lane>}"
+MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
+VERSION="${2:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
+LANE="${3:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
 ARTIFACT_DIR="regression/artifacts"
 REPORT="$ARTIFACT_DIR/${LANE}-report.md"
 
@@ -54,6 +54,8 @@ elif [[ "$MODE" == redpanda ]]; then
     overall=1
   fi
   run_suite e2e pnpm run test:e2e:redpanda
+elif [[ "$MODE" == eventhubs ]]; then
+  run_suite e2e pnpm run test:e2e:eventhubs
 elif [[ "$MODE" == legacy ]]; then
   trap cleanup_legacy EXIT
   if ! docker compose -f docker-compose.legacy.yml up -d --wait; then

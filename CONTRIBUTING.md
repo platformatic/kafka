@@ -68,6 +68,12 @@ Then you run the test normally:
 pnpm test
 ```
 
+#### Azure Event Hubs Smoke Tests
+
+The Event Hubs smoke test runs in the regression workflow on `main`, with an Azure environment created
+and deleted for each run. See [the Event Hubs guide](docs/eventhubs.md) for OIDC setup, verified cleanup
+and recovery, and the retained manual provisioning and local execution instructions.
+
 #### Memory Tests
 
 Memory tests (`test/memory/*.memory-test.ts`) are not part of the regular test suite or CI.

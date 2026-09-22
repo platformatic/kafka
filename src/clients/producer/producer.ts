@@ -199,8 +199,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return this.#streams.size
   }
 
-  close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
   close (force?: boolean): Promise<void>
+  close (force: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void
   close (force?: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void | Promise<void> {
     if (typeof force === 'function') {
       callback = force

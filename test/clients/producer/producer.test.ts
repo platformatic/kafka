@@ -406,7 +406,8 @@ test('close with force=true should close all producer streams', async t => {
 
   strictEqual(producer.streamsCount, 2)
 
-  await producer.close(true)
+  const closing: Promise<void> = producer.close(true)
+  await closing
 
   strictEqual(producer.closed, true)
   strictEqual(stream1.closed, true)

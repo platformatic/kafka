@@ -1920,8 +1920,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    const finish = () => {
+      this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
+      this.memberId = null
+      this.#memberEpoch = -1
+      this.#assignments = []
+      this.assignments = []
+      this.#syncPreferredReadReplicas()
+      callback(null)
+    }
+
     // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
+    if (this[kClosed] && !this.#isGroupCoordinatorConnected()) {
+      finish()
+      return
+    }
     this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(
       'leaveGroupConsumerProtocol',
       (connection, groupCallback) => {
@@ -1952,16 +1966,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           )
         })
       },
-      _error => {
-        this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
-        this.memberId = null
-        this.#memberEpoch = -1
-        this.#assignments = []
-        this.assignments = []
-        this.#syncPreferredReadReplicas()
-
-        callback(null)
-      }
+      _error => finish()
     )
   }
 
@@ -2359,7 +2364,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    const finish = () => {
+      this.emitWithDebug('consumer', 'group:leave', {
+        groupId: this.groupId,
+        memberId: this.memberId,
+        generationId: this.generationId
+      })
+      this.memberId = null
+      this.generationId = 0
+      this.assignments = null
+      this.#syncPreferredReadReplicas()
+      callback(null)
+    }
+
     this.#cancelHeartbeat()
+    if (this[kClosed] && !this.#isGroupCoordinatorConnected()) {
+      finish()
+      return
+    }
 
     this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
       'leaveGroup',
@@ -2376,26 +2398,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       error => {
         if (error) {
           const unknownMemberError = findErrorBy<ProtocolError>(error, 'unknownMemberId', true)
+          const unavailableBrokerWhileClosing = this[kClosed] && NetworkError.isRetryable(error)
 
           // This is to avoid throwing an error if a group join was cancelled.
-          if (!unknownMemberError) {
+          if (!unknownMemberError && !unavailableBrokerWhileClosing) {
             callback(error)
             return
           }
         }
 
-        this.emitWithDebug('consumer', 'group:leave', {
-          groupId: this.groupId,
-          memberId: this.memberId,
-          generationId: this.generationId
-        })
-
-        this.memberId = null
-        this.generationId = 0
-        this.assignments = null
-        this.#syncPreferredReadReplicas()
-
-        callback(null)
+        finish()
       }
     )
   }
@@ -2547,7 +2559,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, result) => {
         callback(this.#handleError(error), result)
-      }
+      },
+      0,
+      [],
+      () => this[kClosed]
     )
   }
 
@@ -2941,5 +2956,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return error
+  }
+
+  #isGroupCoordinatorConnected (): boolean {
+    if (this.#coordinatorId === null) {
+      return false
+    }
+
+    const broker = this.currentMetadata?.brokers.get(this.#coordinatorId)
+    return broker ? this[kConnections].getEstablishedConnection(broker)?.isConnected() === true : false
   }
 }

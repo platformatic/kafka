@@ -873,6 +873,43 @@ test('close should handle errors from leaveGroup', async t => {
   }
 })
 
+test('close should stop retrying leaveGroup when the broker is unavailable', async t => {
+  const consumer = createConsumer(t, { retries: true })
+  await consumer.joinGroup()
+
+  let attempts = 0
+  mockConnectionPoolGet(
+    consumer[kConnections],
+    () => true,
+    undefined,
+    undefined,
+    (_original, _broker, callback) => {
+      attempts++
+      callback(new NetworkError('Broker is unavailable.'))
+      return true
+    }
+  )
+
+  await consumer.close()
+
+  strictEqual(attempts, 1)
+  strictEqual(consumer.memberId, null)
+  strictEqual(consumer.generationId, 0)
+  strictEqual(consumer.closed, true)
+})
+
+test('close should skip leaveGroup when the consumer is disconnected', async t => {
+  const consumer = createConsumer(t)
+  await consumer.joinGroup()
+  await consumer[kConnections].close()
+
+  await consumer.close()
+
+  strictEqual(consumer.memberId, null)
+  strictEqual(consumer.generationId, 0)
+  strictEqual(consumer.closed, true)
+})
+
 test('close should handle errors from Base.close', async t => {
   const consumer = createConsumer(t)
 

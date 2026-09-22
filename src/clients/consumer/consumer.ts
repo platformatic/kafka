@@ -1960,12 +1960,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         )
       })
     }
-    const onLeave = (_error: Error | null): void => finish()
-
     if (this[kClosed]) {
       const connection = this.#getGroupCoordinatorConnection()
       if (connection) {
-        operation(connection, onLeave)
+        operation(connection, finish)
       } else {
         finish()
       }
@@ -1975,7 +1973,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(
       'leaveGroupConsumerProtocol',
       operation,
-      onLeave
+      finish
     )
   }
 

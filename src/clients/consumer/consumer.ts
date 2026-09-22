@@ -1920,48 +1920,60 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    const finish = () => {
+      this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
+      this.memberId = null
+      this.#memberEpoch = -1
+      this.#assignments = []
+      this.assignments = []
+      this.#syncPreferredReadReplicas()
+      callback(null)
+    }
+
     // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
+    const operation = (connection: Connection, groupCallback: CallbackWithPromise<ConsumerGroupHeartbeatResponse>) => {
+      this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
+        error,
+        api
+      ) => {
+        if (error) {
+          groupCallback(error)
+          return
+        }
+
+        const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
+
+        api!(
+          connection,
+          this.groupId,
+          memberId,
+          -1, // memberEpoch = -1 signals leave
+          this.groupInstanceId,
+          this.#clientRack || null,
+          0, // rebalanceTimeout
+          [], // subscribedTopicNames
+          null, // subscribedTopicRegex
+          this.#groupRemoteAssignor,
+          [], // topicPartitions
+          groupCallback
+        )
+      })
+    }
+    if (this[kClosed]) {
+      const connection = this.#getGroupCoordinatorConnection()
+      if (connection) {
+        operation(connection, finish)
+      } else {
+        finish()
+      }
+      return
+    }
+
     this.#performDeduplicateGroupOperaton<ConsumerGroupHeartbeatResponse>(
       'leaveGroupConsumerProtocol',
-      (connection, groupCallback) => {
-        this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
-          error,
-          api
-        ) => {
-          if (error) {
-            groupCallback(error)
-            return
-          }
-
-          const memberId = this.#getConsumerGroupHeartbeatMemberId(api!.version)
-
-          api!(
-            connection,
-            this.groupId,
-            memberId,
-            -1, // memberEpoch = -1 signals leave
-            this.groupInstanceId,
-            this.#clientRack || null,
-            0, // rebalanceTimeout
-            [], // subscribedTopicNames
-            null, // subscribedTopicRegex
-            this.#groupRemoteAssignor,
-            [], // topicPartitions
-            groupCallback
-          )
-        })
-      },
-      _error => {
-        this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
-        this.memberId = null
-        this.#memberEpoch = -1
-        this.#assignments = []
-        this.assignments = []
-        this.#syncPreferredReadReplicas()
-
-        callback(null)
-      }
+      operation,
+      finish
     )
   }
 
@@ -2359,45 +2371,56 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    const finish = () => {
+      this.emitWithDebug('consumer', 'group:leave', {
+        groupId: this.groupId,
+        memberId: this.memberId,
+        generationId: this.generationId
+      })
+      this.memberId = null
+      this.generationId = 0
+      this.assignments = null
+      this.#syncPreferredReadReplicas()
+      callback(null)
+    }
+
     this.#cancelHeartbeat()
-
-    this.#performDeduplicateGroupOperaton<LeaveGroupResponse>(
-      'leaveGroup',
-      (connection, groupCallback) => {
-        this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
-          if (error) {
-            groupCallback(error)
-            return
-          }
-
-          api!(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
-        })
-      },
-      error => {
+    const operation = (connection: Connection, groupCallback: CallbackWithPromise<LeaveGroupResponse>) => {
+      this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
         if (error) {
-          const unknownMemberError = findErrorBy<ProtocolError>(error, 'unknownMemberId', true)
-
-          // This is to avoid throwing an error if a group join was cancelled.
-          if (!unknownMemberError) {
-            callback(error)
-            return
-          }
+          groupCallback(error)
+          return
         }
 
-        this.emitWithDebug('consumer', 'group:leave', {
-          groupId: this.groupId,
-          memberId: this.memberId,
-          generationId: this.generationId
-        })
+        api!(connection, this.groupId, [{ memberId: this.memberId! }], groupCallback)
+      })
+    }
+    const onLeave = (error: Error | null): void => {
+      if (error) {
+        const unknownMemberError = findErrorBy<ProtocolError>(error, 'unknownMemberId', true)
+        const unavailableBrokerWhileClosing = this[kClosed] && NetworkError.isRetryable(error)
 
-        this.memberId = null
-        this.generationId = 0
-        this.assignments = null
-        this.#syncPreferredReadReplicas()
-
-        callback(null)
+        // This is to avoid throwing an error if a group join was cancelled.
+        if (!unknownMemberError && !unavailableBrokerWhileClosing) {
+          callback(error)
+          return
+        }
       }
-    )
+
+      finish()
+    }
+
+    if (this[kClosed]) {
+      const connection = this.#getGroupCoordinatorConnection()
+      if (connection) {
+        operation(connection, onLeave)
+      } else {
+        finish()
+      }
+      return
+    }
+
+    this.#performDeduplicateGroupOperaton<LeaveGroupResponse>('leaveGroup', operation, onLeave)
   }
 
   #performSyncGroup (
@@ -2547,7 +2570,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, result) => {
         callback(this.#handleError(error), result)
-      }
+      },
+      0,
+      [],
+      () => this[kClosed]
     )
   }
 
@@ -2941,5 +2967,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return error
+  }
+
+  #getGroupCoordinatorConnection (): Connection | null {
+    if (this.#coordinatorId === null) {
+      return null
+    }
+
+    const broker = this.currentMetadata?.brokers.get(this.#coordinatorId)
+    const connection = broker ? this[kConnections].getEstablishedConnection(broker) : undefined
+    return connection?.isConnected() === true ? connection : null
   }
 }

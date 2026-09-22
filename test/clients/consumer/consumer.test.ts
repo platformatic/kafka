@@ -899,7 +899,8 @@ test('close with force=true should force close all resources', async t => {
   const stream = await consumer.consume({ topics: [] })
 
   // Close with force=true
-  await consumer.close(true)
+  const closing: Promise<void> = consumer.close(true)
+  await closing
 
   // Verify consumer is closed regardless of active streams
   strictEqual(consumer.closed, true)

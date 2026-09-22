@@ -84,6 +84,7 @@ import {
   createTopic,
   createTracingChannelVerifier,
   kafkaBootstrapServers,
+  isKafka,
   mockAPI,
   mockConnectionAPI,
   mockConnectionPoolGet,
@@ -96,6 +97,8 @@ import {
   waitFor
 } from '../../helpers.ts'
 import { kGetFetchNode } from '../../../src/symbols.ts'
+
+const skipConsumerGroupProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
 
 // This function produces sample messages to a topic for testing the consumer
 async function produceTestMessages ({
@@ -906,37 +909,41 @@ test('close should stop retrying leaveGroup when the broker is unavailable', asy
   strictEqual(consumer.closed, true)
 })
 
-test('close should stop retrying the consumer group heartbeat when the broker is unavailable', async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: true })
-  await consumer.metadata({ topics: [] })
-  await consumer.findGroupCoordinator()
-  await consumer.joinGroup()
+test(
+  'close should stop retrying the consumer group heartbeat when the broker is unavailable',
+  skipConsumerGroupProtocol,
+  async t => {
+    const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: true })
+    await consumer.metadata({ topics: [] })
+    await consumer.findGroupCoordinator()
+    await consumer.joinGroup()
 
-  let attempts = 0
-  const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
-  const connection = await consumer[kConnections].get(broker)
-  mockConnectionAPI(connection, consumerGroupHeartbeatV1.api.key, null, null, (
-    _original,
-    _apiKey,
-    _apiVersion,
-    _payload,
-    _parser,
-    _requestTags,
-    _responseTags,
-    callback
-  ) => {
-    attempts++
-    callback(new NetworkError('Broker is unavailable.'))
-    return true
-  })
+    let attempts = 0
+    const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+    const connection = await consumer[kConnections].get(broker)
+    mockConnectionAPI(connection, consumerGroupHeartbeatV1.api.key, null, null, (
+      _original,
+      _apiKey,
+      _apiVersion,
+      _payload,
+      _parser,
+      _requestTags,
+      _responseTags,
+      callback
+    ) => {
+      attempts++
+      callback(new NetworkError('Broker is unavailable.'))
+      return true
+    })
 
-  await consumer.close()
+    await consumer.close()
 
-  strictEqual(attempts, 1)
-  strictEqual(consumer.memberId, null)
-  deepStrictEqual(consumer.assignments, [])
-  strictEqual(consumer.closed, true)
-})
+    strictEqual(attempts, 1)
+    strictEqual(consumer.memberId, null)
+    deepStrictEqual(consumer.assignments, [])
+    strictEqual(consumer.closed, true)
+  }
+)
 
 test('close should not refresh metadata while leaving the classic consumer group', async t => {
   const consumer = createConsumer(t, { retries: true })
@@ -965,34 +972,38 @@ test('close should not refresh metadata while leaving the classic consumer group
   strictEqual(consumer.closed, true)
 })
 
-test('close should not refresh metadata while leaving the consumer group protocol', async t => {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: true })
-  await consumer.metadata({ topics: [] })
-  await consumer.findGroupCoordinator()
-  await consumer.joinGroup()
-  const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
-  await consumer[kConnections].get(broker)
+test(
+  'close should not refresh metadata while leaving the consumer group protocol',
+  skipConsumerGroupProtocol,
+  async t => {
+    const consumer = createConsumer(t, { groupProtocol: 'consumer', retries: true })
+    await consumer.metadata({ topics: [] })
+    await consumer.findGroupCoordinator()
+    await consumer.joinGroup()
+    const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+    await consumer[kConnections].get(broker)
 
-  let metadataAttempts = 0
-  mockMetadata(
-    consumer,
-    () => true,
-    null,
-    null,
-    (_original, _options, callback) => {
-      metadataAttempts++
-      callback(new NetworkError('Metadata is unavailable.'))
-      return true
-    }
-  )
+    let metadataAttempts = 0
+    mockMetadata(
+      consumer,
+      () => true,
+      null,
+      null,
+      (_original, _options, callback) => {
+        metadataAttempts++
+        callback(new NetworkError('Metadata is unavailable.'))
+        return true
+      }
+    )
 
-  await consumer.close()
+    await consumer.close()
 
-  strictEqual(metadataAttempts, 0)
-  strictEqual(consumer.memberId, null)
-  deepStrictEqual(consumer.assignments, [])
-  strictEqual(consumer.closed, true)
-})
+    strictEqual(metadataAttempts, 0)
+    strictEqual(consumer.memberId, null)
+    deepStrictEqual(consumer.assignments, [])
+    strictEqual(consumer.closed, true)
+  }
+)
 
 test('close should skip leaveGroup when the consumer is disconnected', async t => {
   const consumer = createConsumer(t)

@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      skip_regression:
+        description: 'Skip requiring a successful regression run'
+        required: false
+        type: boolean
+        default: false
 jobs:
   release-npm:
     runs-on: ubuntu-latest
@@ -24,6 +29,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Require successful regression
+        if: ${{ inputs.skip_regression != true }}
         id: regression
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,6 +102,7 @@ jobs:
         run: |
           pnpx @matteo.collina/release-notes -t v${{ inputs.version }} -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
       - name: Attach regression summary
+        if: ${{ inputs.skip_regression != true }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

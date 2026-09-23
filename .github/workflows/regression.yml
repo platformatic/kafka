@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: kafka-regression-linux
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   modern-regression:

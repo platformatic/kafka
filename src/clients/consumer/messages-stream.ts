@@ -19,7 +19,14 @@ import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
-import { kAutocommit, kDeserializationError, kGetFetchNode, kInstance, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import {
+  kAutocommit,
+  kDeserializationError,
+  kGetFetchNode,
+  kInstance,
+  kRefreshOffsetsAndFetch,
+  kUpdateCommittedOffset
+} from '../../symbols.ts'
 import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../base/base.ts'
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
@@ -1090,7 +1097,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
   }
 
-  #updateCommittedOffset (topic: string, partition: number, offset: bigint): void {
+  [kUpdateCommittedOffset] (topic: string, partition: number, offset: bigint): void {
     const key = partitionKey(topic, partition)
     const previous = this.#offsetsCommitted.get(key)
 
@@ -1259,7 +1266,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       for (const { topic, partition, offset } of offsets) {
-        this.#updateCommittedOffset(topic, partition, offset)
+        this[kUpdateCommittedOffset](topic, partition, offset)
         this.#settleCommitWaiters(topic, partition, offset, null)
       }
 

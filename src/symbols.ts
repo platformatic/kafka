@@ -3,6 +3,7 @@
 export const kInstance = Symbol('plt.kafka.base.instance')
 export const kRefreshOffsetsAndFetch = Symbol('plt.kafka.messagesStream.refreshOffsetsAndFetch')
 export const kAutocommit = Symbol('plt.kafka.messagesStream.autocommit')
+export const kUpdateCommittedOffset = Symbol('plt.kafka.messagesStream.updateCommittedOffset')
 export const kGetFetchNode = Symbol('plt.kafka.consumer.getFetchNode')
 export const kDeserializationError = Symbol('plt.kafka.messagesStream.deserializationError')
 

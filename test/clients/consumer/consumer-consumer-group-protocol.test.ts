@@ -417,12 +417,16 @@ test('#updateAssignments should handle metadata error', skipConsumerGroupProtoco
         const originalMetadata = consumer[kMetadata]
 
         mockMetadata(consumer, 1, undefined, undefined, (_original, ...args: unknown[]) => {
+          // A prior heartbeat may already have confirmed an empty assignment. The metadata
+          // failure must preserve whichever assignment was present when it was delivered.
+          const assignmentsBeforeError = consumer.assignments
           metadataErrorDelivered = true
           ;(args.at(-1) as CallbackWithPromise<ClusterMetadata>)(
             new MultipleErrors(mockedErrorMessage, [new Error(mockedErrorMessage + ' (internal)')], {
               canRetry: false
             })
           )
+          strictEqual(consumer.assignments, assignmentsBeforeError)
           return false
         })
 
@@ -440,8 +444,6 @@ test('#updateAssignments should handle metadata error', skipConsumerGroupProtoco
   const stream = await consumer.consume({ topics: [topic] })
   await waitFor(() => ok(metadataErrorDelivered), { timeout: 10000 })
 
-  // The error was handled rather than thrown, and the assignments were left untouched
-  strictEqual(consumer.assignments, null)
-
+  // The error was handled rather than thrown, and the assignment was unchanged at delivery.
   await stream.close()
 })

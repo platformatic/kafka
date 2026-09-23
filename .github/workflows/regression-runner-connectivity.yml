@@ -1,0 +1,62 @@
+---
+name: Regression Runner Connectivity
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  runner-connectivity:
+    name: Check regression runner SSH connectivity
+    runs-on: ubuntu-latest
+    environment: regression-runner-health-check
+    timeout-minutes: 5
+    steps:
+      - name: Check SSH connectivity
+        id: ssh
+        env:
+          RUNNER: ${{ secrets.RUNNER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$ssh_dir/key"
+
+          # Trust the first host key only within this ephemeral health check.
+          # Bound the entire SSH session, including authentication and the remote command.
+          if timeout --signal=KILL 60s ssh \
+            -i "$ssh_dir/key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=60 \
+            -o ConnectionAttempts=1 \
+            -- "$RUNNER" true; then
+            exit 0
+          else
+            status=$?
+            printf 'exit-code=%s\n' "$status" >> "$GITHUB_OUTPUT"
+            exit "$status"
+          fi
+
+      - name: Notify runner connectivity failure on Slack
+        if: ${{ failure() && steps.ssh.outcome == 'failure' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUNNER: ${{ secrets.RUNNER }}
+          SSH_EXIT_CODE: ${{ steps.ssh.outputs.exit-code }}
+          HEALTH_CHECK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          message=$(printf \
+            'Kafka regression runner SSH health check failed (60-second deadline).\nRepository: %s\nRunner: %s\nExit code: %s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$RUNNER" "${SSH_EXIT_CODE:-unavailable}" "$HEALTH_CHECK_RUN_URL")
+          jq -n --arg text "$message" '{ text: $text }' | \
+            curl --fail-with-body --retry 3 --connect-timeout 10 --max-time 30 \
+              --header 'content-type: application/json' \
+              --data-binary @- \
+              "$SLACK_WEBHOOK_URL"

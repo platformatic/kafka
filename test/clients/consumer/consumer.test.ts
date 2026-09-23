@@ -4373,6 +4373,60 @@ test('getLag should return the consumer lag', async t => {
   }
 })
 
+test('getLag should reflect successful manual commits for streams with the partition', async t => {
+  const topic = await createTopic(t, true)
+  const otherTopic = await createTopic(t, true)
+  const consumer = createConsumer(t)
+
+  await produceTestMessages({
+    t,
+    messages: Array.from({ length: 3 }, (_, i) => ({ topic, key: `key-${i}`, value: `value-${i}` }))
+  })
+
+  const streams: MessagesStream<Buffer, Buffer, Buffer, Buffer>[] = []
+  for (let i = 0; i < 2; i++) {
+    streams.push(await consumer.consume({
+      topics: [topic],
+      autocommit: false,
+      mode: MessagesStreamModes.MANUAL,
+      offsets: [{ topic, partition: 0, offset: 0n }],
+      maxWaitTime: 1000
+    }))
+  }
+  const key = `${topic}:0`
+
+  try {
+    await waitFor(() => {
+      for (const stream of streams) {
+        strictEqual(stream.offsetsCommitted.get(key), 0n)
+      }
+    }, { interval: 50, timeout: 5000 })
+
+    deepStrictEqual((await consumer.getLag({ topics: [topic] })).get(topic), [3n])
+
+    await consumer.commit({ offsets: [{ topic, partition: 0, offset: 2n, leaderEpoch: 0 }] })
+    for (const stream of streams) {
+      strictEqual(stream.offsetsCommitted.get(key), 2n)
+    }
+    deepStrictEqual((await consumer.getLag({ topics: [topic] })).get(topic), [1n])
+
+    // A commit for a topic without a stream must not make its lag look assigned.
+    await consumer.commit({ offsets: [{ topic: otherTopic, partition: 0, offset: 1n, leaderEpoch: 0 }] })
+    deepStrictEqual((await consumer.getLag({ topics: [otherTopic] })).get(otherTopic), [-1n])
+
+    // Neither an older successful commit nor a failed commit can advance the local high-water mark.
+    await consumer.commit({ offsets: [{ topic, partition: 0, offset: 1n, leaderEpoch: 0 }] })
+    mockMethod(consumer, kGetApi)
+    await rejects(consumer.commit({ offsets: [{ topic, partition: 0, offset: 3n, leaderEpoch: 0 }] }))
+    for (const stream of streams) {
+      strictEqual(stream.offsetsCommitted.get(key), 2n)
+    }
+    deepStrictEqual((await consumer.getLag({ topics: [topic] })).get(topic), [1n])
+  } finally {
+    await Promise.all(streams.map(stream => stream.close()))
+  }
+})
+
 test('getLag should allow to filter out topics and partitions', async t => {
   const topic = await createTopic(t, true, 3)
   const consumer = createConsumer(t)

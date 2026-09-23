@@ -71,7 +71,7 @@ import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { IS_CONTROL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch } from '../../symbols.ts'
+import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch, kUpdateCommittedOffset } from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
@@ -1193,6 +1193,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.#commit(options, callback, rejoinAttempts + 1)
           })
           return
+        }
+
+        if (!error) {
+          for (const { topic, partition, offset } of options.offsets) {
+            const key = partitionKey(topic, partition)
+            for (const stream of this.#streams) {
+              if (stream.offsetsCommitted.has(key)) {
+                stream[kUpdateCommittedOffset](topic, partition, offset)
+              }
+            }
+          }
         }
 
         callback(error)

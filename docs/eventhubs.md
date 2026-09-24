@@ -5,8 +5,8 @@ It verifies TLS/SASL authentication, metadata, production and consumption on two
 joining, explicit offset commits, resuming those offsets with a new consumer, and receiving new messages
 on an already running stream after its initial fetch.
 
-In CI, the test is a lane of [Regression Tests](../.github/workflows/regression.yml), after Redpanda, on
-`main` only. Each execution provisions its own Azure environment, runs the smoke test, and deletes the
+In CI, the test is an independent GitHub-hosted lane of [Regression Tests](../.github/workflows/regression.yml),
+on `main` only. Each execution provisions its own Azure environment, runs the smoke test, and deletes the
 environment with verification. It is not part of the regular CI workflow or pull requests.
 The smoke test is separate from `pnpm test`, `pnpm run test:ci`, and the API compatibility sweeps.
 

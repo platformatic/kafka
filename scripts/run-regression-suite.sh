@@ -2,9 +2,9 @@
 
 set -o pipefail
 
-MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
-VERSION="${2:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
-LANE="${3:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy> <version> <lane>}"
+MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy|performance|protocol> <version> <lane> [tier] [sweep]}"
+VERSION="${2:?version is required}"
+LANE="${3:?lane is required}"
 ARTIFACT_DIR="regression/artifacts"
 REPORT="$ARTIFACT_DIR/${LANE}-report.md"
 
@@ -14,14 +14,6 @@ rm -f "$REPORT"
 declare -a names
 declare -a statuses
 overall=0
-
-cleanup_redpanda () {
-  docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans || true
-}
-
-cleanup_legacy () {
-  docker compose -f docker-compose.legacy.yml down --volumes --remove-orphans || true
-}
 
 run_suite () {
   local name="$1"
@@ -44,27 +36,17 @@ run_suite () {
 if [[ "$MODE" == modern ]]; then
   run_suite integrity pnpm run test:integrity
   run_suite memory pnpm run test:memory
-  run_suite performance pnpm run test:performance
-  run_suite protocol-load env PROTOCOL_BENCH_ARTIFACT_PREFIX="${LANE}-" \
-    ./scripts/run-protocol-load-test.sh 1
 elif [[ "$MODE" == redpanda ]]; then
-  trap cleanup_redpanda EXIT
-  if ! docker compose -f docker-compose.redpanda.yml up -d --wait; then
-    printf 'Unable to start the Redpanda broker\n' >&2
-    overall=1
-  fi
   run_suite e2e pnpm run test:e2e:redpanda
 elif [[ "$MODE" == eventhubs ]]; then
   run_suite e2e pnpm run test:e2e:eventhubs
 elif [[ "$MODE" == legacy ]]; then
-  trap cleanup_legacy EXIT
-  if ! docker compose -f docker-compose.legacy.yml up -d --wait; then
-    printf 'Unable to start the legacy Kafka broker\n' >&2
-    overall=1
-  fi
   run_suite compatibility pnpm run test:compat
+elif [[ "$MODE" == performance ]]; then
+  run_suite performance pnpm run test:performance
+elif [[ "$MODE" == protocol ]]; then
   run_suite protocol-load env PROTOCOL_BENCH_ARTIFACT_PREFIX="${LANE}-" \
-    ./scripts/run-protocol-load-test.sh 2
+    ./scripts/run-protocol-load-test.sh "${4:?protocol tier is required}" "${5:?protocol sweep is required}"
 else
   printf 'Unknown regression mode: %s\n' "$MODE" >&2
   exit 2

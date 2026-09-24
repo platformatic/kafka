@@ -7,7 +7,11 @@ import { regressionSaslKerberosBootstrapServers } from '../helpers/index.ts'
 test('regression: GSSAPI auth lane connects with a custom Kerberos authenticator', { timeout: 30_000 }, async t => {
   // Keep GSSAPI in the dedicated regression folder because it exercises a very
   // different auth path from PLAIN/SCRAM/OAUTHBEARER and has historically hung.
-  const authenticate = await createAuthenticator('broker@broker-sasl-kerberos', 'EXAMPLE.COM', 'localhost:8000')
+  const authenticate = await createAuthenticator(
+    'broker@broker-sasl-kerberos',
+    'EXAMPLE.COM',
+    `localhost:${process.env.KAFKA_KDC_PORT ?? 8000}`
+  )
   const base = new Base({
     clientId: 'regression-gssapi-auth',
     bootstrapBrokers: regressionSaslKerberosBootstrapServers,

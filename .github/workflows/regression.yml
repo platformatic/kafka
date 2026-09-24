@@ -20,15 +20,15 @@ jobs:
     name: Regression / Confluent Kafka ${{ matrix.kafka-version }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0, 8.1.0, 8.2.0]
-    runs-on: [self-hosted, kafka-regression]
+    runs-on: ubuntu-latest
     environment: regression
     timeout-minutes: 180
     env:
       KAFKA_VERSION: ${{ matrix.kafka-version }}
       REGRESSION_LANE: linux-kafka-${{ matrix.kafka-version }}-node-24
+      COMPOSE_PROJECT_NAME: regression-modern-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -57,11 +57,8 @@ jobs:
       - name: Install NPM Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Clean up previous Kafka Cluster
-        run: docker compose down --volumes --remove-orphans
-
       - name: Start Kafka Cluster
-        run: docker compose up --build --force-recreate -d --wait
+        run: docker compose up --build -d --wait
 
       - name: Verify Kafka Cluster Readiness
         run: |
@@ -86,6 +83,14 @@ jobs:
       - name: Run modern regression suites
         run: bash ./scripts/run-regression-suite.sh modern "$KAFKA_VERSION" "$REGRESSION_LANE"
 
+      - name: Collect Kafka diagnostics
+        if: always()
+        run: bash ./scripts/collect-kafka-diagnostics.sh "$REGRESSION_LANE"
+
+      - name: Stop Kafka Cluster
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
       - name: Upload regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -94,24 +99,15 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
 
-      - name: Dump Kafka diagnostics
-        if: failure()
-        run: |
-          docker compose ps
-          docker compose logs --no-color
-
-      - name: Stop Kafka Cluster
-        if: always()
-        run: docker compose down --volumes
-
   redpanda-regression:
     name: Regression / Redpanda
-    needs: modern-regression
-    runs-on: [self-hosted, kafka-regression]
+    runs-on: ubuntu-latest
     environment: regression
     timeout-minutes: 30
     env:
       REDPANDA_LANE: linux-redpanda-node-24
+      COMPOSE_FILE: docker-compose.redpanda.yml
+      COMPOSE_PROJECT_NAME: regression-redpanda-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -130,12 +126,18 @@ jobs:
           key: node-modules-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
       - name: Install NPM Dependencies
         run: pnpm install --frozen-lockfile
-      - name: Clean up previous Redpanda cluster
-        run: docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans
+      - name: Start Redpanda cluster
+        run: docker compose up -d --wait
       - name: Build
         run: pnpm run build
       - name: Run Redpanda regression suite
         run: bash ./scripts/run-regression-suite.sh redpanda 25.2.1 "$REDPANDA_LANE"
+      - name: Collect Redpanda diagnostics
+        if: always()
+        run: bash ./scripts/collect-kafka-diagnostics.sh "$REDPANDA_LANE"
+      - name: Stop Redpanda cluster
+        if: always()
+        run: docker compose down --volumes --remove-orphans
       - name: Upload Redpanda regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -143,18 +145,8 @@ jobs:
           name: regression-artifacts-redpanda
           path: regression/artifacts
           if-no-files-found: ignore
-      - name: Dump Redpanda diagnostics
-        if: failure()
-        run: |
-          docker compose -f docker-compose.redpanda.yml ps
-          docker compose -f docker-compose.redpanda.yml logs --no-color
-      - name: Stop Redpanda cluster
-        if: always()
-        run: docker compose -f docker-compose.redpanda.yml down --volumes --remove-orphans
-
   eventhubs-regression:
     name: Regression / Azure Event Hubs
-    needs: redpanda-regression
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: eventhubs
@@ -223,14 +215,20 @@ jobs:
 
   legacy-regression:
     name: Regression / Apache Kafka 1.1.0
-    needs: [modern-regression, redpanda-regression]
-    if: ${{ always() }}
-    runs-on: [self-hosted, kafka-regression]
+    runs-on: ubuntu-latest
     environment: regression
     timeout-minutes: 180
     env:
       KAFKA_VERSION: 1.1.0
       REGRESSION_LANE: linux-kafka-1.1-node-24
+      COMPOSE_FILE: docker-compose.legacy.yml
+      COMPOSE_PROJECT_NAME: regression-legacy-${{ github.run_id }}-${{ github.run_attempt }}
+      KAFKA_SINGLE_PORT: 29001
+      KAFKA_SASL_PORT: 29002
+      KAFKA_SASL_PLAIN_PORT: 39002
+      KAFKA_CLUSTER_1_PORT: 29011
+      KAFKA_CLUSTER_2_PORT: 29012
+      KAFKA_CLUSTER_3_PORT: 29013
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -244,10 +242,16 @@ jobs:
           version: 11.1.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Clean up Kafka clusters
-        run: docker compose -f docker-compose.legacy.yml down --volumes --remove-orphans
+      - name: Start legacy Kafka cluster
+        run: docker compose up -d --wait
       - name: Run legacy regression suites
         run: bash ./scripts/run-regression-suite.sh legacy "$KAFKA_VERSION" "$REGRESSION_LANE"
+      - name: Collect legacy diagnostics
+        if: always()
+        run: bash ./scripts/collect-kafka-diagnostics.sh "$REGRESSION_LANE"
+      - name: Stop legacy Kafka cluster
+        if: always()
+        run: docker compose down --volumes --remove-orphans
       - name: Upload legacy regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -256,10 +260,81 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
 
+  performance:
+    name: Performance / Kafka ${{ matrix.kafka-version }} / ${{ matrix.suite }}
+    strategy:
+      fail-fast: false
+      # Only one benchmark job may use the dedicated hardware at a time.
+      max-parallel: 1
+      matrix:
+        kafka-version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0, 8.0.0, 8.1.0, 8.2.0]
+        suite: [performance, produce, consume]
+        include:
+          - kafka-version: 1.1.0
+            suite: produce
+          - kafka-version: 1.1.0
+            suite: consume
+    runs-on: [self-hosted, kafka-regression]
+    environment: regression
+    timeout-minutes: 180
+    env:
+      KAFKA_VERSION: ${{ matrix.kafka-version }}
+      # Keep the existing baseline lane identity; reports distinguish each isolated workload.
+      REGRESSION_LANE: linux-kafka-${{ matrix.kafka-version }}-node-24
+      PERFORMANCE_LANE: performance-kafka-${{ matrix.kafka-version }}-${{ matrix.suite }}-node-24
+      COMPOSE_PROJECT_NAME: performance-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+      COMPOSE_FILE: ${{ matrix.kafka-version == '1.1.0' && 'docker-compose.legacy.yml' || (matrix.suite == 'performance' && 'docker-compose.yml' || 'docker-compose.yml:docker-compose.perf.yml') }}
+      KAFKA_SINGLE_PORT: ${{ matrix.kafka-version == '1.1.0' && '29001' || '9001' }}
+      PROTOCOL_BENCH_BROKERS: ${{ matrix.kafka-version == '1.1.0' && 'localhost:29001' || 'localhost:9001' }}
+      PROTOCOL_TIER: ${{ matrix.kafka-version == '1.1.0' && '2' || '1' }}
+      PERFORMANCE_SUITE: ${{ matrix.suite }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm run build
+      - name: Start performance cluster
+        run: |
+          if [ "$PERFORMANCE_SUITE" = performance ]; then
+            docker compose up -d --wait broker-cluster-1 broker-cluster-2 broker-cluster-3
+          else
+            docker compose up -d --wait broker-single
+          fi
+      - name: Run performance suite
+        run: |
+          if [ "$PERFORMANCE_SUITE" = performance ]; then
+            bash ./scripts/run-regression-suite.sh performance "$KAFKA_VERSION" "$PERFORMANCE_LANE"
+          else
+            bash ./scripts/run-regression-suite.sh protocol "$KAFKA_VERSION" "$PERFORMANCE_LANE" "$PROTOCOL_TIER" "$PERFORMANCE_SUITE"
+          fi
+      - name: Collect performance diagnostics
+        if: always()
+        run: bash ./scripts/collect-kafka-diagnostics.sh "$PERFORMANCE_LANE"
+      - name: Stop performance cluster
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-artifacts-performance-${{ matrix.kafka-version }}-${{ matrix.suite }}
+          path: regression/artifacts
+          if-no-files-found: ignore
+
   report:
     name: Report regression results
     environment: regression
-    needs: [modern-regression, redpanda-regression, eventhubs-regression, legacy-regression]
+    needs: [modern-regression, redpanda-regression, eventhubs-regression, legacy-regression, performance]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -275,6 +350,7 @@ jobs:
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
           EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
+          PERFORMANCE_RESULT: ${{ needs.performance.result }}
         run: |
           summary=regression/artifacts/regression-summary.md
           mkdir -p regression/artifacts
@@ -282,7 +358,7 @@ jobs:
             printf '# Regression test summary\n\n'
             printf -- '- Commit: [`%s`](%s)\n' "$GITHUB_SHA" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
             printf -- '- Workflow run: [#%s](%s)\n\n' "$GITHUB_RUN_NUMBER" "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            printf '## Modern Kafka versions\n\n'
+            printf '## Functional regression — modern Kafka versions\n\n'
             printf -- '- Matrix result: `%s`\n\n' "$MODERN_RESULT"
             for version in 7.5.0 7.6.0 7.7.0 7.8.0 7.9.0 8.0.0 8.1.0 8.2.0; do
               report="regression/artifacts/linux-kafka-${version}-node-24-report.md"
@@ -314,6 +390,22 @@ jobs:
             else
               printf 'Legacy lane report was not produced.\n'
             fi
+            printf '\n## Performance — dedicated runner\n\n'
+            printf -- '- Matrix result: `%s`\n\n' "$PERFORMANCE_RESULT"
+            for version in 7.5.0 7.6.0 7.7.0 7.8.0 7.9.0 8.0.0 8.1.0 8.2.0 1.1.0; do
+              for suite in performance produce consume; do
+                if [ "$version" = 1.1.0 ] && [ "$suite" = performance ]; then
+                  continue
+                fi
+                report="regression/artifacts/performance-kafka-${version}-${suite}-node-24-report.md"
+                if [ -f "$report" ]; then
+                  cat "$report"
+                else
+                  printf '### Kafka %s / %s\n\nNo performance report was produced.\n' "$version" "$suite"
+                fi
+                printf '\n'
+              done
+            done
           } > "$summary"
           cp "$summary" "$GITHUB_STEP_SUMMARY"
       - name: Upload aggregate regression report
@@ -324,7 +416,7 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
       - name: Notify regression failure on Slack
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -333,15 +425,16 @@ jobs:
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
           EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
+          PERFORMANCE_RESULT: ${{ needs.performance.result }}
         run: |
           message=$(printf \
-            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nLegacy: %s\nRun: %s' \
-            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$LEGACY_RESULT" "$REGRESSION_RUN_URL")
+            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nLegacy: %s\nPerformance: %s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$LEGACY_RESULT" "$PERFORMANCE_RESULT" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \
               --header 'content-type: application/json' \
               --data-binary @- \
               "$SLACK_WEBHOOK_URL"
       - name: Fail aggregate job when a lane failed
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
         run: exit 1

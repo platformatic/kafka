@@ -1,8 +1,10 @@
+name: kafka-redpanda
+
 services:
   redpanda:
     image: redpandadata/redpanda:v25.2.1
     ports:
-      - '19092:19092'
+      - '${REDPANDA_PORT:-19092}:19092'
     command:
       - redpanda
       - start
@@ -21,7 +23,7 @@ services:
       - --kafka-addr
       - internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr
-      - internal://redpanda:9092,external://localhost:19092
+      - internal://redpanda:9092,external://localhost:${REDPANDA_PORT:-19092}
     healthcheck:
       test: ['CMD', 'rpk', 'cluster', 'info', '-X', 'brokers=localhost:19092']
       interval: 5s

@@ -3,16 +3,18 @@
 # This is a standalone stack rather than an override of docker-compose.yml: pre-KRaft brokers need a
 # ZooKeeper ensemble and must NOT receive the KAFKA_PROCESS_ROLES, CLUSTER_ID and KAFKA_CONTROLLER_*
 # settings the modern stack uses, and a compose override can add environment keys but never remove
-# them. The ports match the modern stack so the compatibility sweeps run unchanged:
+# them. Default ports still match the test helpers; set KAFKA_*_PORT in both Compose and the tests
+# to run alongside the modern stack. Project-scoped names isolate containers, networks and volumes.
 #
 #   docker compose -f docker-compose.legacy.yml up -d --wait
 #   npm run test:compat
 #
 # Rule of thumb: Confluent Platform version = Apache Kafka version + 3.0. 4.1.0 is Kafka 1.1.0.
+name: kafka-legacy
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:${LEGACY_KAFKA_VERSION:-4.1.0}
-    container_name: legacy-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: '2181'
       ZOOKEEPER_TICK_TIME: '2000'
@@ -24,12 +26,11 @@ services:
 
   broker-single:
     image: &image confluentinc/cp-kafka:${LEGACY_KAFKA_VERSION:-4.1.0}
-    container_name: broker-single
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
-      - '9001:9092'
+      - '${KAFKA_SINGLE_PORT:-9001}:9092'
     healthcheck: &health_check
       test: ['CMD', 'kafka-broker-api-versions', '--bootstrap-server', 'localhost:19092']
       interval: 10s
@@ -44,7 +45,7 @@ services:
       KAFKA_BROKER_ID: '1'
       KAFKA_LISTENERS: 'PLAINTEXT://:9092,DOCKER://:19092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9001,DOCKER://broker-single:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_SINGLE_PORT:-9001},DOCKER://broker-single:19092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'DOCKER'
       KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
       KAFKA_MIN_INSYNC_REPLICAS: '1'
@@ -58,13 +59,12 @@ services:
 
   broker-sasl:
     image: *image
-    container_name: broker-sasl
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
-      - '9002:9092'
-      - '19002:19092'
+      - '${KAFKA_SASL_PORT:-9002}:9092'
+      - '${KAFKA_SASL_PLAIN_PORT:-19002}:19092'
     healthcheck: *health_check
     environment:
       <<: *common_config
@@ -72,7 +72,7 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181/sasl'
       KAFKA_LISTENERS: 'SASL://:9092,DOCKER://:19092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL:SASL_PLAINTEXT,DOCKER:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:9002,DOCKER://broker-sasl:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:${KAFKA_SASL_PORT:-9002},DOCKER://broker-sasl:19092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'DOCKER'
       # Configured per listener rather than through a JAAS file: setting
       # java.security.auth.login.config in KAFKA_OPTS also applies to the image's ZooKeeper
@@ -87,18 +87,17 @@ services:
 
   broker-cluster-1:
     image: *image
-    container_name: broker-cluster-1
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
-      - '9011:9092'
+      - '${KAFKA_CLUSTER_1_PORT:-9011}:9092'
     healthcheck: *health_check
     environment: &cluster_config
       <<: *common_config
       KAFKA_BROKER_ID: '11'
       KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181/cluster'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9011,DOCKER://broker-cluster-1:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_1_PORT:-9011},DOCKER://broker-cluster-1:19092'
       KAFKA_DEFAULT_REPLICATION_FACTOR: '3'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '3'
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '3'
@@ -108,28 +107,26 @@ services:
 
   broker-cluster-2:
     image: *image
-    container_name: broker-cluster-2
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
-      - '9012:9092'
+      - '${KAFKA_CLUSTER_2_PORT:-9012}:9092'
     healthcheck: *health_check
     environment:
       <<: *cluster_config
       KAFKA_BROKER_ID: '12'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9012,DOCKER://broker-cluster-2:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_2_PORT:-9012},DOCKER://broker-cluster-2:19092'
 
   broker-cluster-3:
     image: *image
-    container_name: broker-cluster-3
     depends_on:
       zookeeper:
         condition: service_healthy
     ports:
-      - '9013:9092'
+      - '${KAFKA_CLUSTER_3_PORT:-9013}:9092'
     healthcheck: *health_check
     environment:
       <<: *cluster_config
       KAFKA_BROKER_ID: '13'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9013,DOCKER://broker-cluster-3:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_3_PORT:-9013},DOCKER://broker-cluster-3:19092'

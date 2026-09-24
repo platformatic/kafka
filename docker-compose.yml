@@ -1,14 +1,15 @@
+name: kafka-modern
+
 services:
   kdc:
     image: plt-kafka-kdc:latest
     pull_policy: never
     build:
       context: ./docker/kerberos
-    container_name: kdc
     ports:
-      - '8000:88/tcp'
-      - '8000:88/udp'
-      - '8001:749'
+      - '${KAFKA_KDC_PORT:-8000}:88/tcp'
+      - '${KAFKA_KDC_PORT:-8000}:88/udp'
+      - '${KAFKA_KADMIN_PORT:-8001}:749'
     volumes:
       - './docker/kerberos/krb5-kdc.conf:/etc/krb5.conf:ro'
       - './docker/kerberos/kdc.conf:/var/lib/krb5kdc/kdc.conf:ro'
@@ -23,9 +24,8 @@ services:
 
   schema-registry:
     image: confluentinc/cp-schema-registry:${SCHEMA_REGISTRY_VERSION:-8.1.0}
-    container_name: registry
     ports:
-      - '8004:8081'
+      - '${SCHEMA_REGISTRY_PORT:-8004}:8081'
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8081/subjects']
       interval: 30s
@@ -33,7 +33,7 @@ services:
       retries: 3
       start_period: 40s
     environment:
-      SCHEMA_REGISTRY_HOST_NAME: registry
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: broker-single:19092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       SCHEMA_REGISTRY_KAFKASTORE_TOPIC: _schemas
@@ -46,13 +46,12 @@ services:
 
   schema-registry-auth:
     image: nginx:1.29.3-alpine@sha256:b3c656d55d7ad751196f21b7fd2e8d4da9cb430e32f646adcf92441b72f82b14
-    container_name: registry-auth
     depends_on:
       schema-registry:
         condition: service_healthy
     ports:
-      - '8005:8081'
-      - '8006:8082'
+      - '${SCHEMA_REGISTRY_AUTH_PORT:-8005}:8081'
+      - '${SCHEMA_REGISTRY_BEARER_PORT:-8006}:8082'
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8080']
       interval: 30s
@@ -66,9 +65,8 @@ services:
   broker-single:
     # Rule of thumb: Confluent Kafka Version = Apache Kafka Version + 4.0.0
     image: &image confluentinc/cp-kafka:${KAFKA_VERSION:-8.1.0}
-    container_name: broker-single
     ports:
-      - '9001:9092'
+      - '${KAFKA_SINGLE_PORT:-9001}:9092'
     healthcheck: &health_check # Health_check
       test: ['CMD', '/usr/bin/kafka-broker-api-versions', '--bootstrap-server', 'localhost:19092']
       interval: 10s
@@ -85,7 +83,7 @@ services:
       KAFKA_NODE_ID: '1'
       KAFKA_LISTENERS: 'PLAINTEXT://:9092,DOCKER://:19092,CONTROLLER://:29092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9001,DOCKER://broker-single:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_SINGLE_PORT:-9001},DOCKER://broker-single:19092'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-single:29092'
       # Replication options
       KAFKA_DEFAULT_REPLICATION_FACTOR: '1'
@@ -102,10 +100,9 @@ services:
 
   broker-sasl:
     image: *image
-    container_name: broker-sasl
     ports:
-      - '9002:9092' # SASL
-      - '19002:19092' # PLAIN TEXT - Used to create users
+      - '${KAFKA_SASL_PORT:-9002}:9092' # SASL
+      - '${KAFKA_SASL_PLAIN_PORT:-19002}:19092' # PLAIN TEXT - Used to create users
     healthcheck: *health_check
     volumes:
       - './docker/sasl/jaas.conf:/etc/kafka/jaas.conf:ro'
@@ -114,7 +111,7 @@ services:
       # Broker specific general and port options
       KAFKA_LISTENERS: 'SASL://:9092,DOCKER://:19092,CONTROLLER://:29092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL:SASL_PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:9002,DOCKER://broker-sasl:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:${KAFKA_SASL_PORT:-9002},DOCKER://broker-sasl:19092'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl:29092'
       # SASL
       KAFKA_OPTS: '-Djava.security.auth.login.config=/etc/kafka/jaas.conf'
@@ -134,10 +131,9 @@ services:
 
   broker-sasl-kerberos:
     image: *image
-    container_name: broker-sasl-kerberos
     ports:
-      - '9003:9092' # SASL
-      - '19003:19092' # PLAIN TEXT - Used to create users
+      - '${KAFKA_KERBEROS_PORT:-9003}:9092' # SASL
+      - '${KAFKA_KERBEROS_PLAIN_PORT:-19003}:19092' # PLAIN TEXT - Used to create users
     healthcheck: *health_check
     volumes:
       - './docker/sasl/jaas-kerberos.conf:/etc/kafka/jaas.conf:ro'
@@ -151,7 +147,7 @@ services:
       # Broker specific general and port options
       KAFKA_LISTENERS: 'SASL://:9092,DOCKER://:19092,CONTROLLER://:29092'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'SASL:SASL_PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:9003,DOCKER://broker-sasl-kerberos:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'SASL://localhost:${KAFKA_KERBEROS_PORT:-9003},DOCKER://broker-sasl-kerberos:19092'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-sasl-kerberos:29092'
       # SASL
       KAFKA_OPTS: '-Djava.security.auth.login.config=/etc/kafka/jaas.conf -Djava.security.krb5.conf=/etc/krb5.conf'
@@ -166,15 +162,14 @@ services:
 
   broker-cluster-1:
     image: *image
-    container_name: broker-cluster-1
     ports:
-      - '9011:9092'
+      - '${KAFKA_CLUSTER_1_PORT:-9011}:9092'
     healthcheck: *health_check
     environment: &cluster_config
       <<: *common_config
       # Broker specific general and port options
       KAFKA_NODE_ID: '1'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9011,DOCKER://broker-cluster-1:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_1_PORT:-9011},DOCKER://broker-cluster-1:19092'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-cluster-1:29092,2@broker-cluster-2:29092,3@broker-cluster-3:29092'
       # Replication options
       KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: '3'
@@ -191,27 +186,25 @@ services:
 
   broker-cluster-2:
     image: *image
-    container_name: broker-cluster-2
     ports:
-      - '9012:9092'
+      - '${KAFKA_CLUSTER_2_PORT:-9012}:9092'
     healthcheck: *health_check
     environment:
       <<: *cluster_config
       # Broker specific general and port options
       KAFKA_NODE_ID: '2'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9012,DOCKER://broker-cluster-2:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_2_PORT:-9012},DOCKER://broker-cluster-2:19092'
 
   broker-cluster-3:
     image: *image
-    container_name: broker-cluster-3
     ports:
-      - '9013:9092'
+      - '${KAFKA_CLUSTER_3_PORT:-9013}:9092'
     healthcheck: *health_check
     environment:
       <<: *cluster_config
       # Broker specific general and port options
       KAFKA_NODE_ID: '3'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9013,DOCKER://broker-cluster-3:19092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:${KAFKA_CLUSTER_3_PORT:-9013},DOCKER://broker-cluster-3:19092'
 
 volumes:
   kerberos-data:

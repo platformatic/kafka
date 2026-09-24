@@ -1,6 +1,6 @@
 import { Unpromise } from '@watchable/unpromise'
 import { deepStrictEqual } from 'node:assert'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
   type Channel,
@@ -33,13 +33,13 @@ import {
   type Writer
 } from '../src/index.ts'
 
-export const kafkaSingleBootstrapServers = ['localhost:9001']
-export const kafkaSaslBootstrapServers = ['localhost:9002']
-export const kafkaSaslKerberosBootstrapServers = ['localhost:9003']
-export const kafkaBootstrapServers = ['localhost:9011']
-export const confluentSchemaRegistryUrl = 'http://localhost:8004'
-export const confluentSchemaRegistryAuthBasicUrl = 'http://localhost:8005'
-export const confluentSchemaRegistryBearerUrl = 'http://localhost:8006'
+export const kafkaSingleBootstrapServers = [`localhost:${process.env.KAFKA_SINGLE_PORT ?? 9001}`]
+export const kafkaSaslBootstrapServers = [`localhost:${process.env.KAFKA_SASL_PORT ?? 9002}`]
+export const kafkaSaslKerberosBootstrapServers = [`localhost:${process.env.KAFKA_KERBEROS_PORT ?? 9003}`]
+export const kafkaBootstrapServers = [`localhost:${process.env.KAFKA_CLUSTER_1_PORT ?? 9011}`]
+export const confluentSchemaRegistryUrl = `http://localhost:${process.env.SCHEMA_REGISTRY_PORT ?? 8004}`
+export const confluentSchemaRegistryAuthBasicUrl = `http://localhost:${process.env.SCHEMA_REGISTRY_AUTH_PORT ?? 8005}`
+export const confluentSchemaRegistryBearerUrl = `http://localhost:${process.env.SCHEMA_REGISTRY_BEARER_PORT ?? 8006}`
 export const mockedErrorMessage = 'Cannot connect to any broker.'
 export const mockedOperationId = -1n
 let kafkaVersion = process.env.KAFKA_VERSION
@@ -494,8 +494,11 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
 
 export function isKafka (version: string | string[]): boolean {
   if (!kafkaVersion) {
-    const inspectCommand = 'docker inspect --format "{{.Config.Image}}" broker-cluster-1'
-    const kafkaImage = execSync(inspectCommand, { encoding: 'utf8' }).trim()
+    // Resolve the broker in the selected Compose project, including standalone legacy stacks.
+    const container = execFileSync('docker', ['compose', 'ps', '-q', 'broker-cluster-1'], { encoding: 'utf8' }).trim()
+    const kafkaImage = execFileSync('docker', ['inspect', '--format', '{{.Config.Image}}', container], {
+      encoding: 'utf8'
+    }).trim()
     kafkaVersion = kafkaImage.split(':')[1]
   }
 

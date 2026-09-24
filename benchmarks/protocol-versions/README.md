@@ -12,16 +12,39 @@ Raw per-sample results land in `regression/artifacts/`. The recorded verdict is 
 ## Quick start
 
 ```bash
-# Everything, in the right order (~90 minutes)
-./scripts/run-protocol-load-test.sh
+# Codec microbenchmark, no Docker.
+./scripts/run-protocol-load-test.sh 0
 
-# Or one tier at a time
-./scripts/run-protocol-load-test.sh 0    # codecs, no Docker
-./scripts/run-protocol-load-test.sh 1    # live broker
-./scripts/run-protocol-load-test.sh 2    # Apache Kafka 1.1.0 sanity check
+# One live sweep against a fresh, isolated modern broker.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.perf.yml
+export COMPOSE_PROJECT_NAME=kafka-protocol-produce
+export KAFKA_SINGLE_PORT=49001
+docker compose up -d --wait broker-single
+./scripts/run-protocol-load-test.sh 1 produce
+bash scripts/collect-kafka-diagnostics.sh local-produce
+docker compose down --volumes --remove-orphans
+
+# Fetch uses a separate fresh broker; the Produce broker never needs restarting.
+export COMPOSE_PROJECT_NAME=kafka-protocol-consume
+export KAFKA_SINGLE_PORT=49002
+docker compose up -d --wait broker-single
+./scripts/run-protocol-load-test.sh 1 consume
+bash scripts/collect-kafka-diagnostics.sh local-consume
+docker compose down --volumes --remove-orphans
 ```
 
-Tier 0 needs nothing but Node. Tiers 1 and 2 need Docker.
+Tier 0 needs nothing but Node. Tiers 1 and 2 need an already-running broker. The script runs exactly one
+live sweep, never starts, stops, or restarts containers, and rejects the old implicit `all` invocation.
+The caller owns readiness, diagnostic collection, and cleanup, including after failures.
+
+For a legacy sweep, select `COMPOSE_FILE=docker-compose.legacy.yml`, a separate project name and port,
+start `broker-single` (which also starts ZooKeeper), and invoke `./scripts/run-protocol-load-test.sh 2 produce`
+or `2 consume`. Use a fresh project for each sweep. Tier 2 disables codec pinning and remains a
+non-comparable sanity check. Do not apply the modern Compose file to the legacy project.
+
+CI creates separate jobs for each version and sweep. They execute sequentially on the dedicated runner;
+each job provisions its cluster once and collects diagnostics before removing it, even after failure.
+Keep local sweeps sequential too: distinct ports prevent collisions but do not isolate CPU and memory load.
 
 ## The one design decision worth knowing
 
@@ -68,7 +91,8 @@ All optional.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `PROTOCOL_BENCH_BROKERS` | `localhost:9001` | Single broker, deliberately: cluster replication adds variance unrelated to the codec |
+| `PROTOCOL_BENCH_BROKERS` | `localhost:${KAFKA_SINGLE_PORT}`, port defaults to `9001` | Single broker, deliberately: cluster replication adds variance unrelated to the codec |
+| `COMPOSE_FILE` / `COMPOSE_PROJECT_NAME` | Docker Compose defaults | Select the same project for the broker version query and JMX guard |
 | `PROTOCOL_BENCH_REPETITIONS` | `5` | Measured runs per cell; the median is reported |
 | `PROTOCOL_BENCH_WARMUPS` | `1` | Discarded runs per cell, on top of the global warmup |
 | `PROTOCOL_BENCH_SEED` | `0x5eed` | Shuffle seed for cell order. **Vary this** — see below |

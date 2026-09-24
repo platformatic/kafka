@@ -104,6 +104,8 @@ jobs:
     name: 'API compatibility / Apache Kafka 1.1.0'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      COMPOSE_FILE: docker-compose.legacy.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v4

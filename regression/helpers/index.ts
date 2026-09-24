@@ -22,10 +22,14 @@ import {
   stringSerializers
 } from '../../src/index.ts'
 
-export const regressionBootstrapServers = ['localhost:9011', 'localhost:9012', 'localhost:9013']
-export const regressionSingleBootstrapServers = ['localhost:9001']
-export const regressionSaslBootstrapServers = ['localhost:9002']
-export const regressionSaslKerberosBootstrapServers = ['localhost:9003']
+export const regressionBootstrapServers = [
+  `localhost:${process.env.KAFKA_CLUSTER_1_PORT ?? 9011}`,
+  `localhost:${process.env.KAFKA_CLUSTER_2_PORT ?? 9012}`,
+  `localhost:${process.env.KAFKA_CLUSTER_3_PORT ?? 9013}`
+]
+export const regressionSingleBootstrapServers = [`localhost:${process.env.KAFKA_SINGLE_PORT ?? 9001}`]
+export const regressionSaslBootstrapServers = [`localhost:${process.env.KAFKA_SASL_PORT ?? 9002}`]
+export const regressionSaslKerberosBootstrapServers = [`localhost:${process.env.KAFKA_KERBEROS_PORT ?? 9003}`]
 
 const defaultRetryDelay = 500
 let topicCounter = 0

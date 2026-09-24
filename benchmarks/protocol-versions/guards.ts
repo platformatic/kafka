@@ -35,7 +35,9 @@ function conversions (metric: string): number {
       const output = execFileSync(
         'docker',
         [
+          'compose',
           'exec',
+          '-T',
           'broker-single',
           'kafka-run-class',
           toolClass,

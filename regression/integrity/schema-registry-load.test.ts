@@ -10,7 +10,7 @@ import {
   regressionSingleBootstrapServers
 } from '../helpers/index.ts'
 
-const schemaRegistryUrl = 'http://localhost:8004'
+const schemaRegistryUrl = `http://localhost:${process.env.SCHEMA_REGISTRY_PORT ?? 8004}`
 
 interface SchemaDatum {
   id: number

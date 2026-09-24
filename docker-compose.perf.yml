@@ -1,4 +1,4 @@
-# Isolation overrides for the protocol version benchmarks. Not used by CI.
+# Isolation overrides for the protocol version benchmarks, locally and on the dedicated CI runner.
 # See benchmarks/protocol-versions/README.md.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.perf.yml up -d --wait broker-single

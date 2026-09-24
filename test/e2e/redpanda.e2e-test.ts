@@ -11,7 +11,9 @@ import {
   stringSerializers
 } from '../../src/index.ts'
 
-const bootstrapBrokers = (process.env.REDPANDA_BOOTSTRAP_SERVERS ?? 'localhost:19092').split(',')
+const bootstrapBrokers = (
+  process.env.REDPANDA_BOOTSTRAP_SERVERS ?? `localhost:${process.env.REDPANDA_PORT ?? 19092}`
+).split(',')
 
 test('supports the common Redpanda Kafka workflow', async t => {
   const topic = `redpanda-smoke-${randomUUID()}`

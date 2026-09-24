@@ -5,7 +5,9 @@ import { type Base, kApis, kGetApi } from '../../../src/clients/base/base.ts'
 import { Consumer, Producer, type ConsumerOptions, type ProducerOptions } from '../../../src/index.ts'
 import { brokerApis } from '../../../test/helpers/api-versions.ts'
 
-export const bootstrapBrokers = (process.env.PROTOCOL_BENCH_BROKERS ?? 'localhost:9001').split(',')
+export const bootstrapBrokers = (
+  process.env.PROTOCOL_BENCH_BROKERS ?? `localhost:${process.env.KAFKA_SINGLE_PORT ?? 9001}`
+).split(',')
 
 // The single broker, not the three broker cluster the other benchmarks use: replication adds
 // variance that has nothing to do with which codec is being measured.

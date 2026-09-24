@@ -9,7 +9,6 @@ on:
       - main
     types:
       - requested
-      - in_progress
 
 permissions:
   actions: read
@@ -17,7 +16,7 @@ permissions:
 
 concurrency:
   group: regression-runner-health-check-${{ github.event.workflow_run.id }}
-  # The in-progress event supersedes the queue watchdog for the same regression run.
+  # Hosted jobs can start while the performance runner is offline, so inspect the jobs after the wait.
   cancel-in-progress: true
 
 jobs:
@@ -36,16 +35,17 @@ jobs:
         run: |
           status=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${REGRESSION_RUN_ID}" --jq '.status')
 
-          if [ "$status" != 'queued' ]; then
+          if [ "$status" = 'completed' ]; then
             exit 0
           fi
 
-          active_runs=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/regression.yml/runs?branch=main&status=in_progress&per_page=1" \
-            --jq '.total_count')
+          jobs=$(gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${REGRESSION_RUN_ID}/jobs?per_page=100")
+          queued=$(printf '%s' "$jobs" | jq '[.[].jobs[] | select((.labels | index("kafka-regression")) and .status == "queued")] | length')
+          running=$(printf '%s' "$jobs" | jq '[.[].jobs[] | select((.labels | index("kafka-regression")) and .status == "in_progress")] | length')
 
-          # An active regression means the dedicated runner is available but intentionally busy.
-          if [ "$active_runs" -gt 0 ]; then
+          # Waiting matrix entries are expected while another performance lane uses the hardware.
+          if [ "$queued" -eq 0 ] || [ "$running" -gt 0 ]; then
             exit 0
           fi
 
@@ -59,7 +59,7 @@ jobs:
           REGRESSION_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           message=$(printf \
-            'Kafka regression job has not been picked up by the runner within 2 hours.\nRepository: %s\nCommit: %.12s\nRun: %s' \
+            'Kafka performance job has not been picked up by the dedicated runner within 2 hours.\nRepository: %s\nCommit: %.12s\nRun: %s' \
             "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \

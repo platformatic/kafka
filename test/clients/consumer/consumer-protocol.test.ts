@@ -1,4 +1,5 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, strictEqual, throws } from 'node:assert'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import {
   decodeCooperativeStickyGeneration,
@@ -7,6 +8,51 @@ import {
   encodeConsumerProtocolAssignment,
   encodeConsumerProtocolSubscription
 } from '../../../src/index.ts'
+
+const { MemberMetadata } = createRequire(import.meta.url)('kafkajs/src/consumer/assignerProtocol.js')
+
+for (const version of [1, 2, 3, 4]) {
+  test(`consumer protocol subscription should decode legacy metadata advertising v${version}`, () => {
+    const data = { version, topics: ['topic-a'], userData: Buffer.from('metadata') }
+
+    deepStrictEqual(decodeConsumerProtocolSubscription(MemberMetadata.encode(data)), {
+      ...data,
+      ownedPartitions: [],
+      generationId: -1,
+      rackId: null
+    })
+  })
+}
+
+for (const version of [1, 2]) {
+  test(`consumer protocol subscription should default fields missing after a v${version} body`, () => {
+    const data = {
+      version,
+      topics: ['topic-a'],
+      userData: Buffer.from('metadata'),
+      ownedPartitions: [{ topic: 'topic-a', partitions: [0] }],
+      generationId: 42
+    }
+    const encoded = encodeConsumerProtocolSubscription(data)
+    encoded.writeInt16BE(3)
+
+    deepStrictEqual(decodeConsumerProtocolSubscription(encoded), {
+      ...data,
+      version: 3,
+      generationId: version >= 2 ? 42 : -1,
+      rackId: null
+    })
+  })
+}
+
+for (const version of [0, 1, 2]) {
+  test(`consumer protocol subscription should reject a partial field after a v${version} body`, () => {
+    const encoded = encodeConsumerProtocolSubscription({ version, topics: ['topic-a'] })
+    encoded.writeInt16BE(3)
+
+    throws(() => decodeConsumerProtocolSubscription(Buffer.concat([encoded, Buffer.from([0])])))
+  })
+}
 
 test('consumer protocol subscription should encode and decode v3 fields', () => {
   const encoded = encodeConsumerProtocolSubscription({

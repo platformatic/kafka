@@ -104,15 +104,17 @@ export function decodeConsumerProtocolSubscription (buffer: Buffer): ConsumerPro
     rackId: null
   }
 
-  if (version >= 1) {
+  // KafkaJS and Platformatic <= 2.11 may advertise newer versions with a v0 body.
+  // Default absent trailing fields, but still reject partially encoded fields.
+  if (version >= 1 && reader.remaining > 0) {
     subscription.ownedPartitions = readTopicPartitions(reader)
   }
 
-  if (version >= 2) {
+  if (version >= 2 && reader.remaining > 0) {
     subscription.generationId = reader.readInt32()
   }
 
-  if (version >= 3) {
+  if (version >= 3 && reader.remaining > 0) {
     subscription.rackId = reader.readNullableString(false)
   }
 

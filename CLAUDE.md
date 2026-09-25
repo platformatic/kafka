@@ -42,6 +42,13 @@ across every version the broker still accepts, reporting the unreachable ones as
 They run in their own CI job against the oldest and newest brokers in the matrix, because Kafka 4.0
 raised the minimum accepted version of several APIs. Use the `.compat-test.ts` suffix for new ones.
 
+When changing consumer-group wire formats, verify backward compatibility with metadata produced by
+KafkaJS and older released `@platformatic/kafka` versions, not just round trips through the new
+encoder or different broker API versions. Use independent legacy wire fixtures (including a v1
+subscription header with only v0 fields) to test both JoinGroup leader decoding and
+`Admin.describeGroups`; check that older readers can consume new writes where interoperability is
+required. Do not assume an advertised version guarantees optional trailing fields are present.
+
 The delegation token sweeps need `-f docker-compose.delegation-tokens.yml`, which only works on
 Confluent 7.6.0 or later: KRaft gained delegation tokens in Apache Kafka 3.6, and a 3.5 broker
 configured with a token secret key refuses to start. They skip themselves elsewhere.

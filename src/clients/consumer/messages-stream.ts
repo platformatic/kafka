@@ -93,6 +93,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #refreshOffsetsInflight: boolean
   #refreshOffsetsPending: boolean
   #refreshOffsetsDestroyOnError: boolean
+  #offsetsEpoch: number
   #fetches: number
   #maxFetches: number
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
@@ -102,7 +103,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsCommitted: Map<string, bigint>
   #commitWaiters: Map<string, Array<{ offset: bigint, callback: Callback<void> }>>
   #partitionsEpochs: Map<string, number>
-  #inflightNodes: Map<number, number>
+  #inflightNodes: Map<number, { startedAt: number }>
   #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
   #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeyDeserializer: Deserializer<HeaderKey>
@@ -122,7 +123,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, bigint>,
+    offsetsEpoch: number
   ) => void;
 
   [kInstance]: number;
@@ -196,6 +198,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#refreshOffsetsInflight = false
     this.#refreshOffsetsPending = false
     this.#refreshOffsetsDestroyOnError = false
+    this.#offsetsEpoch = 0
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
     this.#topics = structuredClone(options.topics)
@@ -558,7 +561,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return
     }
 
+    const offsetsEpoch = this.#offsetsEpoch
     this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
+      if (offsetsEpoch !== this.#offsetsEpoch) {
+        return
+      }
+
       if (error) {
         this.emit('fetch')
 
@@ -583,8 +591,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       // Remove stale inflight entries that have been pending for too long.
       // This prevents permanent partition starvation if a fetch callback is never invoked.
       const now = Date.now()
-      for (const [node, timestamp] of this.#inflightNodes) {
-        if (now - timestamp > 120_000) {
+      for (const [node, inflight] of this.#inflightNodes) {
+        if (now - inflight.startedAt > 120_000) {
           this.#inflightNodes.delete(node)
         }
       }
@@ -645,12 +653,31 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       for (const [node, nodeRequests] of requests) {
-        this.#inflightNodes.set(node, Date.now())
+        const inflight = { startedAt: Date.now() }
+        this.#inflightNodes.set(node, inflight)
         this.#consumer.fetch(
           { ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] },
           (error, response) => {
-            this.#inflightNodes.delete(node)
+            const ownsNode = this.#inflightNodes.get(node) === inflight
+            if (ownsNode) {
+              this.#inflightNodes.delete(node)
+            }
             this.emit('fetch')
+
+            // A refresh (including a rejoin) invalidates requests issued before it.
+            // Never let an old response or error undo the restored offsets.
+            if (offsetsEpoch !== this.#offsetsEpoch || !ownsNode) {
+              if (this.#closed || this.closed || this.destroyed) {
+                if (this.#inflightNodes.size === 0) {
+                  this.push(null)
+                }
+              } else if (ownsNode) {
+                // The refresh may have finished while this node was still inflight.
+                // Now that it is free, resume fetching from the restored position.
+                process.nextTick(() => this.#fetch())
+              }
+              return
+            }
 
             if (error) {
               // The stream has been closed, ignore the error
@@ -697,7 +724,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               return
             }
 
-            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets)
+            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch)
           }
         )
       }
@@ -826,8 +853,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, bigint>,
+    offsetsEpoch: number
   ) {
+    if (offsetsEpoch !== this.#offsetsEpoch) {
+      return
+    }
+
     const autocommit = this.#autocommitEnabled
     const keyDeserializer = this.#keyDeserializer
     const valueDeserializer = this.#valueDeserializer
@@ -1355,6 +1387,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #scheduleRefreshOffsetsAndFetch (destroyOnError = true) {
+    // Invalidate outstanding fetches immediately, not only after restoration completes.
+    this.#offsetsEpoch++
     this.#refreshOffsetsDestroyOnError ||= destroyOnError
 
     /* c8 ignore next 4 - Hard to test */
@@ -1468,7 +1502,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
     response: FetchResponse,
-    requestedOffsets: Map<string, bigint>
+    requestedOffsets: Map<string, bigint>,
+    offsetsEpoch: number
   ) {
     const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsumeWithDeserializationError][] = []
 
@@ -1512,7 +1547,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (requests.length === 0) {
-      this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+      this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch)
       return
     }
 
@@ -1545,12 +1580,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       requests,
       0,
       error => {
+        if (offsetsEpoch !== this.#offsetsEpoch) {
+          return
+        }
+
         if (error) {
           this.destroy(error)
           return
         }
 
-        this.#pushRecords(metadata, topicIds, response, requestedOffsets)
+        this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch)
       }
     )
   }

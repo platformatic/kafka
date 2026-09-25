@@ -472,6 +472,133 @@ test('should drain a pending offset refresh scheduled during stream construction
   stream.destroy()
 })
 
+for (const releaseBeforeRebalance of [true, false]) {
+  test(`should retain the committed rewind when a fetch completes ${releaseBeforeRebalance ? 'before' : 'after'} a rebalance`, { timeout: 5_000 }, async () => {
+    const consumer = createOffsetRefreshConsumerMock()
+    let committed = 10n
+    consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+      callback(null, new Map([[topic, [committed]]]))
+    }
+
+    let releaseFetch!: () => void
+    const firstFetch = new Promise<void>(resolve => {
+      consumer.fetch = (_: object, callback: CallbackWithPromise<FetchResponse>) => {
+        releaseFetch = () => {
+          const response = createFetchResponse(-1)
+          response.responses[0].partitions[0].records = [createRecordsBatch(10n, ['old-record'])]
+          callback(null, response)
+        }
+        resolve()
+      }
+    })
+
+    const stream = new MessagesStream(consumer, committedStreamOptions)
+    const received: Array<{ offset: bigint; generation: number }> = []
+    stream.on('data', message => {
+      received.push({ offset: message.offset, generation: (message.metadata.consumer as { generationId: number }).generationId })
+    })
+    stream.on('error', error => { throw error })
+    await firstFetch
+    stream.pause()
+
+    if (releaseBeforeRebalance) {
+      releaseFetch()
+      strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 11n)
+    }
+
+    committed = 0n
+    consumer.generationId = 2
+    const restored = new Promise<void>(resolve => stream.once('offsets', resolve))
+    consumer.emit('consumer:group:join')
+    await restored
+    strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 0n)
+
+    if (!releaseBeforeRebalance) {
+      releaseFetch()
+      strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 0n)
+    }
+
+    let requestedOffset!: bigint
+    const replayRequest = new Promise<void>(resolve => {
+      let replayed = false
+      consumer.fetch = (options: { topics: FetchRequestTopic[] }, callback: CallbackWithPromise<FetchResponse>) => {
+        if (replayed) return
+        replayed = true
+        requestedOffset = options.topics[0].partitions[0].fetchOffset
+        const response = createFetchResponse(-1)
+        response.responses[0].partitions[0].records = [createRecordsBatch(0n, ['replayed-record'])]
+        callback(null, response)
+        resolve()
+      }
+    })
+    const replayDelivered = new Promise<void>(resolve => {
+      stream.on('data', message => {
+        if (message.offset === 0n) resolve()
+      })
+    })
+    stream.resume()
+    await replayRequest
+    await replayDelivered
+
+    strictEqual(requestedOffset, 0n)
+    strictEqual(received.some(message => message.offset === 0n && message.generation === 2), true)
+    if (!releaseBeforeRebalance) {
+      strictEqual(received.some(message => message.offset === 10n), false)
+    }
+    stream.destroy()
+  })
+}
+
+test('should discard a fetch still in deserialization when offsets are restored', { timeout: 5_000 }, async () => {
+  const consumer = createOffsetRefreshConsumerMock()
+  let committed = 10n
+  consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map([[topic, [committed]]]))
+  }
+  consumer.fetch = (_: object, callback: CallbackWithPromise<FetchResponse>) => {
+    const response = createFetchResponse(-1)
+    response.responses[0].partitions[0].records = [createRecordsBatch(10n, ['old-record'])]
+    callback(null, response)
+  }
+
+  let finishHook!: () => void
+  const hookStarted = new Promise<void>(resolve => {
+    finishHook = resolve
+  })
+  let releaseHook!: () => void
+  let held = false
+  const stream = new MessagesStream(consumer, {
+    ...committedStreamOptions,
+    beforeDeserialization (_data, _type, _message, callback) {
+      if (!held) {
+        held = true
+        releaseHook = () => callback(null)
+        finishHook()
+        return
+      }
+      callback(null)
+    }
+  })
+  const received: bigint[] = []
+  stream.on('data', message => received.push(message.offset))
+  stream.on('error', error => { throw error })
+  stream.resume()
+  await hookStarted
+  stream.pause()
+
+  committed = 0n
+  const restored = new Promise<void>(resolve => stream.once('offsets', resolve))
+  consumer.emit('consumer:group:join')
+  await restored
+  releaseHook()
+
+  // Let the remaining hooks finish without allowing stale records into the stream.
+  await new Promise<void>(resolve => setImmediate(resolve))
+  strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 0n)
+  strictEqual(received.length, 0)
+  stream.destroy()
+})
+
 test('should ignore data for partitions which were not part of the fetch request', async t => {
   const fetchedOffsets: bigint[] = []
   let resolveSecondFetch!: () => void

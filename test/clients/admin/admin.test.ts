@@ -2089,6 +2089,75 @@ test('describeGroups should describe consumer groups and support diagnostic chan
   verifyTracingChannel()
 })
 
+test('describeGroups should decode KafkaJS v1 member metadata without ownedPartitions (issue #420)', async t => {
+  const admin = createAdmin(t)
+  const groupId = 'legacy-group'
+  // KafkaJS MemberMetadata.encode({ version: 1, topics: ['topic-a'], userData: Buffer.from('metadata') })
+  // uses a v1 header with a v0 body (no ownedPartitions array).
+  const memberMetadata = Buffer.from('0001000000010007746f7069632d61000000086d65746164617461', 'hex')
+  const connection = {
+    instanceId: 1,
+    send (
+      apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _responseParser: unknown,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: CallbackWithPromise<unknown>
+    ): void {
+      if (apiKey === findCoordinatorV6.api.key) {
+        callback(null, {
+          throttleTimeMs: 0,
+          coordinators: [{ key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }]
+        })
+      } else if (apiKey === describeGroupsV5.api.key) {
+        callback(null, {
+          throttleTimeMs: 0,
+          groups: [{
+            errorCode: 0,
+            groupId,
+            groupState: 'Stable',
+            protocolType: 'consumer',
+            protocolData: 'roundrobin',
+            members: [{
+              memberId: 'kafkajs-member',
+              groupInstanceId: null,
+              clientId: 'kafkajs',
+              clientHost: '/127.0.0.1',
+              memberMetadata,
+              memberAssignment: EMPTY_BUFFER
+            }],
+            authorizedOperations: 0
+          }]
+        })
+      } else {
+        throw new Error(`Unexpected API key ${apiKey}`)
+      }
+    }
+  } as unknown as Connection
+
+  admin[kApis] = [
+    { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+    { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: 5 }
+  ]
+  admin[kGetBootstrapConnection] = callback => callback(null, connection)
+  mockConnectionPoolGet(admin[kConnections], () => true, null, connection)
+
+  const groups = await admin.describeGroups({ groups: [groupId] })
+  const member = groups.get(groupId)?.members.get('kafkajs-member')
+  ok(member)
+  deepStrictEqual(member.metadata, {
+    version: 1,
+    topics: ['topic-a'],
+    metadata: Buffer.from('metadata'),
+    ownedPartitions: [],
+    generationId: -1,
+    rackId: null
+  })
+  deepStrictEqual(member.assignments, new Map())
+})
+
 test('describeGroups should handle includeAuthorizedOperations option', async t => {
   // Create a consumer that joins a group
   const consumer = new Consumer({

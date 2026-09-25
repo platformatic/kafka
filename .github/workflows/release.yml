@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'The version number to tag and release'
+        description: 'Version number or patch, minor, major'
         required: true
         type: string
       prerelease:
@@ -87,7 +87,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Bump Version
-        run: node scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
+        id: bump
+        run: |
+          node scripts/bump-version.ts "${{ inputs.version }}" "${{ github.actor }}"
+          version=$(node -p "require('./package.json').version")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_ACTIONS: 'true'
       - name: Push changes
@@ -99,21 +103,24 @@ jobs:
       - name: Create draft release notes
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.bump.outputs.version }}
         run: |
-          pnpx @matteo.collina/release-notes -t v${{ inputs.version }} -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c ${{ github.ref }}
+          pnpx @matteo.collina/release-notes -t "v$RELEASE_VERSION" -r kafka -o platformatic -d ${{ github.event.inputs.prerelease == 'true' && '-p' || '' }} -c "$(git rev-parse HEAD)"
       - name: Attach regression summary
         if: ${{ inputs.skip_regression != true }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.bump.outputs.version }}
         run: |
-          gh release upload "v${{ inputs.version }}" release-artifacts/regression-summary.md
+          gh release upload "v$RELEASE_VERSION" release-artifacts/regression-summary.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_VERSION: ${{ steps.bump.outputs.version }}
         run: |
           if [ "$PRERELEASE" = 'true' ]; then
-            gh release edit "v${{ inputs.version }}" --draft=false
+            gh release edit "v$RELEASE_VERSION" --draft=false
           else
-            gh release edit "v${{ inputs.version }}" --draft=false --latest
+            gh release edit "v$RELEASE_VERSION" --draft=false --latest
           fi

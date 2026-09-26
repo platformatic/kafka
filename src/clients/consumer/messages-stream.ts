@@ -124,8 +124,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     topicIds: Map<string, string>,
     response: FetchResponse,
     requestedOffsets: Map<string, bigint>,
-    offsetsEpoch: number
-  ) => void;
+    offsetsEpoch: number,
+    complete: () => void
+  ) => void
+
+  #pendingRecords: Array<{ records: Generator<void, void, void>; offsetsEpoch: number; complete: () => void }> = []
+  #pumpingRecords = false;
 
   [kInstance]: number;
 
@@ -406,7 +410,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     // setup, where resume() is called before _construct() completes.
     if (wasPaused) {
       process.nextTick(() => {
-        this.#fetch()
+        this.#drainRecords()
       })
     }
 
@@ -533,6 +537,13 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   _destroy (error: Error | null, callback: (error?: Error | null) => void): void {
+    for (let i = 0; i < this.#pendingRecords.length; i++) {
+      // A deserialization failure unwinds the currently running generator itself.
+      if (!this.#pumpingRecords || i > 0) this.#pendingRecords[i].records.return()
+      this.#pendingRecords[i].complete()
+    }
+    this.#pendingRecords = []
+
     if (this.#autocommitInterval) {
       clearInterval(this.#autocommitInterval)
     }
@@ -546,13 +557,54 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   _read () {
-    this.#fetch()
+    process.nextTick(() => this.#drainRecords())
+  }
+
+  #drainRecords () {
+    if (this.#pumpingRecords || this.#closed || this.destroyed) return
+    this.#pumpingRecords = true
+    try {
+      while (this.#pendingRecords.length > 0) {
+        const pending = this.#pendingRecords[0]
+        if (pending.offsetsEpoch !== this.#offsetsEpoch) {
+          pending.records.return()
+          pending.complete()
+          this.#pendingRecords.shift()
+          continue
+        }
+        if (this.#paused || this.readableLength >= this.readableHighWaterMark) break
+        if (pending.records.next().done) {
+          pending.complete()
+          this.#pendingRecords.shift()
+        }
+        if (this.#closed || this.destroyed) break
+      }
+    } catch (error) {
+      this.destroy(error)
+    } finally {
+      this.#pumpingRecords = false
+    }
+    if (this.#pendingRecords.length === 0 && !this.#closed && !this.destroyed) {
+      if (this.#maxFetches > 0 && this.#fetches >= this.#maxFetches && this.#inflightNodes.size === 0) {
+        this.push(null)
+      } else if (this.readableLength < this.readableHighWaterMark) {
+        process.nextTick(() => this.#fetch())
+      }
+    }
   }
 
   #fetch () {
     /* c8 ignore next 4 - Hard to test */
     if (this.#closed || this.closed || this.destroyed) {
       this.push(null)
+      return
+    }
+
+    if (
+      this.#pendingRecords.length > 0 ||
+      this.readableLength >= this.readableHighWaterMark ||
+      (this.#maxFetches > 0 && this.#fetches >= this.#maxFetches)
+    ) {
       return
     }
 
@@ -655,18 +707,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       for (const [node, nodeRequests] of requests) {
         const inflight = { startedAt: Date.now() }
         this.#inflightNodes.set(node, inflight)
+        const complete = () => {
+          if (this.#inflightNodes.get(node) === inflight) this.#inflightNodes.delete(node)
+        }
         this.#consumer.fetch(
           { ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] },
           (error, response) => {
             const ownsNode = this.#inflightNodes.get(node) === inflight
-            if (ownsNode) {
-              this.#inflightNodes.delete(node)
-            }
             this.emit('fetch')
 
             // A refresh (including a rejoin) invalidates requests issued before it.
             // Never let an old response or error undo the restored offsets.
             if (offsetsEpoch !== this.#offsetsEpoch || !ownsNode) {
+              complete()
               if (this.#closed || this.closed || this.destroyed) {
                 if (this.#inflightNodes.size === 0) {
                   this.push(null)
@@ -680,6 +733,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             }
 
             if (error) {
+              complete()
               // The stream has been closed, ignore the error
               /* c8 ignore next 4 - Hard to test */
               if (this.#closed || this.closed || this.destroyed) {
@@ -715,6 +769,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             }
 
             if (this.#closed || this.closed || this.destroyed) {
+              complete()
               // When it's the last inflight, we finally close the stream.
               // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
               if (this.#inflightNodes.size === 0) {
@@ -724,7 +779,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               return
             }
 
-            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch)
+            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch, complete)
           }
         )
       }
@@ -854,8 +909,28 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     topicIds: Map<string, string>,
     response: FetchResponse,
     requestedOffsets: Map<string, bigint>,
-    offsetsEpoch: number
+    offsetsEpoch: number,
+    complete: () => void
   ) {
+    if (offsetsEpoch !== this.#offsetsEpoch || this.#closed || this.destroyed) {
+      complete()
+      return
+    }
+    this.#pendingRecords.push({
+      records: this.#records(metadata, topicIds, response, requestedOffsets, offsetsEpoch),
+      offsetsEpoch,
+      complete
+    })
+    this.#drainRecords()
+  }
+
+  * #records (
+    metadata: ClusterMetadata,
+    topicIds: Map<string, string>,
+    response: FetchResponse,
+    requestedOffsets: Map<string, bigint>,
+    offsetsEpoch: number
+  ): Generator<void, void, void> {
     if (offsetsEpoch !== this.#offsetsEpoch) {
       return
     }
@@ -867,8 +942,6 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     const headerValueDeserializer = this.#headerValueDeserializer
 
     let diagnosticContext: DiagnosticContext<unknown>
-
-    let canPush = true
 
     const messageMetadata = {
       consumer: {
@@ -903,30 +976,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
           this.#partitionsEpochs.set(key, leaderEpoch)
 
-          // Track offsets
-          if (batch === recordsBatches[recordsBatches.length - 1]) {
-            // Track the last read offset
-            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
-            this.#offsetsToFetch.set(key, lastOffset + 1n)
-
-            // Autocommit if needed
-            if (autocommit) {
-              this.#offsetsToCommit.set(key, {
-                topic,
-                partition,
-                offset: lastOffset + 1n,
-                leaderEpoch
-              })
-            }
-          }
-
-          // Filter control markers
-          if (batch.attributes & IS_CONTROL) {
-            continue
-          }
-
           // Process messages
-          for (const record of batch.records) {
+          for (const record of batch.attributes & IS_CONTROL ? [] : batch.records) {
+            if (offsetsEpoch !== this.#offsetsEpoch || this.#closed || this.destroyed) return
             const messageToConsume: MessageToConsumeWithDeserializationError = { ...record, topic, partition }
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
@@ -1081,7 +1133,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
               consumerReceivesChannel.asyncStart.publish(diagnosticContext)
 
-              canPush = this.push(message)
+              this.push(message)
 
               consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
             } catch (error) {
@@ -1093,6 +1145,25 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             } finally {
               consumerReceivesChannel.end.publish(diagnosticContext)
             }
+            yield
+          }
+          if (offsetsEpoch !== this.#offsetsEpoch || this.#closed || this.destroyed) return
+
+          // Track offsets
+          if (batch === recordsBatches[recordsBatches.length - 1]) {
+            // Track the last read offset
+            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
+            this.#offsetsToFetch.set(key, lastOffset + 1n)
+
+            // Autocommit if needed
+            if (autocommit) {
+              this.#offsetsToCommit.set(key, {
+                topic,
+                partition,
+                offset: lastOffset + 1n,
+                leaderEpoch
+              })
+            }
           }
         }
       }
@@ -1102,31 +1173,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this[kAutocommit]()
     }
 
-    // Schedule the next fetch only when the readable buffer still has room.
-    // When push() returns false, the buffer is above highWaterMark —
-    // continuing to fetch would defeat Node.js backpressure and cause
-    // unbounded memory growth (see #260).
-    //
-    // When canPush is false, the fetch loop restarts via two mechanisms:
-    //  1. _read() — called by Node.js when the buffer drains below
-    //     highWaterMark in both pull and flowing modes.
-    //  2. resume() — when pipeline()/pipe() transitions from paused to
-    //     unpaused after downstream backpressure releases, resume()
-    //     explicitly schedules process.nextTick(#fetch) (see #254).
-    //
-    // process.nextTick yields control back to the event loop between fetch
-    // cycles, ensuring heartbeats, commits, and other I/O are not starved
-    // by a tight fetch loop. It also avoids growing the call stack if
-    // metadata/fetch callbacks fire synchronously.
-    if (canPush) {
-      process.nextTick(() => {
-        this.#fetch()
-      })
-    }
-
-    if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
-      this.push(null)
-    }
+    this.#fetches++
   }
 
   [kUpdateCommittedOffset] (topic: string, partition: number, offset: bigint): void {
@@ -1421,7 +1468,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         return
       }
 
-      this.#fetch()
+      this.#drainRecords()
     })
   }
 
@@ -1503,7 +1550,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     topicIds: Map<string, string>,
     response: FetchResponse,
     requestedOffsets: Map<string, bigint>,
-    offsetsEpoch: number
+    offsetsEpoch: number,
+    complete: () => void
   ) {
     const requests: [Buffer | null, BeforeHookPayloadType, MessageToConsumeWithDeserializationError][] = []
 
@@ -1547,7 +1595,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     }
 
     if (requests.length === 0) {
-      this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch)
+      this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch, complete)
       return
     }
 
@@ -1580,16 +1628,19 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       requests,
       0,
       error => {
-        if (offsetsEpoch !== this.#offsetsEpoch) {
+        if (offsetsEpoch !== this.#offsetsEpoch || this.#closed || this.destroyed) {
+          complete()
+          process.nextTick(() => this.#drainRecords())
           return
         }
 
         if (error) {
+          complete()
           this.destroy(error)
           return
         }
 
-        this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch)
+        this.#pushRecords(metadata, topicIds, response, requestedOffsets, offsetsEpoch, complete)
       }
     )
   }

@@ -1543,7 +1543,9 @@ test('fetch should return data and support diagnostic channels', async t => {
 
   const options = {
     node: topicInfo.partitions[0].leader,
-    maxWaitTime: 1000,
+    // Empty-topic fetches must not long-poll, otherwise a loaded broker may return no topic responses.
+    maxWaitTime: 0,
+    minBytes: 0,
     topics: [
       {
         topicId: topicInfo.id,
@@ -1577,37 +1579,42 @@ test('fetch should return data and support diagnostic channels', async t => {
     }
   })
 
-  const response = await consumer.fetch(options)
+  try {
+    const response = await consumer.fetch(options)
+    const { throttleTimeMs, ...responseWithoutThrottleTime } = response
 
-  response.sessionId = 0
-  deepStrictEqual(response, {
-    throttleTimeMs: 0,
-    errorCode: 0,
-    sessionId: 0,
-    nodeEndpoints: [],
-    responses: [
-      {
-        topicId: topicInfo.id,
-        partitions: [
-          {
-            partitionIndex: 0,
-            errorCode: 0,
-            highWatermark: 0n,
-            lastStableOffset: 0n,
-            logStartOffset: 0n,
-            divergingEpoch: { epoch: -1, endOffset: -1n },
-            currentLeader: { leaderId: -1, leaderEpoch: -1 },
-            snapshotId: { endOffset: -1n, epoch: -1 },
-            abortedTransactions: [],
-            preferredReadReplica: -1,
-            records: []
-          }
-        ]
-      }
-    ]
-  })
+    ok(throttleTimeMs >= 0)
+    responseWithoutThrottleTime.sessionId = 0
+    deepStrictEqual(responseWithoutThrottleTime, {
+      errorCode: 0,
+      sessionId: 0,
+      nodeEndpoints: [],
+      responses: [
+        {
+          topicId: topicInfo.id,
+          partitions: [
+            {
+              partitionIndex: 0,
+              errorCode: 0,
+              highWatermark: 0n,
+              lastStableOffset: 0n,
+              logStartOffset: 0n,
+              divergingEpoch: { epoch: -1, endOffset: -1n },
+              currentLeader: { leaderId: -1, leaderEpoch: -1 },
+              snapshotId: { endOffset: -1n, epoch: -1 },
+              abortedTransactions: [],
+              preferredReadReplica: -1,
+              records: []
+            }
+          ]
+        }
+      ]
+    })
 
-  verifyTracingChannel()
+    verifyTracingChannel()
+  } finally {
+    verifyTracingChannel.unsubscribe()
+  }
 })
 
 test('fetch should support both promise and callback API', async t => {

@@ -475,8 +475,18 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
 
   channel.subscribe(subscribers as TracingChannelSubscribers<DiagnosticEvent>)
 
-  return function verify () {
+  let subscribed = true
+  const unsubscribeVerifier = () => {
+    if (!subscribed) {
+      return
+    }
+
     channel.unsubscribe(subscribers as TracingChannelSubscribers<DiagnosticEvent>)
+    subscribed = false
+  }
+
+  const verify = function verify () {
+    unsubscribeVerifier()
 
     if (multiple) {
       for (const [label, verifier] of Object.entries(verifiers)) {
@@ -490,6 +500,10 @@ export function createTracingChannelVerifier<DiagnosticEvent extends Record<stri
       }
     }
   }
+
+  verify.unsubscribe = unsubscribeVerifier
+
+  return verify
 }
 
 export function isKafka (version: string | string[]): boolean {

@@ -129,6 +129,28 @@ jobs:
       - name: Run API compatibility sweeps
         run: 'pnpm run test:compat'
 
+  client-upgrade:
+    name: 'Client upgrade E2E / KafkaJS and previous releases'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start Kafka
+        run: docker compose up -d --wait broker-single
+      - name: Run client upgrade E2E tests
+        run: pnpm run test:e2e:upgrade
+
   redpanda:
     name: 'Redpanda E2E smoke test'
     runs-on: ubuntu-latest

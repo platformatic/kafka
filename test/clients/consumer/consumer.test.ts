@@ -7286,9 +7286,11 @@ test('cooperative sticky rebalance should only pause streams subscribed to revok
 
   await waitFor(() => {
     const a1 = consumer1.assignments?.find(a => a.topic === topicA)?.partitions.length ?? 0
+    const b1 = consumer1.assignments?.find(a => a.topic === topicB)?.partitions.length ?? 0
     const a2 = consumer2.assignments?.find(a => a.topic === topicA)?.partitions.length ?? 0
-    strictEqual(a1, 2)
-    strictEqual(a2, 2)
+    strictEqual(a1, 0)
+    strictEqual(b1, 4)
+    strictEqual(a2, 4)
   }, { timeout: 15_000 })
 
   // streamB was never paused — only streamA's topic was revoked

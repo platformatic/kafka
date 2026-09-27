@@ -288,6 +288,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   /* c8 ignore next 3 - Simple getter */
+  get topics (): string[] {
+    return this.#topics
+  }
+
+  /* c8 ignore next 3 - Simple getter */
   get offsetsToFetch (): Map<string, bigint> {
     return this.#offsetsToFetch
   }

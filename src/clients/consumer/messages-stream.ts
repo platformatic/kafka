@@ -222,6 +222,24 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
 
+      // Drop any queued commit (and its waiters) for partitions that are no longer assigned
+      // after this rebalance. consumer.assignments is updated before consumer:group:join fires,
+      // so #assignmentsForTopic reflects the new state here. Committing a revoked partition
+      // with the new generationId is accepted by Kafka and moves its committed offset forward,
+      // causing the new owner to start past messages still sitting in our Readable buffer.
+      for (const [key, { topic, partition }] of this.#offsetsToCommit) {
+        if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+          this.#offsetsToCommit.delete(key)
+          const waiters = this.#commitWaiters.get(key)
+          if (waiters) {
+            for (const { callback } of waiters) {
+              callback(null)
+            }
+            this.#commitWaiters.delete(key)
+          }
+        }
+      }
+
       // [kAutocommit] skips flushing while mid-rejoin to avoid triggering a rejoin storm (see
       // below), leaving any queued offset waiting for the next tick of the autocommit timer.
       // With autocommit disabled there is no such timer, so a manual commit requested during a

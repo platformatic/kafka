@@ -1178,6 +1178,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       callback = createPromisifiedCallback<void>()
     }
 
+    // No-op if this partition is no longer assigned. After an eager rebalance the revoked
+    // partition's messages may still be buffered here; committing them with the new
+    // generationId is accepted by Kafka and would advance the committed offset, causing the
+    // new owner to skip those messages permanently.
+    if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+      callback(null)
+      return callback[kCallbackPromise]!
+    }
+
     const key = partitionKey(topic, partition)
 
     const current = this.#offsetsToCommit.get(key)

@@ -1,3 +1,4 @@
+import { UnsupportedFormatError } from '../../errors.ts'
 import { Reader } from '../../protocol/reader.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { type GroupAssignment } from './types.ts'
@@ -93,32 +94,37 @@ export function encodeConsumerProtocolSubscription (data: {
 
 export function decodeConsumerProtocolSubscription (buffer: Buffer): ConsumerProtocolSubscriptionData {
   const reader = Reader.from(buffer)
-  const encodedVersion = reader.readInt16()
-  const version = supportedVersion(encodedVersion)
-  const subscription: ConsumerProtocolSubscriptionData = {
-    version: encodedVersion,
-    topics: reader.readArray(r => r.readString(false), false, false),
-    userData: reader.readBytes(false),
-    ownedPartitions: [],
-    generationId: -1,
-    rackId: null
-  }
 
-  // KafkaJS and Platformatic <= 2.11 may advertise newer versions with a v0 body.
-  // Default absent trailing fields, but still reject partially encoded fields.
-  if (version >= 1 && reader.remaining > 0) {
-    subscription.ownedPartitions = readTopicPartitions(reader)
-  }
+  try {
+    const encodedVersion = reader.readInt16()
+    const version = supportedVersion(encodedVersion)
+    const subscription: ConsumerProtocolSubscriptionData = {
+      version: encodedVersion,
+      topics: reader.readArray(r => r.readString(false), false, false),
+      userData: reader.readBytes(false),
+      ownedPartitions: [],
+      generationId: -1,
+      rackId: null
+    }
 
-  if (version >= 2 && reader.remaining > 0) {
-    subscription.generationId = reader.readInt32()
-  }
+    // KafkaJS and Platformatic <= 2.11 may advertise newer versions with a v0 body.
+    // Default absent trailing fields, but still reject partially encoded fields.
+    if (version >= 1 && reader.remaining > 0) {
+      subscription.ownedPartitions = readTopicPartitions(reader)
+    }
 
-  if (version >= 3 && reader.remaining > 0) {
-    subscription.rackId = reader.readNullableString(false)
-  }
+    if (version >= 2 && reader.remaining > 0) {
+      subscription.generationId = reader.readInt32()
+    }
 
-  return subscription
+    if (version >= 3 && reader.remaining > 0) {
+      subscription.rackId = reader.readNullableString(false)
+    }
+
+    return subscription
+  } catch (e) {
+    throw new UnsupportedFormatError('Malformed consumer protocol subscription', { cause: e as Error })
+  }
 }
 
 export function decodeCooperativeStickyGeneration (userData: Buffer): number {
@@ -155,22 +161,27 @@ export function decodeConsumerProtocolAssignment (buffer: Buffer): ConsumerProto
   }
 
   const reader = Reader.from(buffer)
-  const encodedVersion = reader.readInt16()
 
-  if (reader.remaining === 0) {
+  try {
+    const encodedVersion = reader.readInt16()
+
+    if (reader.remaining === 0) {
+      return {
+        version: encodedVersion,
+        assignedPartitions: [],
+        userData: Buffer.alloc(0)
+      }
+    }
+
+    const assignedPartitions = readTopicPartitions(reader)
+    const userData = reader.remaining > 0 ? reader.readBytes(false) : Buffer.alloc(0)
+
     return {
       version: encodedVersion,
-      assignedPartitions: [],
-      userData: Buffer.alloc(0)
+      assignedPartitions,
+      userData
     }
-  }
-
-  const assignedPartitions = readTopicPartitions(reader)
-  const userData = reader.remaining > 0 ? reader.readBytes(false) : Buffer.alloc(0)
-
-  return {
-    version: encodedVersion,
-    assignedPartitions,
-    userData
+  } catch (e) {
+    throw new UnsupportedFormatError('Malformed consumer protocol assignment', { cause: e as Error })
   }
 }

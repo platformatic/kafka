@@ -1350,36 +1350,40 @@ export class Admin extends Base<AdminOptions> {
                     authorizedOperations: raw.authorizedOperations
                   }
 
-                  for (const member of raw.members) {
-                    let memberMetadata: GroupMember['metadata'] | undefined
-                    let memberAssignments: Map<string, GroupAssignment> | undefined
+                  try {
+                    for (const member of raw.members) {
+                      let memberMetadata: GroupMember['metadata'] | undefined
+                      let memberAssignments: Map<string, GroupAssignment> | undefined
 
-                    if (member.memberMetadata.length > 0) {
-                      const subscription = decodeConsumerProtocolSubscription(member.memberMetadata)
-                      memberMetadata = {
-                        version: subscription.version,
-                        topics: subscription.topics,
-                        metadata: subscription.userData,
-                        ownedPartitions: subscription.ownedPartitions,
-                        generationId: subscription.generationId,
-                        rackId: subscription.rackId
+                      if (raw.protocolType === 'consumer' && member.memberMetadata.length > 0) {
+                        const subscription = decodeConsumerProtocolSubscription(member.memberMetadata)
+                        memberMetadata = {
+                          version: subscription.version,
+                          topics: subscription.topics,
+                          metadata: subscription.userData,
+                          ownedPartitions: subscription.ownedPartitions,
+                          generationId: subscription.generationId,
+                          rackId: subscription.rackId
+                        }
+
+                        memberAssignments = new Map(
+                          decodeConsumerProtocolAssignment(member.memberAssignment).assignedPartitions.map(
+                            assignment => [assignment.topic, assignment]
+                          )
+                        )
                       }
 
-                      memberAssignments = new Map(
-                        decodeConsumerProtocolAssignment(member.memberAssignment).assignedPartitions.map(
-                          assignment => [assignment.topic, assignment]
-                        )
-                      )
+                      group.members.set(member.memberId, {
+                        id: member.memberId,
+                        groupInstanceId: member.groupInstanceId,
+                        clientId: member.clientId,
+                        clientHost: member.clientHost,
+                        metadata: memberMetadata,
+                        assignments: memberAssignments
+                      })
                     }
-
-                    group.members.set(member.memberId, {
-                      id: member.memberId,
-                      groupInstanceId: member.groupInstanceId,
-                      clientId: member.clientId,
-                      clientHost: member.clientHost,
-                      metadata: memberMetadata,
-                      assignments: memberAssignments
-                    })
+                  } catch (e) {
+                    group.error = e as Error
                   }
 
                   groups.set(group.id, group)

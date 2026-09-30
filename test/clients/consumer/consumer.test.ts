@@ -3661,6 +3661,18 @@ test('listOffsets should use custom isolation level when provided', async t => {
   strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
 })
 
+test('listOffsets should accept a custom isolation level in strict mode', async t => {
+  // The option schema declared isolationLevel as a string while FetchIsolationLevels are numbers,
+  // so strict consumers rejected every value: `1` failed the type check, `'1'` the enum.
+  const consumer = createConsumer(t, { strict: true })
+  const topic = await createTopic(t, true)
+
+  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel: FetchIsolationLevels.READ_COMMITTED })
+
+  strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+  strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+})
+
 test('listOffsets should refresh metadata and retry when leadership moves (NOT_LEADER_OR_FOLLOWER)', async t => {
   const topic = 'test-topic'
   // retries: 0 isolates the outer forceUpdateMetadata retry (the fix under test) from

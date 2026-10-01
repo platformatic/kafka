@@ -3,7 +3,8 @@ import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import type { RecordsBatch } from '../../../src/protocol/records.ts'
+import type { Message, RecordsBatch } from '../../../src/protocol/records.ts'
+import type { ConsumeOptions } from '../../../src/clients/consumer/types.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import {
   type Consumer,
@@ -164,14 +165,18 @@ function createConsumerMock (
   return consumer
 }
 
-function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
+function createStream (
+  consumer: Consumer,
+  options: Partial<ConsumeOptions<Buffer, Buffer, Buffer, Buffer>> = {}
+): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
   const stream = new MessagesStream(consumer, {
     topics: [topic],
     mode: MessagesStreamModes.EARLIEST,
     fallbackMode: MessagesStreamFallbackModes.EARLIEST,
     maxWaitTime: 1000,
     maxBytes: 1024,
-    autocommit: false
+    autocommit: false,
+    ...options
   })
 
   mockConnectionPoolGet(stream[kConnections], () => true, null, null, (_original, broker, callback) => {
@@ -1024,202 +1029,108 @@ test('should fall back to leader when preferred read replica fetch fails', async
   stream.destroy()
 })
 
-// Regression: when a rebalance revokes a partition, any offset already queued in
-// #offsetsToCommit (from a batch pushed to the Readable buffer before the rebalance)
-// should NOT be committed via kAutocommit during #onConsumerGroupJoin.
-//
-// Without the guard, kAutocommit fires with the new generationId and advances
-// the committed offset for a revoked partition. The new owner then starts from
-// that higher position and permanently skips the messages that were sitting
-// unread in the old consumer's Readable buffer.
-test('should not commit queued offsets for revoked partitions during rebalance autocommit', { timeout: 5_000 }, async () => {
-  const consumer = createOffsetRefreshConsumerMock()
-
-  // Simulate an active consumer (heartbeat running after rejoin)
-  consumer.isActive = () => true
-
-  // No prior committed offset so the stream starts from EARLIEST (offset 0)
-  consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
-    callback(null, new Map())
-  }
-
-  // Track which partitions consumer.commit was called for
+test('should not commit queued offsets for revoked partitions during rebalance autocommit', { timeout: 5_000 }, async t => {
   const committedPartitions: number[] = []
-  consumer.commit = (
-    options: { offsets: Array<{ partition: number; offset: bigint }> },
-    callback: CallbackWithPromise<void>
-  ) => {
-    committedPartitions.push(...options.offsets.map((o: { partition: number }) => o.partition))
-    callback(null)
-  }
-
-  // Hold the first fetch until we are ready to trigger the rebalance
   let releaseFetch!: () => void
+  let resolveFetchStarted!: () => void
   const fetchStarted = new Promise<void>(resolve => {
-    consumer.fetch = (_: object, callback: CallbackWithPromise<FetchResponse>) => {
-      releaseFetch = () => {
-        const response = createFetchResponse(-1)
-        response.responses[0].partitions[0].records = [
-          createRecordsBatch(0n, ['msg-0', 'msg-1', 'msg-2', 'msg-3', 'msg-4'])
-        ]
-        callback(null, response)
-      }
-      resolve()
-    }
+    resolveFetchStarted = resolve
   })
 
-  // Use interval-based autocommit (large value) so kAutocommit() is NOT triggered
-  // at the end of each batch inside #pushRecords.  It will only fire when explicitly
-  // called — i.e. from #onConsumerGroupJoin after the rebalance.
-  const stream = new MessagesStream(consumer, {
-    topics: [topic],
-    mode: MessagesStreamModes.COMMITTED,
-    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
-    maxWaitTime: 1000,
-    maxBytes: 1024,
-    autocommit: 100_000
-  })
-
-  stream.on('error', (error: Error) => { throw error })
-  // Attach a data listener to enter flowing mode and trigger _read() → #fetch()
-  stream.on('data', () => {})
-
-  // Wait until the fetch is in-flight, then pause so messages stay in the buffer
-  await fetchStarted
-  stream.pause()
-
-  // Release the fetch response: #pushRecords sets #offsetsToCommit['test-topic:0'] = 5
-  // but — because autocommit is interval-based — kAutocommit is NOT called yet.
-  releaseFetch()
-  await new Promise<void>(resolve => setImmediate(resolve))
-
-  strictEqual(
-    stream.offsetsToCommit.get(`${topic}:0`)?.offset,
-    5n,
-    '#offsetsToCommit must contain the pending offset before the rebalance'
-  )
-  strictEqual(committedPartitions.length, 0, 'no commit should have fired before the rebalance')
-
-  // REBALANCE: partition 0 is revoked — consumer now owns no partitions.
-  // Messages 0-4 are still in the Readable buffer, unread by application code.
-  // The new owner of partition 0 (Consumer B) will call listCommittedOffsets and
-  // start from whatever is committed.
-  consumer.assignments = []
-  consumer.generationId = 2
-
-  const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
-  consumer.emit('consumer:group:join')
-  await offsetsRestored
-
-  // Allow the async consumer.commit call triggered by kAutocommit() to settle
-  await new Promise<void>(resolve => setImmediate(resolve))
-  await new Promise<void>(resolve => setImmediate(resolve))
-
-  try {
-    strictEqual(
-      committedPartitions.includes(0),
-      false,
-      'partition 0 was revoked but consumer.commit was still called for it ' +
-      `(committed partitions: ${JSON.stringify(committedPartitions)})`
-    )
-  } finally {
-    // destroy clears the autocommit setInterval; must run even on assertion failure
-    stream.destroy()
-  }
-})
-
-// Same root cause as the autocommit variant above, but triggered via message.commit()
-// (the manual-commit path).
-//
-// After a rebalance that revokes partition 0, messages from that partition are still
-// in the Readable buffer and are delivered to the user's for-await/on('data') loop.
-// When the user calls message.commit() on one of those stale messages, stream.#commit
-// adds the offset to #offsetsToCommit and calls kAutocommit() — which sends the commit
-// to Kafka with the new generationId.  The new owner of partition 0 then starts from
-// that committed offset and skips the messages Consumer A read from the stale buffer.
-test('manual message.commit() on a stale buffered message from a revoked partition should not advance the committed offset', { timeout: 5_000 }, async () => {
-  const consumer = createOffsetRefreshConsumerMock()
-
-  consumer.isActive = () => true
-
-  // No prior committed offset — stream will start from EARLIEST (offset 0)
-  consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
-    callback(null, new Map())
-  }
-
-  const committedPartitions: number[] = []
-  consumer.commit = (
-    options: { offsets: Array<{ partition: number; offset: bigint }> },
-    callback: CallbackWithPromise<void>
-  ) => {
-    committedPartitions.push(...options.offsets.map((o: { partition: number }) => o.partition))
-    callback(null)
-  }
-
-  // Deliver messages 0-4 on the first fetch, then stop
-  let fetchCount = 0
-  consumer.fetch = (_: object, callback: CallbackWithPromise<FetchResponse>) => {
-    fetchCount++
-    if (fetchCount === 1) {
+  const consumer = createConsumerMock(t, (_options, callback) => {
+    releaseFetch = () => {
       const response = createFetchResponse(-1)
       response.responses[0].partitions[0].records = [
         createRecordsBatch(0n, ['msg-0', 'msg-1', 'msg-2', 'msg-3', 'msg-4'])
       ]
       callback(null, response)
     }
-    // subsequent fetches hang — we don't need them
-  }
-
-  const stream = new MessagesStream(consumer, {
-    topics: [topic],
-    mode: MessagesStreamModes.COMMITTED,
-    fallbackMode: MessagesStreamFallbackModes.EARLIEST,
-    maxWaitTime: 1000,
-    maxBytes: 1024,
-    autocommit: false   // manual commit
+    resolveFetchStarted()
+  })
+  t.mock.method(consumer, 'isActive', () => true)
+  mockMethod(consumer, 'listCommittedOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map())
+    return true
+  })
+  mockMethod(consumer, 'commit', () => true, null, null, (
+    _original,
+    options: { offsets: Array<{ partition: number }> },
+    callback: CallbackWithPromise<void>
+  ) => {
+    committedPartitions.push(...options.offsets.map(offset => offset.partition))
+    callback(null)
+    return true
   })
 
-  stream.on('error', (error: Error) => { throw error })
+  // Interval autocommit leaves the fetched offset queued until the rebalance flush.
+  const stream = createStream(consumer, { mode: MessagesStreamModes.COMMITTED, autocommit: 100_000 })
+  t.after(() => stream.destroy())
+  stream.on('data', () => {})
 
-  // Collect messages as they arrive
-  const received: Array<{ message: any }> = []
-  const fiveMessages = new Promise<void>(resolve => {
-    stream.on('data', (message: any) => {
-      received.push({ message })
-      if (received.length === 5) resolve()
-    })
-  })
-
-  // Let messages 0-4 arrive in the buffer and be delivered to the data handler
-  await fiveMessages
+  await fetchStarted
   stream.pause()
+  releaseFetch()
+  await new Promise<void>(resolve => setImmediate(resolve))
 
-  strictEqual(received.length, 5, 'all 5 messages should have been received')
-  strictEqual(committedPartitions.length, 0, 'no commit yet')
+  strictEqual(stream.offsetsToCommit.get(`${topic}:0`)?.offset, 5n)
+  strictEqual(committedPartitions.length, 0)
 
-  // REBALANCE: partition 0 is revoked
   consumer.assignments = []
   consumer.generationId = 2
-
   const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
   consumer.emit('consumer:group:join')
   await offsetsRestored
 
-  // User calls message.commit() on a message that came from the now-revoked partition.
-  // This simulates a batching consumer that collected messages, got a rebalance mid-batch,
-  // and then commits — not realising the partition is no longer theirs.
-  await received[4].message.commit()
+  strictEqual(committedPartitions.includes(0), false)
+})
 
-  await new Promise<void>(resolve => setImmediate(resolve))
+test('manual message.commit() on a stale buffered message from a revoked partition should not advance the committed offset', { timeout: 5_000 }, async t => {
+  const committedPartitions: number[] = []
+  let fetchCount = 0
+  const consumer = createConsumerMock(t, (_options, callback) => {
+    if (++fetchCount === 1) {
+      const response = createFetchResponse(-1)
+      response.responses[0].partitions[0].records = [
+        createRecordsBatch(0n, ['msg-0', 'msg-1', 'msg-2', 'msg-3', 'msg-4'])
+      ]
+      callback(null, response)
+    }
+  })
+  t.mock.method(consumer, 'isActive', () => true)
+  mockMethod(consumer, 'listCommittedOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map())
+    return true
+  })
+  mockMethod(consumer, 'commit', () => true, null, null, (
+    _original,
+    options: { offsets: Array<{ partition: number }> },
+    callback: CallbackWithPromise<void>
+  ) => {
+    committedPartitions.push(...options.offsets.map(offset => offset.partition))
+    callback(null)
+    return true
+  })
 
-  try {
-    strictEqual(
-      committedPartitions.includes(0),
-      false,
-      'manual message.commit() for a revoked partition should not call consumer.commit, ' +
-      `but committed partitions: ${JSON.stringify(committedPartitions)}`
-    )
-  } finally {
-    stream.destroy()
-  }
+  const stream = createStream(consumer, { mode: MessagesStreamModes.COMMITTED })
+  t.after(() => stream.destroy())
+  const received: Array<Message<Buffer, Buffer, Buffer, Buffer>> = []
+  const fiveMessages = new Promise<void>(resolve => {
+    stream.on('data', message => {
+      received.push(message)
+      if (received.length === 5) resolve()
+    })
+  })
+
+  await fiveMessages
+  stream.pause()
+  strictEqual(committedPartitions.length, 0)
+
+  consumer.assignments = []
+  consumer.generationId = 2
+  const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
+  consumer.emit('consumer:group:join')
+  await offsetsRestored
+
+  await received[4].commit()
+  strictEqual(committedPartitions.includes(0), false)
 })

@@ -210,7 +210,7 @@ export const listOffsetsOptionsSchema = {
         items: { type: 'number', minimum: 0 }
       }
     },
-    isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
+    isolationLevel: { type: 'number', enum: allowedFetchIsolationLevels },
     timestamp: { bigint: true }
   },
   required: ['topics'],

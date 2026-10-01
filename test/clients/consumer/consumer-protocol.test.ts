@@ -6,7 +6,8 @@ import {
   decodeConsumerProtocolAssignment,
   decodeConsumerProtocolSubscription,
   encodeConsumerProtocolAssignment,
-  encodeConsumerProtocolSubscription
+  encodeConsumerProtocolSubscription,
+  UnsupportedFormatError
 } from '../../../src/index.ts'
 
 const { MemberMetadata } = createRequire(import.meta.url)('kafkajs/src/consumer/assignerProtocol.js')
@@ -133,4 +134,20 @@ test('cooperative sticky generation should decode from v1 user data', () => {
 
   strictEqual(decodeCooperativeStickyGeneration(userData), 42)
   strictEqual(decodeCooperativeStickyGeneration(Buffer.alloc(0)), -1)
+})
+
+test('consumer protocol subscription should throw a typed error on truncated buffers', () => {
+  const truncated = Buffer.alloc(6)
+  truncated.writeInt16BE(0, 0)
+  truncated.writeInt32BE(5, 2)
+
+  throws(() => decodeConsumerProtocolSubscription(truncated), UnsupportedFormatError)
+})
+
+test('consumer protocol assignment should throw a typed error on truncated buffers', () => {
+  const truncated = Buffer.alloc(6)
+  truncated.writeInt16BE(0, 0)
+  truncated.writeInt32BE(5, 2)
+
+  throws(() => decodeConsumerProtocolAssignment(truncated), UnsupportedFormatError)
 })

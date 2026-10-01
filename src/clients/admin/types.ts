@@ -57,6 +57,7 @@ export interface Group extends Omit<GroupBase, 'groupType'> {
   protocol: string
   members: Map<string, GroupMember>
   authorizedOperations: number
+  error?: Error
 }
 
 // Currently empty but reserved for future use

@@ -6,10 +6,13 @@ import {
   AuthenticationError,
   Base,
   findErrorBy,
+  Connection,
+  metadataV12,
   MultipleErrors,
   NetworkError,
   parseBroker,
   SASLMechanisms,
+  saslPlain,
   sleep,
   UserError
 } from '../../../src/index.ts'
@@ -213,6 +216,151 @@ for (const mechanism of allowedSASLMechanisms) {
     await base.metadata({ topics: [], forceUpdate: true })
   })
 }
+
+test('reauthFraction schedules reauthentication while idle', async t => {
+  const connection = new Connection('test-client', {
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin', reauthFraction: 0.05 }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  await once(connection, 'sasl:authentication:extended')
+})
+
+test('reauthFraction defaults to 80% for a direct connection', async t => {
+  const connection = new Connection('test-client', {
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin', lazyReauthentication: true }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  let extended = 0
+  connection.on('sasl:authentication:extended', () => extended++)
+
+  await sleep(100)
+  await metadataV12.api.async(connection, [])
+  deepStrictEqual(extended, 0)
+})
+
+test('reauthLeadTime schedules the timer earlier than reauthFraction', async t => {
+  const connection = new Connection('test-client', {
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      reauthLeadTime: 4500
+    }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  const startedAt = Date.now()
+  await once(connection, 'sasl:authentication:extended')
+  ok(Date.now() - startedAt < 3000)
+})
+
+for (const reauthLeadTime of [5000, 10000]) {
+  test(`reauthLeadTime ${reauthLeadTime} falls back to reauthFraction`, async t => {
+    const connection = new Connection('test-client', {
+      sasl: {
+        mechanism: SASLMechanisms.PLAIN,
+        username: 'admin',
+        password: 'admin',
+        reauthFraction: 0.1,
+        reauthLeadTime
+      }
+    })
+    t.after(() => connection.close())
+
+    await connection.connect(saslBroker.host, saslBroker.port)
+    let extended = 0
+    connection.on('sasl:authentication:extended', () => extended++)
+
+    await sleep(100)
+    deepStrictEqual(extended, 0)
+
+    await once(connection, 'sasl:authentication:extended')
+    deepStrictEqual(extended, 1)
+  })
+}
+
+test('a zero session lifetime disables the reauthentication timer', async t => {
+  const connection = new Connection('test-client', {
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      reauthFraction: 0.05,
+      reauthLeadTime: 10000,
+      lazyReauthentication: true,
+      authenticate (_mechanism, connection, authenticate, username, password, _token, callback) {
+        // Simulate a broker that disables reauthentication while still completing the SASL exchange.
+        saslPlain.authenticate(authenticate, connection, username!, password!, (error, response) => {
+          callback(error, response && { ...response, sessionLifetimeMs: 0n })
+        })
+      }
+    }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  let extended = 0
+  connection.on('sasl:authentication:extended', () => extended++)
+
+  await sleep(400)
+  await metadataV12.api.async(connection, [])
+  deepStrictEqual(extended, 0)
+})
+
+test('lazyReauthentication leaves idle connections alone and shares one reauthentication', async t => {
+  const connection = new Connection('test-client', {
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      reauthFraction: 0.05,
+      lazyReauthentication: true
+    }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  let extended = 0
+  connection.on('sasl:authentication:extended', () => extended++)
+
+  await sleep(400)
+  deepStrictEqual(extended, 0)
+
+  await Promise.all([metadataV12.api.async(connection, []), metadataV12.api.async(connection, [])])
+  deepStrictEqual(extended, 1)
+})
+
+test('lazyReauthentication fails waiting requests if reauthentication fails', async t => {
+  let password = 'admin'
+  const connection = new Connection('test-client', {
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: () => password,
+      reauthFraction: 0.05,
+      lazyReauthentication: true
+    }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+  password = 'invalid'
+  await sleep(400)
+
+  const results = await Promise.allSettled([
+    metadataV12.api.async(connection, []),
+    metadataV12.api.async(connection, [])
+  ])
+  for (const result of results) {
+    deepStrictEqual(result.status, 'rejected')
+    ok((result as PromiseRejectedResult).reason instanceof NetworkError)
+  }
+})
 
 test('should show proper error when SASL failed due to attempted TLS to a non TLS broker', async t => {
   const base = new Base({

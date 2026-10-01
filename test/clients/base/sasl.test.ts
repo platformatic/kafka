@@ -218,16 +218,21 @@ for (const mechanism of allowedSASLMechanisms) {
 }
 
 test('reauthFraction schedules reauthentication while idle', async t => {
+  // Control the reauthentication timer while keeping broker I/O real.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const connection = new Connection('test-client', {
     sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin', reauthFraction: 0.05 }
   })
   t.after(() => connection.close())
 
   await connection.connect(saslBroker.host, saslBroker.port)
-  await once(connection, 'sasl:authentication:extended')
+  const extended = once(connection, 'sasl:authentication:extended')
+  t.mock.timers.tick(250)
+  await extended
 })
 
 test('reauthFraction defaults to 80% for a direct connection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const connection = new Connection('test-client', {
     sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin', lazyReauthentication: true }
   })
@@ -237,12 +242,17 @@ test('reauthFraction defaults to 80% for a direct connection', async t => {
   let extended = 0
   connection.on('sasl:authentication:extended', () => extended++)
 
-  await sleep(100)
+  t.mock.timers.tick(3999)
   await metadataV12.api.async(connection, [])
   deepStrictEqual(extended, 0)
+
+  t.mock.timers.tick(1)
+  await metadataV12.api.async(connection, [])
+  deepStrictEqual(extended, 1)
 })
 
 test('reauthLeadTime schedules the timer earlier than reauthFraction', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const connection = new Connection('test-client', {
     sasl: {
       mechanism: SASLMechanisms.PLAIN,
@@ -254,13 +264,22 @@ test('reauthLeadTime schedules the timer earlier than reauthFraction', async t =
   t.after(() => connection.close())
 
   await connection.connect(saslBroker.host, saslBroker.port)
-  const startedAt = Date.now()
-  await once(connection, 'sasl:authentication:extended')
-  ok(Date.now() - startedAt < 3000)
+  let extended = 0
+  connection.on('sasl:authentication:extended', () => extended++)
+
+  t.mock.timers.tick(499)
+  await metadataV12.api.async(connection, [])
+  deepStrictEqual(extended, 0)
+
+  const reauthenticated = once(connection, 'sasl:authentication:extended')
+  t.mock.timers.tick(1)
+  await reauthenticated
+  deepStrictEqual(extended, 1)
 })
 
 for (const reauthLeadTime of [5000, 10000]) {
   test(`reauthLeadTime ${reauthLeadTime} falls back to reauthFraction`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
     const connection = new Connection('test-client', {
       sasl: {
         mechanism: SASLMechanisms.PLAIN,
@@ -276,15 +295,19 @@ for (const reauthLeadTime of [5000, 10000]) {
     let extended = 0
     connection.on('sasl:authentication:extended', () => extended++)
 
-    await sleep(100)
+    t.mock.timers.tick(499)
+    await metadataV12.api.async(connection, [])
     deepStrictEqual(extended, 0)
 
-    await once(connection, 'sasl:authentication:extended')
+    const reauthenticated = once(connection, 'sasl:authentication:extended')
+    t.mock.timers.tick(1)
+    await reauthenticated
     deepStrictEqual(extended, 1)
   })
 }
 
 test('a zero session lifetime disables the reauthentication timer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const connection = new Connection('test-client', {
     sasl: {
       mechanism: SASLMechanisms.PLAIN,
@@ -307,12 +330,13 @@ test('a zero session lifetime disables the reauthentication timer', async t => {
   let extended = 0
   connection.on('sasl:authentication:extended', () => extended++)
 
-  await sleep(400)
+  t.mock.timers.tick(400)
   await metadataV12.api.async(connection, [])
   deepStrictEqual(extended, 0)
 })
 
 test('lazyReauthentication leaves idle connections alone and shares one reauthentication', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const connection = new Connection('test-client', {
     sasl: {
       mechanism: SASLMechanisms.PLAIN,
@@ -328,7 +352,7 @@ test('lazyReauthentication leaves idle connections alone and shares one reauthen
   let extended = 0
   connection.on('sasl:authentication:extended', () => extended++)
 
-  await sleep(400)
+  t.mock.timers.tick(400)
   deepStrictEqual(extended, 0)
 
   await Promise.all([metadataV12.api.async(connection, []), metadataV12.api.async(connection, [])])
@@ -336,6 +360,7 @@ test('lazyReauthentication leaves idle connections alone and shares one reauthen
 })
 
 test('lazyReauthentication fails waiting requests if reauthentication fails', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   let password = 'admin'
   const connection = new Connection('test-client', {
     sasl: {
@@ -350,7 +375,7 @@ test('lazyReauthentication fails waiting requests if reauthentication fails', as
 
   await connection.connect(saslBroker.host, saslBroker.port)
   password = 'invalid'
-  await sleep(400)
+  t.mock.timers.tick(400)
 
   const results = await Promise.allSettled([
     metadataV12.api.async(connection, []),

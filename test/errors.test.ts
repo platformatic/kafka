@@ -57,12 +57,23 @@ test('GenericError.findBy', () => {
 test('NetworkError.isRetryable', () => {
   strictEqual(NetworkError.isRetryable(new NetworkError('retryable')), true)
   strictEqual(NetworkError.isRetryable(new NetworkError('not retryable', { canRetry: false })), false)
+  strictEqual(
+    NetworkError.isRetryable(new NetworkError('authentication failed', { cause: new AuthenticationError('invalid') })),
+    false
+  )
+  strictEqual(NetworkError.isRetryable(new NetworkError('connection reset', { cause: new Error('ECONNRESET') })), true)
   strictEqual(NetworkError.isRetryable(new TimeoutError('timed out')), false)
+  strictEqual(NetworkError.isRetryable(new ProtocolError('LEADER_NOT_AVAILABLE')), false)
   strictEqual(
     NetworkError.isRetryable(new MultipleErrors('multiple errors', [new NetworkError('retryable')])),
     true
   )
+  strictEqual(
+    NetworkError.isRetryable(new MultipleErrors('multiple errors', [new NetworkError('retryable'), new UserError('invalid')])),
+    false
+  )
   strictEqual(NetworkError.isRetryable(new Error('not a library error')), false)
+  strictEqual(NetworkError.isRetryable(null), false)
 })
 
 test('MultipleErrors constructor', () => {
@@ -328,6 +339,31 @@ test('findErrorBy - recurses into nested errors', () => {
 
   strictEqual(findErrorBy(error, 'foo', 'bar'), nested)
   strictEqual(findErrorBy(error, 'foo', 'baz'), null)
+})
+
+test('findErrorBy - traverses causes and aggregate entries together', () => {
+  const authentication = new AuthenticationError('authentication failed')
+  const protocol = new ProtocolError('SASL_AUTHENTICATION_FAILED')
+  const response = new MultipleErrors('response failed', [protocol])
+  const network = new NetworkError('connection failed', { cause: new Error('wrapper', { cause: response }) })
+  const errors = new MultipleErrors('brokers failed', [new NetworkError('temporary'), network], {
+    cause: authentication
+  })
+
+  strictEqual(findErrorBy(network, 'canRetry', false), protocol)
+  strictEqual(findErrorBy(errors, 'canRetry', false), protocol)
+  strictEqual(findErrorBy(errors, 'code', AuthenticationError.code), authentication)
+})
+
+test('findErrorBy - terminates on cyclic cause and aggregate graphs', () => {
+  const first = new NetworkError('first')
+  const second = new MultipleErrors('second', [first])
+  Reflect.defineProperty(first, 'cause', { value: second })
+
+  strictEqual(findErrorBy(first, 'canRetry', false), null)
+  const userError = new UserError('invalid configuration')
+  second.errors.push(userError)
+  strictEqual(findErrorBy(first, 'canRetry', false), userError)
 })
 
 test('MultipleErrors.findBy - handles undefined entries in errors array', () => {

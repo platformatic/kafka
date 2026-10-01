@@ -1,5 +1,5 @@
-import { type Callback } from '../../apis/definitions.ts'
 import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { type GroupProtocols } from '../../apis/enumerations.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type KafkaRecord, type Message } from '../../protocol/records.ts'
@@ -51,8 +51,7 @@ export const DeserializationErrorActions = {
   CONTINUE: 'continue'
 } as const
 
-export type DeserializationErrorAction =
-  (typeof DeserializationErrorActions)[keyof typeof DeserializationErrorActions]
+export type DeserializationErrorAction = (typeof DeserializationErrorActions)[keyof typeof DeserializationErrorActions]
 
 export interface DeserializationErrorContext {
   error: unknown
@@ -92,6 +91,11 @@ export type GroupPartitionsAssigner = (
   topics: Set<string>,
   metadata: ClusterMetadata
 ) => GroupPartitionsAssignments[]
+
+export type GroupPartitionsAssignerTopicsSelector = (
+  leader: ExtendedGroupProtocolSubscription,
+  members: Map<string, ExtendedGroupProtocolSubscription>
+) => string[]
 
 export type GroupProtocolsMetadataCallback = (
   protocols: GroupProtocolSubscription[],
@@ -134,6 +138,7 @@ export interface GroupOptions {
   protocols?: GroupProtocolSubscription[]
   protocolsMetadata?: GroupProtocolsMetadataCallback
   partitionAssigner?: GroupPartitionsAssigner
+  partitionAssignerTopicsSelector?: GroupPartitionsAssignerTopicsSelector
   assignmentUserData?: Buffer
 }
 

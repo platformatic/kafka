@@ -993,14 +993,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 const action = this.#deserializationErrorHandler
                   ? this.#deserializationErrorHandler(context)
                   : this.#corruptedMessageHandler(
-                        record,
-                        topic,
-                        partition,
-                        firstTimestamp,
-                        firstOffset,
-                        commit as Message['commit'],
-                        error
-                      )
+                    record,
+                    topic,
+                    partition,
+                    firstTimestamp,
+                    firstOffset,
+                    commit as Message['commit'],
+                    error
+                  )
                     ? DeserializationErrorActions.FAIL
                     : DeserializationErrorActions.SKIP
 

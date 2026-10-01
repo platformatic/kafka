@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
@@ -196,6 +196,33 @@ test('constructor should throw on invalid options when strict mode is enabled', 
 
   strictEqual(client instanceof Base, true)
   client.close()
+})
+
+test('constructor validates SASL reauthentication options', t => {
+  const options = {
+    clientId: 'test-client',
+    bootstrapBrokers: ['localhost:9092'],
+    strict: true,
+    sasl: { mechanism: 'PLAIN' as const, username: 'admin', password: 'admin' }
+  }
+
+  for (const reauthFraction of [0, -0.1, 1.1]) {
+    throws(() => new Base({ ...options, sasl: { ...options.sasl, reauthFraction } }), { code: 'PLT_KFK_USER' })
+  }
+
+  throws(() => new Base({ ...options, sasl: { ...options.sasl, reauthLeadTime: -1 } }), {
+    code: 'PLT_KFK_USER'
+  })
+  throws(
+    () => new Base({ ...options, sasl: { ...options.sasl, lazyReauthentication: 'yes' as unknown as boolean } }),
+    { code: 'PLT_KFK_USER' }
+  )
+
+  const client = new Base({
+    ...options,
+    sasl: { ...options.sasl, reauthFraction: 1, reauthLeadTime: 0, lazyReauthentication: true }
+  })
+  t.after(() => client.close())
 })
 
 test('close should properly terminate client', async t => {

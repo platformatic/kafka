@@ -5,7 +5,6 @@ import { connect as createTLSConnection, type ConnectionOptions as TLSConnection
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
-import { clientSoftwareName, clientSoftwareVersion } from '../clients/base/options.ts'
 import {
   apiVersionsV1,
   saslAuthenticateV0,
@@ -14,6 +13,7 @@ import {
   saslHandshakeV1
 } from '../apis/index.ts'
 import { type SaslAuthenticateResponse, type SASLAuthenticationAPI } from '../apis/security/sasl-authenticate-v2.ts'
+import { clientSoftwareName, clientSoftwareVersion } from '../clients/base/options.ts'
 import {
   connectionsApiChannel,
   connectionsConnectsChannel,
@@ -81,6 +81,9 @@ export interface SASLOptions {
   oauthBearerExtensions?: Record<string, string> | CredentialProvider<Record<string, string>>
   authenticate?: SASLCustomAuthenticator
   authBytesValidator?: (authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void
+  reauthFraction?: number
+  reauthLeadTime?: number
+  lazyReauthentication?: boolean
 }
 
 export interface ConnectionOptions {
@@ -154,6 +157,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #socketMustBeDrained: boolean
   #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
+  #reauthenticationDue = false
   // Negotiated once per connection: reauthentication runs the same path again.
   #saslAuthenticateApi: SASLAuthenticationAPI | undefined
 
@@ -395,7 +399,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       callback = createPromisifiedCallback()
     }
 
-    clearInterval(this.#reauthenticationTimeout)
+    clearTimeout(this.#reauthenticationTimeout)
 
     if (
       this.#status === ConnectionStatuses.CLOSED ||
@@ -438,6 +442,37 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     hasResponseHeaderTaggedFields: boolean,
     callback: Callback<ReturnType>
   ) {
+    if (
+      (this.#status === ConnectionStatuses.REAUTHENTICATING ||
+        (this.#status === ConnectionStatuses.CONNECTED && this.#reauthenticationDue)) &&
+      // SASL requests must still pass through send() while reauthentication is in progress.
+      apiKey !== apiVersionsV1.api.key &&
+      apiKey !== saslHandshakeV1.api.key &&
+      apiKey !== saslAuthenticateV2.api.key
+    ) {
+      this.ready(error => {
+        if (error) {
+          callback(error)
+        } else {
+          this.send(
+            apiKey,
+            apiVersion,
+            createPayload,
+            responseParser,
+            hasRequestHeaderTaggedFields,
+            hasResponseHeaderTaggedFields,
+            callback
+          )
+        }
+      })
+
+      if (this.#reauthenticationDue) {
+        this.reauthenticate()
+      }
+
+      return
+    }
+
     // Correlation ID is a 32-bit integer in the protocol, so we need to wrap around after 2^31 - 1
     const correlationId = (this.#correlationId + 1) & 0x7fffffff
     this.#correlationId = correlationId
@@ -552,6 +587,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     const port = this.#port!
     const diagnosticContext = createDiagnosticContext({ connection: this, operation: 'reauthenticate', host, port })
 
+    this.#reauthenticationDue = false
     this.#status = ConnectionStatuses.REAUTHENTICATING
     clearTimeout(this.#reauthenticationTimeout)
     this.#authenticate(host, port, diagnosticContext)
@@ -811,7 +847,21 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
 
     if (sessionLifetimeMs > 0) {
-      this.#reauthenticationTimeout = setTimeout(this.reauthenticate.bind(this), Number(sessionLifetimeMs) * 0.8)
+      const lifetime = Number(sessionLifetimeMs)
+      const leadTime = lifetime - (this.#options.sasl?.reauthLeadTime ?? 0)
+      const fractionTime = lifetime * (this.#options.sasl?.reauthFraction ?? 0.8)
+
+      // Ignore a non-positive lead-time delay to avoid an immediate reauthentication loop.
+      this.#reauthenticationTimeout = setTimeout(
+        () => {
+          if (this.#options.sasl?.lazyReauthentication) {
+            this.#reauthenticationDue = true
+          } else {
+            this.reauthenticate()
+          }
+        },
+        Math.min(fractionTime, leadTime > 0 ? leadTime : fractionTime)
+      )
     }
 
     const isReauthenticating = this.#status === ConnectionStatuses.REAUTHENTICATING

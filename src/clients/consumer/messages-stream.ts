@@ -101,7 +101,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsToFetch: Map<string, bigint>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
-  #commitWaiters: Map<string, Array<{ offset: bigint, callback: Callback<void> }>>
+  #commitWaiters: Map<string, Array<{ offset: bigint; callback: Callback<void> }>>
   #partitionsEpochs: Map<string, number>
   #inflightNodes: Map<number, { startedAt: number }>
   #keyDeserializer: DeserializerWithHeaders<Key, HeaderKey, HeaderValue>
@@ -164,6 +164,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       beforeDeserialization,
       // The options below are only destructured to avoid being part of structuredClone below
       partitionAssigner: _partitionAssigner,
+      partitionAssignerTopicsSelector: _partitionAssignerTopicsSelector,
       protocolsMetadata: _protocolsMetadata,
       ...otherOptions
     } = options
@@ -678,87 +679,83 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       for (const [node, nodeRequests] of requests) {
         const inflight = { startedAt: Date.now() }
         this.#inflightNodes.set(node, inflight)
-        this.#consumer.fetch(
-          { ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] },
-          (error, response) => {
-            const ownsNode = this.#inflightNodes.get(node) === inflight
-            if (ownsNode) {
-              this.#inflightNodes.delete(node)
-            }
-            this.emit('fetch')
+        this.#consumer.fetch({ ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] }, (
+          error,
+          response
+        ) => {
+          const ownsNode = this.#inflightNodes.get(node) === inflight
+          if (ownsNode) {
+            this.#inflightNodes.delete(node)
+          }
+          this.emit('fetch')
 
-            // A refresh (including a rejoin) invalidates requests issued before it.
-            // Never let an old response or error undo the restored offsets.
-            if (offsetsEpoch !== this.#offsetsEpoch || !ownsNode) {
-              if (this.#closed || this.closed || this.destroyed) {
-                if (this.#inflightNodes.size === 0) {
-                  this.push(null)
-                }
-              } else if (ownsNode) {
-                // The refresh may have finished while this node was still inflight.
-                // Now that it is free, resume fetching from the restored position.
-                process.nextTick(() => this.#fetch())
-              }
-              return
-            }
-
-            if (error) {
-              // The stream has been closed, ignore the error
-              /* c8 ignore next 4 - Hard to test */
-              if (this.#closed || this.closed || this.destroyed) {
-                this.push(null)
-                return
-              }
-
-              if (this.#fallbackMode !== MessagesStreamFallbackModes.FAIL) {
-                this.#handleOffsetOutOfRange(error as GenericError, topicIds, (recoveryError, recovered) => {
-                  if (this.#closed || this.closed || this.destroyed) {
-                    return
-                  }
-
-                  if (recoveryError) {
-                    this.destroy(recoveryError)
-                    return
-                  }
-
-                  if (recovered) {
-                    process.nextTick(() => {
-                      this.#fetch()
-                    })
-                    return
-                  }
-
-                  this.destroy(error)
-                })
-                return
-              }
-
-              this.destroy(error)
-              return
-            }
-
+          // A refresh (including a rejoin) invalidates requests issued before it.
+          // Never let an old response or error undo the restored offsets.
+          if (offsetsEpoch !== this.#offsetsEpoch || !ownsNode) {
             if (this.#closed || this.closed || this.destroyed) {
-              // When it's the last inflight, we finally close the stream.
-              // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
               if (this.#inflightNodes.size === 0) {
                 this.push(null)
               }
+            } else if (ownsNode) {
+              // The refresh may have finished while this node was still inflight.
+              // Now that it is free, resume fetching from the restored position.
+              process.nextTick(() => this.#fetch())
+            }
+            return
+          }
 
+          if (error) {
+            // The stream has been closed, ignore the error
+            /* c8 ignore next 4 - Hard to test */
+            if (this.#closed || this.closed || this.destroyed) {
+              this.push(null)
               return
             }
 
-            this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch)
+            if (this.#fallbackMode !== MessagesStreamFallbackModes.FAIL) {
+              this.#handleOffsetOutOfRange(error as GenericError, topicIds, (recoveryError, recovered) => {
+                if (this.#closed || this.closed || this.destroyed) {
+                  return
+                }
+
+                if (recoveryError) {
+                  this.destroy(recoveryError)
+                  return
+                }
+
+                if (recovered) {
+                  process.nextTick(() => {
+                    this.#fetch()
+                  })
+                  return
+                }
+
+                this.destroy(error)
+              })
+              return
+            }
+
+            this.destroy(error)
+            return
           }
-        )
+
+          if (this.#closed || this.closed || this.destroyed) {
+            // When it's the last inflight, we finally close the stream.
+            // This is done to avoid the user exiting from consmuming metrics like for-await and still see the process up.
+            if (this.#inflightNodes.size === 0) {
+              this.push(null)
+            }
+
+            return
+          }
+
+          this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch)
+        })
       }
     })
   }
 
-  #handleOffsetOutOfRange (
-    error: GenericError,
-    topicIds: Map<string, string>,
-    callback: Callback<boolean>
-  ): void {
+  #handleOffsetOutOfRange (error: GenericError, topicIds: Map<string, string>, callback: Callback<boolean>): void {
     if (!findErrorBy(error, 'apiId', 'OFFSET_OUT_OF_RANGE')) {
       callback(null, false)
       return
@@ -1217,7 +1214,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return
     }
 
-    const remaining: Array<{ offset: bigint, callback: Callback<void> }> = []
+    const remaining: Array<{ offset: bigint; callback: Callback<void> }> = []
     for (const waiter of waiters) {
       if (waiter.offset <= offset) {
         waiter.callback(error)

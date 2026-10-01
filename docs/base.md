@@ -172,6 +172,33 @@ const producer = new Producer({
 })
 ```
 
+### `SASLOptions`
+
+| Property                | Type                                                                   | Default | Description                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------- |
+| `mechanism`             | `SASLMechanismValue`                                                   |         | SASL mechanism: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `OAUTHBEARER`, or `GSSAPI`.                        |
+| `username`              | `string \| CredentialProvider`                                         |         | Username or a function that provides one for PLAIN or SCRAM authentication.                                   |
+| `password`              | `string \| CredentialProvider`                                         |         | Password or a function that provides one for PLAIN or SCRAM authentication.                                   |
+| `token`                 | `string \| CredentialProvider`                                         |         | Token or a function that provides one for OAUTHBEARER authentication.                                         |
+| `oauthBearerExtensions` | `Record<string, string> \| CredentialProvider<Record<string, string>>` |         | Extensions or a function that provides them for OAUTHBEARER authentication.                                   |
+| `authenticate`          | `SASLCustomAuthenticator`                                              |         | Custom authentication function; required for GSSAPI. See the section below.                                   |
+| `authBytesValidator`    | `(authBytes: Buffer, callback: CallbackWithPromise<Buffer>) => void`   |         | Validates the authentication bytes returned by the broker.                                                    |
+| `reauthFraction`        | `number`                                                               | `0.8`   | Fraction of the broker session lifetime at which reauthentication becomes due; greater than `0`, at most `1`. |
+| `reauthLeadTime`        | `number`                                                               | `0`     | Milliseconds before session expiration at which reauthentication becomes due, if earlier.                     |
+| `lazyReauthentication`  | `boolean`                                                              | `false` | If enabled, reauthenticate on the next request after the timer expires instead of while idle.                 |
+
+SASL reauthentication runs automatically at 80% of the session lifetime reported by the broker. Set
+`sasl.reauthFraction` to change that fraction (greater than `0` and at most `1`). Set `sasl.reauthLeadTime`
+to move the timer earlier when fewer than that many milliseconds would remain before expiration.
+The timer uses the earlier of the fractional time and the lifetime minus the lead time. The lead time
+defaults to `0`, so existing reauthentication timing is unchanged. If subtracting the lead time from
+the session lifetime gives zero or a negative value, the lead time is ignored and the fractional time
+is used instead to avoid an immediate reauthentication loop. A
+broker-reported session lifetime of `0` disables automatic reauthentication.
+Set `sasl.lazyReauthentication: true` to wait until the next request after the timer expires
+before reauthenticating. Concurrent requests wait for the same reauthentication. By default,
+the timer continues to reauthenticate idle connections as before.
+
 ## Connecting to Kafka via SASL using a custom authenticator
 
 For advanced use cases where you need full control over the SASL authentication process, you can provide a custom `authenticate` function in the `sasl` options. This allows you to implement custom authentication flows, handle complex credential management, or integrate with external authentication systems.

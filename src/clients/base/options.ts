@@ -45,6 +45,9 @@ export const baseOptionsSchema = {
       type: 'object',
       properties: {
         mechanism: { type: 'string', enum: allowedSASLMechanisms },
+        reauthFraction: { type: 'number', exclusiveMinimum: 0, maximum: 1, default: 0.8 },
+        reauthLeadTime: { type: 'number', minimum: 0 },
+        lazyReauthentication: { type: 'boolean' },
         username: { oneOf: [{ type: 'string' }, { function: true }] },
         password: { oneOf: [{ type: 'string' }, { function: true }] },
         token: { oneOf: [{ type: 'string' }, { function: true }] },

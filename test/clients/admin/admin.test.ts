@@ -76,6 +76,7 @@ import {
   sleep,
   stringSerializers,
   UnsupportedApiError,
+  UnsupportedFormatError,
   UserError,
   Writer
 } from '../../../src/index.ts'
@@ -2347,6 +2348,167 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
       )
     })
   }
+})
+
+test('describeGroups should report undecodable member metadata as a per-group error', async t => {
+  const admin = createAdmin(t)
+  const groupId = 'group-bad-metadata'
+
+  const truncatedMetadata = Buffer.alloc(6)
+  truncatedMetadata.writeInt16BE(0, 0)
+  truncatedMetadata.writeInt32BE(5, 2)
+
+  const bootstrapConnection = {
+    instanceId: 1,
+    send<ReturnType> (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      callback(null, {
+        throttleTimeMs: 0,
+        coordinators: [
+          { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+        ]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  const coordinatorConnection = {
+    instanceId: 2,
+    send<ReturnType> (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      callback(null, {
+        throttleTimeMs: 0,
+        groups: [
+          {
+            errorCode: 0,
+            groupId,
+            groupState: 'Stable',
+            protocolType: 'consumer',
+            protocolData: 'range',
+            members: [
+              {
+                memberId: 'member-1',
+                groupInstanceId: null,
+                clientId: 'client-1',
+                clientHost: '/127.0.0.1',
+                memberMetadata: truncatedMetadata,
+                memberAssignment: EMPTY_BUFFER
+              }
+            ],
+            authorizedOperations: -2147483648
+          }
+        ]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  admin[kApis] = [
+    { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+    { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: 5 }
+  ]
+  admin[kGetBootstrapConnection] = callback => callback(null, bootstrapConnection)
+  mockConnectionPoolGet(admin[kConnections], () => true, null, coordinatorConnection)
+
+  const groups = await admin.describeGroups({ groups: [groupId] })
+
+  const group = groups.get(groupId)
+  ok(group)
+  ok(group.error instanceof UnsupportedFormatError)
+})
+
+test('describeGroups should not decode member metadata for non-consumer protocol types', async t => {
+  const admin = createAdmin(t)
+  const groupId = 'group-connect'
+
+  const connectMetadata = Buffer.alloc(1)
+  connectMetadata.writeIntBE(1, 0, 1)
+
+  const bootstrapConnection = {
+    instanceId: 1,
+    send<ReturnType> (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      callback(null, {
+        throttleTimeMs: 0,
+        coordinators: [
+          { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
+        ]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  const coordinatorConnection = {
+    instanceId: 2,
+    send<ReturnType> (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _responseParser: ResponseParser<ReturnType>,
+      _requestTaggedFields: boolean,
+      _responseTaggedFields: boolean,
+      callback: Callback<ReturnType>
+    ): void {
+      callback(null, {
+        throttleTimeMs: 0,
+        groups: [
+          {
+            errorCode: 0,
+            groupId,
+            groupState: 'Stable',
+            protocolType: 'connect',
+            protocolData: 'default',
+            members: [
+              {
+                memberId: 'member-1',
+                groupInstanceId: null,
+                clientId: 'client-1',
+                clientHost: '/127.0.0.1',
+                memberMetadata: connectMetadata,
+                memberAssignment: EMPTY_BUFFER
+              }
+            ],
+            authorizedOperations: -2147483648
+          }
+        ]
+      } as ReturnType)
+    }
+  } as unknown as Connection
+
+  admin[kApis] = [
+    { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+    { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: 5 }
+  ]
+  admin[kGetBootstrapConnection] = callback => callback(null, bootstrapConnection)
+  mockConnectionPoolGet(admin[kConnections], () => true, null, coordinatorConnection)
+
+  const groups = await admin.describeGroups({ groups: [groupId] })
+
+  const group = groups.get(groupId)
+  ok(group)
+  strictEqual(group.error, undefined)
+  const member = group.members.get('member-1')
+  ok(member)
+  strictEqual(member.metadata, undefined)
+  strictEqual(member.assignments, undefined)
 })
 
 test('describeGroups should handle memberAssignment with single user data byte with high bit set', async t => {

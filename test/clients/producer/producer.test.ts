@@ -2256,6 +2256,24 @@ test('getSendBrokers should return the correct brokers for messages (with partit
   })
 })
 
+test('getSendBrokers should wrap out-of-range partitions like send does', async t => {
+  const producer = createProducer(t)
+  const testTopic = await createTopic(t, true, 3)
+
+  // send() reduces the partition modulo the partition count; getSendBrokers used a bitwise AND,
+  // which threw on `partition: 3` (partitions[3] does not exist) and mapped 4 to 0 instead of 1.
+  const messages = [
+    { topic: testTopic, value: Buffer.from('message1'), partition: 3 },
+    { topic: testTopic, value: Buffer.from('message2'), partition: 4 },
+    { topic: testTopic, value: Buffer.from('message3'), partition: 2 }
+  ]
+
+  const brokers = await producer.getSendBrokers({ messages })
+
+  deepStrictEqual(Object.keys(brokers), [`${testTopic}:0`, `${testTopic}:1`, `${testTopic}:2`])
+  deepStrictEqual(Object.keys(brokers[`${testTopic}:0`]), ['host', 'port', 'rack'])
+})
+
 test('getSendBrokers should handle serializer errors', async t => {
   const producer = createProducer<string, string, string, string>(t, {
     serializers: {

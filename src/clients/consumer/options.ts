@@ -28,7 +28,8 @@ export const groupOptionsProperties = {
     }
   },
   protocolsMetadata: { function: true },
-  partitionAssigner: { function: true }
+  partitionAssigner: { function: true },
+  partitionAssignerTopicsSelector: { function: true }
 }
 
 export const groupOptionsAdditionalValidations = {
@@ -210,7 +211,7 @@ export const listOffsetsOptionsSchema = {
         items: { type: 'number', minimum: 0 }
       }
     },
-    isolationLevel: { type: 'string', enum: allowedFetchIsolationLevels },
+    isolationLevel: { type: 'number', enum: allowedFetchIsolationLevels },
     timestamp: { bigint: true }
   },
   required: ['topics'],

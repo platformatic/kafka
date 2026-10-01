@@ -524,7 +524,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       for (const [topic, partitions] of topicsPartitions!) {
         for (const rawPartition of partitions) {
-          const partition = rawPartition & metadata!.topics.get(topic)!.partitionsCount
+          const partition = rawPartition % metadata!.topics.get(topic)!.partitionsCount
           const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
           const broker = metadata!.brokers.get(leader)
 

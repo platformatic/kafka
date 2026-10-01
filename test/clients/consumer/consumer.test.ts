@@ -20,18 +20,18 @@ import {
   type ClusterMetadata,
   CompressionAlgorithms,
   ConfluentSchemaRegistry,
-  COOPERATIVE_STICKY_ASSIGNOR,
   type Connection,
   Consumer,
-  type ConsumerHeartbeatStalledPayload,
   consumerCommitsChannel,
   consumerConsumesChannel,
   consumerFetchesChannel,
   consumerGroupChannel,
   consumerGroupHeartbeatV1,
   consumerHeartbeatChannel,
+  type ConsumerHeartbeatStalledPayload,
   consumerLagChannel,
   consumerOffsetsChannel,
+  COOPERATIVE_STICKY_ASSIGNOR,
   defaultConsumerOptions,
   type ExtendedGroupProtocolSubscription,
   FetchIsolationLevels,
@@ -41,10 +41,10 @@ import {
   findErrorBy,
   GenericError,
   type GroupPartitionsAssignments,
-  heartbeatV4,
-  heartbeatV3,
-  heartbeatV2,
   heartbeatV1,
+  heartbeatV2,
+  heartbeatV3,
+  heartbeatV4,
   instancesChannel,
   joinGroupV2,
   joinGroupV3,
@@ -68,14 +68,15 @@ import {
   type ProducerOptions,
   ProtocolError,
   Reader,
-  ResponseError,
-  type Writer,
   type RecordsBatch,
+  ResponseError,
   sleep,
   syncGroupV5,
   UnsupportedApiError,
-  UserError
+  UserError,
+  type Writer
 } from '../../../src/index.ts'
+import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
 import {
   createConsumer,
   createCreationChannelVerifier,
@@ -83,8 +84,8 @@ import {
   createProducer,
   createTopic,
   createTracingChannelVerifier,
-  kafkaBootstrapServers,
   isKafka,
+  kafkaBootstrapServers,
   mockAPI,
   mockConnectionAPI,
   mockConnectionPoolGet,
@@ -96,8 +97,6 @@ import {
   mockUnavailableAPI,
   waitFor
 } from '../../helpers.ts'
-import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
-
 const skipConsumerGroupProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
 
 // This function produces sample messages to a topic for testing the consumer
@@ -227,7 +226,9 @@ test('fetch normalizes legacy response error topic names to IDs', async t => {
       _responseTags: boolean,
       callback: Callback<unknown>
     ): void {
-      callback(new ResponseError(fetchV12.api.key, fetchV12.api.version, { '/responses/0/partitions/0': [1, null] }, response))
+      callback(
+        new ResponseError(fetchV12.api.key, fetchV12.api.version, { '/responses/0/partitions/0': [1, null] }, response)
+      )
     }
   } as unknown as Connection
 
@@ -2179,7 +2180,10 @@ test('fetch should refresh metadata and reset leader epoch when leadership moves
         callback: CallbackWithPromise<FetchResponse>
       ) => {
         const partition = topics[0].partitions[0]
-        fetchAttempts.push({ currentLeaderEpoch: partition.currentLeaderEpoch, lastFetchedEpoch: partition.lastFetchedEpoch })
+        fetchAttempts.push({
+          currentLeaderEpoch: partition.currentLeaderEpoch,
+          lastFetchedEpoch: partition.lastFetchedEpoch
+        })
 
         // First attempt hits the (now stale) cached leader: the broker rejects it because
         // leadership moved to a different node.
@@ -3661,6 +3665,18 @@ test('listOffsets should use custom isolation level when provided', async t => {
   strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
 })
 
+test('listOffsets should accept a custom isolation level in strict mode', async t => {
+  // The option schema declared isolationLevel as a string while FetchIsolationLevels are numbers,
+  // so strict consumers rejected every value: `1` failed the type check, `'1'` the enum.
+  const consumer = createConsumer(t, { strict: true })
+  const topic = await createTopic(t, true)
+
+  const offsets = await consumer.listOffsets({ topics: [topic], isolationLevel: FetchIsolationLevels.READ_COMMITTED })
+
+  strictEqual(offsets instanceof Map, true, 'Should return a Map of offsets')
+  strictEqual(offsets.has(topic), true, 'Should contain the requested topic')
+})
+
 test('listOffsets should refresh metadata and retry when leadership moves (NOT_LEADER_OR_FOLLOWER)', async t => {
   const topic = 'test-topic'
   // retries: 0 isolates the outer forceUpdateMetadata retry (the fix under test) from
@@ -3726,7 +3742,12 @@ test('listOffsets should refresh metadata and retry when leadership moves (NOT_L
 
         callback(null, {
           throttleTimeMs: 0,
-          topics: [{ name: topic, partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: -1n, offset: 42n, leaderEpoch: 5 }] }]
+          topics: [
+            {
+              name: topic,
+              partitions: [{ partitionIndex: 0, errorCode: 0, timestamp: -1n, offset: 42n, leaderEpoch: 5 }]
+            }
+          ]
         })
       }
 
@@ -4392,22 +4413,27 @@ test('getLag should reflect successful manual commits for streams with the parti
 
   const streams: MessagesStream<Buffer, Buffer, Buffer, Buffer>[] = []
   for (let i = 0; i < 2; i++) {
-    streams.push(await consumer.consume({
-      topics: [topic],
-      autocommit: false,
-      mode: MessagesStreamModes.MANUAL,
-      offsets: [{ topic, partition: 0, offset: 0n }],
-      maxWaitTime: 1000
-    }))
+    streams.push(
+      await consumer.consume({
+        topics: [topic],
+        autocommit: false,
+        mode: MessagesStreamModes.MANUAL,
+        offsets: [{ topic, partition: 0, offset: 0n }],
+        maxWaitTime: 1000
+      })
+    )
   }
   const key = `${topic}:0`
 
   try {
-    await waitFor(() => {
-      for (const stream of streams) {
-        strictEqual(stream.offsetsCommitted.get(key), 0n)
-      }
-    }, { interval: 50, timeout: 5000 })
+    await waitFor(
+      () => {
+        for (const stream of streams) {
+          strictEqual(stream.offsetsCommitted.get(key), 0n)
+        }
+      },
+      { interval: 50, timeout: 5000 }
+    )
 
     deepStrictEqual((await consumer.getLag({ topics: [topic] })).get(topic), [3n])
 
@@ -5463,13 +5489,19 @@ test('joinGroup should setup assignment with a cooperative sticky policy', async
   await consumer2.joinGroup()
   await rejoinPromise
 
-  await waitFor(() => {
-    const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
-    const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
-    deepStrictEqual([...assignments1, ...assignments2].sort((a, b) => a - b), [0, 1, 2, 3])
-    strictEqual(assignments1.length, 2)
-    strictEqual(assignments2.length, 2)
-  }, { timeout: 10_000 })
+  await waitFor(
+    () => {
+      const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
+      const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
+      deepStrictEqual(
+        [...assignments1, ...assignments2].sort((a, b) => a - b),
+        [0, 1, 2, 3]
+      )
+      strictEqual(assignments1.length, 2)
+      strictEqual(assignments2.length, 2)
+    },
+    { timeout: 10_000 }
+  )
 })
 
 test('cooperative sticky rebalance should keep consuming after a second member joins', async t => {
@@ -5526,19 +5558,27 @@ test('cooperative sticky rebalance should keep consuming after a second member j
 
   await rejoinPromise
 
-  await waitFor(() => {
-    const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
-    const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
-    strictEqual(assignments1.length, 2)
-    strictEqual(assignments2.length, 2)
-    deepStrictEqual([...assignments1, ...assignments2].sort((a, b) => a - b), [0, 1, 2, 3])
-  }, { timeout: 15_000 })
+  await waitFor(
+    () => {
+      const assignments1 = consumer1.assignments?.[0]?.partitions ?? []
+      const assignments2 = consumer2.assignments?.[0]?.partitions ?? []
+      strictEqual(assignments1.length, 2)
+      strictEqual(assignments2.length, 2)
+      deepStrictEqual(
+        [...assignments1, ...assignments2].sort((a, b) => a - b),
+        [0, 1, 2, 3]
+      )
+    },
+    { timeout: 15_000 }
+  )
 
-  await waitFor(() => {
-    const total =
-      receivedByMember.get('consumer-1')!.size + receivedByMember.get('consumer-2')!.size
-    strictEqual(total >= 8, true)
-  }, { timeout: 20_000 })
+  await waitFor(
+    () => {
+      const total = receivedByMember.get('consumer-1')!.size + receivedByMember.get('consumer-2')!.size
+      strictEqual(total >= 8, true)
+    },
+    { timeout: 20_000 }
+  )
 
   await stream1.close()
   await stream2.close()
@@ -5591,10 +5631,13 @@ test('cooperative sticky rebalance should autocommit revoked partition offsets b
   await consumer2.joinGroup()
   await rejoinPromise
 
-  await waitFor(() => {
-    strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
-    strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
-  }, { timeout: 15_000 })
+  await waitFor(
+    () => {
+      strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
+      strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
+    },
+    { timeout: 15_000 }
+  )
 
   await stream1.close()
 
@@ -5681,13 +5724,17 @@ test('cooperative sticky rebalance should continue when autocommit fails', async
   await rejoinPromise
 
   // The rebalance must have continued despite the autocommit failure.
-  await waitFor(() => {
-    strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
-    strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
-  }, { timeout: 15_000 })
+  await waitFor(
+    () => {
+      strictEqual(consumer1.assignments?.[0]?.partitions.length, 2)
+      strictEqual(consumer2.assignments?.[0]?.partitions.length, 2)
+    },
+    { timeout: 15_000 }
+  )
 
-  const [{ groupId: payloadGroupId, error: autocommitError }] =
-    (await autocommitErrorPromise) as [{ groupId: string; error: Error }]
+  const [{ groupId: payloadGroupId, error: autocommitError }] = (await autocommitErrorPromise) as [
+    { groupId: string; error: Error }
+  ]
   strictEqual(payloadGroupId, groupId)
   strictEqual(autocommitError instanceof Error, true)
   strictEqual(commitFailures, 1)
@@ -5713,22 +5760,28 @@ test('cooperative sticky rebalance should redistribute partitions when a member 
   await consumer2.joinGroup()
   await consumer3.joinGroup()
 
-  await waitFor(() => {
-    const total =
-      (consumer1.assignments?.[0]?.partitions.length ?? 0) +
-      (consumer2.assignments?.[0]?.partitions.length ?? 0) +
-      (consumer3.assignments?.[0]?.partitions.length ?? 0)
-    strictEqual(total, 6)
-  }, { timeout: 15_000 })
+  await waitFor(
+    () => {
+      const total =
+        (consumer1.assignments?.[0]?.partitions.length ?? 0) +
+        (consumer2.assignments?.[0]?.partitions.length ?? 0) +
+        (consumer3.assignments?.[0]?.partitions.length ?? 0)
+      strictEqual(total, 6)
+    },
+    { timeout: 15_000 }
+  )
 
   const rejoinPromise = once(consumer1, 'consumer:group:join')
   await consumer3.leaveGroup()
   await rejoinPromise
 
-  await waitFor(() => {
-    strictEqual(consumer1.assignments?.[0]?.partitions.length, 3)
-    strictEqual(consumer2.assignments?.[0]?.partitions.length, 3)
-  }, { timeout: 15_000 })
+  await waitFor(
+    () => {
+      strictEqual(consumer1.assignments?.[0]?.partitions.length, 3)
+      strictEqual(consumer2.assignments?.[0]?.partitions.length, 3)
+    },
+    { timeout: 15_000 }
+  )
 })
 
 test('joinGroup should setup assignment with a custom policy', async t => {
@@ -5780,6 +5833,146 @@ test('joinGroup should setup assignment with a custom policy', async t => {
 
   deepStrictEqual(consumer1.assignments, [{ topic, partitions: [0, 1, 2] }])
   deepStrictEqual(consumer2.assignments, [{ topic, partitions: [0, 1, 2] }])
+})
+
+test('joinGroup should invoke a custom assigner for a single member without a topic selector', async t => {
+  const topic = await createTopic(t, true, 2)
+  let called = false
+  const consumer = createConsumer(t, {
+    partitionAssigner (current, members, _topics, metadata) {
+      called = true
+      strictEqual(members.size, 1)
+      strictEqual(metadata.topics.get(topic)?.partitionsCount, 2)
+      return [{ memberId: current, assignments: new Map([[topic, { topic, partitions: [0] }]]) }]
+    }
+  })
+
+  await consumer.topics.trackAll(topic)
+  await consumer.joinGroup()
+
+  strictEqual(called, true)
+  deepStrictEqual(consumer.assignments, [{ topic, partitions: [0] }])
+})
+
+test('joinGroup should request only the topics selected by a custom assigner', async t => {
+  const leaderTopic = await createTopic(t, true, 1)
+  const otherTopic = await createTopic(t, true, 1)
+  const groupId = createGroupId()
+  const requested: string[][] = []
+  const selected: string[][] = []
+
+  const consumer1 = createConsumer(t, {
+    groupId,
+    partitionAssignerTopicsSelector (leader, members) {
+      strictEqual(leader, members.get(leader.memberId))
+      selected.push([...members.keys()])
+      return leader.topics!
+    },
+    partitionAssigner (_current, members, _topics, metadata) {
+      deepStrictEqual([...metadata.topics.keys()], [leaderTopic])
+      return [...members].map(([memberId, member]) => ({
+        memberId,
+        assignments: new Map([[member.topics![0], { topic: member.topics![0], partitions: [0] }]])
+      }))
+    }
+  })
+  const consumer2 = createConsumer(t, { groupId })
+
+  await consumer1.topics.trackAll(leaderTopic)
+  await consumer2.topics.trackAll(otherTopic)
+  mockMetadata(
+    consumer1,
+    () => true,
+    null,
+    null,
+    (original, options, callback) => {
+      requested.push([...options.topics])
+      if (options.topics.includes(otherTopic)) {
+        callback(new UserError('Unexpected metadata request for another member.'))
+        return true
+      }
+      original(options, callback)
+      return true
+    }
+  )
+
+  await consumer1.joinGroup()
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  deepStrictEqual(consumer1.assignments, [{ topic: leaderTopic, partitions: [0] }])
+  deepStrictEqual(consumer2.assignments, [{ topic: otherTopic, partitions: [0] }])
+  ok(selected.some(members => members.length === 2))
+  ok(requested.every(topics => !topics.includes(otherTopic)))
+})
+
+test('joinGroup should let a custom assigner request no topic metadata', async t => {
+  const topic = await createTopic(t, true, 1)
+  const consumer = createConsumer(t)
+  await consumer.topics.trackAll(topic)
+
+  await consumer.joinGroup({
+    partitionAssignerTopicsSelector: () => [],
+    partitionAssigner (current, members, _topics, metadata) {
+      strictEqual(members.size, 1)
+      strictEqual(metadata.topics.size, 0)
+      return [{ memberId: current, assignments: new Map([[topic, { topic, partitions: [0] }]]) }]
+    }
+  })
+
+  deepStrictEqual(consumer.assignments, [{ topic, partitions: [0] }])
+})
+
+test('joinGroup should require all member topics when no custom topic selector is supplied', async t => {
+  const firstTopic = await createTopic(t, true, 1)
+  const secondTopic = await createTopic(t, true, 1)
+  const groupId = createGroupId()
+  const seen: string[][] = []
+
+  const consumer1 = createConsumer(t, {
+    groupId,
+    partitionAssigner (_current, members, _topics, metadata) {
+      seen.push([...metadata.topics.keys()])
+      return [...members.keys()].map(memberId => ({ memberId, assignments: new Map() }))
+    }
+  })
+  const consumer2 = createConsumer(t, { groupId })
+  await consumer1.topics.trackAll(firstTopic)
+  await consumer2.topics.trackAll(secondTopic)
+
+  await consumer1.joinGroup()
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  await rejoinPromise
+
+  ok(seen.some(topics => topics.includes(firstTopic) && topics.includes(secondTopic)))
+})
+
+test('joinGroup should ignore a topic selector without a custom assigner', async t => {
+  const topic = await createTopic(t, true, 1)
+  const consumer = createConsumer(t)
+  await consumer.topics.trackAll(topic)
+
+  await consumer.joinGroup({
+    partitionAssignerTopicsSelector () {
+      throw new Error('The built-in assigner must not call the topic selector.')
+    }
+  })
+
+  deepStrictEqual(consumer.assignments, [{ topic, partitions: [0] }])
+})
+
+test('joinGroup should reject an invalid custom topic selection', async t => {
+  const consumer = createConsumer(t)
+  await rejects(
+    consumer.joinGroup({
+      partitionAssigner: () => [],
+      // @ts-expect-error - Test the return value at runtime.
+      partitionAssignerTopicsSelector: () => 'invalid'
+    }),
+    { code: 'PLT_KFK_USER', message: 'partitionAssignerTopicsSelector must return an array of topic names.' }
+  )
 })
 
 test('joinGroup should not fail when the partition assigner misses a member', async t => {
@@ -6017,6 +6210,14 @@ test('joinGroup should fail when consumer is closed', async t => {
 
 test('joinGroup should validate the supplied options', async t => {
   const consumer = createConsumer(t, { strict: true })
+
+  await rejects(
+    consumer.joinGroup({
+      // @ts-expect-error - Intentionally passing an invalid option.
+      partitionAssignerTopicsSelector: true
+    }),
+    { code: 'PLT_KFK_USER' }
+  )
 
   // Test with invalid sessionTimeout
   try {
@@ -7077,7 +7278,7 @@ test('metrics should track the number of active streams', async t => {
   }
 
   await consumer.close(true)
-
+ d
   {
     const metrics = await registry.getMetricsAsJSON()
     const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!

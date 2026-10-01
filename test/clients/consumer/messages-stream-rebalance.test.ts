@@ -3,7 +3,8 @@ import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import type { RecordsBatch } from '../../../src/protocol/records.ts'
+import type { Message, RecordsBatch } from '../../../src/protocol/records.ts'
+import type { ConsumeOptions } from '../../../src/clients/consumer/types.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import {
   type Consumer,
@@ -164,14 +165,18 @@ function createConsumerMock (
   return consumer
 }
 
-function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
+function createStream (
+  consumer: Consumer,
+  options: Partial<ConsumeOptions<Buffer, Buffer, Buffer, Buffer>> = {}
+): MessagesStream<Buffer, Buffer, Buffer, Buffer> {
   const stream = new MessagesStream(consumer, {
     topics: [topic],
     mode: MessagesStreamModes.EARLIEST,
     fallbackMode: MessagesStreamFallbackModes.EARLIEST,
     maxWaitTime: 1000,
     maxBytes: 1024,
-    autocommit: false
+    autocommit: false,
+    ...options
   })
 
   mockConnectionPoolGet(stream[kConnections], () => true, null, null, (_original, broker, callback) => {
@@ -1022,4 +1027,110 @@ test('should fall back to leader when preferred read replica fetch fails', async
   strictEqual(nodes[2], 1)
 
   stream.destroy()
+})
+
+test('should not commit queued offsets for revoked partitions during rebalance autocommit', { timeout: 5_000 }, async t => {
+  const committedPartitions: number[] = []
+  let releaseFetch!: () => void
+  let resolveFetchStarted!: () => void
+  const fetchStarted = new Promise<void>(resolve => {
+    resolveFetchStarted = resolve
+  })
+
+  const consumer = createConsumerMock(t, (_options, callback) => {
+    releaseFetch = () => {
+      const response = createFetchResponse(-1)
+      response.responses[0].partitions[0].records = [
+        createRecordsBatch(0n, ['msg-0', 'msg-1', 'msg-2', 'msg-3', 'msg-4'])
+      ]
+      callback(null, response)
+    }
+    resolveFetchStarted()
+  })
+  t.mock.method(consumer, 'isActive', () => true)
+  mockMethod(consumer, 'listCommittedOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map())
+    return true
+  })
+  mockMethod(consumer, 'commit', () => true, null, null, (
+    _original,
+    options: { offsets: Array<{ partition: number }> },
+    callback: CallbackWithPromise<void>
+  ) => {
+    committedPartitions.push(...options.offsets.map(offset => offset.partition))
+    callback(null)
+    return true
+  })
+
+  // Interval autocommit leaves the fetched offset queued until the rebalance flush.
+  const stream = createStream(consumer, { mode: MessagesStreamModes.COMMITTED, autocommit: 100_000 })
+  t.after(() => stream.destroy())
+  stream.on('data', () => {})
+
+  await fetchStarted
+  stream.pause()
+  releaseFetch()
+  await new Promise<void>(resolve => setImmediate(resolve))
+
+  strictEqual(stream.offsetsToCommit.get(`${topic}:0`)?.offset, 5n)
+  strictEqual(committedPartitions.length, 0)
+
+  consumer.assignments = []
+  consumer.generationId = 2
+  const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
+  consumer.emit('consumer:group:join')
+  await offsetsRestored
+
+  strictEqual(committedPartitions.includes(0), false)
+})
+
+test('manual message.commit() on a stale buffered message from a revoked partition should not advance the committed offset', { timeout: 5_000 }, async t => {
+  const committedPartitions: number[] = []
+  let fetchCount = 0
+  const consumer = createConsumerMock(t, (_options, callback) => {
+    if (++fetchCount === 1) {
+      const response = createFetchResponse(-1)
+      response.responses[0].partitions[0].records = [
+        createRecordsBatch(0n, ['msg-0', 'msg-1', 'msg-2', 'msg-3', 'msg-4'])
+      ]
+      callback(null, response)
+    }
+  })
+  t.mock.method(consumer, 'isActive', () => true)
+  mockMethod(consumer, 'listCommittedOffsets', () => true, null, null, (_original, _options, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map())
+    return true
+  })
+  mockMethod(consumer, 'commit', () => true, null, null, (
+    _original,
+    options: { offsets: Array<{ partition: number }> },
+    callback: CallbackWithPromise<void>
+  ) => {
+    committedPartitions.push(...options.offsets.map(offset => offset.partition))
+    callback(null)
+    return true
+  })
+
+  const stream = createStream(consumer, { mode: MessagesStreamModes.COMMITTED })
+  t.after(() => stream.destroy())
+  const received: Array<Message<Buffer, Buffer, Buffer, Buffer>> = []
+  const fiveMessages = new Promise<void>(resolve => {
+    stream.on('data', message => {
+      received.push(message)
+      if (received.length === 5) resolve()
+    })
+  })
+
+  await fiveMessages
+  stream.pause()
+  strictEqual(committedPartitions.length, 0)
+
+  consumer.assignments = []
+  consumer.generationId = 2
+  const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
+  consumer.emit('consumer:group:join')
+  await offsetsRestored
+
+  await received[4].commit()
+  strictEqual(committedPartitions.includes(0), false)
 })

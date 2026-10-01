@@ -2276,7 +2276,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const addedOnRevokeRound = this.#diffGroupAssignments(assignments, previousAssignments)
 
       if (revoked.length > 0) {
-        for (const stream of this.#streams) {
+        const revokedTopics = new Set(revoked.map(a => a.topic))
+        const affectedStreams = [...this.#streams].filter(s => s.topics.some(t => revokedTopics.has(t)))
+
+        for (const stream of affectedStreams) {
           stream.pause()
         }
 
@@ -2309,7 +2312,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.assignments = assignments
             this.#syncPreferredReadReplicas()
 
-            for (const stream of this.#streams) {
+            for (const stream of affectedStreams) {
               stream.resume()
             }
 

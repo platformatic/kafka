@@ -76,7 +76,7 @@ import {
   UserError,
   type Writer
 } from '../../../src/index.ts'
-import { kGetFetchNode } from '../../../src/symbols.ts'
+import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
 import {
   createConsumer,
   createCreationChannelVerifier,
@@ -97,7 +97,6 @@ import {
   mockUnavailableAPI,
   waitFor
 } from '../../helpers.ts'
-
 const skipConsumerGroupProtocol = { skip: isKafka(['7.5.0', '7.6.0', '7.7.0', '7.8.0', '7.9.0']) }
 
 // This function produces sample messages to a topic for testing the consumer
@@ -7279,7 +7278,7 @@ test('metrics should track the number of active streams', async t => {
   }
 
   await consumer.close(true)
-
+ d
   {
     const metrics = await registry.getMetricsAsJSON()
     const activeConsumers = metrics.find(m => m.name === 'kafka_consumers_streams')!
@@ -7423,4 +7422,85 @@ test('metrics should track the consumer lag', async t => {
     deepStrictEqual(sum, expectedSum)
     deepStrictEqual(count, 3)
   }
+})
+
+test('cooperative sticky rebalance should only pause streams subscribed to revoked topics', async t => {
+  const topicA = await createTopic(t, true, 4)
+  const topicB = await createTopic(t, true, 4)
+  const groupId = createGroupId()
+  const protocols = [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }]
+
+  await produceTestMessages({
+    t,
+    messages: Array.from({ length: 16 }, (_, i) => ({
+      topic: topicB,
+      key: `key-${i}`,
+      value: `value-${i}`,
+      partition: i % 4
+    }))
+  })
+
+  const consumer1 = createConsumer(t, { groupId, protocols })
+  await consumer1.topics.trackAll(topicA)
+  await consumer1.topics.trackAll(topicB)
+  await consumer1.joinGroup()
+
+  const streamA = await consumer1.consume({
+    topics: [topicA],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+  const streamB = await consumer1.consume({
+    topics: [topicB],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+
+  const streamBMessages: string[] = []
+  streamB.on('data', message => {
+    streamBMessages.push(message.value.toString())
+  })
+
+  await waitFor(() => strictEqual(streamBMessages.length >= 4, true), { timeout: 15_000 })
+
+  // Intercept pause and kAutocommit on streamB before triggering the cooperative rebalance
+  const streamBPauseMock = t.mock.method(streamB, 'pause')
+  const streamBAutocommitMock = t.mock.method(streamB, kAutocommit)
+
+  // consumer2 joins for topicA only — triggers a cooperative revoke of topicA partitions on consumer1.
+  // topicB partitions are not revoked, so streamB must not be paused.
+  const consumer2 = createConsumer(t, { groupId, protocols })
+  await consumer2.topics.trackAll(topicA)
+
+  const rejoinPromise = once(consumer1, 'consumer:group:join')
+  await consumer2.joinGroup()
+  const streamC = await consumer2.consume({
+    topics: [topicA],
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: true,
+    maxWaitTime: 2000
+  })
+
+  await rejoinPromise
+
+  await waitFor(() => {
+    const a1 = consumer1.assignments?.find(a => a.topic === topicA)?.partitions.length ?? 0
+    const b1 = consumer1.assignments?.find(a => a.topic === topicB)?.partitions.length ?? 0
+    const a2 = consumer2.assignments?.find(a => a.topic === topicA)?.partitions.length ?? 0
+    strictEqual(a1, 0)
+    strictEqual(b1, 4)
+    strictEqual(a2, 4)
+  }, { timeout: 15_000 })
+
+  // streamB was never paused — only streamA's topic was revoked
+  strictEqual(streamBPauseMock.mock.callCount(), 0)
+  // streamB's offsets were still flushed — generationId changes on rejoin and pending offsets
+  // for non-revoked partitions must be committed before that happens to avoid ILLEGAL_GENERATION
+  strictEqual(streamBAutocommitMock.mock.callCount() >= 1, true)
+
+  await streamA.close()
+  await streamB.close()
+  await streamC.close()
 })

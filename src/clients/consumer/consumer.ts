@@ -34,12 +34,12 @@ import {
   type OffsetCommitRequestTopic,
   type OffsetCommitResponse
 } from '../../apis/consumer/offset-commit-v9.ts'
+import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import {
   type OffsetFetchRequest,
   type OffsetFetchRequestTopic,
   type OffsetFetchResponse
 } from '../../apis/consumer/offset-fetch-v9.ts'
-import { type OffsetFetchResponse as LegacyOffsetFetchResponse } from '../../apis/consumer/offset-fetch-v3.ts'
 import {
   type SyncGroupRequest,
   type SyncGroupRequestAssignment,
@@ -94,15 +94,15 @@ import {
 } from '../base/base.ts'
 import { type ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Gauge, type Histogram } from '../metrics.ts'
-import { MessagesStream } from './messages-stream.ts'
 import {
   CONSUMER_PROTOCOL_HIGHEST_VERSION,
-  decodeCooperativeStickyGeneration,
   decodeConsumerProtocolAssignment,
   decodeConsumerProtocolSubscription,
+  decodeCooperativeStickyGeneration,
   encodeConsumerProtocolAssignment,
   encodeConsumerProtocolSubscription
 } from './consumer-protocol.ts'
+import { MessagesStream } from './messages-stream.ts'
 import {
   commitOptionsValidator,
   consumeOptionsValidator,
@@ -115,19 +115,15 @@ import {
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
 } from './options.ts'
-import {
-  COOPERATIVE_STICKY_ASSIGNOR,
-  cooperativeStickyAssigner,
-  roundRobinAssigner
-} from './partitions-assigners.ts'
+import { COOPERATIVE_STICKY_ASSIGNOR, cooperativeStickyAssigner, roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
   type ConsumeOptions,
+  type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
   type ConsumerGroupOptions,
-  type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupRebalancePayload,
   type ConsumerHeartbeatErrorPayload,
   type ConsumerHeartbeatPayload,
@@ -139,6 +135,7 @@ import {
   type GroupAssignment,
   type GroupOptions,
   type GroupPartitionsAssigner,
+  type GroupPartitionsAssignerTopicsSelector,
   type GroupProtocolsMetadataCallback,
   type GroupProtocolSubscription,
   type ListCommitsOptions,
@@ -761,6 +758,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     const protocolsMetadata = (this[kOptions] as GroupOptions).protocolsMetadata
     if (!options.protocolsMetadata && protocolsMetadata) {
       options.protocolsMetadata = protocolsMetadata
+    }
+
+    if (!options.partitionAssigner && (this[kOptions] as GroupOptions).partitionAssigner) {
+      options.partitionAssigner = (this[kOptions] as GroupOptions).partitionAssigner
+    }
+    if (!options.partitionAssignerTopicsSelector && (this[kOptions] as GroupOptions).partitionAssignerTopicsSelector) {
+      options.partitionAssignerTopicsSelector = (this[kOptions] as GroupOptions).partitionAssignerTopicsSelector
     }
 
     this.#validateGroupOptions(options)
@@ -1494,14 +1498,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #syncGroup (
     partitionsAssigner: GroupPartitionsAssigner | null,
+    partitionAssignerTopicsSelector: GroupPartitionsAssignerTopicsSelector | null,
     callback: CallbackWithPromise<GroupAssignment[]>
   ): void {
     consumerGroupChannel.traceCallback(
       this.#performSyncGroup,
-      2,
+      3,
       createDiagnosticContext({ client: this, operation: 'syncGroup' }),
       this,
       partitionsAssigner,
+      partitionAssignerTopicsSelector,
       null,
       callback
     )
@@ -1550,7 +1556,11 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             // - extend the stall window by that bound rather than pausing it
             // - a rejoin that never completes still surfaces as a stall
             this.#resetHeartbeatStall()
-            this.#trackHeartbeatStall(options, error, options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options))
+            this.#trackHeartbeatStall(
+              options,
+              error,
+              options.rebalanceTimeout + this.#heartbeatStallTimeoutFor(options)
+            )
 
             this.#joinGroup(options, error => {
               if (error) {
@@ -2183,7 +2193,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           // Send a syncGroup request
-          this.#syncGroup(options.partitionAssigner, (error, response) => {
+          this.#syncGroup(options.partitionAssigner, options.partitionAssignerTopicsSelector, (error, response) => {
             if (!this.#membershipActive) {
               callback(null)
               return
@@ -2436,6 +2446,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #performSyncGroup (
     partitionsAssigner: GroupPartitionsAssigner | null,
+    partitionAssignerTopicsSelector: GroupPartitionsAssignerTopicsSelector | null,
     assignments: SyncGroupRequestAssignment[] | null,
     callback: CallbackWithPromise<GroupAssignment[]>
   ): void {
@@ -2446,23 +2457,44 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (!Array.isArray(assignments)) {
       if (this.#isLeader) {
-        // Get all the metadata for  the topics the consumer are listening to, then compute the assignments
-        const topicsSubscriptions = new Map<string, ExtendedGroupProtocolSubscription[]>()
+        const customTopics = !!(partitionsAssigner && partitionAssignerTopicsSelector)
+        let subscribedTopics: string[]
 
-        for (const subscription of this.#members.values()) {
-          for (const topic of subscription.topics!) {
-            let topicSubscriptions = topicsSubscriptions.get(topic)
-
-            if (!topicSubscriptions) {
-              topicSubscriptions = []
-              topicsSubscriptions.set(topic, topicSubscriptions)
-            }
-
-            topicSubscriptions.push(subscription)
+        if (customTopics) {
+          try {
+            subscribedTopics = partitionAssignerTopicsSelector!(this.#members.get(this.memberId!)!, this.#members)
+          } catch (error) {
+            callback(
+              this.#handleError(new UserError('partitionAssignerTopicsSelector failed.', { cause: error as Error }))
+            )
+            return
           }
-        }
 
-        const subscribedTopics = Array.from(topicsSubscriptions.keys())
+          if (!Array.isArray(subscribedTopics) || subscribedTopics.some(topic => typeof topic !== 'string')) {
+            callback(
+              this.#handleError(new UserError('partitionAssignerTopicsSelector must return an array of topic names.'))
+            )
+            return
+          }
+        } else {
+          // Get all the metadata for the topics the consumers are listening to, then compute the assignments.
+          const topicsSubscriptions = new Map<string, ExtendedGroupProtocolSubscription[]>()
+
+          for (const subscription of this.#members.values()) {
+            for (const topic of subscription.topics!) {
+              let topicSubscriptions = topicsSubscriptions.get(topic)
+
+              if (!topicSubscriptions) {
+                topicSubscriptions = []
+                topicsSubscriptions.set(topic, topicSubscriptions)
+              }
+
+              topicSubscriptions.push(subscription)
+            }
+          }
+
+          subscribedTopics = Array.from(topicsSubscriptions.keys())
+        }
 
         this[kMetadata]({ topics: subscribedTopics }, (error, metadata) => {
           if (error) {
@@ -2484,7 +2516,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#performSyncGroup(partitionsAssigner, this.#createAssignments(partitionsAssigner, metadata!), callback)
+          this.#performSyncGroup(
+            partitionsAssigner,
+            partitionAssignerTopicsSelector,
+            this.#createAssignments(partitionsAssigner, metadata!),
+            callback
+          )
         })
 
         return
@@ -2685,9 +2722,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     let userData = typeof metadata.metadata === 'string' ? Buffer.from(metadata.metadata) : metadata.metadata
 
     if (cooperative && !userData && metadata.version < 2) {
-      userData = Writer.create()
-        .appendInt32(this.memberId && ownedPartitions.length > 0 ? this.generationId : -1)
-        .buffer
+      userData = Writer.create().appendInt32(
+        this.memberId && ownedPartitions.length > 0 ? this.generationId : -1
+      ).buffer
     }
 
     return encodeConsumerProtocolSubscription({
@@ -2748,7 +2785,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // We are the only member of the group, assign all partitions to us
     const membersSize = this.#members.size
-    if (membersSize === 1) {
+    if (membersSize === 1 && !partitionsAssigner) {
       const assignments: GroupAssignment[] = []
 
       for (const topic of this.topics.current) {

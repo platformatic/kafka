@@ -28,7 +28,8 @@ export const groupOptionsProperties = {
     }
   },
   protocolsMetadata: { function: true },
-  partitionAssigner: { function: true }
+  partitionAssigner: { function: true },
+  partitionAssignerTopicsSelector: { function: true }
 }
 
 export const groupOptionsAdditionalValidations = {

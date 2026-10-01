@@ -19,6 +19,7 @@ import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV1,
   apiVersionsV3,
+  AuthenticationError,
   Base,
   baseApisChannel,
   baseMetadataChannel,
@@ -1123,6 +1124,55 @@ test('kPerformWithRetry should route synchronous exceptions thrown on retry to c
   strictEqual(attempts, 2)
   strictEqual(error instanceof MultipleErrors, true)
   strictEqual(error.errors.at(-1).message, 'synchronous throw on retry')
+})
+
+test('kPerformWithRetry stops on non-retriable connection causes', async t => {
+  const client = createBase(t, { retries: 2, retryDelay: 0 })
+  const saslResponse = new ResponseError(36, 2, { error: [58, 'Access denied'] }, {})
+  const causes = [
+    new AuthenticationError('SASL authentication failed.', { cause: saslResponse }),
+    saslResponse,
+    new AuthenticationError('Unsupported SASL mechanism.'),
+    new UserError('TLS handshake failed.'),
+    new UserError('Invalid configuration.'),
+    Object.assign(new Error('Invalid user credentials.'), { canRetry: false })
+  ]
+
+  for (const cause of causes) {
+    const error = new NetworkError('Connection failed.', { cause })
+    const callback = createPromisifiedCallback<string>()
+    let attempts = 0
+    const result = client[kPerformWithRetry]<string>(
+      'metadata',
+      retryCallback => {
+        attempts++
+        retryCallback(error)
+      },
+      callback
+    )
+
+    strictEqual(await (result as Promise<string>).catch(e => e), error)
+    strictEqual(attempts, 1)
+  }
+})
+
+test('kPerformWithRetry retries transient connection causes', async t => {
+  const client = createBase(t, { retries: 2, retryDelay: 0 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+  const result = client[kPerformWithRetry]<string>(
+    'metadata',
+    retryCallback => {
+      attempts++
+      retryCallback(new NetworkError('Connection failed.', { cause: new Error('ECONNRESET') }))
+    },
+    callback
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 3)
+  strictEqual(error instanceof MultipleErrors, true)
+  strictEqual(error.errors.length, 3)
 })
 
 test('kPerformWithRetry should clear retry errors after eventual success', async t => {

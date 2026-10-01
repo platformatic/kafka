@@ -29,6 +29,35 @@ export type ErrorCode = (typeof errorCodes)[number]
 
 export type ErrorProperties = { cause?: Error } & Record<string, any>
 
+export function findNestedErrorBy (error: Error, property: string, value: unknown, visited: Set<Error>): Error | null {
+  if (!error || visited.has(error)) {
+    return null
+  }
+
+  visited.add(error)
+  if ((error as Error & Record<string, unknown>)[property] === value) {
+    return error
+  }
+
+  // Visit aggregate entries before the cause, preserving the existing search order.
+  if (MultipleErrors.isMultipleErrors(error)) {
+    for (const nested of error.errors) {
+      if (nested && typeof nested === 'object') {
+        const found = findNestedErrorBy(nested, property, value, visited)
+        if (found) {
+          return found
+        }
+      }
+    }
+  }
+
+  if (error.cause && typeof error.cause === 'object') {
+    return findNestedErrorBy(error.cause as Error, property, value, visited)
+  }
+
+  return null
+}
+
 export class GenericError extends Error {
   code: string;
   [index: string]: any
@@ -58,11 +87,7 @@ export class GenericError extends Error {
   }
 
   findBy<ErrorType extends GenericError = GenericError> (property: string, value: unknown): ErrorType | null {
-    if (this[property] === value) {
-      return this as unknown as ErrorType
-    }
-
-    return null
+    return findNestedErrorBy(this, property, value, new Set<Error>()) as ErrorType | null
   }
 
   toString () {
@@ -111,27 +136,7 @@ export class MultipleErrors extends AggregateError {
     property: string,
     value: unknown
   ): ErrorType | null {
-    if (this[property] === value) {
-      return this as unknown as ErrorType
-    }
-
-    for (const error of this.errors) {
-      if (!error) {
-        continue
-      }
-
-      if (error[property] === value) {
-        return error as unknown as ErrorType
-      }
-
-      const found = error[kGenericError] ? error.findBy(property, value) : undefined
-
-      if (found) {
-        return found as unknown as ErrorType
-      }
-    }
-
-    return null
+    return findNestedErrorBy(this, property, value, new Set<Error>()) as ErrorType | null
   }
 
   toString () {
@@ -172,7 +177,8 @@ export class NetworkError extends GenericError {
 
   static isRetryable (error: Error | null | undefined): boolean {
     const networkError = findErrorBy(error, 'code', NetworkError.code)
-    return networkError?.canRetry === true
+    // Require a retryable network error, but reject any non-retriable error in the whole tree.
+    return networkError?.canRetry === true && !findErrorBy(error, 'canRetry', false)
   }
 
   constructor (message: string, properties: ErrorProperties = {}) {

@@ -5,6 +5,7 @@ import {
   allowedSASLMechanisms,
   AuthenticationError,
   Base,
+  findErrorBy,
   MultipleErrors,
   NetworkError,
   parseBroker,
@@ -57,11 +58,18 @@ for (const mechanism of allowedSASLMechanisms) {
     const base = new Base({
       clientId: 'clientId',
       bootstrapBrokers: kafkaSaslBootstrapServers,
-      retries: 0,
+      retries: 2,
+      retryDelay: 0,
       sasl: { mechanism, username: 'admin', password: 'invalid' }
     })
 
     t.after(() => base.close())
+    let metadataRetries = 0
+    base.on('client:performWithRetry:retry', operationId => {
+      if (operationId === 'metadata') {
+        metadataRetries++
+      }
+    })
 
     try {
       await base.metadata({ topics: [] })
@@ -69,6 +77,8 @@ for (const mechanism of allowedSASLMechanisms) {
     } catch (error) {
       ok(error instanceof MultipleErrors)
       deepStrictEqual(error.errors[0].cause.message, 'SASL authentication failed.')
+      deepStrictEqual(findErrorBy(error, 'apiId', 'SASL_AUTHENTICATION_FAILED')?.canRetry, false)
+      deepStrictEqual(metadataRetries, 0)
     }
   })
 

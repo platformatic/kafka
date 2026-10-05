@@ -40,7 +40,7 @@ Creates a new base client.
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
-| `tlsServerName`      | `boolean` \| `string`  |           | TLS Server Name Indication (SNI). Set to `true` to use each target broker's hostname, or a string to use a fixed name. See the TLS section below.                   |
+| `tlsServerName`      | `boolean` \| `string`  | `true`    | TLS SNI defaults to each target broker's hostname, excluding IP addresses. Set to `false` to disable inference, or a string to use a fixed name.                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
 | `context`            | `unknown`              |           | Opaque user data forwarded to internally created `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                |
 
@@ -125,6 +125,9 @@ In practice, `requestTimeout` is the guard for `TimeoutError: Request timed out`
 ## Connecting to Kafka via TLS connection
 
 To connect to a Kafka via TLS connection, simply pass all relevant options in the `tls` options when creating any subclass of `Base`.
+SNI is enabled automatically for DNS hostnames, including brokers discovered after bootstrap, but not for IP addresses.
+An explicit `tls.servername` takes precedence over automatic inference; a string `tlsServerName` overrides it.
+Set `tlsServerName: false` to disable automatic inference without removing an explicit `tls.servername`.
 Example:
 
 ```javascript

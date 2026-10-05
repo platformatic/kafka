@@ -1571,7 +1571,7 @@ test('Connection.connect should handle authentication errors', async t => {
   }
 })
 
-test('Connection.connect should connect to a TLS host without forwarding the servername', async t => {
+test('Connection.connect should use the TLS hostname as the servername by default', async t => {
   const { server, port } = await createTLSServer(t)
 
   const hostPromise = Promise.withResolvers()
@@ -1592,10 +1592,42 @@ test('Connection.connect should connect to a TLS host without forwarding the ser
   deepStrictEqual(connection.host, 'localhost')
   deepStrictEqual(connection.port, port)
   ok(connection.socket instanceof TLSSocket)
-  deepStrictEqual(await hostPromise.promise, false)
+  deepStrictEqual(await hostPromise.promise, 'localhost')
 })
 
-test('Connection.connect should connect to a TLS host without forwarding the host as the servername', async t => {
+for (const { host, tlsServerName, servername, expected } of [
+  { host: 'localhost', tlsServerName: false, servername: undefined, expected: false },
+  { host: '127.0.0.1', tlsServerName: undefined, servername: undefined, expected: false },
+  { host: '::1', tlsServerName: undefined, servername: undefined, expected: false },
+  { host: '127.0.0.1', tlsServerName: true, servername: undefined, expected: false },
+  { host: '::1', tlsServerName: true, servername: undefined, expected: false },
+  { host: 'localhost', tlsServerName: undefined, servername: 'anotherhost', expected: 'anotherhost' },
+  { host: 'localhost', tlsServerName: true, servername: 'anotherhost', expected: 'anotherhost' },
+  { host: 'localhost', tlsServerName: false, servername: 'anotherhost', expected: 'anotherhost' },
+  { host: '127.0.0.1', tlsServerName: undefined, servername: 'anotherhost', expected: 'anotherhost' },
+  { host: '127.0.0.1', tlsServerName: 'customhost', servername: 'anotherhost', expected: 'customhost' }
+]) {
+  test(`Connection.connect should use SNI ${expected} for ${host} with tlsServerName=${tlsServerName} and tls.servername=${servername}`, async t => {
+    const { server, port } = await createTLSServer(t)
+    const hostPromise = Promise.withResolvers()
+    server.on('secureConnection', socket => {
+      hostPromise.resolve(socket.servername)
+    })
+
+    const connection = new Connection('test-client', {
+      tls: { rejectUnauthorized: false, servername },
+      tlsServerName
+    })
+    t.after(() => connection.close())
+
+    await connection.connect(host, port)
+
+    deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
+    deepStrictEqual(await hostPromise.promise, expected)
+  })
+}
+
+test('Connection.connect should forward the TLS hostname as the servername when enabled', async t => {
   const { server, port } = await createTLSServer(t)
 
   const hostPromise = Promise.withResolvers()
@@ -1620,7 +1652,7 @@ test('Connection.connect should connect to a TLS host without forwarding the hos
   deepStrictEqual(await hostPromise.promise, 'localhost')
 })
 
-test('Connection.connect should connect to a TLS host without using a custom host as the servername', async t => {
+test('Connection.connect should use a custom TLS servername', async t => {
   const { server, port } = await createTLSServer(t)
 
   const hostPromise = Promise.withResolvers()

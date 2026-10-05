@@ -40,7 +40,7 @@ Creates a new base client.
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
-| `tlsServerName`      | `boolean` \| `string`  |           | A TLS servername to use when connecting. When set to `true` it will use the current target host.                                                                   |
+| `tlsServerName`      | `boolean` \| `string`  |           | TLS Server Name Indication (SNI). Set to `true` to use each target broker's hostname, or a string to use a fixed name. See the TLS section below.                   |
 | `sasl`               | `SASLOptions`          |           | Configures SASL authentication. See section below.                                                                                                                 |
 | `context`            | `unknown`              |           | Opaque user data forwarded to internally created `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                |
 
@@ -142,6 +142,28 @@ const producer = new Producer({
   }
 })
 ```
+
+### TLS Server Name Indication (SNI)
+
+Setting `tls: {}` enables TLS with Node.js defaults, but does not automatically enable Server Name Indication (SNI).
+Node.js `tls.connect()` does not send SNI unless a `servername` is provided. Kafka deployments whose TLS endpoints
+require SNI, for example for routing through a TLS proxy, can close connections when it is missing. This behavior
+is not specific to a Kafka provider.
+
+Set `tlsServerName: true` alongside your TLS options to send the current target broker's hostname:
+
+```javascript
+tls: {},
+tlsServerName: true
+```
+
+This applies both to bootstrap connections and to connections to brokers discovered through Kafka metadata.
+Prefer `true` when SNI should follow the hostname of each broker, rather than
+always using the bootstrap hostname. A string sets a fixed SNI name for all broker connections; alternatively,
+`tls.servername` can provide a fixed name directly. A truthy `tlsServerName` overrides `tls.servername`.
+
+Keep any existing TLS options when adding `tlsServerName`. Do not disable certificate verification to fix missing SNI.
+See [Troubleshooting](./troubleshooting.md#connection-errors-during-tls-or-authentication-setup) for the associated error symptoms and a complete configuration example.
 
 ## Connecting to Kafka via SASL
 

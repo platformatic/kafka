@@ -5,7 +5,7 @@ It verifies TLS/SASL authentication, metadata, production and consumption on two
 joining, explicit offset commits, resuming those offsets with a new consumer, and receiving new messages
 on an already running stream after its initial fetch.
 
-In CI, the test is an independent GitHub-hosted lane of [Regression Tests](../.github/workflows/regression.yml),
+In CI, the test is an independent GitHub-hosted lane of [Regression Tests](../../.github/workflows/regression.yml),
 on `main` only. Each execution provisions its own Azure environment, runs the smoke test, and deletes the
 environment with verification. It is not part of the regular CI workflow or pull requests.
 The smoke test is separate from `pnpm test`, `pnpm run test:ci`, and the API compatibility sweeps.
@@ -18,7 +18,7 @@ persistent development environment. Automated cleanup does not touch these manua
 - A current [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and access to a subscription
   where you can create resource groups, Event Hubs namespaces, and SAS authorization rules.
 - [GitHub CLI](https://cli.github.com/) and repository administration access for the CI configuration.
-- Node.js and pnpm as described in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- Node.js and pnpm as described in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - Outbound TLS access to `<namespace>.servicebus.windows.net:9093` from the test runner.
 
 The commands below use Bash syntax. Run them in the same shell; retain the subscription, resource group,
@@ -145,7 +145,7 @@ The SASL username is the literal `$ConnectionString`; the password is the comple
 
 ## Configure automated regression runs
 
-The Event Hubs lane lives directly in [`.github/workflows/regression.yml`](../.github/workflows/regression.yml).
+The Event Hubs lane lives directly in [`.github/workflows/regression.yml`](../../.github/workflows/regression.yml).
 It uses Node.js 24 on a GitHub-hosted runner and has a 45-minute job limit, with separate provisioning,
 smoke, and cleanup step limits. No permanent Kafka connection string is required: GitHub authenticates
 to Azure using OIDC and obtains a temporary namespace's SAS key during the run. The key is masked before
@@ -245,7 +245,7 @@ gh workflow run regression.yml --repo "$GITHUB_REPOSITORY" --ref main
 
 ### Lifecycle and verified cleanup
 
-[`scripts/eventhubs-resources.ts`](../scripts/eventhubs-resources.ts) implements `provision`, `credentials`,
+[`scripts/eventhubs-resources.ts`](../../scripts/eventhubs-resources.ts) implements `provision`, `credentials`,
 `cleanup`, and `recover`. Names include a hash of subscription/repository, the run ID, and the attempt.
 The resource group is tagged with `purpose=kafka-eventhubs-regression`, `repository`, `run`, and `attempt`.
 Its name is known before Azure creation begins, including when provisioning subsequently fails.
@@ -270,7 +270,7 @@ An already absent group is a successful, idempotent cleanup. Deletion verificati
 with 15-second intervals; cleanup CLI calls have their own 60-second limit, within the workflow step's 15-minute limit.
 
 If the runner disappears, a job times out, or the workflow is force-cancelled, that final step may never run.
-[Event Hubs resource recovery](../.github/workflows/eventhubs-cleanup.yml) therefore runs independently on
+[Event Hubs resource recovery](../../.github/workflows/eventhubs-cleanup.yml) therefore runs independently on
 completion of Regression Tests and every six hours, and can also be dispatched manually. It uses trusted
 `main` code, lists tagged groups in the configured subscription, and checks each owning GitHub run:
 

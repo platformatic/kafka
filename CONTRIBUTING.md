@@ -71,8 +71,14 @@ pnpm test
 #### Azure Event Hubs Smoke Tests
 
 The Event Hubs smoke test runs in the regression workflow on `main`, with an Azure environment created
-and deleted for each run. See [the Event Hubs guide](docs/eventhubs.md) for OIDC setup, verified cleanup
+and deleted for each run. See [the Event Hubs guide](docs/regression/eventhubs.md) for OIDC setup, verified cleanup
 and recovery, and the retained manual provisioning and local execution instructions.
+
+#### Oracle Streaming Smoke Tests
+
+The Oracle Streaming smoke test runs locally against the Kafka endpoint of a real OCI Streaming pool.
+The local runner provisions an isolated pool and a two-partition stream, runs the smoke twice, and verifies
+cleanup. See [the Oracle Streaming guide](docs/regression/oracle-streaming.md) for configuration and commands.
 
 #### Memory Tests
 

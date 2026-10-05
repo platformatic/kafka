@@ -174,6 +174,8 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Record Azure CLI version
+        run: az version --output json
       - name: Provision Event Hubs resources
         id: provision
         timeout-minutes: 15

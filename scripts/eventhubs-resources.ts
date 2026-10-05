@@ -32,13 +32,58 @@ export function resourceNames (config: Configuration, run: string, attempt: stri
   return { group, namespace: group, topic: 'kafka-smoke', policy: 'kafka-smoke' }
 }
 
+export function commandError (file: string, args: string[], timeout: number, error: unknown): UserError {
+  // Use known operation names rather than echoing arbitrary arguments or executable paths.
+  const operation =
+    file === 'az'
+      ? [
+          'group exists',
+          'group create',
+          'group show',
+          'group delete',
+          'group list',
+          'eventhubs namespace create',
+          'eventhubs namespace show',
+          'eventhubs eventhub create',
+          'eventhubs namespace authorization-rule'
+        ].find(name => args.slice(0, name.split(' ').length).join(' ') === name)
+      : undefined
+  const label = file === 'az' ? `az${operation ? ` ${operation}` : ''}` : file === 'gh' ? 'gh api' : 'Command'
+  const details: string[] = []
+  if (error instanceof Error) {
+    const failure = error as Error & { code?: string | number; killed?: boolean; signal?: string; stderr?: string }
+    if (failure.killed && failure.signal === 'SIGTERM') {
+      details.push(`timeout after ${timeout} ms`)
+    } else if (typeof failure.code === 'number') {
+      details.push(`exit code ${failure.code}`)
+    } else if (
+      failure.code &&
+      ['ENOENT', 'EACCES', 'ENOBUFS', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(failure.code)
+    ) {
+      details.push(failure.code)
+    }
+    // Only extract structured diagnostics from namespace creation. Never expose CLI output,
+    // error messages, or causes: credential commands and HTTP errors can contain secrets.
+    if (file === 'az' && args.slice(0, 3).join(' ') === 'eventhubs namespace create') {
+      const azureCode = failure.stderr?.match(/^ERROR: \(([A-Za-z][A-Za-z0-9_.]{0,127})\)/m)?.[1]
+      if (azureCode) {
+        details.push(`Azure error ${azureCode}`)
+      }
+      if (/^ERROR: unrecognized arguments:/m.test(failure.stderr ?? '')) {
+        details.push('Azure CLI rejected command arguments')
+      }
+    }
+  }
+  const diagnostic = details.length ? ` (${details.join(', ')})` : ''
+  return new UserError(`${label} failed${diagnostic}; check access and resource state.`)
+}
+
 export async function command (file: string, args: string[], timeout = 60_000): Promise<string> {
   try {
     const { stdout } = await execute(file, args, { timeout, maxBuffer: 4 * 1024 * 1024 })
     return stdout.trim()
-  } catch {
-    // Azure CLI errors can contain credentials. Do not include command output or the original cause.
-    throw new UserError(`${file} ${args.slice(0, 3).join(' ')} failed or timed out; check access and resource state.`)
+  } catch (error) {
+    throw commandError(file, args, timeout, error)
   }
 }
 

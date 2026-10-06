@@ -1,6 +1,6 @@
 import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import fastq from 'fastq'
-import { createConnection, type NetConnectOpts, type Socket } from 'node:net'
+import { createConnection, isIP, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
@@ -255,9 +255,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         timeout: this.#options.connectTimeout
       }
 
-      if (this.#options.tlsServerName) {
-        connectionOptions.servername =
-          typeof this.#options.tlsServerName === 'string' ? this.#options.tlsServerName : host
+      if (typeof this.#options.tlsServerName === 'string' && this.#options.tlsServerName) {
+        connectionOptions.servername = this.#options.tlsServerName
+      } else if ((this.#options.tlsServerName ?? true) && !isIP(host) && !this.#options.tls?.servername) {
+        // Infer SNI only for DNS names, preserving an explicitly configured TLS servername.
+        connectionOptions.servername = host
       }
 
       /* c8 ignore next 13 - Hard to test */

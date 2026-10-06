@@ -25,7 +25,7 @@ export interface KerberosCredentials {
   password: string
 }
 
-function createKerberosAuthenticationError (message: string, kerberosError: string): AuthenticationError {
+function createKerberosAuthenticationError (message: string, kerberosError: unknown): AuthenticationError {
   return new AuthenticationError(message, { kerberosError })
 }
 
@@ -36,12 +36,7 @@ function performChallenge (
   step: string,
   callback: CallbackWithPromise<SaslAuthenticateResponse>
 ): void {
-  client.step(step, async (error, challenge) => {
-    if (error) {
-      callback(createKerberosAuthenticationError('Cannot continue Kerberos step challenge.', error))
-      return
-    }
-
+  client.step(step).then(challenge => {
     const challengeBuffer = challenge ? Buffer.from(challenge, 'base64') : EMPTY_BUFFER
 
     authenticate(connection, challengeBuffer, (error, response) => {
@@ -56,19 +51,9 @@ function performChallenge (
       }
 
       if (client.contextComplete) {
-        client.unwrap(response!.authBytes.toString('base64'), error => {
-          if (error) {
-            callback(createKerberosAuthenticationError('Cannot unwrap Kerberose response', error))
-            return
-          }
-
+        client.unwrap(response!.authBytes.toString('base64')).then(() => {
           // Byte 0: No security layer; Byte 1-3: max message size - 0=none
-          client.wrap(Buffer.from([1, 0, 0, 0]).toString('base64'), {}, (error, wrapped) => {
-            if (error) {
-              callback(createKerberosAuthenticationError('Cannot wrap Kerberos response.', error))
-              return
-            }
-
+          client.wrap(Buffer.from([1, 0, 0, 0]).toString('base64'), {}).then(wrapped => {
             authenticate(connection, Buffer.from(wrapped, 'base64'), (error, response) => {
               if (error) {
                 callback(new AuthenticationError('SASL authentication failed.', { cause: error }))
@@ -77,7 +62,11 @@ function performChallenge (
 
               callback(null, response)
             })
+          }, error => {
+            callback(createKerberosAuthenticationError('Cannot wrap Kerberos response.', error))
           })
+        }, error => {
+          callback(createKerberosAuthenticationError('Cannot unwrap Kerberose response', error))
         })
 
         return
@@ -85,6 +74,8 @@ function performChallenge (
 
       performChallenge(connection, authenticate, client, response!.authBytes.toString('base64'), callback)
     })
+  }, error => {
+    callback(createKerberosAuthenticationError('Cannot continue Kerberos step challenge.', error))
   })
 }
 
@@ -178,15 +169,15 @@ async function authenticate (
       await acquireTicket(kerberosRoot, username!, password!)
     }
 
-    krb.initializeClient(service, {}, (error, client) => {
-      /* c8 ignore next 4 - Hard to test */
-      if (error) {
+    krb.initializeClient(service, {}).then(
+      client => {
+        performChallenge(connection, authenticate, client, '', afterRestoreCallback)
+      },
+      /* c8 ignore next 3 - Hard to test */
+      error => {
         afterRestoreCallback(createKerberosAuthenticationError('Cannot initialize Kerberos client.', error))
-        return
       }
-
-      performChallenge(connection, authenticate, client, '', afterRestoreCallback)
-    })
+    )
     /* c8 ignore next 3 - Hard to test */
   } catch (error) {
     afterRestoreCallback(error as Error)

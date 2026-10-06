@@ -1,9 +1,95 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { test } from 'node:test'
-import { EventHubsResources, resourceNames, type Command } from '../scripts/eventhubs-resources.ts'
+import {
+  command,
+  commandError,
+  EventHubsResources,
+  resourceNames,
+  type Command
+} from '../scripts/eventhubs-resources.ts'
 import { UserError } from '../src/errors.ts'
 
 const config = { subscription: 'test-subscription', repository: 'platformatic/kafka', location: 'northeurope' }
+
+test('namespace failures expose structured diagnostics without raw output or causes', () => {
+  const failure = Object.assign(new Error('secret error message'), {
+    code: 1,
+    stdout: 'secret stdout',
+    stderr: 'ERROR: (RequestDisallowedByAzure) secret connection string\nsecret stderr',
+    cause: new Error('secret cause')
+  })
+  const error = commandError('az', ['eventhubs', 'namespace', 'create'], 600_000, failure)
+  strictEqual(error.code, 'PLT_KFK_USER')
+  strictEqual(
+    error.message,
+    'az eventhubs namespace create failed (exit code 1, Azure error RequestDisallowedByAzure); check access and resource state.'
+  )
+  strictEqual(error.cause, undefined)
+  ok(!JSON.stringify(error).includes('secret'))
+})
+
+test('credential and unknown commands do not expose stderr diagnostics', () => {
+  const failure = Object.assign(new Error('secret'), { code: 1, stderr: 'ERROR: (SecretKey) secret' })
+  for (const [file, args] of [
+    ['az', ['eventhubs', 'namespace', 'authorization-rule', 'keys', 'list']],
+    ['az', ['unknown']],
+    ['gh', ['api']]
+  ] as const) {
+    const error = commandError(file, [...args], 60_000, failure)
+    ok(error.message.includes('exit code 1'))
+    ok(!error.message.includes('SecretKey'))
+    ok(!error.message.includes('secret'))
+  }
+})
+
+test('namespace argument errors are reported without echoing argument values', () => {
+  const failure = Object.assign(new Error('secret'), {
+    code: 2,
+    stderr: 'ERROR: unrecognized arguments: --unsupported secret'
+  })
+  const error = commandError('az', ['eventhubs', 'namespace', 'create'], 600_000, failure)
+  ok(error.message.includes('exit code 2, Azure CLI rejected command arguments'))
+  ok(!error.message.includes('secret'))
+  ok(!error.message.includes('--unsupported'))
+})
+
+test('timeouts and process-launch failures retain only safe metadata', () => {
+  const args = ['eventhubs', 'namespace', 'create']
+  const timeout = Object.assign(new Error('secret'), { killed: true, signal: 'SIGTERM', code: null })
+  ok(commandError('az', args, 600_000, timeout).message.includes('timeout after 600000 ms'))
+  for (const code of ['ENOENT', 'EACCES', 'ENOBUFS', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER']) {
+    const failure = Object.assign(new Error('secret'), { code })
+    ok(commandError('az', args, 60_000, failure).message.includes(`(${code})`))
+  }
+  for (const failure of [
+    new Error('secret'),
+    'secret',
+    { code: 'secret' },
+    Object.assign(new Error(), { code: 'secret' })
+  ]) {
+    const error = commandError('az', args, 60_000, failure)
+    strictEqual(error.code, 'PLT_KFK_USER')
+    ok(!error.message.includes('secret'))
+  }
+})
+
+test('command wraps real subprocess failures without leaking output', async () => {
+  await rejects(command(process.execPath, ['-e', 'console.error("secret"); process.exit(7)']), error => {
+    ok(error instanceof UserError)
+    strictEqual(error.code, 'PLT_KFK_USER')
+    ok(error.message.includes('exit code 7'))
+    ok(!error.message.includes('secret'))
+    return true
+  })
+})
+
+test('command reports real timeouts and still trims successful output', async () => {
+  await rejects(command(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], 50), {
+    code: 'PLT_KFK_USER',
+    message: /timeout after 50 ms/
+  })
+  strictEqual(await command(process.execPath, ['-e', 'console.log("  success  ")']), 'success')
+})
 
 function fixture () {
   const names = resourceNames(config, '123', '1')

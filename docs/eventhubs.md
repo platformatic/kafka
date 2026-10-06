@@ -257,6 +257,12 @@ connection retries. Namespace creation runs synchronously with a ten-minute CLI 
 does not support `--no-wait` for this operation. Other CLI calls retain their 60-second timeout.
 The lane reports provisioning, smoke, and cleanup outcomes separately.
 
+The job records the Azure CLI version before provisioning. CLI failures retain the `PLT_KFK_USER` error
+code and report the exit code, timeout, or known process-launch error when available. Namespace creation
+also reports Azure's structured error code or an unrecognized-arguments diagnostic. Raw CLI stdout,
+stderr, error messages, and causes are never logged, including for credential retrieval. These diagnostics
+distinguish provisioning failures from smoke test failures without exposing SAS keys or connection strings.
+
 An `always()` step deletes the group even after partial provisioning or a smoke failure. It validates
 ownership before deletion, then polls `az group exists` until Azure explicitly returns `false`. Azure CLI
 errors and polling timeouts fail the lane; a deletion request alone never counts as successful cleanup.

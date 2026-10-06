@@ -220,7 +220,10 @@ For more details, see the [Confluent Schema Registry documentation](./docs/confl
 
 ## TLS and SASL
 
-See the relevant sections in the the [Base Client](./docs/base.md) page.
+See the relevant sections in the [Base Client](./docs/base.md) page.
+
+For Kafka TLS endpoints that require SNI, enable TLS and SNI with `tls: {}` and `tlsServerName: true`.
+See [Troubleshooting](./docs/troubleshooting.md#connection-errors-during-tls-or-authentication-setup) for connection errors, including failures in `joinGroup` or `listApis`.
 
 ## Serialisation/Deserialisation
 
@@ -354,6 +357,7 @@ Many of the methods accept the same options as the client's constructors. The co
 - [Base Client](./docs/base.md)
 - [Metrics](./docs/metrics.md)
 - [Diagnostic and Instrumentation](./docs/diagnostic.md)
+- [Troubleshooting](./docs/troubleshooting.md)
 - [Other APIs and Types](./docs/other.md)
 - [Kafka API Codec Changelogs](https://github.com/platformatic/kafka/blob/main/docs/internals/api-changelog/README.md)
 - [Migrating from KafkaJS](./migration/README.md)

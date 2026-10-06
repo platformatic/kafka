@@ -43,6 +43,7 @@
     "test:e2e:upgrade": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/e2e/client-upgrade.e2e-test.ts'",
     "test:e2e:redpanda": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/e2e/redpanda.e2e-test.ts'",
     "test:e2e:eventhubs": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/e2e/eventhubs.e2e-test.ts'",
+    "test:e2e:oracle-streaming": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/e2e/oracle-streaming.e2e-test.ts'",
     "test:docker:up": "docker-compose up -d --wait",
     "test:docker:down": "docker-compose down",
     "regression:baseline:compare": "npm run test:performance",

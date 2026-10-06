@@ -14,49 +14,51 @@ import {
   type CommitOptionsPartition,
   type Message,
   type MessageToProduce,
-  type MessagesStream,
   type Offsets
 } from '../../src/index.ts'
 
-test('supports the Azure Event Hubs Kafka workflow', { timeout: 240_000 }, async t => {
-  const bootstrapServers = process.env.EVENTHUBS_BOOTSTRAP_SERVERS?.trim()
-  const topic = process.env.EVENTHUBS_TOPIC?.trim()
-  const password = process.env.EVENTHUBS_CONNECTION_STRING?.trim()
-  ok(bootstrapServers, 'EVENTHUBS_BOOTSTRAP_SERVERS is required; see docs/regression/eventhubs.md')
-  ok(topic, 'EVENTHUBS_TOPIC is required; see docs/regression/eventhubs.md')
-  ok(password, 'EVENTHUBS_CONNECTION_STRING is required; see docs/regression/eventhubs.md')
+test('supports the Oracle Streaming Kafka workflow', { timeout: 240_000 }, async t => {
+  const bootstrapServers = process.env.ORACLE_STREAMING_BOOTSTRAP_SERVERS?.trim()
+  const topic = process.env.ORACLE_STREAMING_TOPIC?.trim()
+  const username = process.env.ORACLE_STREAMING_USERNAME?.trim()
+  const password = process.env.ORACLE_STREAMING_AUTH_TOKEN?.trim()
+  ok(bootstrapServers, 'ORACLE_STREAMING_BOOTSTRAP_SERVERS is required; see docs/regression/oracle-streaming.md')
+  ok(topic, 'ORACLE_STREAMING_TOPIC is required; see docs/regression/oracle-streaming.md')
+  ok(username, 'ORACLE_STREAMING_USERNAME is required; see docs/regression/oracle-streaming.md')
+  ok(password, 'ORACLE_STREAMING_AUTH_TOKEN is required; see docs/regression/oracle-streaming.md')
 
-  const runId = `eventhubs-smoke-${randomUUID()}`
+  const runId = `oracle-streaming-smoke-${randomUUID()}`
   const connectionOptions = {
     bootstrapBrokers: bootstrapServers.split(',').map(broker => broker.trim()),
     tls: { rejectUnauthorized: true },
     tlsServerName: true,
-    sasl: { mechanism: 'PLAIN' as const, username: '$ConnectionString', password },
+    sasl: { mechanism: 'PLAIN' as const, username, password },
     autocreateTopics: false,
     connectTimeout: 10_000,
-    requestTimeout: 60_000,
-    timeout: 60_000,
+    requestTimeout: 30_000,
+    timeout: 30_000,
     retries: 2,
     retryDelay: 1000
   }
+  // OCI Streaming does not support idempotent production or transactions.
   const producer = new Producer<string, string, string, string>({
     ...connectionOptions,
     clientId: `${runId}-producer`,
     serializers: stringSerializers,
+    idempotent: false,
     compression: 'none'
   })
   t.after(() => producer.close())
 
   const metadata = await producer.metadata({ topics: [topic], forceUpdate: true })
   const partitions = metadata.topics.get(topic)?.partitions
-  ok(partitions, 'the smoke test Event Hub must exist')
-  strictEqual(partitions.length, 2, 'the smoke test Event Hub must have two partitions')
+  ok(partitions, 'the smoke test stream must exist')
+  strictEqual(partitions.length, 2, 'the smoke test stream must have two partitions')
   ok(
     partitions.every(partition => partition.leader >= 0),
     'both partitions must have active leaders'
   )
 
-  // Reuse the group only within this run, so retained messages and other runs cannot alter its commits.
   for (const batch of [0, 1, 2]) {
     const records: MessageToProduce<string, string, string, string>[] = [0, 1, 0, 1].map((partition, index) => ({
       topic,
@@ -66,11 +68,10 @@ test('supports the Azure Event Hubs Kafka workflow', { timeout: 240_000 }, async
       headers: { runId, batch: String(batch) }
     }))
 
-    // Prepublish the first two batches so a broken COMMITTED resume falling back to LATEST must fail.
+    // Prepublish the resume batch so an incorrect fallback to LATEST cannot pass.
     if (batch < 2) {
       await producer.send({ messages: records, acks: ProduceAcks.ALL })
     }
-
     const consumer = new Consumer<string, string, string, string>({
       ...connectionOptions,
       clientId: `${runId}-consumer-${batch}`,
@@ -83,20 +84,19 @@ test('supports the Azure Event Hubs Kafka workflow', { timeout: 240_000 }, async
       heartbeatInterval: 3000
     })
     t.after(() => consumer.close(true))
-
-    const stream: MessagesStream<string, string, string, string> = await consumer.consume({
+    const stream = await consumer.consume({
       topics: [topic],
       mode: [MessagesStreamModes.EARLIEST, MessagesStreamModes.COMMITTED, MessagesStreamModes.LATEST][batch],
       fallbackMode: MessagesStreamFallbackModes.FAIL,
-      maxWaitTime: 1000
+      maxWaitTime: 1000,
+      maxBytes: 1_048_576,
+      maxBytesPerPartition: 1_048_576
     })
-    // Abort a stalled fetch when the test deadline expires, allowing cleanup to close the clients.
     addAbortSignal(t.signal, stream)
 
-    // LATEST starts beyond retained records. Wait for an actual fetch before publishing, rather than
-    // sleeping or assuming consume() has already initialized offsets and started fetching.
     let publishAfterFetch = Promise.resolve()
     if (batch === 2) {
+      // Observe an actual fetch after LATEST initialization before publishing the final batch.
       publishAfterFetch = once(stream, 'fetch', { signal: t.signal }).then(async () => {
         ok(!stream.destroyed, 'the initial fetch must not destroy the stream')
         for (const partition of [0, 1]) {
@@ -109,11 +109,10 @@ test('supports the Azure Event Hubs Kafka workflow', { timeout: 240_000 }, async
     const messages: Message<string, string, string, string>[] = []
     const receiveMessages = async () => {
       for await (const message of stream) {
-        // The Event Hub persists across executions; ignore records from other runs.
+        // A second local execution shares retained records, but never its group ID or message keys.
         if (!message.key?.startsWith(`${runId}-`)) {
           continue
         }
-
         const partitionMessages = messages.filter(received => received.partition === message.partition)
         const expected = records.filter(record => record.partition === message.partition)[partitionMessages.length]
         ok(expected, 'received an unexpected record for this run')
@@ -127,21 +126,19 @@ test('supports the Azure Event Hubs Kafka workflow', { timeout: 240_000 }, async
         if (partitionMessages.length > 0) {
           ok(message.offset > partitionMessages[partitionMessages.length - 1].offset)
         }
-
         messages.push(message)
         if (messages.length === records.length) {
           break
         }
       }
     }
-    // Reading starts the fetch loop; observe both promises immediately so errors from either path fail the test.
     await Promise.all([publishAfterFetch, receiveMessages()])
     await stream.close()
     strictEqual(messages.length, records.length, 'all records must arrive before the stream ends')
 
     const offsets: CommitOptionsPartition[] = [0, 1].map(partition => {
-      const lastMessage = messages.findLast(message => message.partition === partition)!
-      return { topic, partition, offset: lastMessage.offset + 1n, leaderEpoch: lastMessage.leaderEpoch }
+      const last = messages.findLast(message => message.partition === partition)!
+      return { topic, partition, offset: last.offset + 1n, leaderEpoch: last.leaderEpoch }
     })
     await consumer.commit({ offsets })
     const committed: Offsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0, 1] }] })

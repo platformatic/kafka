@@ -215,6 +215,75 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
 
+  oracle-authentication:
+    name: Regression / Oracle Streaming authentication
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: oracle
+    timeout-minutes: 10
+    env:
+      OCI_WIF_DOMAIN_URL: ${{ vars.OCI_WIF_DOMAIN_URL }}
+      OCI_WIF_CLIENT_ID: ${{ vars.OCI_WIF_CLIENT_ID }}
+      OCI_TENANCY_ID: ${{ vars.OCI_TENANCY_ID }}
+      OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
+      OCI_COMPARTMENT_ID: ${{ vars.OCI_COMPARTMENT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install the validated OCI CLI version
+        run: |
+          python3 -m venv "$RUNNER_TEMP/oci-cli"
+          "$RUNNER_TEMP/oci-cli/bin/pip" install 'oci-cli==3.94.1'
+          printf '%s\n' "$RUNNER_TEMP/oci-cli/bin" >> "$GITHUB_PATH"
+      - name: Exchange GitHub OIDC for an OCI WIF session
+        id: login
+        env:
+          OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
+        run: node scripts/oracle-streaming-auth.ts
+      # Validate the hosted identity before enabling provisioning or consuming Kafka credentials.
+      - name: Verify Streaming access in the dedicated compartment
+        id: access
+        timeout-minutes: 2
+        run: |
+          test -n "$OCI_COMPARTMENT_ID"
+          oci streaming admin stream-pool list \
+            --compartment-id "$OCI_COMPARTMENT_ID" --region "$OCI_CLI_REGION" --all \
+            --query 'data[].{name:name,state:"lifecycle-state"}'
+          oci streaming admin stream list \
+            --compartment-id "$OCI_COMPARTMENT_ID" --region "$OCI_CLI_REGION" --all \
+            --query 'data[].{name:name,state:"lifecycle-state"}'
+      - name: Record Oracle authentication results
+        if: always()
+        env:
+          LOGIN_RESULT: ${{ steps.login.outcome }}
+          ACCESS_RESULT: ${{ steps.access.outcome }}
+        run: |
+          mkdir -p regression/artifacts
+          {
+            printf '### Oracle Streaming authentication\n\n'
+            printf -- '- WIF login: `%s`\n' "$LOGIN_RESULT"
+            printf -- '- Read-only Streaming access: `%s`\n' "$ACCESS_RESULT"
+            printf -- '- No resources were created or deleted; Kafka E2E is not enabled yet.\n'
+          } > regression/artifacts/linux-oracle-auth-node-24-report.md
+          cat regression/artifacts/linux-oracle-auth-node-24-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Oracle authentication artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-artifacts-oracle-auth
+          path: regression/artifacts
+          if-no-files-found: ignore
+
   legacy-regression:
     name: Regression / Apache Kafka 1.1.0
     runs-on: ubuntu-latest
@@ -336,7 +405,15 @@ jobs:
   report:
     name: Report regression results
     environment: regression
-    needs: [modern-regression, redpanda-regression, eventhubs-regression, legacy-regression, performance]
+    needs:
+      [
+        modern-regression,
+        redpanda-regression,
+        eventhubs-regression,
+        oracle-authentication,
+        legacy-regression,
+        performance
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -351,6 +428,7 @@ jobs:
           MODERN_RESULT: ${{ needs.modern-regression.result }}
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
           EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
+          ORACLE_RESULT: ${{ needs.oracle-authentication.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
           PERFORMANCE_RESULT: ${{ needs.performance.result }}
         run: |
@@ -385,6 +463,13 @@ jobs:
             else
               printf 'Event Hubs regression report was not produced. Check the recovery workflow for resource cleanup.\n'
             fi
+            printf '\n## Oracle Streaming Authentication Check\n\n'
+            printf -- '- Job result: `%s`\n\n' "$ORACLE_RESULT"
+            if [ -f regression/artifacts/linux-oracle-auth-node-24-report.md ]; then
+              cat regression/artifacts/linux-oracle-auth-node-24-report.md
+            else
+              printf 'Oracle authentication report was not produced.\n'
+            fi
             printf '\n## Legacy Sanity Check\n\n'
             printf -- '- Job result: `%s`\n\n' "$LEGACY_RESULT"
             if [ -f regression/artifacts/linux-kafka-1.1-node-24-report.md ]; then
@@ -418,7 +503,7 @@ jobs:
           path: regression/artifacts
           if-no-files-found: ignore
       - name: Notify regression failure on Slack
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.oracle-authentication.result == 'failure' || needs.oracle-authentication.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.oracle-authentication.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -426,17 +511,18 @@ jobs:
           MODERN_RESULT: ${{ needs.modern-regression.result }}
           REDPANDA_RESULT: ${{ needs.redpanda-regression.result }}
           EVENTHUBS_RESULT: ${{ needs.eventhubs-regression.result }}
+          ORACLE_RESULT: ${{ needs.oracle-authentication.result }}
           LEGACY_RESULT: ${{ needs.legacy-regression.result }}
           PERFORMANCE_RESULT: ${{ needs.performance.result }}
         run: |
           message=$(printf \
-            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nLegacy: %s\nPerformance: %s\nRun: %s' \
-            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$LEGACY_RESULT" "$PERFORMANCE_RESULT" "$REGRESSION_RUN_URL")
+            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nOracle authentication: %s\nLegacy: %s\nPerformance: %s\nRun: %s' \
+            "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$ORACLE_RESULT" "$LEGACY_RESULT" "$PERFORMANCE_RESULT" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \
               --header 'content-type: application/json' \
               --data-binary @- \
               "$SLACK_WEBHOOK_URL"
       - name: Fail aggregate job when a lane failed
-        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
+        if: ${{ always() && (needs.modern-regression.result != 'success' || needs.redpanda-regression.result != 'success' || needs.eventhubs-regression.result == 'failure' || needs.eventhubs-regression.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.eventhubs-regression.result != 'success') || needs.oracle-authentication.result == 'failure' || needs.oracle-authentication.result == 'cancelled' || (github.ref == 'refs/heads/main' && needs.oracle-authentication.result != 'success') || needs.legacy-regression.result != 'success' || needs.performance.result != 'success') }}
         run: exit 1

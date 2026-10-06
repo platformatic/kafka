@@ -360,7 +360,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       } else if (action === 'credentials') {
         if (!process.env.GITHUB_ENV || process.env.GITHUB_ACTIONS !== 'true') {
           throw new UserError(
-            'The credentials command requires GitHub Actions; see docs/eventhubs.md for local access.'
+            'The credentials command requires GitHub Actions; see docs/regression/eventhubs.md for local access.'
           )
         }
         const credentials = await resources.credentials(run, attempt)

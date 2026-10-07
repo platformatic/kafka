@@ -29,7 +29,7 @@ async function dropTsExtensionsInDeclarations () {
     const destination = resolve(distDir, 'typescript-4/dist', file)
     const ast = parse(source, { sourceType: 'module', plugins: ['typescript'] })
 
-    traverse.default(ast, {
+    traverse(ast, {
       // Do not use .ts extensions in import/export statements
       ImportDeclaration (path) {
         if (path.node.source.value.endsWith('.ts')) {
@@ -43,8 +43,8 @@ async function dropTsExtensionsInDeclarations () {
         }
       },
       TSImportType (path) {
-        if (path.node.argument?.value.endsWith('.ts')) {
-          path.node.argument.value = path.node.argument.value.slice(0, -3)
+        if (path.node.source.value.endsWith('.ts')) {
+          path.node.source.value = path.node.source.value.slice(0, -3)
         }
       },
       // Buffer<T> to Buffer
@@ -52,13 +52,13 @@ async function dropTsExtensionsInDeclarations () {
         const node = path.node
 
         if ((node.typeName as Identifier).name === 'Buffer') {
-          node.typeParameters = null
+          node.typeArguments = null
         }
       }
     })
 
     await mkdir(dirname(destination), { recursive: true })
-    await writeFile(destination, generate.default(ast).code, 'utf-8')
+    await writeFile(destination, generate(ast).code, 'utf-8')
   }
 }
 

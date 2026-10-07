@@ -5,3 +5,5 @@ allowBuilds:
   unrs-resolver: true
   '@confluentinc/kafka-javascript': false
   '@platformatic/rdkafka': false
+minimumReleaseAgeExclude:
+  - '@platformatic/wasm-utils@0.3.0'

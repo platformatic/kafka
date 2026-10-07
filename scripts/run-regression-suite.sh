@@ -2,7 +2,7 @@
 
 set -o pipefail
 
-MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|legacy|performance|protocol> <version> <lane> [tier] [sweep]}"
+MODE="${1:?usage: run-regression-suite.sh <modern|redpanda|eventhubs|oracle|legacy|performance|protocol> <version> <lane> [tier] [sweep]}"
 VERSION="${2:?version is required}"
 LANE="${3:?lane is required}"
 ARTIFACT_DIR="regression/artifacts"
@@ -40,6 +40,10 @@ elif [[ "$MODE" == redpanda ]]; then
   run_suite e2e pnpm run test:e2e:redpanda
 elif [[ "$MODE" == eventhubs ]]; then
   run_suite e2e pnpm run test:e2e:eventhubs
+elif [[ "$MODE" == oracle ]]; then
+  # Independent processes verify isolation from retained messages on the same per-run stream.
+  run_suite e2e-first pnpm run test:e2e:oracle-streaming
+  run_suite e2e-second pnpm run test:e2e:oracle-streaming
 elif [[ "$MODE" == legacy ]]; then
   run_suite compatibility pnpm run test:compat
 elif [[ "$MODE" == performance ]]; then

@@ -216,17 +216,18 @@ jobs:
           if-no-files-found: ignore
 
   oracle-authentication:
-    name: Regression / Oracle Streaming authentication
+    name: Regression / Oracle Streaming
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: oracle
-    timeout-minutes: 10
+    timeout-minutes: 65
     env:
       OCI_WIF_DOMAIN_URL: ${{ vars.OCI_WIF_DOMAIN_URL }}
       OCI_WIF_CLIENT_ID: ${{ vars.OCI_WIF_CLIENT_ID }}
       OCI_TENANCY_ID: ${{ vars.OCI_TENANCY_ID }}
       OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
       OCI_COMPARTMENT_ID: ${{ vars.OCI_COMPARTMENT_ID }}
+      ORACLE_STREAMING_USERNAME_PREFIX: ${{ vars.ORACLE_STREAMING_USERNAME_PREFIX }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -245,42 +246,63 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/oci-cli"
           "$RUNNER_TEMP/oci-cli/bin/pip" install 'oci-cli==3.94.1'
           printf '%s\n' "$RUNNER_TEMP/oci-cli/bin" >> "$GITHUB_PATH"
+      - name: Check Kafka configuration before creating resources
+        env:
+          ORACLE_STREAMING_AUTH_TOKEN: ${{ secrets.ORACLE_STREAMING_AUTH_TOKEN }}
+        run: |
+          test -n "$ORACLE_STREAMING_USERNAME_PREFIX"
+          test -n "$ORACLE_STREAMING_AUTH_TOKEN"
       - name: Exchange GitHub OIDC for an OCI WIF session
         id: login
         env:
           OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
         run: node scripts/oracle-streaming-auth.ts
-      # Validate the hosted identity before enabling provisioning or consuming Kafka credentials.
-      - name: Verify Streaming access in the dedicated compartment
-        id: access
-        timeout-minutes: 2
-        run: |
-          test -n "$OCI_COMPARTMENT_ID"
-          oci streaming admin stream-pool list \
-            --compartment-id "$OCI_COMPARTMENT_ID" --region "$OCI_CLI_REGION" --all \
-            --query 'data[].{name:name,state:"lifecycle-state"}'
-          oci streaming admin stream list \
-            --compartment-id "$OCI_COMPARTMENT_ID" --region "$OCI_CLI_REGION" --all \
-            --query 'data[].{name:name,state:"lifecycle-state"}'
-      - name: Record Oracle authentication results
+      - name: Provision Oracle Streaming resources
+        id: provision
+        timeout-minutes: 25
+        env:
+          OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
+        run: node scripts/oracle-streaming-ci.ts provision
+      - name: Retrieve Oracle Streaming connection settings
+        env:
+          OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
+        run: node scripts/oracle-streaming-ci.ts credentials
+      - name: Run Oracle Streaming regression suite twice
+        id: smoke
+        timeout-minutes: 10
+        env:
+          ORACLE_STREAMING_AUTH_TOKEN: ${{ secrets.ORACLE_STREAMING_AUTH_TOKEN }}
+        run: bash ./scripts/run-regression-suite.sh oracle OCI-Streaming linux-oracle-node-24
+      - name: Delete and verify Oracle Streaming resources
+        id: cleanup
+        if: ${{ always() && steps.login.outcome == 'success' && steps.provision.outcome != 'skipped' && steps.provision.outcome != '' }}
+        timeout-minutes: 25
+        env:
+          OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
+        run: node scripts/oracle-streaming-ci.ts cleanup
+      - name: Record Oracle lifecycle results
         if: always()
         env:
           LOGIN_RESULT: ${{ steps.login.outcome }}
-          ACCESS_RESULT: ${{ steps.access.outcome }}
+          PROVISION_RESULT: ${{ steps.provision.outcome }}
+          SMOKE_RESULT: ${{ steps.smoke.outcome }}
+          CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
         run: |
           mkdir -p regression/artifacts
           {
-            printf '### Oracle Streaming authentication\n\n'
+            printf '\n## Oracle Streaming resource lifecycle\n\n'
             printf -- '- WIF login: `%s`\n' "$LOGIN_RESULT"
-            printf -- '- Read-only Streaming access: `%s`\n' "$ACCESS_RESULT"
-            printf -- '- No resources were created or deleted; Kafka E2E is not enabled yet.\n'
-          } > regression/artifacts/linux-oracle-auth-node-24-report.md
-          cat regression/artifacts/linux-oracle-auth-node-24-report.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload Oracle authentication artifacts
+            printf -- '- Provisioning: `%s`\n' "$PROVISION_RESULT"
+            printf -- '- Smoke: `%s`\n' "$SMOKE_RESULT"
+            printf -- '- Verified cleanup: `%s`\n' "$CLEANUP_RESULT"
+            printf -- '- Resource tags: repository=`%s`, run=`%s`, attempt=`%s`\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          } >> regression/artifacts/linux-oracle-node-24-report.md
+          cat regression/artifacts/linux-oracle-node-24-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Oracle regression artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: regression-artifacts-oracle-auth
+          name: regression-artifacts-oracle
           path: regression/artifacts
           if-no-files-found: ignore
 
@@ -463,12 +485,12 @@ jobs:
             else
               printf 'Event Hubs regression report was not produced. Check the recovery workflow for resource cleanup.\n'
             fi
-            printf '\n## Oracle Streaming Authentication Check\n\n'
+            printf '\n## Oracle Streaming Smoke Check\n\n'
             printf -- '- Job result: `%s`\n\n' "$ORACLE_RESULT"
-            if [ -f regression/artifacts/linux-oracle-auth-node-24-report.md ]; then
-              cat regression/artifacts/linux-oracle-auth-node-24-report.md
+            if [ -f regression/artifacts/linux-oracle-node-24-report.md ]; then
+              cat regression/artifacts/linux-oracle-node-24-report.md
             else
-              printf 'Oracle authentication report was not produced.\n'
+              printf 'Oracle regression report was not produced. Check the recovery workflow for cleanup.\n'
             fi
             printf '\n## Legacy Sanity Check\n\n'
             printf -- '- Job result: `%s`\n\n' "$LEGACY_RESULT"
@@ -516,7 +538,7 @@ jobs:
           PERFORMANCE_RESULT: ${{ needs.performance.result }}
         run: |
           message=$(printf \
-            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nOracle authentication: %s\nLegacy: %s\nPerformance: %s\nRun: %s' \
+            'Kafka regression tests did not complete successfully.\nRepository: %s\nCommit: %.12s\nModern: %s\nRedpanda: %s\nEvent Hubs: %s\nOracle Streaming: %s\nLegacy: %s\nPerformance: %s\nRun: %s' \
             "$GITHUB_REPOSITORY" "$REGRESSION_HEAD_SHA" "$MODERN_RESULT" "$REDPANDA_RESULT" "$EVENTHUBS_RESULT" "$ORACLE_RESULT" "$LEGACY_RESULT" "$PERFORMANCE_RESULT" "$REGRESSION_RUN_URL")
           jq -n --arg text "$message" '{ text: $text }' | \
             curl --fail-with-body --retry 3 \

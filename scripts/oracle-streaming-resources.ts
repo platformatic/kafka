@@ -14,6 +14,7 @@ export type Command = (args: string[]) => Promise<string>
 export interface Configuration {
   compartment: string
   region: string
+  owner?: { repository: string; attempt: string }
 }
 
 interface Resource {
@@ -32,11 +33,22 @@ export function resourceNames (config: Configuration, run: string) {
       'Oracle Streaming run ID must contain 1-64 letters, digits or hyphens, starting with a letter or digit.'
     )
   }
+  if (
+    config.owner &&
+    (!/^\d+$/.test(run) ||
+      !/^\d+$/.test(config.owner.attempt) ||
+      !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(config.owner.repository))
+  ) {
+    throw new UserError('Oracle Streaming CI ownership requires numeric run/attempt IDs and a repository.')
+  }
   const scope = createHash('sha256')
-    .update(`${config.compartment}/${config.region}/${repository}`)
+    .update(`${config.compartment}/${config.region}/${config.owner?.repository ?? repository}`)
     .digest('hex')
     .slice(0, 12)
-  return { pool: `kafka-oss-${scope}-${run}`, topic: 'kafka-smoke' }
+  return {
+    pool: config.owner ? `kafka-oss-ci-${scope}-${run}-${config.owner.attempt}` : `kafka-oss-${scope}-${run}`,
+    topic: 'kafka-smoke'
+  }
 }
 
 export async function command (args: string[]): Promise<string> {
@@ -97,7 +109,7 @@ export class OracleStreamingResources {
     }
   }
 
-  private async list (kind: 'stream-pool' | 'stream') {
+  async list (kind: 'stream-pool' | 'stream') {
     // List by compartment even after pool deletion, and fetch every page before declaring resources absent.
     const result = await this.oci([kind, 'list', '--compartment-id', this.config.compartment, '--all'])
     if (
@@ -116,13 +128,26 @@ export class OracleStreamingResources {
     return (result.data as Resource[]).filter(item => item['lifecycle-state'] !== 'DELETED')
   }
 
+  private tags (run: string): Record<string, string> {
+    return this.config.owner
+      ? {
+          purpose: 'kafka-oracle-streaming-regression',
+          repository: this.config.owner.repository,
+          run,
+          attempt: this.config.owner.attempt
+        }
+      : { purpose, repository, run }
+  }
+
+  private matchesTags (resource: Resource, run: string) {
+    return Object.entries(this.tags(run)).every(([key, value]) => resource['freeform-tags']?.[key] === value)
+  }
+
   private owns (pool: Resource, run: string) {
     return (
       pool.name === resourceNames(this.config, run).pool &&
       pool['compartment-id'] === this.config.compartment &&
-      pool['freeform-tags']?.purpose === purpose &&
-      pool['freeform-tags']?.repository === repository &&
-      pool['freeform-tags']?.run === run
+      this.matchesTags(pool, run)
     )
   }
 
@@ -152,7 +177,7 @@ export class OracleStreamingResources {
     if ((await this.pools(run)).length > 0) {
       throw new UserError(`Oracle Streaming pool ${names.pool} already exists; use a fresh run ID or clean it up.`)
     }
-    const tags = JSON.stringify({ purpose, repository, run })
+    const tags = JSON.stringify(this.tags(run))
     try {
       const { data: pool } = await this.oci([
         'stream-pool',
@@ -250,13 +275,7 @@ export class OracleStreamingResources {
     const ids = new Set(pools.map(pool => pool.id))
     const streams = (await this.list('stream')).filter(stream => ids.has(stream['stream-pool-id'] ?? ''))
     if (
-      streams.some(
-        stream =>
-          stream.name !== resourceNames(this.config, run).topic ||
-          stream['freeform-tags']?.purpose !== purpose ||
-          stream['freeform-tags']?.repository !== repository ||
-          stream['freeform-tags']?.run !== run
-      )
+      streams.some(stream => stream.name !== resourceNames(this.config, run).topic || !this.matchesTags(stream, run))
     ) {
       throw new UserError('Refusing to delete Oracle Streaming streams: resource names or ownership tags do not match.')
     }
@@ -285,11 +304,7 @@ export class OracleStreamingResources {
       const remainingPools = await this.pools(run)
       const streams = await this.list('stream')
       const remainingStreams = streams.filter(
-        stream =>
-          ids.has(stream['stream-pool-id'] ?? '') ||
-          (stream['freeform-tags']?.purpose === purpose &&
-            stream['freeform-tags']?.repository === repository &&
-            stream['freeform-tags']?.run === run)
+        stream => ids.has(stream['stream-pool-id'] ?? '') || this.matchesTags(stream, run)
       )
       if (remainingPools.length === 0 && remainingStreams.length === 0) {
         console.error(`Verified Oracle Streaming cleanup: region=${this.config.region} run=${run}`)

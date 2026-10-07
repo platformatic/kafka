@@ -1,18 +1,31 @@
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { test } from 'node:test'
-import { OracleStreamingResources, resourceNames, type Command } from '../scripts/oracle-streaming-resources.ts'
+import {
+  OracleStreamingResources,
+  resourceNames,
+  type Command,
+  type Configuration
+} from '../scripts/oracle-streaming-resources.ts'
+import { recover, renewingCommand } from '../scripts/oracle-streaming-ci.ts'
 import { UserError } from '../src/errors.ts'
 
 const config = { compartment: 'ocid1.compartment.test', region: 'eu-frankfurt-1' }
 const run = 'local-test-1'
 
-function fixture () {
-  const names = resourceNames(config, run)
-  const tags = { purpose: 'kafka-oracle-streaming-local', repository: 'platformatic/kafka', run }
+function fixture (configuration: Configuration = config, runId = run) {
+  const names = resourceNames(configuration, runId)
+  const tags = configuration.owner
+    ? {
+        purpose: 'kafka-oracle-streaming-regression',
+        repository: configuration.owner.repository,
+        run: runId,
+        attempt: configuration.owner.attempt
+      }
+    : { purpose: 'kafka-oracle-streaming-local', repository: 'platformatic/kafka', run: runId }
   const pool = {
     id: 'ocid1.streampool.test',
     name: names.pool,
-    'compartment-id': config.compartment,
+    'compartment-id': configuration.compartment,
     'lifecycle-state': 'ACTIVE',
     'freeform-tags': { ...tags },
     'kafka-settings': { 'bootstrap-servers': 'streaming.eu-frankfurt-1.oci.oraclecloud.com:9092' }
@@ -20,7 +33,7 @@ function fixture () {
   const stream = {
     id: 'ocid1.stream.test',
     name: names.topic,
-    'compartment-id': config.compartment,
+    'compartment-id': configuration.compartment,
     'stream-pool-id': pool.id,
     'lifecycle-state': 'ACTIVE',
     'freeform-tags': { ...tags }
@@ -91,9 +104,201 @@ function fixture () {
         throw new UserError(`Unexpected mock operation: ${operation}.`)
     }
   }
-  const resources = new OracleStreamingResources(config, command, async () => {}, 2)
+  const resources = new OracleStreamingResources(configuration, command, async () => {}, 2)
   return { resources, names, pool, stream, state, calls, command }
 }
+
+test('CI ownership isolates repositories and attempts without changing local names', async () => {
+  const ci = { ...config, owner: { repository: 'platformatic/kafka', attempt: '2' } }
+  const id = '12345'
+  const { resources, names, state, pool, calls } = fixture(ci, id)
+  ok(names.pool.includes('-ci-'))
+  ok(names.pool.endsWith('-12345-2'))
+  ok(names.pool !== resourceNames({ ...ci, owner: { ...ci.owner, attempt: '3' } }, id).pool)
+  ok(names.pool !== resourceNames({ ...ci, owner: { ...ci.owner, repository: 'other/kafka' } }, id).pool)
+  await resources.provision(id)
+  const create = calls.find(args => args[3] === 'create')!
+  deepStrictEqual(JSON.parse(create[create.indexOf('--freeform-tags') + 1]), {
+    purpose: 'kafka-oracle-streaming-regression',
+    repository: 'platformatic/kafka',
+    run: id,
+    attempt: '2'
+  })
+  // A pool with the expected name but another attempt is never adopted or deleted.
+  pool['freeform-tags'].attempt = '3'
+  await rejects(resources.cleanup(id), { code: 'PLT_KFK_USER' })
+  ok(!calls.some(args => args[3] === 'delete'))
+  pool['freeform-tags'].attempt = '2'
+  await resources.cleanup(id)
+  ok(state.pools.every(item => item['lifecycle-state'] === 'DELETED'))
+  throws(() => resourceNames(ci, 'local-id'), { code: 'PLT_KFK_USER' })
+  throws(() => resourceNames({ ...ci, owner: { ...ci.owner, attempt: '../bad' } }, id), { code: 'PLT_KFK_USER' })
+})
+
+test('WIF sessions renew during polling and cleanup and renewal failures never invoke OCI', async () => {
+  let clock = 0
+  let logins = 0
+  const used: string[] = []
+  let fail = false
+  const command = renewingCommand(
+    async () => {
+      logins++
+      if (fail) {
+        throw new UserError('Session renewal failed.')
+      }
+      return {
+        environment: {
+          OCI_CLI_CONFIG_FILE: `profile-${logins}`,
+          OCI_CLI_AUTH: 'security_token',
+          OCI_CLI_PROFILE: 'DEFAULT'
+        },
+        expiresAt: clock + 60
+      }
+    },
+    async (args, environment) => {
+      used.push(`${args[0]}:${environment.OCI_CLI_CONFIG_FILE}`)
+      return ''
+    },
+    () => clock
+  )
+  await command(['list'])
+  await command(['get'])
+  strictEqual(logins, 1)
+  clock = 60
+  await command(['delete'])
+  deepStrictEqual(used, ['list:profile-1', 'get:profile-1', 'delete:profile-2'])
+  clock = 120
+  fail = true
+  await rejects(command(['delete']), { code: 'PLT_KFK_USER' })
+  strictEqual(used.length, 3)
+  fail = false
+  await command(['delete'])
+  strictEqual(used.at(-1), 'delete:profile-4')
+})
+
+test('recovery deletes completed CI runs but preserves active runs and local resources', async () => {
+  const ci = { ...config, owner: { repository: 'platformatic/kafka', attempt: '1' } }
+  const { resources, state, command, calls } = fixture(ci, '123')
+  await resources.provision('123')
+  const local = fixture()
+  local.pool.id = 'ocid1.streampool.local'
+  local.stream.id = 'ocid1.stream.local'
+  local.stream['stream-pool-id'] = local.pool.id
+  state.pools.push(local.pool)
+  state.streams.push(local.stream)
+  const status = { status: 'in_progress', path: '.github/workflows/regression.yml', head_branch: 'main', event: 'push' }
+  let requests = 0
+  const github = async (id: string) => {
+    strictEqual(id, '123')
+    requests++
+    return status
+  }
+  await recover(ci, command, github, async () => {}, 2)
+  ok(!calls.some(args => args[3] === 'delete'))
+  status.status = 'completed'
+  await recover(ci, command, github, async () => {}, 2)
+  strictEqual(requests, 2)
+  strictEqual(local.pool['lifecycle-state'], 'ACTIVE')
+  strictEqual(local.stream['lifecycle-state'], 'ACTIVE')
+})
+
+test('recovery refuses unknown workflow identities, API errors and malformed ownership', async () => {
+  const ci = { ...config, owner: { repository: 'platformatic/kafka', attempt: '1' } }
+  for (const change of [
+    { path: 'another.yml' },
+    { head_branch: 'untrusted' },
+    { status: 'unknown' },
+    { head_branch: 'oracle-part-2', event: 'push' },
+    { head_branch: 'oracle-part-2', event: 'workflow_dispatch' }
+  ]) {
+    const { resources, command, calls } = fixture(ci, '123')
+    await resources.provision('123')
+    await rejects(
+      recover(
+        ci,
+        command,
+        async () => ({
+          status: 'completed',
+          path: '.github/workflows/regression.yml',
+          head_branch: 'main',
+          event: 'push',
+          ...change
+        }),
+        async () => {},
+        2
+      ),
+      { code: 'PLT_KFK_USER' }
+    )
+    ok(!calls.some(args => args[3] === 'delete'))
+  }
+  const { resources, pool, command, calls } = fixture(ci, '123')
+  await resources.provision('123')
+  await rejects(
+    recover(
+      ci,
+      command,
+      async () => {
+        throw new UserError('GitHub unavailable.')
+      },
+      async () => {},
+      2
+    ),
+    { code: 'PLT_KFK_USER' }
+  )
+  pool.name = 'unexpected-pool'
+  await rejects(
+    recover(
+      ci,
+      command,
+      async () => ({
+        status: 'completed',
+        path: '.github/workflows/regression.yml',
+        head_branch: 'main',
+        event: 'push'
+      }),
+      async () => {},
+      2
+    ),
+    { code: 'PLT_KFK_USER' }
+  )
+  pool['freeform-tags'].attempt = 'bad'
+  await rejects(
+    recover(
+      ci,
+      command,
+      async () => {
+        throw new UserError('Must not request GitHub.')
+      },
+      async () => {},
+      2
+    ),
+    { code: 'PLT_KFK_USER' }
+  )
+  ok(!calls.some(args => args[3] === 'delete'))
+})
+
+test('recovery fails rather than ignoring orphan streams from trusted runs', async () => {
+  const ci = { ...config, owner: { repository: 'platformatic/kafka', attempt: '1' } }
+  const { resources, state, command } = fixture(ci, '123')
+  await resources.provision('123')
+  const status = {
+    status: 'completed',
+    path: '.github/workflows/regression.yml',
+    head_branch: 'main',
+    event: 'workflow_dispatch'
+  }
+  state.pools = []
+  await rejects(
+    recover(
+      ci,
+      command,
+      async () => status,
+      async () => {},
+      2
+    ),
+    { code: 'PLT_KFK_USER' }
+  )
+})
 
 test('local lifecycle verifies stream deletion before deleting the empty pool', async () => {
   const { resources, pool, calls, state } = fixture()

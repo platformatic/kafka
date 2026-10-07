@@ -223,6 +223,24 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
 
+      // Drop any queued commit (and its waiters) for partitions that are no longer assigned
+      // after this rebalance. consumer.assignments is updated before consumer:group:join fires,
+      // so #assignmentsForTopic reflects the new state here. Committing a revoked partition
+      // with the new generationId is accepted by Kafka and moves its committed offset forward,
+      // causing the new owner to start past messages still sitting in our Readable buffer.
+      for (const [key, { topic, partition }] of this.#offsetsToCommit) {
+        if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+          this.#offsetsToCommit.delete(key)
+          const waiters = this.#commitWaiters.get(key)
+          if (waiters) {
+            for (const { callback } of waiters) {
+              callback(null)
+            }
+            this.#commitWaiters.delete(key)
+          }
+        }
+      }
+
       // [kAutocommit] skips flushing while mid-rejoin to avoid triggering a rejoin storm (see
       // below), leaving any queued offset waiting for the next tick of the autocommit timer.
       // With autocommit disabled there is no such timer, so a manual commit requested during a
@@ -286,6 +304,11 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   /* c8 ignore next 3 - Simple getter */
   get consumer (): Consumer<Key, Value, HeaderKey, HeaderValue> {
     return this.#consumer
+  }
+
+  /* c8 ignore next 3 - Simple getter */
+  get topics (): string[] {
+    return this.#topics
   }
 
   /* c8 ignore next 3 - Simple getter */
@@ -1150,6 +1173,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   ): void | Promise<void> {
     if (!callback) {
       callback = createPromisifiedCallback<void>()
+    }
+
+    // No-op if this partition is no longer assigned. After an eager rebalance the revoked
+    // partition's messages may still be buffered here; committing them with the new
+    // generationId is accepted by Kafka and would advance the committed offset, causing the
+    // new owner to skip those messages permanently.
+    if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+      callback(null)
+      return callback[kCallbackPromise]!
     }
 
     const key = partitionKey(topic, partition)

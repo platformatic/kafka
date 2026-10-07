@@ -90,6 +90,8 @@ export interface ConnectionOptions {
   connectTimeout?: number
   requestTimeout?: number
   maxInflights?: number
+  keepAlive?: boolean
+  keepAliveInitialDelay?: number
   tls?: TLSConnectionOptions
   ssl?: TLSConnectionOptions // Alias for tls
   tlsServerName?: string | boolean
@@ -301,6 +303,10 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
         : createConnection({ ...connectionOptions, port, host })
       this.#socket.setNoDelay(true)
+
+      if (this.#options.keepAlive) {
+        this.#socket.setKeepAlive(true, this.#options.keepAliveInitialDelay ?? 0)
+      }
 
       this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
         this.#socket.removeListener('timeout', connectingSocketTimeoutHandler)

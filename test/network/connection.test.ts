@@ -357,6 +357,40 @@ test('Connection.close should not wait forever for peer close', async t => {
   ok(connection.socket.closed)
 })
 
+for (const tls of [false, true]) {
+  test(`Connection.connect should enable keep-alive on ${tls ? 'TLS' : 'plaintext'} sockets`, async t => {
+    const { port } = tls ? await createTLSServer(t) : await createServer(t)
+    const setKeepAlive = t.mock.method(Socket.prototype, 'setKeepAlive')
+
+    const connection = new Connection('test-client', {
+      keepAlive: true,
+      keepAliveInitialDelay: 1000,
+      tls: tls ? { rejectUnauthorized: false } : undefined
+    })
+    t.after(() => connection.close())
+
+    await connection.connect('localhost', port)
+
+    const calls = setKeepAlive.mock.calls.filter(call => call.this === connection.socket)
+    deepStrictEqual(
+      calls.map(call => call.arguments),
+      [[true, 1000]]
+    )
+  })
+}
+
+test('Connection.connect should not enable keep-alive by default', async t => {
+  const { port } = await createServer(t)
+  const setKeepAlive = t.mock.method(Socket.prototype, 'setKeepAlive')
+
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  strictEqual(setKeepAlive.mock.calls.filter(call => call.this === connection.socket).length, 0)
+})
+
 test('Connection.send should enqueue request and process response', async t => {
   const { server, port } = await createServer(t)
   const connection = new Connection('test-client')

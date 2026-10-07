@@ -391,6 +391,69 @@ test('Connection.connect should not enable keep-alive by default', async t => {
   strictEqual(setKeepAlive.mock.calls.filter(call => call.this === connection.socket).length, 0)
 })
 
+test('Connection should close after connectionsMaxIdle without requests', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+  await once(connection, 'close')
+
+  strictEqual(connection.status, ConnectionStatuses.CLOSED)
+})
+
+test('Connection should not close for connectionsMaxIdle while a request is in flight', { timeout: 3000 }, async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connection.close())
+
+  // Respond well after connectionsMaxIdle has elapsed
+  server.on('connection', socket => {
+    socket.on('data', () => {
+      setTimeout(() => socket.write(Buffer.from([0, 0, 0, 4, 0, 0, 0, 1])), 300)
+    })
+  })
+
+  await connection.connect('localhost', port)
+
+  let closed = false
+  connection.once('close', () => {
+    closed = true
+  })
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  await new Promise<string>((resolve, reject) => {
+    connection.send(
+      0, // apiKey
+      0, // apiVersion
+      payloadFn,
+      function () {
+        return 'Success'
+      }, // Dummy parser
+      false, // hasRequestHeaderTaggedFields
+      false, // hasResponseHeaderTaggedFields
+      (err, returnValue) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(returnValue!)
+        }
+      }
+    )
+  })
+
+  strictEqual(closed, false)
+  strictEqual(connection.status, ConnectionStatuses.CONNECTED)
+
+  // Once the response is received the connection becomes idle again
+  await once(connection, 'close')
+})
+
 test('Connection.send should enqueue request and process response', async t => {
   const { server, port } = await createServer(t)
   const connection = new Connection('test-client')

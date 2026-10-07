@@ -2,7 +2,12 @@ import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import fastq from 'fastq'
 import { createConnection, isIP, type NetConnectOpts, type Socket } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
-import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../apis/callbacks.ts'
+import {
+  type CallbackWithPromise,
+  createPromisifiedCallback,
+  kCallbackPromise,
+  noopCallback
+} from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
 import {
@@ -92,6 +97,7 @@ export interface ConnectionOptions {
   maxInflights?: number
   keepAlive?: boolean
   keepAliveInitialDelay?: number
+  connectionsMaxIdle?: number
   tls?: TLSConnectionOptions
   ssl?: TLSConnectionOptions // Alias for tls
   tlsServerName?: string | boolean
@@ -782,6 +788,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #onConnectionSucceed (diagnosticContext: DiagnosticContext): void {
     this.#status = ConnectionStatuses.CONNECTED
 
+    if (this.#options.connectionsMaxIdle) {
+      this.#socket.setTimeout(this.#options.connectionsMaxIdle)
+      this.#socket.on('timeout', this.#onIdleTimeout.bind(this))
+    }
+
     connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
     this.emit('connect')
     connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
@@ -1033,6 +1044,22 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       chunk[1] === 0x03 &&
       chunk[2] <= 0x04
     )
+  }
+
+  #onIdleTimeout (): void {
+    if (
+      this.#status === ConnectionStatuses.CONNECTED &&
+      this.#inflightRequests.size === 0 &&
+      this.#afterDrainRequests.length === 0 &&
+      this.#requestsQueue.idle() &&
+      this.#payloadQueue.idle()
+    ) {
+      this.close(noopCallback)
+      return
+    }
+
+    // Busy or reauthenticating: re-arm, as a request with no response produces no socket activity
+    this.#socket.setTimeout(this.#options.connectionsMaxIdle!)
   }
 
   #onClose (): void {

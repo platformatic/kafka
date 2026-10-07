@@ -324,6 +324,22 @@ test('get should evict a connection whose request timed out', { timeout: 3000 },
   await newConnection.close()
 })
 
+test('get should open a new connection after an idle one is closed', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  await once(connectionPool, 'disconnect')
+
+  const newConnection = await connectionPool.get(broker)
+  ok(newConnection !== connection)
+  strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
+})
+
 test('get should handle errors and remove connection', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())

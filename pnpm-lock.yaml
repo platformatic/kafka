@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@platformatic/dynamic-buffer':
-        specifier: ^0.3.1
-        version: 0.3.1
+        specifier: ^0.4.0
+        version: 0.4.0
       '@platformatic/wasm-utils':
-        specifier: ^0.2.1
-        version: 0.2.1
+        specifier: ^0.3.0
+        version: 0.3.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -804,16 +804,16 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@platformatic/dynamic-buffer@0.3.1':
-    resolution: {integrity: sha512-xQD5JSkQc4D15suOk7FezGDmh6Vb5e4phDoFZ/ASpa3Ft+3fOVwFOENmHtC1561zm/xHnKwI91NbMF8inpbk0Q==}
+  '@platformatic/dynamic-buffer@0.4.0':
+    resolution: {integrity: sha512-eCL++LyBjSsqalm4I67dl+gVqLSKd6gPYCieD72S5KqqAkmSAgAYNHt+lL+iVXssWPSfbuIJ5PEwpn5JVD73Xw==}
     engines: {node: '>= 22.19.0'}
 
   '@platformatic/rdkafka@4.1.2':
     resolution: {integrity: sha512-kCdTWWi67WCfHEfTH88UFsFm8c4UxuMt9ZXtU2WQu1LHdbFYe85/5OJ2VD4CWH9sg3M08DEtFyS7JH7gvpC+2g==}
     engines: {node: '>=16'}
 
-  '@platformatic/wasm-utils@0.2.1':
-    resolution: {integrity: sha512-5rNl4h5n+hZG4LjiItQ7bVfHBqTypjldP46NXrOYW64cZr87ahngK1s9nEtCpByWg7WWjRLSxyCytgJK5gNdwQ==}
+  '@platformatic/wasm-utils@0.3.0':
+    resolution: {integrity: sha512-tK7M2HMtVQrHBuQ/TSaDIk3YCEV6+EUQcConDrIH1kbQ7ZQiCWGrp7Jn+vd0FxoAsq2O8ZXGhANxwNpkPR8Maw==}
     engines: {node: '>= 22.19.0'}
 
   '@stylistic/eslint-plugin@2.11.0':
@@ -2926,16 +2926,16 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.24.2':
     optional: true
 
-  '@platformatic/dynamic-buffer@0.3.1': {}
+  '@platformatic/dynamic-buffer@0.4.0': {}
 
   '@platformatic/rdkafka@4.1.2':
     dependencies:
       bindings: 1.5.0
       nan: 2.29.0
 
-  '@platformatic/wasm-utils@0.2.1':
+  '@platformatic/wasm-utils@0.3.0':
     dependencies:
-      '@platformatic/dynamic-buffer': 0.3.1
+      '@platformatic/dynamic-buffer': 0.4.0
 
   '@stylistic/eslint-plugin@2.11.0(eslint@9.39.5)(typescript@6.0.3)':
     dependencies:

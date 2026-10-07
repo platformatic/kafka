@@ -38,7 +38,13 @@ import {
   defaultPort,
   metadataOptionsValidator
 } from './options.ts'
-import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
+import {
+  type BaseOptions,
+  type BrokerWithRack,
+  type ClusterMetadata,
+  type ClusterTopicMetadata,
+  type MetadataOptions
+} from './types.ts'
 
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
@@ -98,6 +104,8 @@ export class Base<
   [kPrometheus]: Metrics | undefined
 
   #metadata: ClusterMetadata | undefined
+  // Every broker seen in a metadata response, by nodeId. Not reset by clearMetadata.
+  #knownBrokers: Map<number, BrokerWithRack>
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
   #apiVersionsVersions: WeakMap<Connection, 1 | 3>
 
@@ -110,6 +118,7 @@ export class Base<
     this[kApis] = []
     this[kContext] = options.context
     this.#apiVersionsVersions = new WeakMap()
+    this.#knownBrokers = new Map()
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType) as OptionsType
@@ -556,17 +565,30 @@ export class Base<
   }
 
   [kGetBootstrapConnection] (callback: Callback<Connection>, attempt = 0): void {
-    let brokers: Broker[]
-    if (!this.#metadata) {
-      brokers = this[kBootstrapBrokers]
-    } else {
-      const discovered = Array.from(this.#metadata.brokers.values())
-      brokers = [...this[kBootstrapBrokers], ...discovered]
+    // Each address appears once so retry rotation is not skewed
+    const candidates = new Map<string, Broker>()
+    const discovered = this.#metadata?.brokers.values() ?? []
+    for (const broker of [...this[kBootstrapBrokers], ...discovered]) {
+      const key = `${broker.host}:${broker.port}`
+      if (!candidates.has(key)) {
+        candidates.set(key, broker)
+      }
     }
+
+    let brokers = Array.from(candidates.values())
 
     if (attempt > 0 && brokers.length > 1) {
       const offset = attempt % brokers.length
       brokers = [...brokers.slice(offset), ...brokers.slice(0, offset)]
+    }
+
+    // Known brokers missing from the latest metadata response go last, after the rotation
+    for (const broker of this.#knownBrokers.values()) {
+      const key = `${broker.host}:${broker.port}`
+      if (!candidates.has(key)) {
+        candidates.set(key, broker)
+        brokers.push(broker)
+      }
     }
 
     this[kConnections].getFirstAvailable(brokers, callback)
@@ -696,7 +718,6 @@ export class Base<
               const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again
-              /* c8 ignore next 4 - Hard to test */
               if (hasStaleMetadata) {
                 this.clearMetadata()
                 topicsToFetch = topics
@@ -727,6 +748,7 @@ export class Base<
             for (const broker of metadata!.brokers) {
               const { host, port, rack } = broker
               brokers.set(broker.nodeId, { host, port, rack })
+              this.#knownBrokers.set(broker.nodeId, { host, port, rack })
             }
 
             this.#metadata.brokers = brokers

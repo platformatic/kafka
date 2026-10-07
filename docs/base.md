@@ -95,7 +95,7 @@ Returns the client's default broker connection pool.
 
 ### `clearMetadata`
 
-Clear the current metadata.
+Clear the current metadata. Brokers seen in earlier metadata responses are still used as connection fallbacks.
 
 ## Custom Retry Delay Function
 

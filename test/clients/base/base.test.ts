@@ -1284,7 +1284,7 @@ test('metadata should fall back to discovered brokers when bootstrap broker is u
   ok(metadata.brokers.size > 0)
 })
 
-test('metadata should use bootstrap brokers only after clearMetadata', async t => {
+test('metadata should fall back to known brokers after clearMetadata', async t => {
   // Tests assume a single bootstrap broker; if kafkaBootstrapServers is extended the test is invalidated
   strictEqual(kafkaBootstrapServers.length, 1, 'test assumes a single bootstrap broker')
   const [bootstrapHost, bootstrapPortStr] = kafkaBootstrapServers[0].split(':')
@@ -1292,32 +1292,29 @@ test('metadata should use bootstrap brokers only after clearMetadata', async t =
 
   const client = createBase(t, { retries: 0 })
 
-  // Fetch initial metadata to populate the discovered brokers cache
+  // Fetch initial metadata to populate the known brokers
   const initialMetadata = await client.metadata({ topics: [] })
   ok(initialMetadata.brokers.size > 1, 'test requires a multi-broker cluster')
 
-  // Clear the cache — subsequent fetches should revert to bootstrap-only discovery
+  // clearMetadata drops the cached topology but not the brokers seen so far
   client.clearMetadata()
 
   // Simulate the bootstrap broker becoming unreachable
+  let bootstrapAttempted = false
   const pool = client[kConnections]
   const originalGet = pool.get.bind(pool)
   pool.get = function (broker: Broker, callback: CallbackWithPromise<Connection>) {
     if (broker.host === bootstrapHost && broker.port === bootstrapPort) {
+      bootstrapAttempted = true
       callback(new Error('Simulated bootstrap broker unreachable'))
       return
     }
     originalGet(broker, callback)
   } as typeof originalGet
 
-  // Should fail because clearMetadata reset the discovered broker cache
-  try {
-    await client.metadata({ topics: [] })
-    throw new Error('Expected metadata call to fail')
-  } catch (error) {
-    strictEqual(error instanceof MultipleErrors, true)
-    strictEqual(error.message, 'Cannot connect to any broker.')
-  }
+  const metadata = await client.metadata({ topics: [] })
+  ok(bootstrapAttempted, 'bootstrap broker should have been attempted before falling back')
+  ok(metadata.brokers.size > 0)
 })
 
 test('kGetBootstrapConnection rotates broker list based on retry attempt', t => {
@@ -1342,6 +1339,176 @@ test('kGetBootstrapConnection rotates broker list based on retry attempt', t => 
   strictEqual(capturedLists[1][0].host, 'broker-b') // attempt 1: offset by 1
   strictEqual(capturedLists[2][0].host, 'broker-c') // attempt 2: offset by 2
   strictEqual(capturedLists[3][0].host, 'broker-a') // attempt 3: wraps around (3 % 3 = 0)
+})
+
+// Serves each metadata request from `responses` in order (a broker list or an error), and
+// records the candidate list of every bootstrap connection attempt.
+function mockMetadataResponses (client: Base, responses: ([number, string, number][] | Error)[]): Broker[][] {
+  const connection = {
+    send (
+      _apiKey: number,
+      _apiVersion: number,
+      _payload: () => Writer,
+      _parser: ResponseParser<unknown>,
+      _requestTags: boolean,
+      _responseTags: boolean,
+      callback: Callback<unknown>
+    ): void {
+      const response = responses.shift()!
+
+      if (response instanceof Error) {
+        callback(response, undefined)
+        return
+      }
+
+      callback(null, {
+        clusterId: 'cluster',
+        controllerId: 1,
+        brokers: response.map(([nodeId, host, port]) => ({ nodeId, host, port, rack: null })),
+        topics: []
+      })
+    }
+  } as unknown as Connection
+
+  const candidates: Broker[][] = []
+  client[kApis] = [{ apiKey: metadataV10.api.key, name: 'Metadata', minVersion: 10, maxVersion: 10 }]
+  mockConnectionPoolGetFirstAvailable(
+    client[kConnections],
+    () => true,
+    undefined,
+    undefined,
+    (_original, brokers: Broker[], callback: CallbackWithPromise<Connection>) => {
+      candidates.push(brokers.map(({ host, port }) => ({ host, port })))
+      callback(null, connection)
+      return true
+    }
+  )
+
+  return candidates
+}
+
+test('kGetBootstrapConnection keeps brokers missing from the latest metadata response', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092],
+      [3, 'b3', 9092]
+    ],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  await client.metadata({ topics: [], forceUpdate: true })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  deepStrictEqual(candidates[2], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection lists each broker address once', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ]
+  ])
+
+  await client.metadata({ topics: [] })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  deepStrictEqual(candidates[1], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection uses the latest address of a known broker', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [[2, 'b2-moved', 9093]],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  await client.metadata({ topics: [], forceUpdate: true })
+  await client.metadata({ topics: [], forceUpdate: true })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  deepStrictEqual(candidates[3], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2-moved', port: 9093 }
+  ])
+})
+
+test('kGetBootstrapConnection does not rotate known brokers ahead of the latest metadata response', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092],
+      [3, 'b3', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [4, 'b4', 9092]
+    ]
+  ])
+
+  await client.metadata({ topics: [] })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  client[kGetBootstrapConnection](() => {}, 1)
+  client[kGetBootstrapConnection](() => {}, 2)
+
+  deepStrictEqual(candidates[2], [
+    { host: 'b4', port: 9092 },
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+  deepStrictEqual(candidates[3], [
+    { host: 'b1', port: 9092 },
+    { host: 'b4', port: 9092 },
+    { host: 'b2', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection keeps known brokers after stale metadata clears the cache', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0 })
+  const leaderNotAvailable = new ResponseError(metadataV10.api.key, 10, { '/topics/0': [5, null] }, {})
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    leaderNotAvailable,
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  await rejects(() => client.metadata({ topics: [], forceUpdate: true }))
+  await client.metadata({ topics: [] })
+
+  deepStrictEqual(candidates[2], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 }
+  ])
 })
 
 test('metadata should not crash when the error is not a library error', async t => {

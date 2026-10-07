@@ -1,0 +1,66 @@
+---
+name: Oracle Streaming resource recovery
+on:
+  workflow_run:
+    workflows: [Regression Tests]
+    branches: [main]
+    types: [completed]
+  schedule:
+    - cron: '43 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: oracle-streaming-resource-recovery
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: oracle
+    timeout-minutes: 65
+    env:
+      OCI_WIF_DOMAIN_URL: ${{ vars.OCI_WIF_DOMAIN_URL }}
+      OCI_WIF_CLIENT_ID: ${{ vars.OCI_WIF_CLIENT_ID }}
+      OCI_TENANCY_ID: ${{ vars.OCI_TENANCY_ID }}
+      OCI_CLI_REGION: ${{ vars.OCI_CLI_REGION }}
+      OCI_COMPARTMENT_ID: ${{ vars.OCI_COMPARTMENT_ID }}
+    steps:
+      # Automatic recovery uses trusted main, never triggering-run code or artifacts.
+      - name: Checkout trusted recovery code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: refs/heads/main
+      - name: Use supported Node.js Version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.x
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install the validated OCI CLI version
+        run: |
+          python3 -m venv "$RUNNER_TEMP/oci-cli"
+          "$RUNNER_TEMP/oci-cli/bin/pip" install 'oci-cli==3.94.1'
+          printf '%s\n' "$RUNNER_TEMP/oci-cli/bin" >> "$GITHUB_PATH"
+      - name: Recover resources from completed trusted regression runs
+        env:
+          OCI_WIF_CLIENT_SECRET: ${{ secrets.OCI_WIF_CLIENT_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/oracle-streaming-ci.ts recover
+      - name: Notify recovery failure on Slack
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          message="Oracle Streaming recovery failed. Resources may still be billable. Inspect ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n --arg text "$message" '{ text: $text }' | \
+            curl --fail-with-body --retry 3 --header 'content-type: application/json' --data-binary @- "$SLACK_WEBHOOK_URL"

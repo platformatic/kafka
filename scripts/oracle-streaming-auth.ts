@@ -110,8 +110,53 @@ export async function exchangeToken (
       signal: AbortSignal.timeout(30_000)
     })
     if (!response.ok) {
+      const diagnostics: string[] = []
+      const sensitive = [
+        config.clientSecret,
+        config.requestToken,
+        jwt,
+        publicKey,
+        `${config.clientId}:${config.clientSecret}`
+      ]
+      // Only known OAuth codes are safe to report. Descriptions and arbitrary response fields may contain credentials.
+      try {
+        const body = (await response.json()) as { error?: unknown } | null
+        if (
+          typeof body?.error === 'string' &&
+          [
+            'invalid_request',
+            'invalid_client',
+            'invalid_grant',
+            'unauthorized_client',
+            'unsupported_grant_type',
+            'invalid_scope',
+            'invalid_target',
+            'access_denied',
+            'server_error',
+            'temporarily_unavailable'
+          ].includes(body.error)
+        ) {
+          diagnostics.push(`OAuth error=${body.error}`)
+        }
+      } catch {
+        // Non-JSON errors must retain the HTTP failure without exposing parsing errors or response text.
+      }
+      // Accept bounded hexadecimal request IDs, not arbitrary header text or echoed credential material.
+      for (const [header, label] of [
+        ['opc-request-id', 'OCI request ID'],
+        ['x-oracle-dms-ecid', 'OCI ECID']
+      ]) {
+        const requestId = response.headers.get(header)
+        if (
+          requestId &&
+          /^[a-fA-F0-9-]{16,128}$/.test(requestId) &&
+          !sensitive.some(value => value && requestId.includes(value))
+        ) {
+          diagnostics.push(`${label}=${requestId}`)
+        }
+      }
       throw new UserError(
-        `OCI WIF token exchange failed with HTTP ${response.status}; check the OAuth client and trust.`
+        `OCI WIF token exchange failed with HTTP ${response.status}${diagnostics.length ? ` (${diagnostics.join('; ')})` : ''}; check the OAuth client and trust.`
       )
     }
     const { token } = (await response.json()) as { token?: string }
@@ -157,36 +202,54 @@ export async function writeCredentials (
   return { OCI_CLI_CONFIG_FILE: configFile, OCI_CLI_AUTH: 'security_token', OCI_CLI_PROFILE: 'DEFAULT' }
 }
 
+export async function loginSession () {
+  if (
+    process.env.GITHUB_ACTIONS !== 'true' ||
+    process.env.GITHUB_REF !== 'refs/heads/main' ||
+    !process.env.RUNNER_TEMP
+  ) {
+    throw new UserError('OCI WIF login requires GitHub Actions on main with a runner temporary directory.')
+  }
+  const config: FederationConfiguration = {
+    domain: process.env.OCI_WIF_DOMAIN_URL ?? '',
+    clientId: process.env.OCI_WIF_CLIENT_ID ?? '',
+    clientSecret: process.env.OCI_WIF_CLIENT_SECRET ?? '',
+    tenancy: process.env.OCI_TENANCY_ID ?? '',
+    region: process.env.OCI_CLI_REGION ?? '',
+    requestUrl: process.env.ACTIONS_ID_TOKEN_REQUEST_URL ?? '',
+    requestToken: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? '',
+    repository: process.env.GITHUB_REPOSITORY ?? ''
+  }
+  validateConfiguration(config)
+  const { publicKey, privateKey } = await generateKeys('rsa', { modulusLength: 2048 })
+  const token = await exchangeToken(config, publicKey.export({ type: 'spki', format: 'der' }).toString('base64'))
+  console.log(`::add-mask::${token.replaceAll('%', '%25')}`)
+  const environment = await writeCredentials(
+    process.env.RUNNER_TEMP,
+    config,
+    privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(),
+    token
+  )
+  // UPST is a JWT. Leave enough validity for a bounded CLI call, and refresh at least once a minute.
+  let expiresAt: number
+  try {
+    const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+    if (!Number.isFinite(claims.exp) || claims.exp * 1000 <= Date.now() + 90_000) {
+      throw new UserError('OCI WIF session expires too soon for a resource operation.')
+    }
+    expiresAt = Math.min(Date.now() + 60_000, claims.exp * 1000 - 90_000)
+  } catch {
+    throw new UserError('OCI WIF session lifetime cannot be verified.')
+  }
+  return { environment, expiresAt }
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    if (
-      process.env.GITHUB_ACTIONS !== 'true' ||
-      process.env.GITHUB_REF !== 'refs/heads/main' ||
-      !process.env.RUNNER_TEMP ||
-      !process.env.GITHUB_ENV
-    ) {
-      throw new UserError('OCI WIF login requires GitHub Actions on main with a runner temporary directory.')
+    if (!process.env.GITHUB_ENV) {
+      throw new UserError('OCI WIF CLI login requires GITHUB_ENV.')
     }
-    const config: FederationConfiguration = {
-      domain: process.env.OCI_WIF_DOMAIN_URL ?? '',
-      clientId: process.env.OCI_WIF_CLIENT_ID ?? '',
-      clientSecret: process.env.OCI_WIF_CLIENT_SECRET ?? '',
-      tenancy: process.env.OCI_TENANCY_ID ?? '',
-      region: process.env.OCI_CLI_REGION ?? '',
-      requestUrl: process.env.ACTIONS_ID_TOKEN_REQUEST_URL ?? '',
-      requestToken: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? '',
-      repository: process.env.GITHUB_REPOSITORY ?? ''
-    }
-    validateConfiguration(config)
-    const { publicKey, privateKey } = await generateKeys('rsa', { modulusLength: 2048 })
-    const token = await exchangeToken(config, publicKey.export({ type: 'spki', format: 'der' }).toString('base64'))
-    console.log(`::add-mask::${token.replaceAll('%', '%25')}`)
-    const environment = await writeCredentials(
-      process.env.RUNNER_TEMP,
-      config,
-      privateKey.export({ type: 'pkcs1', format: 'pem' }).toString(),
-      token
-    )
+    const { environment } = await loginSession()
     await appendFile(
       process.env.GITHUB_ENV,
       Object.entries(environment)

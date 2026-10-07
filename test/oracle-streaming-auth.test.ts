@@ -94,6 +94,10 @@ test('tokens outside the trusted environment and main never reach OCI', async ()
     { sub: 'repo:platformatic/kafka:environment:oracle-streaming' },
     { repository: 'other/repo' },
     { ref: 'refs/heads/feature' },
+    { ref: 'refs/heads/oracle-part-2', event_name: 'push' },
+    { ref: 'refs/heads/oracle-part-2', event_name: 'pull_request' },
+    { ref: 'refs/heads/oracle-part-2', event_name: 'workflow_dispatch' },
+    { ref: 'refs/heads/oracle-part-2' },
     { exp: 0 },
     { exp: 'future' }
   ]) {
@@ -139,6 +143,88 @@ test('HTTP errors and malformed responses never leak credential-bearing bodies o
       )
     }
   }
+})
+
+test('OCI failures report recognized OAuth codes and validated request IDs without response details', async () => {
+  for (const oauthError of ['invalid_client', 'invalid_grant', 'unauthorized_client', 'invalid_request']) {
+    let calls = 0
+    const jwt = token()
+    await rejects(
+      exchangeToken(config, 'key', async () => {
+        calls++
+        if (calls === 1) {
+          return Response.json({ value: jwt })
+        }
+        return Response.json(
+          {
+            error: oauthError,
+            error_description: `${config.clientSecret} ${config.requestToken} ${jwt}`,
+            token: 'private-session-token'
+          },
+          { status: 401, headers: { 'opc-request-id': 'ED2AB9B7E9524480AC794C55BF71D6A3' } }
+        )
+      }),
+      (error: Error & { code: string }) => {
+        strictEqual(error.code, 'PLT_KFK_USER')
+        strictEqual(
+          error.message,
+          `OCI WIF token exchange failed with HTTP 401 (OAuth error=${oauthError}; OCI request ID=ED2AB9B7E9524480AC794C55BF71D6A3); check the OAuth client and trust.`
+        )
+        strictEqual(error.cause, undefined)
+        return true
+      }
+    )
+  }
+})
+
+test('OCI diagnostics suppress unknown codes, malformed bodies and unsafe request IDs', async () => {
+  const sensitiveConfig = { ...config, clientSecret: 'abcdef0123456789' }
+  for (const failure of [
+    Response.json({ error: sensitiveConfig.clientSecret }, { status: 401 }),
+    Response.json({ error: 'invalid_client\ncredential' }, { status: 401 }),
+    Response.json(null, { status: 401 }),
+    new Response('credential-bearing non-JSON body', { status: 401 }),
+    new Response('', { status: 401, headers: { 'opc-request-id': '::error::credential' } }),
+    new Response('', { status: 401, headers: { 'opc-request-id': 'a'.repeat(129) } }),
+    new Response('', { status: 401, headers: { 'opc-request-id': sensitiveConfig.clientSecret } })
+  ]) {
+    let calls = 0
+    await rejects(
+      exchangeToken(sensitiveConfig, 'key', async () => {
+        calls++
+        return calls === 1 ? Response.json({ value: token() }) : failure
+      }),
+      {
+        code: 'PLT_KFK_USER',
+        message: 'OCI WIF token exchange failed with HTTP 401; check the OAuth client and trust.'
+      }
+    )
+  }
+})
+
+test('OCI ECIDs are reported without logging error descriptions or other response fields', async () => {
+  let calls = 0
+  await rejects(
+    exchangeToken(config, 'public-key', async () => {
+      calls++
+      if (calls === 1) {
+        return Response.json({ value: token() })
+      }
+      return Response.json(
+        { error: 'unauthorized_client', error_description: config.clientSecret, token: 'private-session-token' },
+        { status: 401, headers: { 'x-oracle-dms-ecid': '517cd083def10c22dc9e482c19b7569b' } }
+      )
+    }),
+    (error: Error & { code: string }) => {
+      strictEqual(error.code, 'PLT_KFK_USER')
+      strictEqual(
+        error.message,
+        'OCI WIF token exchange failed with HTTP 401 (OAuth error=unauthorized_client; OCI ECID=517cd083def10c22dc9e482c19b7569b); check the OAuth client and trust.'
+      )
+      strictEqual(error.cause, undefined)
+      return true
+    }
+  )
 })
 
 test('ephemeral CLI profiles have private permissions and never store the OAuth secret', async () => {

@@ -137,14 +137,13 @@ Resource operations are covered by mocked CLI tests that reject deletion of non-
 on October 5, 2026. A subsequent complete run passed both E2E executions and verified the corrected
 automatic stream-first teardown without manual intervention.
 
-## Hosted authentication check
+## Hosted resource lifecycle
 
-Before enabling the hosted resource lifecycle, validate the CI identity using the
-**Regression / Oracle Streaming authentication** job in [Regression Tests](../../.github/workflows/regression.yml).
-This job runs on a GitHub-hosted runner on `main`, reads pools and streams in the dedicated
-compartment, and creates or deletes **no resources**. It does not test Kafka or change IAM configuration.
-It runs on pushes to `main` and manual regression executions on `main`. Its results are included in the
-aggregate regression report and failure notifications on Slack. There is no standalone authentication workflow.
+The **Regression / Oracle Streaming** job in [Regression Tests](../../.github/workflows/regression.yml)
+runs on `ubuntu-latest`: WIF login, public stream-pool provisioning, two-partition stream creation,
+two consecutive Kafka smoke executions, and verified stream-first teardown. It does not change IAM.
+On `main`, its results participate in the aggregate regression report and Slack failure notifications.
+The full hosted lifecycle passed on October 7, 2026; independent hosted recovery validation remains pending.
 
 ### Authentication model
 
@@ -156,13 +155,13 @@ The script writes a new, private CLI `security_token` profile under `RUNNER_TEMP
 auth mode and profile name to subsequent steps. It never overwrites a local CLI configuration.
 
 WIF removes the permanent OCI API signing key, **not every persistent secret**: this flow still requires an
-OAuth client secret to authenticate token exchange. Kafka SASL/PLAIN needs its own auth token, which this
-read-only workflow does not consume. Do not upload the personal API private key used for local validation.
+OAuth client secret to authenticate token exchange. Kafka SASL/PLAIN needs a separate auth token,
+available only to configuration validation and smoke steps. Do not upload a personal API private key.
 
 Tokens are short-lived. OCI can limit the session to the source JWT's remaining lifetime; do not assume
-that every session lasts an hour. The check exchanges immediately before its two bounded read operations.
-The future resource workflow must obtain fresh credentials before provisioning and cleanup, and refresh
-within long polling operations. A one-time login is not sufficient for a 45-minute lifecycle job.
+that every session lasts an hour. The CI helper exchanges fresh credentials before resource operations,
+refreshes at least once a minute during polling, and leaves a 90-second lifetime margin for bounded
+60-second CLI calls. Cleanup obtains its own fresh session even after a failed smoke.
 
 ### One-time OCI setup (administrator)
 
@@ -174,8 +173,8 @@ version; the Identity Propagation Trust can require the domain's SCIM REST API r
    domain service-user identifier returned by that operation. It is this domain ID, not a tenancy OCID,
    that the trust uses.
 2. Put the service user in a dedicated group. Scope its OCI policy to the smoke compartment only.
-   For the first read-only check, grant `read stream-family`. When enabling the full lifecycle later,
-   grant `manage stream-family` in that compartment, without tenancy-wide administrative privileges.
+   The initial read-only check used `read stream-family`. The complete lifecycle requires
+   `manage stream-family` in that compartment, without tenancy-wide administrative privileges.
 3. Create and activate a **confidential OAuth application** for runtime token exchange, enabling the
    **Client credentials** grant. Save its client ID and secret. Assign **no Identity Domain administrator
    roles** to this application. Administrative SCIM setup must use a separate administrator identity/client.
@@ -197,7 +196,7 @@ The relevant trust fields are:
   "clientClaimValues": ["https://cloud.oracle.com"],
   "impersonationServiceUsers": [
     {
-      "rule": "sub eq 'repo:platformatic/kafka:environment:oracle'",
+      "rule": "sub eq repo:platformatic/kafka:environment:oracle",
       "value": "<identity-domain-service-user-id>"
     }
   ],
@@ -209,8 +208,8 @@ The relevant trust fields are:
 
 An environment subject does not include the branch. The dedicated `oracle` environment must restrict
 deployments to the branch `main`, with no other branches or tags allowed. The workflow and auth script
-also require `main`, but those checks are additional safeguards, not substitutes for the environment's
-branch policy. The OCI identity retains only `read stream-family` during this authentication validation.
+also require a trusted ref, but those checks are additional safeguards, not substitutes for the environment's
+branch policy. Authentication and resource management now require `main` only.
 Never use a wildcard subject or give the runtime OAuth application administrative domain roles.
 Verify WIF/service-user availability in the actual Identity Domain before making any changes.
 
@@ -219,40 +218,77 @@ Verify WIF/service-user availability in the actual Identity Domain before making
 Create the dedicated GitHub Environment **`oracle`**. In **Deployment branches and tags**, select
 **Selected branches and tags** and add only **Branch → `main`**. Leave required reviewers and wait timers
 disabled so that future recovery can run without manual approval. Add the environment variables and
-secret below without changing the existing `regression` or `eventhubs` settings.
+secrets below without changing the existing `regression` or `eventhubs` settings.
 
-| Name                    | Type     | Value                                                      |
-| ----------------------- | -------- | ---------------------------------------------------------- |
-| `OCI_WIF_DOMAIN_URL`    | Variable | `https://<domain>.identity.oraclecloud.com`, no path/query |
-| `OCI_WIF_CLIENT_ID`     | Variable | Runtime confidential application's client ID               |
-| `OCI_WIF_CLIENT_SECRET` | Secret   | Runtime application's client secret                        |
-| `OCI_TENANCY_ID`        | Variable | Tenancy OCID                                               |
-| `OCI_CLI_REGION`        | Variable | `us-sanjose-1` for the locally validated region            |
-| `OCI_COMPARTMENT_ID`    | Variable | Dedicated smoke compartment OCID                           |
+| Name                               | Type     | Value                                                                                        |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `OCI_WIF_DOMAIN_URL`               | Variable | `https://<domain>.identity.oraclecloud.com`, no path/query                                   |
+| `OCI_WIF_CLIENT_ID`                | Variable | Runtime confidential application's client ID                                                 |
+| `OCI_WIF_CLIENT_SECRET`            | Secret   | Runtime application's client secret                                                          |
+| `OCI_TENANCY_ID`                   | Variable | Tenancy OCID                                                                                 |
+| `OCI_CLI_REGION`                   | Variable | `us-sanjose-1` for the locally validated region                                              |
+| `OCI_COMPARTMENT_ID`               | Variable | Dedicated smoke compartment OCID                                                             |
+| `ORACLE_STREAMING_USERNAME_PREFIX` | Variable | `<tenancy-name>/<identity-domain-name>/<dedicated-kafka-username>`, without a trailing slash |
+| `ORACLE_STREAMING_AUTH_TOKEN`      | Secret   | Dedicated Kafka user's OCI auth token                                                        |
+| `SLACK_WEBHOOK_URL`                | Secret   | Recovery failure notification webhook                                                        |
 
 Set the secret through GitHub's secret input or an interactive CLI prompt, not command-line arguments,
-source files, logs, or chat. No Kafka token is required for this check.
+source files, logs, or chat. Generate the Kafka auth token on a dedicated OCI user with Streaming access
+in the smoke compartment. Do not assume that the WIF service user supports Kafka auth tokens;
+use a separate dedicated domain user if necessary. The pool OCID is appended to the username at runtime.
 
-The regression workflow and auth script must be present on trusted `main` before dispatch. Run
-**Actions → Regression Tests → Run workflow → main** to execute the full regression, including this check.
-Success means WIF login and both Streaming listings passed; it does not prove create/delete permissions
-or Kafka SASL authentication. Inspect the step that failed if the check is unsuccessful. The auth helper
-reports HTTP status and a stable `PLT_KFK_USER` error without logging HTTP bodies, JWTs, or client secrets.
+Run **Actions → Regression Tests → Run workflow → main** for the full regression. Success requires provisioning, both smoke executions
+and verified deletion; authentication alone is insufficient. Inspect the failed step and lifecycle summary.
+The auth helper
+reports HTTP status, a recognized OAuth error code and a validated OCI request ID when available, using
+the stable `PLT_KFK_USER` error. Unknown codes, error descriptions, HTTP bodies, JWTs and client secrets
+are never logged. Validated `x-oracle-dms-ecid` values are also reported for OCI correlation.
+`invalid_client` points to client authentication; `invalid_grant` points to the supplied
+grant/token validation. These codes guide investigation but do not identify a specific misconfiguration.
 Do not enable HTTP/CLI debug logging to troubleshoot with secrets present.
 
-### Next integration milestone
+### Validated WIF configuration
 
-After hosted WIF succeeds, add the regression lane and independent recovery:
+GitHub OIDC exchange and both read-only Streaming listings passed on October 7, 2026 in
+[run 37609217743](https://github.com/platformatic/kafka/actions/runs/37609217743).
+The impersonation rule must use the exact subject without enclosing quotes inside the rule string.
+The quoted form was accepted by the SCIM API but failed at runtime with `unauthorized_client` and
+`No rules matched from given token to find impersonation user.` Removing the quotes resolved the failure.
 
-- Preserve the environment's `main`-only branch policy when elevating OCI permissions beyond read-only.
-- Preserve local run IDs and tags; use distinct CI ownership tags with repository/run/attempt.
-- Refresh WIF sessions during bounded CLI operations, including cleanup after a failed smoke.
-- Run the same E2E on `ubuntu-latest` and record provisioning, smoke and verified deletion separately.
-- Recover only resources owned by completed trusted regression runs; never delete active or local runs.
-- Configure the dedicated Kafka user's auth token and Slack secret only where they are needed.
+The client-credentials probe and error-description diagnostics have been removed.
 
-Only the read-only authentication job is integrated into regression at this milestone. Hosted Kafka E2E,
-provisioning and resource recovery are not enabled yet.
+### Validation results
+
+The complete hosted lifecycle passed in [run 37613892408](https://github.com/platformatic/kafka/actions/runs/37613892408):
+WIF login, provisioning, two consecutive smoke executions and verified stream/pool deletion.
+Normal cancellation in [run 37616134681](https://github.com/platformatic/kafka/actions/runs/37616134681)
+allowed the ordinary cleanup to finish successfully.
+Forced cancellation in [run 37616460306](https://github.com/platformatic/kafka/actions/runs/37616460306)
+interrupted smoke and skipped cleanup. The recovery helper was then executed locally with the previously
+validated OCI API credentials, verified the owning GitHub run, and deleted the remaining stream and pool.
+This validates real recovery behavior, not the independent hosted recovery workflow or its WIF credentials.
+
+The temporary `oracle-part-2` exceptions have been removed: other regression lanes, aggregate reporting
+and ordinary concurrency are restored. Remove that branch from the `oracle` environment's deployment
+branch policy, leaving only `main`.
+
+### Ownership and interrupted-run recovery
+
+CI resources carry `purpose=kafka-oracle-streaming-regression`, `repository`, `run` and `attempt` tags.
+Pool names include a compartment/region/repository hash, GitHub run ID and attempt. Local names and tags
+are unchanged. Cleanup validates names, compartment, ownership and every selected stream before deletion,
+then waits for streams to disappear before deleting the pool and verifies both are absent.
+
+[Oracle Streaming resource recovery](../../.github/workflows/oracle-streaming-cleanup.yml) runs independently
+when Regression Tests completes, every six hours, and on manual dispatch. It checks the owning GitHub run
+using `actions: read`, deletes only completed trusted regression runs on `main`, and preserves active and local runs.
+Unknown ownership, unverifiable runs, mismatched resource names and orphan streams fail closed and require
+operator inspection rather than reporting successful recovery. Recovery failures notify Slack.
+
+Automatic recovery needs the recovery workflow and helpers on trusted `main`; `workflow_run` and schedules
+do not activate from an unpublished feature branch. GitHub also refused manual dispatch before the workflow
+was registered on the default branch. Validate the independent hosted workflow after integration into `main`;
+this follow-up has been deferred. Never dispatch recovery using untrusted code or artifacts.
 
 ## References
 

@@ -37,6 +37,9 @@ export const baseOptionsSchema = {
     retries: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'boolean' }] },
     retryDelay: { oneOf: [{ type: 'number', minimum: 0 }, { function: true }] },
     maxInflights: { type: 'number', minimum: 0 },
+    keepAlive: { type: 'boolean' },
+    keepAliveInitialDelay: { type: 'number', minimum: 0 },
+    connectionsMaxIdle: { type: 'number', minimum: 0 },
     handleBackPressure: { type: 'boolean', default: false },
     tls: { type: 'object', additionalProperties: true }, // No validation as they come from Node.js
     ssl: { type: 'object', additionalProperties: true }, // Alias for tls, no validation as they come from Node.js

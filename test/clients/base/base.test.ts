@@ -225,6 +225,21 @@ test('constructor validates SASL reauthentication options', t => {
   t.after(() => client.close())
 })
 
+test('constructor validates keep-alive and idle connection options', t => {
+  const options = {
+    clientId: 'test-client',
+    bootstrapBrokers: ['localhost:9092'],
+    strict: true
+  }
+
+  throws(() => new Base({ ...options, keepAlive: 'yes' as unknown as boolean }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAliveInitialDelay: -1 }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, connectionsMaxIdle: -1 }), { code: 'PLT_KFK_USER' })
+
+  const client = new Base({ ...options, keepAlive: true, keepAliveInitialDelay: 1000, connectionsMaxIdle: 60000 })
+  t.after(() => client.close())
+})
+
 test('close should properly terminate client', async t => {
   const client = createBase(t)
 

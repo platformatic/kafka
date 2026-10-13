@@ -1511,6 +1511,189 @@ test('kGetBootstrapConnection keeps known brokers after stale metadata clears th
   ])
 })
 
+test('kGetBootstrapConnection drops known brokers absent for longer than knownBrokersMaxAge', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, knownBrokersMaxAge: 1000 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092],
+      [3, 'b3', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [3, 'b3', 9092]
+    ],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  t.mock.timers.tick(600)
+  await client.metadata({ topics: [], forceUpdate: true })
+  t.mock.timers.tick(600)
+  await client.metadata({ topics: [], forceUpdate: true })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  // b2 was last seen 1200ms ago, b3 600ms ago
+  deepStrictEqual(candidates[3], [
+    { host: 'b1', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection keeps known brokers while metadata requests fail', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, knownBrokersMaxAge: 1000 })
+  const leaderNotAvailable = new ResponseError(metadataV10.api.key, 10, { '/topics/0': [5, null] }, {})
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    leaderNotAvailable,
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  t.mock.timers.tick(5000)
+  await rejects(() => client.metadata({ topics: [], forceUpdate: true }))
+  await client.metadata({ topics: [] })
+
+  deepStrictEqual(candidates[2], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection keeps the most recently seen absent brokers up to maxAbsentKnownBrokers', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, maxAbsentKnownBrokers: 2 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [3, 'b3', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [4, 'b4', 9092]
+    ],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  for (let i = 0; i < 4; i++) {
+    t.mock.timers.tick(10)
+    await client.metadata({ topics: [], forceUpdate: true })
+  }
+
+  deepStrictEqual(candidates[4], [
+    { host: 'b1', port: 9092 },
+    { host: 'b4', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection evicts absent brokers by when they were last seen', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, maxAbsentKnownBrokers: 1 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [3, 'b3', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  for (let i = 0; i < 4; i++) {
+    t.mock.timers.tick(10)
+    await client.metadata({ topics: [], forceUpdate: true })
+  }
+
+  // b2 reappeared after b3 was last seen
+  deepStrictEqual(candidates[4], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection does not count reported addresses toward maxAbsentKnownBrokers', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 })
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, maxAbsentKnownBrokers: 1 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [4, 'b4', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [3, 'b2', 9092]
+    ],
+    [
+      [1, 'b1', 9092],
+      [3, 'b2', 9092]
+    ]
+  ])
+
+  await client.metadata({ topics: [] })
+  for (let i = 0; i < 3; i++) {
+    t.mock.timers.tick(10)
+    await client.metadata({ topics: [], forceUpdate: true })
+  }
+
+  // Node 2's address is reported as node 3, so the single slot goes to b4
+  deepStrictEqual(candidates[3], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 },
+    { host: 'b4', port: 9092 }
+  ])
+})
+
+test('kGetBootstrapConnection does not count brokers in the latest metadata response toward maxAbsentKnownBrokers', async t => {
+  const client = createBase(t, { bootstrapBrokers: ['b1:9092'], retries: 0, maxAbsentKnownBrokers: 0 })
+  const candidates = mockMetadataResponses(client, [
+    [
+      [1, 'b1', 9092],
+      [2, 'b2', 9092],
+      [3, 'b3', 9092]
+    ],
+    [[1, 'b1', 9092]],
+    [[1, 'b1', 9092]]
+  ])
+
+  await client.metadata({ topics: [] })
+  client.clearMetadata()
+  await client.metadata({ topics: [] })
+  await client.metadata({ topics: [], forceUpdate: true })
+
+  // After clearMetadata, b2 and b3 come only from the known brokers
+  deepStrictEqual(candidates[1], [
+    { host: 'b1', port: 9092 },
+    { host: 'b2', port: 9092 },
+    { host: 'b3', port: 9092 }
+  ])
+  deepStrictEqual(candidates[2], [{ host: 'b1', port: 9092 }])
+})
+
 test('metadata should not crash when the error is not a library error', async t => {
   const client = createBase(t, { retries: 0 })
 

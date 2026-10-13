@@ -8,7 +8,13 @@ import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { MultipleErrors, NetworkError } from '../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../events.ts'
-import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
+import {
+  Connection,
+  ConnectionStatuses,
+  validateKeepAliveOptions,
+  type Broker,
+  type ConnectionOptions
+} from './connection.ts'
 
 export interface ConnectionPoolEventPayload {
   broker: Broker
@@ -39,6 +45,7 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
 
   constructor (clientId: string, connectionOptions: ConnectionOptions = {}) {
     super()
+    validateKeepAliveOptions(connectionOptions.keepAlive)
     this.#closed = false
     this.#instanceId = currentInstance++
     this.#clientId = clientId

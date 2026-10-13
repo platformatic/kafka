@@ -42,6 +42,7 @@ import {
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
   type ClusterMetadata,
+  type KeepAliveOptions,
   Writer
 } from '../../../src/index.ts'
 import {
@@ -232,11 +233,17 @@ test('constructor validates keep-alive and idle connection options', t => {
     strict: true
   }
 
-  throws(() => new Base({ ...options, keepAlive: 'yes' as unknown as boolean }), { code: 'PLT_KFK_USER' })
-  throws(() => new Base({ ...options, keepAliveInitialDelay: -1 }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: true as unknown as KeepAliveOptions }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { initialDelay: 500 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { interval: 500 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { count: 0 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { delay: 1000 } as KeepAliveOptions }), { code: 'PLT_KFK_USER' })
   throws(() => new Base({ ...options, connectionsMaxIdle: -1 }), { code: 'PLT_KFK_USER' })
 
-  const client = new Base({ ...options, keepAlive: true, keepAliveInitialDelay: 1000, connectionsMaxIdle: 60000 })
+  new Base({ ...options, keepAlive: {} }).close()
+  new Base({ ...options, keepAlive: { initialDelay: 0 } }).close()
+
+  const client = new Base({ ...options, keepAlive: { initialDelay: 1000 }, connectionsMaxIdle: 60000 })
   t.after(() => client.close())
 })
 

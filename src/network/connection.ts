@@ -1,6 +1,6 @@
 import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import fastq from 'fastq'
-import { createConnection, isIP, type NetConnectOpts, type Socket } from 'node:net'
+import { createConnection, isIP, Socket, type NetConnectOpts } from 'node:net'
 import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
 import {
   type CallbackWithPromise,
@@ -91,12 +91,17 @@ export interface SASLOptions {
   lazyReauthentication?: boolean
 }
 
+export interface KeepAliveOptions {
+  initialDelay?: number
+  interval?: number
+  count?: number
+}
+
 export interface ConnectionOptions {
   connectTimeout?: number
   requestTimeout?: number
   maxInflights?: number
-  keepAlive?: boolean
-  keepAliveInitialDelay?: number
+  keepAlive?: KeepAliveOptions
   connectionsMaxIdle?: number
   tls?: TLSConnectionOptions
   ssl?: TLSConnectionOptions // Alias for tls
@@ -141,7 +146,20 @@ export const defaultOptions = {
   maxInflights: 5
 }
 
+// @types/node does not declare interval and count yet
+type SetKeepAlive = (this: Socket, enable: boolean, initialDelay: number, interval?: number, count?: number) => Socket
+
 let currentInstance = 0
+
+export function validateKeepAliveOptions (keepAlive: KeepAliveOptions | undefined): void {
+  // Node.js accepts interval and count from 24.19.0 and 26.4.0; older versions ignore them
+  if (
+    (keepAlive?.interval !== undefined || keepAlive?.count !== undefined) &&
+    Socket.prototype.setKeepAlive.length < 4
+  ) {
+    throw new UserError('keepAlive.interval and keepAlive.count require Node.js 24.19.0 or 26.4.0 and later.')
+  }
+}
 
 export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #host: string | undefined
@@ -181,6 +199,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
     }
     this.#options.tls ??= this.#options.ssl
+    validateKeepAliveOptions(this.#options.keepAlive)
     this.#status = ConnectionStatuses.NONE
     this.#clientId = clientId
     this.#context = options.context
@@ -311,7 +330,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.#socket.setNoDelay(true)
 
       if (this.#options.keepAlive) {
-        this.#socket.setKeepAlive(true, this.#options.keepAliveInitialDelay ?? 0)
+        const { initialDelay, interval, count } = this.#options.keepAlive
+        ;(this.#socket.setKeepAlive as SetKeepAlive).call(this.#socket, true, initialDelay ?? 0, interval, count)
       }
 
       this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {

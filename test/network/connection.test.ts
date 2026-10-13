@@ -15,6 +15,7 @@ import {
   type CallbackWithPromise,
   Connection,
   type ConnectionDiagnosticEvent,
+  ConnectionPool,
   connectionsApiChannel,
   connectionsConnectsChannel,
   ConnectionStatuses,
@@ -363,8 +364,7 @@ for (const tls of [false, true]) {
     const setKeepAlive = t.mock.method(Socket.prototype, 'setKeepAlive')
 
     const connection = new Connection('test-client', {
-      keepAlive: true,
-      keepAliveInitialDelay: 1000,
+      keepAlive: { initialDelay: 1000 },
       tls: tls ? { rejectUnauthorized: false } : undefined
     })
     t.after(() => connection.close())
@@ -374,10 +374,49 @@ for (const tls of [false, true]) {
     const calls = setKeepAlive.mock.calls.filter(call => call.this === connection.socket)
     deepStrictEqual(
       calls.map(call => call.arguments),
-      [[true, 1000]]
+      [[true, 1000, undefined, undefined]]
     )
   })
 }
+
+test('Connection.connect should pass keep-alive interval and count', async t => {
+  const { port } = await createServer(t)
+  const calls: unknown[][] = []
+
+  // Stands in for Node.js 24.19+ and 26.4+ so the test runs on every supported version
+  const original = Socket.prototype.setKeepAlive
+  Socket.prototype.setKeepAlive = function (enable?: boolean, initialDelay?: number, interval?: number, count?: number) {
+    calls.push([enable, initialDelay, interval, count])
+    return this
+  }
+  t.after(() => {
+    Socket.prototype.setKeepAlive = original
+  })
+
+  const connection = new Connection('test-client', { keepAlive: { interval: 2000, count: 3 } })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(calls, [[true, 0, 2000, 3]])
+})
+
+test('Connection should reject keep-alive interval and count on Node.js versions without them', t => {
+  const original = Socket.prototype.setKeepAlive
+  Socket.prototype.setKeepAlive = function (_enable?: boolean, _initialDelay?: number) {
+    return this
+  }
+  t.after(() => {
+    Socket.prototype.setKeepAlive = original
+  })
+
+  for (const keepAlive of [{ interval: 2000 }, { count: 3 }]) {
+    throws(() => new Connection('test-client', { keepAlive }), UserError)
+    throws(() => new ConnectionPool('test-client', { keepAlive }), UserError)
+  }
+
+  ok(new Connection('test-client', { keepAlive: { initialDelay: 1000 } }))
+})
 
 test('Connection.connect should not enable keep-alive by default', async t => {
   const { port } = await createServer(t)

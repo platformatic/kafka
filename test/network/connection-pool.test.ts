@@ -340,6 +340,30 @@ test('get should open a new connection after an idle one is closed', { timeout: 
   strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
 })
 
+test('get should open a new connection while an idle one is closing', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  const closed = once(connection, 'close')
+  const replacement = new Promise<Connection>((resolve, reject) => {
+    connection.once('closing', () => {
+      connectionPool.get(broker).then(resolve, reject)
+    })
+  })
+
+  const newConnection = await replacement
+  await closed
+
+  ok(newConnection !== connection)
+  strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
+  strictEqual(connectionPool.getEstablishedConnection(broker), newConnection)
+})
+
 test('get should handle errors and remove connection', async t => {
   const connectionPool = new ConnectionPool('test-client')
   t.after(() => connectionPool.close())

@@ -244,19 +244,31 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
       this.emit('sasl:authentication:extended', { ...eventPayload, authentication })
     })
 
-    // Remove stale connections from the pool
+    // Remove stale connections from the pool. Removing on 'closing' lets get() open a replacement
+    // instead of waiting on a connection that is about to close.
+    connection.once('closing', () => {
+      this.#remove(key, connection)
+    })
+
     connection.once('close', () => {
       this.emit('disconnect', eventPayload)
-      this.#connections.delete(key)
+      this.#remove(key, connection)
     })
 
     connection.once('error', () => {
-      this.#connections.delete(key)
+      this.#remove(key, connection)
     })
 
     connection.on('drain', () => {
       this.emit('drain', eventPayload)
     })
+  }
+
+  // A replacement may already be stored under the same key
+  #remove (key: string, connection: Connection): void {
+    if (this.#connections.get(key) === connection) {
+      this.#connections.delete(key)
+    }
   }
 
   #getFirstAvailable (

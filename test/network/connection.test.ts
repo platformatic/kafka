@@ -435,9 +435,15 @@ test('Connection should close after connectionsMaxIdle without requests', { time
   const connection = new Connection('test-client', { connectionsMaxIdle: 100 })
   t.after(() => connection.close())
 
+  let statusOnIdle
+  connection.once('idle', () => {
+    statusOnIdle = connection.status
+  })
+
   await connection.connect('localhost', port)
   await once(connection, 'close')
 
+  strictEqual(statusOnIdle, ConnectionStatuses.CLOSING)
   strictEqual(connection.status, ConnectionStatuses.CLOSED)
 })
 
@@ -2016,6 +2022,64 @@ test('Connection.ready should resolve during SASL reauthentication', async t => 
   strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
 
   await readyPromise
+})
+
+test('Connection should not close for connectionsMaxIdle during SASL authentication', async t => {
+  const connection = new Connection('test-client', {
+    connectionsMaxIdle: 100,
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      authenticate (_mechanism, connection, authenticate, usernameProvider, passwordProvider, _tokenProvider, callback) {
+        setTimeout(() => {
+          saslPlain.authenticate(authenticate, connection, usernameProvider!, passwordProvider!, callback)
+        }, 300)
+      }
+    }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+  strictEqual(connection.status, ConnectionStatuses.CONNECTED)
+
+  await once(connection, 'idle')
+})
+
+test('Connection should not close for connectionsMaxIdle during SASL reauthentication', async t => {
+  let authentications = 0
+  const connection = new Connection('test-client', {
+    connectionsMaxIdle: 100,
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      authenticate (_mechanism, connection, authenticate, usernameProvider, passwordProvider, _tokenProvider, callback) {
+        // Delay only the reauthentication, past connectionsMaxIdle
+        setTimeout(
+          () => {
+            saslPlain.authenticate(authenticate, connection, usernameProvider!, passwordProvider!, callback)
+          },
+          authentications++ === 0 ? 0 : 300
+        )
+      }
+    }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+
+  const events: string[] = []
+  connection.on('sasl:authentication:extended', () => events.push('reauthenticated'))
+  connection.on('idle', () => events.push('idle'))
+
+  connection.reauthenticate()
+  strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
+
+  await once(connection, 'close')
+  deepStrictEqual(events, ['reauthenticated', 'idle'])
 })
 
 test('Connection.reauthenticate should do nothing when SASL is not configured', async t => {

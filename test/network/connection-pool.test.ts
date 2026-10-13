@@ -263,6 +263,7 @@ test('get should handle connection disconnect event', async t => {
 
   // Verify the pool emitted the disconnect event
   deepStrictEqual(disconnectSpy.mock.calls.length, 1)
+  deepStrictEqual(disconnectSpy.mock.calls[0].arguments, [{ broker, connection }])
 
   // Try to get the connection again - should create a new one
   const newConnection = await connectionPool.get(broker)
@@ -333,7 +334,8 @@ test('get should open a new connection after an idle one is closed', { timeout: 
   const broker = { host: 'localhost', port }
   const connection = await connectionPool.get(broker)
 
-  await once(connectionPool, 'disconnect')
+  const [payload] = await once(connectionPool, 'disconnect')
+  strictEqual(payload.reason, 'idle')
 
   const newConnection = await connectionPool.get(broker)
   ok(newConnection !== connection)

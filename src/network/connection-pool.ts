@@ -28,7 +28,7 @@ export interface ConnectionPoolEvents extends TypedEvents {
   'sasl:handshake': (payload: ConnectionPoolEventPayload & { mechanisms: string[] }) => void
   'sasl:authentication': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
   'sasl:authentication:extended': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
-  disconnect: (payload: ConnectionPoolEventPayload) => void
+  disconnect: (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
   drain: (payload: ConnectionPoolEventPayload) => void
 }
 
@@ -250,8 +250,13 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
       this.#remove(key, connection)
     })
 
+    let idle = false
+    connection.once('idle', () => {
+      idle = true
+    })
+
     connection.once('close', () => {
-      this.emit('disconnect', eventPayload)
+      this.emit('disconnect', idle ? { ...eventPayload, reason: 'idle' } : eventPayload)
       this.#remove(key, connection)
     })
 

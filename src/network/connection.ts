@@ -52,6 +52,7 @@ export interface ConnectionEvents extends TypedEvents {
   ready: () => void
   close: () => void
   closing: () => void
+  idle: () => void
   'sasl:handshake': (mechanisms: string[]) => void
   'sasl:authentication': (authBytes?: Buffer) => void
   'sasl:authentication:extended': (authBytes?: Buffer) => void
@@ -1075,6 +1076,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.#payloadQueue.idle()
     ) {
       this.close(noopCallback)
+      this.emit('idle')
       return
     }
 

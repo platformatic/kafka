@@ -63,6 +63,7 @@ Starts SASL re-authentication when the current connection uses SASL and the brok
 | `ready`                        | (none)                | Emitted when the connection is ready to send Kafka requests.                           |
 | `close`                        | (none)                | Emitted when the underlying socket is closed.                                          |
 | `closing`                      | (none)                | Emitted when the connection starts shutting down.                                      |
+| `idle`                         | (none)                | Emitted when `connectionsMaxIdle` closes an idle connection, after `closing`.          |
 | `sasl:handshake`               | `string[]`            | Emitted when SASL handshake completes with the list of supported mechanisms.           |
 | `sasl:authentication`          | `Buffer \| undefined` | Emitted when SASL authentication completes.                                            |
 | `sasl:authentication:extended` | `Buffer \| undefined` | Emitted when SASL authentication is refreshed or extended.                             |
@@ -133,6 +134,7 @@ Closes and removes all pooled connections.
 
 - `broker`: the broker `{ host, port }` associated with the event.
 - `connection`: the `Connection` instance associated with the event.
+- `reason`: only on `disconnect`, set to `'idle'` when `connectionsMaxIdle` closed the connection.
 
 ## Messages
 

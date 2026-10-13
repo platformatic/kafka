@@ -9,7 +9,7 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 | Name                                         | Description                                                                                  |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `client:broker:connect`                      | Emitted when connecting to a broker.                                                         |
-| `client:broker:disconnect`                   | Emitted when disconnecting from a broker.                                                    |
+| `client:broker:disconnect`                   | Emitted when disconnecting from a broker. `reason` is `'idle'` for an idle close.            |
 | `client:broker:failed`                       | Emitted when a broker connection fails.                                                      |
 | `client:broker:drain`                        | Emitted when a broker is ready to be triggered by requests.                                  |
 | `client:broker:sasl:handshake`               | Emitted when SASL handshake with a broker is completed.                                      |
@@ -38,7 +38,7 @@ Creates a new base client.
 | `requestTimeout`     | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                                |
 | `maxInflights`       | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
 | `keepAlive`          | `KeepAliveOptions`     |           | Enables TCP keep-alive on broker connections. See section below.                                                                                                   |
-| `connectionsMaxIdle` | `number`               |           | Close a broker connection that has had no traffic and no pending requests for this many milliseconds. The next request reconnects. Disabled by default.            |
+| `connectionsMaxIdle` | `number`               |           | Close a broker connection that has had no traffic and no pending requests for this many milliseconds. The next request reconnects. `0` or unset disables it.       |
 | `handleBackPressure` | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |

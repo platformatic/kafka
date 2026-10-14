@@ -20,6 +20,7 @@ import {
   type CreatedTopic,
   type DescribeClientQuotasOptions,
   type GroupBase,
+  type GroupMember,
   type ListConsumerGroupOffsetsGroup
 } from '../../../src/clients/admin/index.ts'
 import { kApis, kConnections, kGetApi, kGetBootstrapConnection } from '../../../src/clients/base/base.ts'
@@ -61,6 +62,8 @@ import {
   describeGroupsV5,
   describeLogDirsV4,
   EMPTY_BUFFER,
+  encodeConsumerProtocolAssignment,
+  encodeConsumerProtocolSubscription,
   findCoordinatorV3,
   findCoordinatorV6,
   incrementalAlterConfigsV1,
@@ -1001,7 +1004,7 @@ test('createTopics should negotiate legacy versions and normalize their response
         ]
       }
       const connection = {
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           _payload: () => Writer,
@@ -1090,7 +1093,7 @@ test('deleteTopics should negotiate legacy versions with name-based requests', a
       const admin = createAdmin(t)
       const topicName = `topic-v${version}`
       const connection = {
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -1732,7 +1735,7 @@ test('listGroups should negotiate legacy versions and normalize their defaults',
       const groupId = `group-v${version}`
       const connection = {
         instanceId: 1,
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -2115,22 +2118,26 @@ test('describeGroups should decode KafkaJS v1 member metadata without ownedParti
       } else if (apiKey === describeGroupsV5.api.key) {
         callback(null, {
           throttleTimeMs: 0,
-          groups: [{
-            errorCode: 0,
-            groupId,
-            groupState: 'Stable',
-            protocolType: 'consumer',
-            protocolData: 'roundrobin',
-            members: [{
-              memberId: 'kafkajs-member',
-              groupInstanceId: null,
-              clientId: 'kafkajs',
-              clientHost: '/127.0.0.1',
-              memberMetadata,
-              memberAssignment: EMPTY_BUFFER
-            }],
-            authorizedOperations: 0
-          }]
+          groups: [
+            {
+              errorCode: 0,
+              groupId,
+              groupState: 'Stable',
+              protocolType: 'consumer',
+              protocolData: 'roundrobin',
+              members: [
+                {
+                  memberId: 'kafkajs-member',
+                  groupInstanceId: null,
+                  clientId: 'kafkajs',
+                  clientHost: '/127.0.0.1',
+                  memberMetadata,
+                  memberAssignment: EMPTY_BUFFER
+                }
+              ],
+              authorizedOperations: 0
+            }
+          ]
         })
       } else {
         throw new Error(`Unexpected API key ${apiKey}`)
@@ -2202,7 +2209,7 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
       const includeAuthorizedOperations = true
       const connection = {
         instanceId: 1,
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -2337,7 +2344,7 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
                     clientId: 'client-1',
                     clientHost: '/127.0.0.1',
                     metadata: undefined,
-                    assignments: undefined
+                    assignments: new Map()
                   }
                 ]
               ]),
@@ -2350,83 +2357,185 @@ test('describeGroups should negotiate legacy versions and normalize their defaul
   }
 })
 
-test('describeGroups should report undecodable member metadata as a per-group error', async t => {
-  const admin = createAdmin(t)
+test('describeGroups should preserve members and independently decode their payloads (issue #455)', async t => {
   const groupId = 'group-bad-metadata'
 
   const truncatedMetadata = Buffer.alloc(6)
   truncatedMetadata.writeInt16BE(0, 0)
   truncatedMetadata.writeInt32BE(5, 2)
 
-  const bootstrapConnection = {
-    instanceId: 1,
-    send<ReturnType> (
-      _apiKey: number,
-      _apiVersion: number,
-      _payload: () => Writer,
-      _responseParser: ResponseParser<ReturnType>,
-      _requestTaggedFields: boolean,
-      _responseTaggedFields: boolean,
-      callback: Callback<ReturnType>
-    ): void {
-      callback(null, {
-        throttleTimeMs: 0,
-        coordinators: [
-          { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
-        ]
-      } as ReturnType)
-    }
-  } as unknown as Connection
+  const metadata = encodeConsumerProtocolSubscription({ version: 0, topics: ['topic'] })
+  const assignment = encodeConsumerProtocolAssignment({
+    version: 0,
+    assignedPartitions: [{ topic: 'topic', partitions: [0] }]
+  })
+  const partialMetadata = Buffer.concat([metadata, Buffer.from([0])])
+  partialMetadata.writeInt16BE(1, 0)
+  const legacyMetadata = Buffer.from(metadata)
+  legacyMetadata.writeInt16BE(1, 0)
+  const futureMetadata = Buffer.from(metadata)
+  futureMetadata.writeInt16BE(100, 0)
 
-  const coordinatorConnection = {
-    instanceId: 2,
-    send<ReturnType> (
-      _apiKey: number,
-      _apiVersion: number,
-      _payload: () => Writer,
-      _responseParser: ResponseParser<ReturnType>,
-      _requestTaggedFields: boolean,
-      _responseTaggedFields: boolean,
-      callback: Callback<ReturnType>
-    ): void {
-      callback(null, {
-        throttleTimeMs: 0,
-        groups: [
-          {
-            errorCode: 0,
-            groupId,
-            groupState: 'Stable',
-            protocolType: 'consumer',
-            protocolData: 'range',
-            members: [
-              {
-                memberId: 'member-1',
-                groupInstanceId: null,
-                clientId: 'client-1',
-                clientHost: '/127.0.0.1',
-                memberMetadata: truncatedMetadata,
-                memberAssignment: EMPTY_BUFFER
-              }
-            ],
-            authorizedOperations: -2147483648
-          }
-        ]
-      } as ReturnType)
+  const scenarios = [
+    { name: 'bad subscription', metadata: partialMetadata, assignment, metadataError: true, assignmentError: false },
+    { name: 'bad assignment', metadata, assignment: truncatedMetadata, metadataError: false, assignmentError: true },
+    {
+      name: 'both bad',
+      metadata: truncatedMetadata,
+      assignment: truncatedMetadata,
+      metadataError: true,
+      assignmentError: true
+    },
+    { name: 'empty metadata', metadata: EMPTY_BUFFER, assignment, metadataError: false, assignmentError: false },
+    {
+      name: 'empty metadata and bad assignment',
+      metadata: EMPTY_BUFFER,
+      assignment: truncatedMetadata,
+      metadataError: false,
+      assignmentError: true
+    },
+    {
+      name: 'empty payloads',
+      metadata: EMPTY_BUFFER,
+      assignment: EMPTY_BUFFER,
+      metadataError: false,
+      assignmentError: false
+    },
+    { name: 'legacy subscription', metadata: legacyMetadata, assignment, metadataError: false, assignmentError: false },
+    { name: 'future subscription', metadata: futureMetadata, assignment, metadataError: false, assignmentError: false },
+    {
+      name: 'several bad members',
+      metadata: truncatedMetadata,
+      assignment,
+      metadataError: true,
+      assignmentError: false,
+      several: true
     }
-  } as unknown as Connection
-
-  admin[kApis] = [
-    { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
-    { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: 5 }
   ]
-  admin[kGetBootstrapConnection] = callback => callback(null, bootstrapConnection)
-  mockConnectionPoolGet(admin[kConnections], () => true, null, coordinatorConnection)
 
-  const groups = await admin.describeGroups({ groups: [groupId] })
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async t => {
+      const admin = createAdmin(t)
+      const members = ['member-1', 'member-2', 'member-3'].map((memberId, index) => {
+        const broken = index === 1 || (scenario.several && index === 2)
+        return {
+          memberId,
+          groupInstanceId: `instance-${index}`,
+          clientId: `client-${index}`,
+          clientHost: '/127.0.0.1',
+          memberMetadata: broken ? scenario.metadata : metadata,
+          memberAssignment: broken ? scenario.assignment : assignment
+        }
+      })
 
-  const group = groups.get(groupId)
-  ok(group)
-  ok(group.error instanceof UnsupportedFormatError)
+      const bootstrapConnection = {
+        instanceId: 1,
+        send<ReturnType> (
+          _apiKey: number,
+          _apiVersion: number,
+          _payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          _requestTaggedFields: boolean,
+          _responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          callback(null, {
+            throttleTimeMs: 0,
+            coordinators: [{ key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }]
+          } as ReturnType)
+        }
+      } as unknown as Connection
+
+      const coordinatorConnection = {
+        instanceId: 2,
+        send<ReturnType> (
+          _apiKey: number,
+          _apiVersion: number,
+          _payload: () => Writer,
+          _responseParser: ResponseParser<ReturnType>,
+          _requestTaggedFields: boolean,
+          _responseTaggedFields: boolean,
+          callback: Callback<ReturnType>
+        ): void {
+          callback(null, {
+            throttleTimeMs: 0,
+            groups: [
+              {
+                errorCode: 0,
+                groupId,
+                groupState: 'Stable',
+                protocolType: 'consumer',
+                protocolData: 'range',
+                members,
+                authorizedOperations: -2147483648
+              },
+              {
+                errorCode: 0,
+                groupId: 'unaffected-group',
+                groupState: 'Stable',
+                protocolType: 'consumer',
+                protocolData: 'range',
+                members: [members[0]],
+                authorizedOperations: -2147483648
+              }
+            ]
+          } as ReturnType)
+        }
+      } as unknown as Connection
+
+      admin[kApis] = [
+        { apiKey: findCoordinatorV6.api.key, name: 'FindCoordinator', minVersion: 0, maxVersion: 6 },
+        { apiKey: describeGroupsV5.api.key, name: 'DescribeGroups', minVersion: 0, maxVersion: 5 }
+      ]
+      admin[kGetBootstrapConnection] = callback => callback(null, bootstrapConnection)
+      mockConnectionPoolGet(admin[kConnections], () => true, null, coordinatorConnection)
+
+      const groups = await admin.describeGroups({ groups: [groupId, 'unaffected-group'] })
+
+      const group = groups.get(groupId)
+      ok(group)
+      deepStrictEqual(
+        [...group.members.keys()],
+        members.map(member => member.memberId)
+      )
+      for (const [index, raw] of members.entries()) {
+        const member: GroupMember = group.members.get(raw.memberId)!
+        const affected = index === 1 || (scenario.several === true && index === 2)
+        strictEqual(member.id, raw.memberId)
+        strictEqual(member.groupInstanceId, raw.groupInstanceId)
+        strictEqual(member.clientId, raw.clientId)
+        strictEqual(member.clientHost, raw.clientHost)
+        strictEqual(member.metadataError instanceof UnsupportedFormatError, affected && scenario.metadataError)
+        strictEqual(member.assignmentError instanceof UnsupportedFormatError, affected && scenario.assignmentError)
+        for (const error of [member.metadataError, member.assignmentError]) {
+          if (error) {
+            strictEqual((error as UnsupportedFormatError).code, 'PLT_KFK_UNSUPPORTED_FORMAT')
+          }
+        }
+
+        if (affected && (scenario.metadataError || scenario.metadata.length === 0)) {
+          strictEqual(member.metadata, undefined)
+        } else {
+          deepStrictEqual(member.metadata?.topics, ['topic'])
+        }
+
+        if (affected && scenario.assignmentError) {
+          strictEqual(member.assignments, undefined)
+        } else {
+          deepStrictEqual(
+            [...member.assignments!],
+            affected && scenario.assignment.length === 0 ? [] : [['topic', { topic: 'topic', partitions: [0] }]]
+          )
+        }
+      }
+
+      const failedMember = group.members.get('member-2')!
+      strictEqual(group.error, failedMember.metadataError ?? failedMember.assignmentError)
+      const unaffected = groups.get('unaffected-group')!
+      strictEqual(unaffected.error, undefined)
+      deepStrictEqual(unaffected.members.get('member-1'), group.members.get('member-1'))
+    })
+  }
 })
 
 test('describeGroups should not decode member metadata for non-consumer protocol types', async t => {
@@ -2449,9 +2558,7 @@ test('describeGroups should not decode member metadata for non-consumer protocol
     ): void {
       callback(null, {
         throttleTimeMs: 0,
-        coordinators: [
-          { key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }
-        ]
+        coordinators: [{ key: groupId, nodeId: 1, host: 'localhost', port: 9092, errorCode: 0, errorMessage: null }]
       } as ReturnType)
     }
   } as unknown as Connection
@@ -2788,7 +2895,7 @@ test('deleteGroups should negotiate classic versions with compatible responses',
       const groupId = `group-v${legacyApi.api.version}`
       const connection = {
         instanceId: 1,
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -3005,7 +3112,7 @@ test('removeMembersFromConsumerGroup should fan out legacy LeaveGroup requests',
       const requests: Array<{ groupId: string; memberId: string }> = []
       const connection = {
         instanceId: 1,
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -4104,7 +4211,7 @@ test('describeClientQuotas should negotiate classic and flexible codecs', async 
     await t.test(`v${api.version}`, async t => {
       const admin = createAdmin(t)
       const connection = {
-        send <ReturnType>(
+        send<ReturnType> (
           apiKey: number,
           apiVersion: number,
           payload: () => Writer,
@@ -4169,14 +4276,21 @@ test('describeLogDirs should describe log directories for topics and support dia
 
   // Topic creation can complete before all replicas have joined the ISR. Wait
   // for the replicated topic to be ready before checking DescribeLogDirs.
-  await waitFor(async () => {
-    const metadata = await admin.metadata({ topics: [topicName2], forceUpdate: true })
-    const topic = metadata.topics.get(topicName2)
+  await waitFor(
+    async () => {
+      const metadata = await admin.metadata({ topics: [topicName2], forceUpdate: true })
+      const topic = metadata.topics.get(topicName2)
 
-    if (!topic || topic.partitions.length !== 4 || topic.partitions.some(partition => partition.replicas.length !== 2 || partition.isr.length !== 2)) {
-      throw new Error(`Topic ${topicName2} replicas are not ready.`)
-    }
-  }, { interval: 100, timeout: 30_000 })
+      if (
+        !topic ||
+        topic.partitions.length !== 4 ||
+        topic.partitions.some(partition => partition.replicas.length !== 2 || partition.isr.length !== 2)
+      ) {
+        throw new Error(`Topic ${topicName2} replicas are not ready.`)
+      }
+    },
+    { interval: 100, timeout: 30_000 }
+  )
 
   const options = {
     topics: [
@@ -4514,7 +4628,7 @@ test('listConsumerGroupOffsets should fan out legacy OffsetFetch requests for gr
   const offsetFetchGroups: string[] = []
   const connection = {
     instanceId: 1,
-    send <ReturnType>(
+    send<ReturnType> (
       apiKey: number,
       apiVersion: number,
       payload: () => Writer,
@@ -6258,7 +6372,7 @@ test('describeConfigs should negotiate v1 with public defaults', async t => {
   const admin = createAdmin(t)
   const connection = {
     instanceId: 1,
-    send <ReturnType>(
+    send<ReturnType> (
       apiKey: number,
       apiVersion: number,
       payload: () => Writer,
@@ -9714,7 +9828,7 @@ test('findCoordinator should fan out legacy requests and restore coordinator key
   const requestedKeys: string[] = []
   const connection = {
     instanceId: 1,
-    send <ReturnType>(
+    send<ReturnType> (
       apiKey: number,
       apiVersion: number,
       payload: () => Writer,

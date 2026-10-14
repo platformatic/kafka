@@ -72,6 +72,8 @@ export const baseOptionsSchema = {
     },
     context: true,
     metadataMaxAge: { type: 'number', minimum: 0 },
+    knownBrokersMaxAge: { type: 'number', minimum: 0 },
+    maxAbsentKnownBrokers: { type: 'number', minimum: 0 },
     autocreateTopics: { type: 'boolean' },
     strict: { type: 'boolean' },
     metrics: { type: 'object', additionalProperties: true }
@@ -104,6 +106,8 @@ export const defaultBaseOptions: Partial<BaseOptions> = {
   retries: 3,
   retryDelay: 1000,
   metadataMaxAge: 5000, // 5 seconds
+  knownBrokersMaxAge: 3_600_000, // 1 hour
+  maxAbsentKnownBrokers: 10,
   autocreateTopics: false,
   strict: false
 }

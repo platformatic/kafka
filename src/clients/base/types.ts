@@ -52,6 +52,8 @@ export interface BaseOptions extends ConnectionOptions {
   retries?: number | boolean
   retryDelay?: number | RetryDelayGetter
   metadataMaxAge?: number
+  knownBrokersMaxAge?: number
+  maxAbsentKnownBrokers?: number
   autocreateTopics?: boolean
   strict?: boolean
   metrics?: Metrics

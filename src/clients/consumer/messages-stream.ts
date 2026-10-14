@@ -726,6 +726,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             return
           }
 
+          // Consumer.fetch resets request epochs during recovery. Invalidate the stream cache
+          // too, even when the successful retry returns no records to update it.
+          for (const topic of nodeRequests) {
+            for (const partition of topic.partitions) {
+              if (partition.currentLeaderEpoch === -1) {
+                this.#partitionsEpochs.delete(partitionKey(topicIds.get(topic.topicId)!, partition.partition))
+              }
+            }
+          }
+
           this.#pushRecordsOperation(metadata!, topicIds, response!, requestedOffsets, offsetsEpoch)
         })
       }

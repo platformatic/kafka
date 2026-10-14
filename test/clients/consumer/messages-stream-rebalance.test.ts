@@ -1,4 +1,4 @@
-import { strictEqual } from 'node:assert'
+import { deepStrictEqual, strictEqual } from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
@@ -180,6 +180,61 @@ function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffe
   })
 
   return stream
+}
+
+for (const records of [undefined, []]) {
+  test(`should invalidate cached leader epochs after fenced fetches with ${records ? 'empty' : 'absent'} records`, async t => {
+    const metadata = createMetadata()
+    const epochs: number[] = []
+    const completed = Promise.withResolvers<void>()
+    let received = 0
+    let disconnects = 0
+
+    const consumer = createConsumerMock(
+      t,
+      (options, callback) => {
+        const partition = options.topics[0].partitions[0]
+        epochs.push(partition.currentLeaderEpoch)
+        strictEqual(partition.lastFetchedEpoch, partition.currentLeaderEpoch)
+        strictEqual(partition.fetchOffset, epochs.length === 1 ? 0n : 1n)
+
+        if (epochs.length === 6) {
+          completed.resolve()
+          return
+        }
+
+        const response = createFetchResponse(-1)
+        if (epochs.length === 1) {
+          response.responses[0].partitions[0].records = [createRecordsBatch(0n, ['initial'])]
+        } else if (epochs.length === 2) {
+          // Refresh metadata during the retry without disconnecting or producing new records.
+          metadata.topics.get(topic)!.partitions[0].leaderEpoch = 1
+          callback(new ResponseError(1, 17, { '': [74, null] }, response))
+          return
+        } else {
+          response.responses[0].partitions[0].records = records
+        }
+
+        callback(null, response)
+      },
+      metadata
+    )
+    consumer.on('client:broker:disconnect', () => {
+      disconnects++
+    })
+    const stream = createStream(consumer)
+    t.after(() => stream.destroy())
+    stream.on('data', () => {
+      received++
+    })
+
+    await completed.promise
+
+    // The retry and subsequent empty polls must not reuse the cached fenced epoch.
+    deepStrictEqual(epochs, [-1, 0, -1, -1, -1, -1])
+    strictEqual(received, 1)
+    strictEqual(disconnects, 0)
+  })
 }
 
 test('should not fetch while offsets are refreshing after a group rejoin', async () => {

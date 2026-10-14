@@ -38,7 +38,13 @@ import {
   defaultPort,
   metadataOptionsValidator
 } from './options.ts'
-import { type BaseOptions, type ClusterMetadata, type ClusterTopicMetadata, type MetadataOptions } from './types.ts'
+import {
+  type BaseOptions,
+  type BrokerWithRack,
+  type ClusterMetadata,
+  type ClusterTopicMetadata,
+  type MetadataOptions
+} from './types.ts'
 
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
@@ -64,6 +70,10 @@ export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 export const kContext = Symbol('plt.kafka.base.context')
 
 let currentInstance = 0
+
+interface KnownBroker extends BrokerWithRack {
+  lastSeen: number
+}
 
 export interface BaseEvents extends TypedEvents {
   'client:broker:connect': (payload: ConnectionPoolEventPayload) => void
@@ -98,6 +108,8 @@ export class Base<
   [kPrometheus]: Metrics | undefined
 
   #metadata: ClusterMetadata | undefined
+  // Every broker seen in a metadata response, by nodeId. Not reset by clearMetadata.
+  #knownBrokers: Map<number, KnownBroker>
   #inflightDeduplications: Map<string, CallbackWithPromise<any>[]>
   #apiVersionsVersions: WeakMap<Connection, 1 | 3>
 
@@ -110,6 +122,7 @@ export class Base<
     this[kApis] = []
     this[kContext] = options.context
     this.#apiVersionsVersions = new WeakMap()
+    this.#knownBrokers = new Map()
 
     // Validate options
     this[kOptions] = Object.assign({}, defaultBaseOptions as OptionsType) as OptionsType
@@ -556,17 +569,31 @@ export class Base<
   }
 
   [kGetBootstrapConnection] (callback: Callback<Connection>, attempt = 0): void {
-    let brokers: Broker[]
-    if (!this.#metadata) {
-      brokers = this[kBootstrapBrokers]
-    } else {
-      const discovered = Array.from(this.#metadata.brokers.values())
-      brokers = [...this[kBootstrapBrokers], ...discovered]
+    // Each address appears once so retry rotation is not skewed
+    const candidates = new Map<string, Broker>()
+    const discovered = this.#metadata?.brokers.values() ?? []
+    for (const broker of [...this[kBootstrapBrokers], ...discovered]) {
+      const key = `${broker.host}:${broker.port}`
+      if (!candidates.has(key)) {
+        candidates.set(key, broker)
+      }
     }
+
+    let brokers = Array.from(candidates.values())
 
     if (attempt > 0 && brokers.length > 1) {
       const offset = attempt % brokers.length
       brokers = [...brokers.slice(offset), ...brokers.slice(0, offset)]
+    }
+
+    // Known brokers missing from the latest metadata response go last, most recently seen first
+    const known = Array.from(this.#knownBrokers.values()).sort((a, b) => b.lastSeen - a.lastSeen)
+    for (const broker of known) {
+      const key = `${broker.host}:${broker.port}`
+      if (!candidates.has(key)) {
+        candidates.set(key, broker)
+        brokers.push(broker)
+      }
     }
 
     this[kConnections].getFirstAvailable(brokers, callback)
@@ -696,7 +723,6 @@ export class Base<
               const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
 
               // Stale metadata, we need to fetch everything again
-              /* c8 ignore next 4 - Hard to test */
               if (hasStaleMetadata) {
                 this.clearMetadata()
                 topicsToFetch = topics
@@ -727,9 +753,11 @@ export class Base<
             for (const broker of metadata!.brokers) {
               const { host, port, rack } = broker
               brokers.set(broker.nodeId, { host, port, rack })
+              this.#knownBrokers.set(broker.nodeId, { host, port, rack, lastSeen: lastUpdate })
             }
 
             this.#metadata.brokers = brokers
+            this.#pruneKnownBrokers(brokers, lastUpdate)
 
             // Update all the topics in the cache
             for (const { name, topicId: id, partitions: rawPartitions, isInternal } of metadata!.topics) {
@@ -770,6 +798,34 @@ export class Base<
       },
       callback
     )
+  }
+
+  #pruneKnownBrokers (reported: Map<number, Broker>, now: number): void {
+    const { knownBrokersMaxAge, maxAbsentKnownBrokers } = this[kOptions]
+    const reportedAddresses = new Set(Array.from(reported.values(), ({ host, port }) => `${host}:${port}`))
+    const absent: [number, KnownBroker][] = []
+
+    for (const [nodeId, broker] of this.#knownBrokers) {
+      if (reported.has(nodeId)) {
+        continue
+      }
+
+      // An address now reported under another nodeId is never used as a fallback
+      if (now - broker.lastSeen > knownBrokersMaxAge! || reportedAddresses.has(`${broker.host}:${broker.port}`)) {
+        this.#knownBrokers.delete(nodeId)
+      } else {
+        absent.push([nodeId, broker])
+      }
+    }
+
+    // Keep the most recently seen
+    if (absent.length > maxAbsentKnownBrokers!) {
+      absent.sort((a, b) => a[1].lastSeen - b[1].lastSeen)
+
+      for (const [nodeId] of absent.slice(0, absent.length - maxAbsentKnownBrokers!)) {
+        this.#knownBrokers.delete(nodeId)
+      }
+    }
   }
 
   #forwardEvents (source: EventEmitter, events: string[]): void {

@@ -111,6 +111,7 @@ export const consumerOptionsSchema = {
     groupId: idProperty,
     context: true,
     streamContext: true,
+    leaveGroupTimeout: { type: 'number', minimum: 0 },
     ...groupOptionsProperties,
     ...consumeOptionsProperties
   },

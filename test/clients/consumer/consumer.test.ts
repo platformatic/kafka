@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { type ChannelListener, subscribe, unsubscribe } from 'node:diagnostics_channel'
 import { once } from 'node:events'
@@ -1017,6 +1017,160 @@ test('close should skip leaveGroup when the consumer is disconnected', async t =
   strictEqual(consumer.memberId, null)
   strictEqual(consumer.generationId, 0)
   strictEqual(consumer.closed, true)
+})
+
+test('constructor should validate leaveGroupTimeout', async t => {
+  for (const leaveGroupTimeout of [-1, NaN, Infinity, 'invalid']) {
+    throws(
+      () =>
+        new Consumer({
+          clientId: 'test-client',
+          bootstrapBrokers: kafkaBootstrapServers,
+          groupId: 'test-group',
+          // @ts-expect-error - Intentionally passing an invalid option.
+          leaveGroupTimeout,
+          strict: true
+        }),
+      (error: Error) =>
+        error instanceof UserError && error.code === UserError.code && error.message.includes('leaveGroupTimeout')
+    )
+  }
+
+  for (const leaveGroupTimeout of [undefined, 0, 20, 2_147_483_648]) {
+    const consumer = createConsumer(t, { leaveGroupTimeout, strict: true })
+    await consumer.close()
+  }
+})
+
+for (const groupProtocol of ['classic', 'consumer'] as const) {
+  const options = groupProtocol === 'consumer' ? skipConsumerGroupProtocol : {}
+
+  test(`close should bound a hung ${groupProtocol} group leave`, options, async t => {
+    for (const leaveGroupTimeout of [0, 20]) {
+      for (const force of [false, true]) {
+        await t.test(`timeout=${leaveGroupTimeout}, force=${force}`, { timeout: 5000 }, async t => {
+          const consumer = createConsumer(t, { groupProtocol, leaveGroupTimeout, requestTimeout: 30_000 })
+          await consumer.metadata({ topics: [] })
+          await consumer.findGroupCoordinator()
+          await consumer.joinGroup()
+          const stream = force ? await consumer.consume({ topics: [] }) : undefined
+          const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+          const connection = await consumer[kConnections].get(broker)
+          const apiKey = groupProtocol === 'classic' ? leaveGroupV5.api.key : consumerGroupHeartbeatV1.api.key
+          let leaveCallback: CallbackWithPromise<unknown> | undefined
+          let attempts = 0
+          let leaveEvents = 0
+          let closeEvents = 0
+          let closeCallbacks = 0
+          consumer.on('consumer:group:leave', () => {
+            leaveEvents++
+          })
+          consumer.on('client:close', () => {
+            closeEvents++
+          })
+          mockConnectionAPI(connection, apiKey, null, null, (
+            _original,
+            _apiKey,
+            _apiVersion,
+            _payload,
+            _parser,
+            _requestTags,
+            _responseTags,
+            callback
+          ) => {
+            attempts++
+            leaveCallback = callback
+            return true
+          })
+
+          // Exercise both public completion styles while the broker never responds.
+          if (force) {
+            await new Promise<void>((resolve, reject) => {
+              consumer.close(true, error => {
+                closeCallbacks++
+                if (error) {
+                  reject(error)
+                } else {
+                  resolve()
+                }
+              })
+            })
+          } else {
+            await consumer.close()
+          }
+
+          strictEqual(attempts, leaveGroupTimeout === 0 ? 0 : 1)
+          strictEqual(consumer.closed, true)
+          strictEqual(connection.isConnected(), false)
+          strictEqual(consumer.memberId, null)
+          if (groupProtocol === 'classic') {
+            strictEqual(consumer.generationId, 0)
+            strictEqual(consumer.assignments, null)
+          } else {
+            deepStrictEqual(consumer.assignments, [])
+          }
+          if (stream) {
+            strictEqual(stream.closed, true)
+          }
+
+          // Both late success and late failure must be ignored after the timeout.
+          leaveCallback?.(null, {})
+          leaveCallback?.(new NetworkError('Late network error.'))
+          strictEqual(leaveEvents, 1)
+          strictEqual(closeEvents, 1)
+          strictEqual(closeCallbacks, force ? 1 : 0)
+        })
+      }
+    }
+  })
+
+  test(`close should cancel the ${groupProtocol} leave timer after a response`, options, async t => {
+    const consumer = createConsumer(t, { groupProtocol, leaveGroupTimeout: 100 })
+    await consumer.metadata({ topics: [] })
+    await consumer.findGroupCoordinator()
+    await consumer.joinGroup()
+    const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+    const connection = await consumer[kConnections].get(broker)
+    const apiKey = groupProtocol === 'classic' ? leaveGroupV5.api.key : consumerGroupHeartbeatV1.api.key
+    let leaveEvents = 0
+    consumer.on('consumer:group:leave', () => {
+      leaveEvents++
+    })
+    mockConnectionAPI(connection, apiKey, null, {})
+
+    await consumer.close()
+    await sleep(150)
+
+    strictEqual(leaveEvents, 1)
+    strictEqual(consumer.closed, true)
+  })
+}
+
+test('leaveGroupTimeout should not affect explicit leaveGroup', async t => {
+  const consumer = createConsumer(t, { leaveGroupTimeout: 0 })
+  await consumer.joinGroup()
+  const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+  const connection = await consumer[kConnections].get(broker)
+  let attempts = 0
+  mockConnectionAPI(connection, leaveGroupV5.api.key, null, null, (
+    _original,
+    _apiKey,
+    _apiVersion,
+    _payload,
+    _parser,
+    _requestTags,
+    _responseTags,
+    callback
+  ) => {
+    attempts++
+    callback(null, {})
+    return true
+  })
+
+  await consumer.leaveGroup()
+
+  strictEqual(attempts, 1)
+  strictEqual(consumer.closed, false)
 })
 
 test('close should handle errors from Base.close', async t => {

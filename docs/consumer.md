@@ -452,6 +452,8 @@ Note that all the partitions must be hosted on the node otherwise the operation 
 
 Commits offsets for consumed messages.
 
+If a commit requires rejoining the group, it is retried only if every requested partition is still assigned to this consumer. Otherwise, the original commit error is returned (`PLT_KFK_PROTOCOL`, or `PLT_KFK_RESPONSE` for aggregated broker errors), without resending any offsets under the new generation. This also applies to in-flight stream commits.
+
 The return value is `void`.
 
 Options:

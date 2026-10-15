@@ -116,7 +116,6 @@ import {
 } from '../base/base.ts'
 import { type BaseOptions } from '../base/types.ts'
 import { decodeConsumerProtocolAssignment, decodeConsumerProtocolSubscription } from '../consumer/consumer-protocol.ts'
-import { type GroupAssignment } from '../consumer/types.ts'
 import {
   adminListOffsetsOptionsValidator,
   alterClientQuotasOptionsValidator,
@@ -1350,14 +1349,26 @@ export class Admin extends Base<AdminOptions> {
                     authorizedOperations: raw.authorizedOperations
                   }
 
-                  try {
-                    for (const member of raw.members) {
-                      let memberMetadata: GroupMember['metadata'] | undefined
-                      let memberAssignments: Map<string, GroupAssignment> | undefined
+                  for (const member of raw.members) {
+                    // Preserve identity even when either opaque consumer payload is malformed.
+                    const groupMember: GroupMember = {
+                      id: member.memberId,
+                      groupInstanceId: member.groupInstanceId,
+                      clientId: member.clientId,
+                      clientHost: member.clientHost,
+                      metadata: undefined,
+                      assignments: undefined
+                    }
+                    group.members.set(member.memberId, groupMember)
 
-                      if (raw.protocolType === 'consumer' && member.memberMetadata.length > 0) {
+                    if (raw.protocolType !== 'consumer') {
+                      continue
+                    }
+
+                    if (member.memberMetadata.length > 0) {
+                      try {
                         const subscription = decodeConsumerProtocolSubscription(member.memberMetadata)
-                        memberMetadata = {
+                        groupMember.metadata = {
                           version: subscription.version,
                           topics: subscription.topics,
                           metadata: subscription.userData,
@@ -1365,25 +1376,24 @@ export class Admin extends Base<AdminOptions> {
                           generationId: subscription.generationId,
                           rackId: subscription.rackId
                         }
-
-                        memberAssignments = new Map(
-                          decodeConsumerProtocolAssignment(member.memberAssignment).assignedPartitions.map(
-                            assignment => [assignment.topic, assignment]
-                          )
-                        )
+                      } catch (e) {
+                        groupMember.metadataError = e as Error
+                        group.error ??= groupMember.metadataError
                       }
-
-                      group.members.set(member.memberId, {
-                        id: member.memberId,
-                        groupInstanceId: member.groupInstanceId,
-                        clientId: member.clientId,
-                        clientHost: member.clientHost,
-                        metadata: memberMetadata,
-                        assignments: memberAssignments
-                      })
                     }
-                  } catch (e) {
-                    group.error = e as Error
+
+                    // Assignments remain available independently of subscription metadata.
+                    try {
+                      groupMember.assignments = new Map(
+                        decodeConsumerProtocolAssignment(member.memberAssignment).assignedPartitions.map(assignment => [
+                          assignment.topic,
+                          assignment
+                        ])
+                      )
+                    } catch (e) {
+                      groupMember.assignmentError = e as Error
+                      group.error ??= groupMember.assignmentError
+                    }
                   }
 
                   groups.set(group.id, group)

@@ -43,7 +43,9 @@ export interface GroupMember {
   clientId: string
   clientHost: string
   metadata?: Omit<ExtendedGroupProtocolSubscription, 'memberId'>
+  metadataError?: Error
   assignments?: Map<string, GroupAssignment>
+  assignmentError?: Error
 }
 
 export interface GroupBase {

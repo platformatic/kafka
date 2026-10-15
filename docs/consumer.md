@@ -54,6 +54,7 @@ Options:
 | partitionAssigner               | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Built-in assigners are `roundRobinAssigner` and `cooperativeStickyAssigner`. Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                     |
 | partitionAssignerTopicsSelector | `GroupPartitionsAssignerTopicsSelector`                      |                           | Selects the topic metadata required by a custom `partitionAssigner`. By default, metadata for every member's subscribed topics is required. Return `[]` to request no topic metadata for assignment. Not supported for `groupProtocol=consumer`.                                                                                                                                                     |
 | streamContext                   | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
+| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds for the group leave step during `close()`, for either group protocol. Set to `0` to skip the leave request. When omitted, the existing `requestTimeout` applies. |
 
 It also supports all the constructor options of `Base`.
 
@@ -272,6 +273,10 @@ If `force` is `true`, then the method will close all `MessagesStream` created fr
 
 The return value is `void`.
 
+The `leaveGroupTimeout` constructor option bounds only the group leave step, after active streams have been closed. It accepts a non-negative number of milliseconds and applies to both group protocols. When omitted, the existing `requestTimeout` applies.
+
+On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the leave request entirely. The broker will expire the membership according to its session timeout if it does not receive the leave request. This option does not change other request timeouts or explicit `leaveGroup()` calls.
+
 ## Using Schema Registries
 
 > ⚠️ **Experimental API**
@@ -451,6 +456,8 @@ Note that all the partitions must be hosted on the node otherwise the operation 
 ### `commit(options[, callback])`
 
 Commits offsets for consumed messages.
+
+If a commit requires rejoining the group, it is retried only if every requested partition is still assigned to this consumer. Otherwise, the original commit error is returned (`PLT_KFK_PROTOCOL`, or `PLT_KFK_RESPONSE` for aggregated broker errors), without resending any offsets under the new generation. This also applies to in-flight stream commits.
 
 The return value is `void`.
 

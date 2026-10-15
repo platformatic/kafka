@@ -1194,6 +1194,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
+            // Kafka accepts commits for unassigned partitions under the new generation.
+            // Fail the whole retry rather than moving another member's committed offsets.
+            const stillAssigned = options.offsets.every(({ topic, partition }) =>
+              this.assignments?.some(
+                assignment => assignment.topic === topic && assignment.partitions.includes(partition)
+              ))
+            if (!stillAssigned) {
+              callback(error)
+              return
+            }
+
             this.#commit(options, callback, rejoinAttempts + 1)
           })
           return
@@ -1982,12 +1993,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       })
     }
     if (this[kClosed]) {
-      const connection = this.#getGroupCoordinatorConnection()
-      if (connection) {
-        operation(connection, finish)
-      } else {
-        finish()
-      }
+      this.#leaveGroupWhileClosing(operation, finish)
       return
     }
 
@@ -2432,12 +2438,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     if (this[kClosed]) {
-      const connection = this.#getGroupCoordinatorConnection()
-      if (connection) {
-        operation(connection, onLeave)
-      } else {
-        finish()
-      }
+      this.#leaveGroupWhileClosing(operation, onLeave)
       return
     }
 
@@ -3015,6 +3016,38 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return error
+  }
+
+  #leaveGroupWhileClosing<Response> (
+    operation: (connection: Connection, callback: CallbackWithPromise<Response>) => void,
+    callback: CallbackWithPromise<void>
+  ): void {
+    const timeout = this[kOptions].leaveGroupTimeout
+    const connection = this.#getGroupCoordinatorConnection()
+    if (timeout === 0 || !connection) {
+      callback(null)
+      return
+    }
+
+    // Bound only the leave step, after active streams have been closed. Late responses
+    // must not repeat membership cleanup or close the connection pool a second time.
+    let completed = false
+    let timer: NodeJS.Timeout | undefined
+    const finish = (error?: Error | null): void => {
+      if (completed) {
+        return
+      }
+
+      completed = true
+      clearTimeout(timer)
+      callback(error ?? null)
+    }
+
+    if (timeout !== undefined) {
+      timer = setTimeout(() => finish(null), timeout)
+    }
+
+    operation(connection, finish)
   }
 
   #getGroupCoordinatorConnection (): Connection | null {

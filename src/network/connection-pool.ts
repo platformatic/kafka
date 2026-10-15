@@ -8,7 +8,13 @@ import { type Callback } from '../apis/definitions.ts'
 import { connectionsPoolGetsChannel, createDiagnosticContext, notifyCreation } from '../diagnostic.ts'
 import { MultipleErrors, NetworkError } from '../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../events.ts'
-import { Connection, ConnectionStatuses, type Broker, type ConnectionOptions } from './connection.ts'
+import {
+  Connection,
+  ConnectionStatuses,
+  validateKeepAliveOptions,
+  type Broker,
+  type ConnectionOptions
+} from './connection.ts'
 
 export interface ConnectionPoolEventPayload {
   broker: Broker
@@ -22,7 +28,7 @@ export interface ConnectionPoolEvents extends TypedEvents {
   'sasl:handshake': (payload: ConnectionPoolEventPayload & { mechanisms: string[] }) => void
   'sasl:authentication': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
   'sasl:authentication:extended': (payload: ConnectionPoolEventPayload & { authentication?: Buffer }) => void
-  disconnect: (payload: ConnectionPoolEventPayload) => void
+  disconnect: (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
   drain: (payload: ConnectionPoolEventPayload) => void
 }
 
@@ -39,6 +45,7 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
 
   constructor (clientId: string, connectionOptions: ConnectionOptions = {}) {
     super()
+    validateKeepAliveOptions(connectionOptions.keepAlive)
     this.#closed = false
     this.#instanceId = currentInstance++
     this.#clientId = clientId
@@ -237,19 +244,36 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
       this.emit('sasl:authentication:extended', { ...eventPayload, authentication })
     })
 
-    // Remove stale connections from the pool
+    // Remove stale connections from the pool. Removing on 'closing' lets get() open a replacement
+    // instead of waiting on a connection that is about to close.
+    connection.once('closing', () => {
+      this.#remove(key, connection)
+    })
+
+    let idle = false
+    connection.once('idle', () => {
+      idle = true
+    })
+
     connection.once('close', () => {
-      this.emit('disconnect', eventPayload)
-      this.#connections.delete(key)
+      this.emit('disconnect', idle ? { ...eventPayload, reason: 'idle' } : eventPayload)
+      this.#remove(key, connection)
     })
 
     connection.once('error', () => {
-      this.#connections.delete(key)
+      this.#remove(key, connection)
     })
 
     connection.on('drain', () => {
       this.emit('drain', eventPayload)
     })
+  }
+
+  // A replacement may already be stored under the same key
+  #remove (key: string, connection: Connection): void {
+    if (this.#connections.get(key) === connection) {
+      this.#connections.delete(key)
+    }
   }
 
   #getFirstAvailable (

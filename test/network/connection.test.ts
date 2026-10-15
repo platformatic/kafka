@@ -15,6 +15,7 @@ import {
   type CallbackWithPromise,
   Connection,
   type ConnectionDiagnosticEvent,
+  ConnectionPool,
   connectionsApiChannel,
   connectionsConnectsChannel,
   ConnectionStatuses,
@@ -355,6 +356,147 @@ test('Connection.close should not wait forever for peer close', async t => {
 
   strictEqual(destroySoonCalled, true)
   ok(connection.socket.closed)
+})
+
+for (const tls of [false, true]) {
+  test(`Connection.connect should enable keep-alive on ${tls ? 'TLS' : 'plaintext'} sockets`, async t => {
+    const { port } = tls ? await createTLSServer(t) : await createServer(t)
+    const setKeepAlive = t.mock.method(Socket.prototype, 'setKeepAlive')
+
+    const connection = new Connection('test-client', {
+      keepAlive: { initialDelay: 1000 },
+      tls: tls ? { rejectUnauthorized: false } : undefined
+    })
+    t.after(() => connection.close())
+
+    await connection.connect('localhost', port)
+
+    const calls = setKeepAlive.mock.calls.filter(call => call.this === connection.socket)
+    deepStrictEqual(
+      calls.map(call => call.arguments),
+      [[true, 1000, undefined, undefined]]
+    )
+  })
+}
+
+test('Connection.connect should pass keep-alive interval and count', async t => {
+  const { port } = await createServer(t)
+  const calls: unknown[][] = []
+
+  // Stands in for Node.js 24.19+ and 26.4+ so the test runs on every supported version
+  const original = Socket.prototype.setKeepAlive
+  Socket.prototype.setKeepAlive = function (enable?: boolean, initialDelay?: number, interval?: number, count?: number) {
+    calls.push([enable, initialDelay, interval, count])
+    return this
+  }
+  t.after(() => {
+    Socket.prototype.setKeepAlive = original
+  })
+
+  const connection = new Connection('test-client', { keepAlive: { interval: 2000, count: 3 } })
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  deepStrictEqual(calls, [[true, 0, 2000, 3]])
+})
+
+test('Connection should reject keep-alive interval and count on Node.js versions without them', t => {
+  const original = Socket.prototype.setKeepAlive
+  Socket.prototype.setKeepAlive = function (_enable?: boolean, _initialDelay?: number) {
+    return this
+  }
+  t.after(() => {
+    Socket.prototype.setKeepAlive = original
+  })
+
+  for (const keepAlive of [{ interval: 2000 }, { count: 3 }]) {
+    throws(() => new Connection('test-client', { keepAlive }), UserError)
+    throws(() => new ConnectionPool('test-client', { keepAlive }), UserError)
+  }
+
+  ok(new Connection('test-client', { keepAlive: { initialDelay: 1000 } }))
+})
+
+test('Connection.connect should not enable keep-alive by default', async t => {
+  const { port } = await createServer(t)
+  const setKeepAlive = t.mock.method(Socket.prototype, 'setKeepAlive')
+
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  await connection.connect('localhost', port)
+
+  strictEqual(setKeepAlive.mock.calls.filter(call => call.this === connection.socket).length, 0)
+})
+
+test('Connection should close after connectionsMaxIdle without requests', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connection.close())
+
+  let statusOnIdle
+  connection.once('idle', () => {
+    statusOnIdle = connection.status
+  })
+
+  await connection.connect('localhost', port)
+  await once(connection, 'close')
+
+  strictEqual(statusOnIdle, ConnectionStatuses.CLOSING)
+  strictEqual(connection.status, ConnectionStatuses.CLOSED)
+})
+
+test('Connection should not close for connectionsMaxIdle while a request is in flight', { timeout: 3000 }, async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connection.close())
+
+  // Respond well after connectionsMaxIdle has elapsed
+  server.on('connection', socket => {
+    socket.on('data', () => {
+      setTimeout(() => socket.write(Buffer.from([0, 0, 0, 4, 0, 0, 0, 1])), 300)
+    })
+  })
+
+  await connection.connect('localhost', port)
+
+  let closed = false
+  connection.once('close', () => {
+    closed = true
+  })
+
+  function payloadFn () {
+    const writer = Writer.create()
+    writer.appendInt32(42)
+    return writer
+  }
+
+  await new Promise<string>((resolve, reject) => {
+    connection.send(
+      0, // apiKey
+      0, // apiVersion
+      payloadFn,
+      function () {
+        return 'Success'
+      }, // Dummy parser
+      false, // hasRequestHeaderTaggedFields
+      false, // hasResponseHeaderTaggedFields
+      (err, returnValue) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(returnValue!)
+        }
+      }
+    )
+  })
+
+  strictEqual(closed, false)
+  strictEqual(connection.status, ConnectionStatuses.CONNECTED)
+
+  // Once the response is received the connection becomes idle again
+  await once(connection, 'close')
 })
 
 test('Connection.send should enqueue request and process response', async t => {
@@ -1880,6 +2022,64 @@ test('Connection.ready should resolve during SASL reauthentication', async t => 
   strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
 
   await readyPromise
+})
+
+test('Connection should not close for connectionsMaxIdle during SASL authentication', async t => {
+  const connection = new Connection('test-client', {
+    connectionsMaxIdle: 100,
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      authenticate (_mechanism, connection, authenticate, usernameProvider, passwordProvider, _tokenProvider, callback) {
+        setTimeout(() => {
+          saslPlain.authenticate(authenticate, connection, usernameProvider!, passwordProvider!, callback)
+        }, 300)
+      }
+    }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+  strictEqual(connection.status, ConnectionStatuses.CONNECTED)
+
+  await once(connection, 'idle')
+})
+
+test('Connection should not close for connectionsMaxIdle during SASL reauthentication', async t => {
+  let authentications = 0
+  const connection = new Connection('test-client', {
+    connectionsMaxIdle: 100,
+    sasl: {
+      mechanism: SASLMechanisms.PLAIN,
+      username: 'admin',
+      password: 'admin',
+      authenticate (_mechanism, connection, authenticate, usernameProvider, passwordProvider, _tokenProvider, callback) {
+        // Delay only the reauthentication, past connectionsMaxIdle
+        setTimeout(
+          () => {
+            saslPlain.authenticate(authenticate, connection, usernameProvider!, passwordProvider!, callback)
+          },
+          authentications++ === 0 ? 0 : 300
+        )
+      }
+    }
+  })
+  t.after(() => connection.close())
+
+  const saslBroker = parseBroker(kafkaSaslBootstrapServers[0])
+  await connection.connect(saslBroker.host, saslBroker.port)
+
+  const events: string[] = []
+  connection.on('sasl:authentication:extended', () => events.push('reauthenticated'))
+  connection.on('idle', () => events.push('idle'))
+
+  connection.reauthenticate()
+  strictEqual(connection.status, ConnectionStatuses.REAUTHENTICATING)
+
+  await once(connection, 'close')
+  deepStrictEqual(events, ['reauthenticated', 'idle'])
 })
 
 test('Connection.reauthenticate should do nothing when SASL is not configured', async t => {

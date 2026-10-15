@@ -95,6 +95,14 @@ Gets detailed information about consumer groups.
 
 The return value is a map where keys are group names and values are the detailed group information.
 
+Every member retains its identity even if its consumer protocol payloads are malformed. Subscription metadata and
+assignments are decoded independently: valid fields remain available, while failed fields are undefined and have an
+optional `metadataError` or `assignmentError` with code `PLT_KFK_UNSUPPORTED_FORMAT`. The group's `error` contains the
+first decoding error, and processing continues for all members and groups.
+
+Empty subscription metadata leaves `metadata` undefined without an error. An empty consumer assignment produces an
+empty `assignments` map, including when subscription metadata is empty. Non-consumer protocol payloads are not decoded.
+
 Options:
 
 | Property                      | Type       | Description                                                                                 |

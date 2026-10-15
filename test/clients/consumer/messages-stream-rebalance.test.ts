@@ -6,6 +6,7 @@ import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consume
 import type { RecordsBatch } from '../../../src/protocol/records.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import {
+  type Connection,
   type Consumer,
   ListOffsetTimestamps,
   MessagesStream,
@@ -234,6 +235,39 @@ for (const records of [undefined, []]) {
     deepStrictEqual(epochs, [-1, 0, -1, -1, -1, -1])
     strictEqual(received, 1)
     strictEqual(disconnects, 0)
+  })
+}
+
+for (const idle of [true, false]) {
+  test(`should ${idle ? 'keep' : 'invalidate'} cached leader epochs on ${idle ? 'idle' : 'regular'} broker disconnects`, async t => {
+    const epochs: number[] = []
+    const completed = Promise.withResolvers<void>()
+
+    const consumer = createConsumerMock(t, (options, callback) => {
+      epochs.push(options.topics[0].partitions[0].currentLeaderEpoch)
+
+      if (epochs.length === 3) {
+        completed.resolve()
+        return
+      }
+
+      const response = createFetchResponse(-1)
+      if (epochs.length === 1) {
+        response.responses[0].partitions[0].records = [createRecordsBatch(0n, ['initial'])]
+      } else {
+        const payload = { broker: { host: 'broker-2', port: 9092 }, connection: {} as unknown as Connection }
+        consumer.emit('client:broker:disconnect', idle ? { ...payload, reason: 'idle' } : payload)
+      }
+
+      callback(null, response)
+    })
+    const stream = createStream(consumer)
+    t.after(() => stream.destroy())
+    stream.on('data', () => {})
+
+    await completed.promise
+
+    deepStrictEqual(epochs, [-1, 0, idle ? 0 : -1])
   })
 }
 

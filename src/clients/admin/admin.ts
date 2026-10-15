@@ -98,7 +98,7 @@ import {
   adminTopicsChannel,
   createDiagnosticContext
 } from '../../diagnostic.ts'
-import { findErrorBy, MultipleErrors, NetworkError, UserError } from '../../errors.ts'
+import { findErrorBy, MultipleErrors, NetworkError, ProtocolError, ResponseError, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../index.ts'
 import {
   Base,
@@ -997,7 +997,21 @@ export class Admin extends Base<AdminOptions> {
                   return
                 }
 
-                api!(connection!, null, false, false, retryCallback)
+                api!(connection!, null, false, false, (error, response) => {
+                  // Topic names remain usable when only partition metadata has errors.
+                  if (
+                    error instanceof ResponseError &&
+                    error.errors.length > 0 &&
+                    error.errors.every(
+                      nested => nested instanceof ProtocolError && /^\/topics\/\d+\/partitions\/\d+$/.test(nested.path)
+                    )
+                  ) {
+                    retryCallback(null, error.response as MetadataResponse)
+                    return
+                  }
+
+                  retryCallback(error, response)
+                })
               })
             })
           },

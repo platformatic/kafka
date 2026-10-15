@@ -186,6 +186,7 @@ export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & 
   groupId: string
   context?: unknown
   streamContext?: unknown
+  leaveGroupTimeout?: number
 } & (GroupOptions | ConsumerGroupOptions) &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue>
 

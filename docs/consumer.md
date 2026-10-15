@@ -54,6 +54,7 @@ Options:
 | partitionAssigner               | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Built-in assigners are `roundRobinAssigner` and `cooperativeStickyAssigner`. Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                     |
 | partitionAssignerTopicsSelector | `GroupPartitionsAssignerTopicsSelector`                      |                           | Selects the topic metadata required by a custom `partitionAssigner`. By default, metadata for every member's subscribed topics is required. Return `[]` to request no topic metadata for assignment. Not supported for `groupProtocol=consumer`.                                                                                                                                                     |
 | streamContext                   | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
+| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds for the group leave step during `close()`, for either group protocol. Set to `0` to skip the leave request. When omitted, the existing `requestTimeout` applies. |
 
 It also supports all the constructor options of `Base`.
 
@@ -271,6 +272,10 @@ If `force` is not `true`, then the method will throw an error if any `MessagesSt
 If `force` is `true`, then the method will close all `MessagesStream` created from this consumer.
 
 The return value is `void`.
+
+The `leaveGroupTimeout` constructor option bounds only the group leave step, after active streams have been closed. It accepts a non-negative number of milliseconds and applies to both group protocols. When omitted, the existing `requestTimeout` applies.
+
+On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the leave request entirely. The broker will expire the membership according to its session timeout if it does not receive the leave request. This option does not change other request timeouts or explicit `leaveGroup()` calls.
 
 ## Using Schema Registries
 

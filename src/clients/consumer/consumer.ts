@@ -1194,6 +1194,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               return
             }
 
+            // Kafka accepts commits for unassigned partitions under the new generation.
+            // Fail the whole retry rather than moving another member's committed offsets.
+            const stillAssigned = options.offsets.every(({ topic, partition }) =>
+              this.assignments?.some(
+                assignment => assignment.topic === topic && assignment.partitions.includes(partition)
+              ))
+            if (!stillAssigned) {
+              callback(error)
+              return
+            }
+
             this.#commit(options, callback, rejoinAttempts + 1)
           })
           return

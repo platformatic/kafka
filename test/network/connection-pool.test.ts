@@ -640,6 +640,25 @@ test('emits failed event on connection failure', async t => {
   deepStrictEqual(failedSpy.mock.calls.length, 1)
 })
 
+test('should not crash when a connection emits multiple error events', async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client')
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+
+  const connection = await connectionPool.get(broker)
+
+  // A socket can emit 'error' more than once. The pool registers its removal handler via once(),
+  // so without a persistent listener the second emission would be rethrown as an unhandled 'error'
+  // and crash the process. Emitting twice must be swallowed rather than throw.
+  connection.emit('error', new Error('first'))
+  connection.emit('error', new Error('second'))
+
+  await connection.close()
+})
+
 test('isActive should return false when no connections exist', () => {
   const connectionPool = new ConnectionPool('test-client')
 

@@ -329,11 +329,14 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     clearTimeout(this.#lagMonitoring!)
     this.#resetHeartbeatStall()
 
+    const membershipActive = this.#membershipActive
     let closer: (force: boolean, callback: CallbackWithPromise<void>) => void
     if (this.#useConsumerGroupProtocol) {
       closer = this.#leaveGroupConsumerProtocol.bind(this)
     } else if (this.#membershipActive) {
       closer = this.#leaveGroupClassicProtocol.bind(this)
+      // As in leaveGroup, so that a rejoin still inflight does not resume the membership
+      this.#membershipActive = false
     } else {
       closer = function noopCloser (_: boolean, callback: CallbackWithPromise<void>) {
         callback(null)
@@ -343,6 +346,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     closer(force as boolean, error => {
       if (error) {
         this[kClosed] = false
+        this.#membershipActive = membershipActive
         callback(error)
         return
       }

@@ -845,6 +845,31 @@ test('close should leave consumer group if currently joined', async t => {
   strictEqual(consumer.closed, true, 'Consumer should be marked as closed')
 })
 
+test('close should not let an inflight rejoin without a member id revive the consumer', async t => {
+  const consumer = createConsumer(t)
+  await consumer.joinGroup()
+
+  // Hold the next JoinGroup response until close completed, as for a rejoin after UNKNOWN_MEMBER_ID
+  const joinAnswered = Promise.withResolvers<() => void>()
+  mockAPI(consumer[kConnections], joinGroupV9.api.key, null, null, (originalSend, ...args) => {
+    const callback = args.pop()
+    originalSend(...args, (error: Error | null, response: unknown) => {
+      joinAnswered.resolve(() => callback(error, response))
+    })
+  })
+
+  consumer.memberId = null
+  const rejoin = consumer.joinGroup()
+  const answerJoin = await joinAnswered.promise
+
+  await consumer.close()
+  answerJoin()
+  await rejoin
+
+  strictEqual(consumer.memberId, null)
+  strictEqual(consumer.isActive(), false)
+})
+
 test('close should be idempotent - calling it multiple times has no effect', async t => {
   const consumer = createConsumer(t)
 

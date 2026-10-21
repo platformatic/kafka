@@ -418,11 +418,14 @@ jobs:
         run: docker compose down --volumes --remove-orphans
       - name: Upload performance artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          ARTIFACT_NAME: regression-artifacts-performance-${{ matrix.kafka-version }}-${{ matrix.suite }}
         with:
-          name: regression-artifacts-performance-${{ matrix.kafka-version }}-${{ matrix.suite }}
-          path: regression/artifacts
-          if-no-files-found: ignore
+          script: |
+            const { pathToFileURL } = require('node:url')
+            const { uploadArtifacts } = await import(pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/upload-artifacts.js`).href)
+            await uploadArtifacts(process.env.ARTIFACT_NAME, 'regression/artifacts')
 
   report:
     name: Report regression results

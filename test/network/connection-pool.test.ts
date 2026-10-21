@@ -325,6 +325,59 @@ test('get should evict a connection whose request timed out', { timeout: 3000 },
   await newConnection.close()
 })
 
+for (const trigger of ['closing', 'timeout callback']) {
+  test(`get should replace a timed-out connection from its ${trigger}`, { timeout: 3000 }, async t => {
+    const { port } = await createServer(t)
+    const connectionPool = new ConnectionPool('test-client', { requestTimeout: 100 })
+    t.after(() => connectionPool.close())
+
+    const broker = { host: 'localhost', port }
+    const connection = await connectionPool.get(broker)
+    const closed = once(connection, 'close')
+    const replacement = Promise.withResolvers<Connection>()
+    let closingEmitted = false
+
+    connection.once('closing', () => {
+      closingEmitted = true
+      if (trigger === 'closing') {
+        connectionPool.get(broker).then(replacement.resolve, replacement.reject)
+      }
+    })
+
+    await rejects(
+      new Promise((resolve, reject) => {
+        connection.send(
+          0,
+          0,
+          () => Writer.create().appendInt32(42),
+          () => 'Success',
+          false,
+          false,
+          (error, response) => {
+            if (trigger === 'timeout callback') {
+              connectionPool.get(broker).then(replacement.resolve, replacement.reject)
+            }
+            if (error) {
+              reject(error)
+            } else {
+              resolve(response)
+            }
+          }
+        )
+      }),
+      { message: 'Request timed out' }
+    )
+
+    strictEqual(closingEmitted, true)
+    const newConnection = await replacement.promise
+    await closed
+
+    ok(newConnection !== connection)
+    strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
+    strictEqual(connectionPool.getEstablishedConnection(broker), newConnection)
+  })
+}
+
 test('get should open a new connection after an idle one is closed', { timeout: 3000 }, async t => {
   const { port } = await createServer(t)
 

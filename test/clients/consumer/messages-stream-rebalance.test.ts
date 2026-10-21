@@ -3,11 +3,12 @@ import { EventEmitter } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
-import type { RecordsBatch } from '../../../src/protocol/records.ts'
+import { IS_CONTROL, IS_TRANSACTIONAL, type RecordsBatch } from '../../../src/protocol/records.ts'
 import { kConnections, kCreateConnectionPool, kGetApi, kOptions, kPrometheus } from '../../../src/clients/base/base.ts'
 import {
   type Connection,
   type Consumer,
+  FetchIsolationLevels,
   ListOffsetTimestamps,
   MessagesStream,
   MessagesStreamFallbackModes,
@@ -181,6 +182,127 @@ function createStream (consumer: Consumer): MessagesStream<Buffer, Buffer, Buffe
   })
 
   return stream
+}
+
+function transactionalBatch (offset: bigint, producerId = 5n): RecordsBatch {
+  return { ...createRecordsBatch(offset, [`value-${offset}`]), attributes: IS_TRANSACTIONAL, producerId }
+}
+
+function abortMarker (offset: bigint, producerId = 5n): RecordsBatch {
+  const batch = transactionalBatch(offset, producerId)
+  batch.attributes |= IS_CONTROL
+  batch.records[0].key = Buffer.from([0, 0, 0, 0])
+  return batch
+}
+
+test('should advance past aborted-only fetch responses in READ_COMMITTED', { timeout: 5_000 }, async t => {
+  const offsets: bigint[] = []
+  const received: string[] = []
+  const consumer = createConsumerMock(t, (options, callback) => {
+    const offset = options.topics[0].partitions[0].fetchOffset
+    offsets.push(offset)
+    // Bound retries as well as time, so a regression cannot spin on nextTick forever.
+    if (offsets.length > 5) {
+      callback(new Error('Consumer did not advance past aborted records'))
+      return
+    }
+    if (offset >= 4n) {
+      return
+    }
+    const response = createFetchResponse(-1)
+    const partition = response.responses[0].partitions[0]
+    partition.abortedTransactions = offset < 3n ? [{ producerId: 5n, firstOffset: 0n }] : []
+    partition.records = [
+      offset < 2n ? transactionalBatch(offset) : offset === 2n ? abortMarker(offset) : transactionalBatch(offset)
+    ]
+    callback(null, response)
+  })
+  const stream = createStream(consumer)
+  t.after(() => stream.destroy())
+
+  for await (const message of stream) {
+    received.push(message.value.toString())
+    if (message.offset === 3n) {
+      break
+    }
+  }
+
+  deepStrictEqual(received, ['value-3'])
+  deepStrictEqual(offsets.slice(0, 4), [0n, 1n, 2n, 3n])
+  strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 4n)
+})
+
+for (const isolationLevel of [FetchIsolationLevels.READ_COMMITTED, FetchIsolationLevels.READ_UNCOMMITTED]) {
+  test(`fetch should filter aborted transactions and preserve batch offsets at isolation level ${isolationLevel}`, async t => {
+    const consumer = createConsumerMock(t, (_options, callback) => {
+      const response = createFetchResponse(-1)
+      const partition = response.responses[0].partitions[0]
+      // Deliberately unsorted, with two aborted transactions from the same producer.
+      partition.abortedTransactions = [
+        { producerId: 5n, firstOffset: 5n },
+        { producerId: 6n, firstOffset: 1n },
+        { producerId: 5n, firstOffset: 0n },
+        { producerId: 7n, firstOffset: 11n }
+      ]
+      const nonTransactional = createRecordsBatch(2n, ['non-transactional'])
+      nonTransactional.producerId = 5n
+      // Compaction can leave a batch base offset before the transaction's first offset.
+      const compacted = transactionalBatch(10n, 7n)
+      compacted.lastOffsetDelta = 3
+      compacted.records[0].offsetDelta = 3
+      partition.records = [
+        transactionalBatch(0n),
+        transactionalBatch(1n, 6n),
+        nonTransactional,
+        abortMarker(3n),
+        transactionalBatch(4n),
+        transactionalBatch(5n),
+        abortMarker(6n),
+        transactionalBatch(7n),
+        transactionalBatch(8n, 6n), // Its abort marker is in a later response.
+        abortMarker(9n, 99n), // No matching aborted transaction (#391).
+        compacted
+      ]
+      response.responses[0].partitions.push({
+        ...partition,
+        partitionIndex: 1,
+        abortedTransactions: [],
+        records: [transactionalBatch(0n)]
+      })
+      callback(null, response)
+    })
+    const pool = consumer[kCreateConnectionPool]()
+    t.after(() => pool.close())
+    mockConnectionPoolGet(pool, () => true, null, null, (_original, _broker, callback) => {
+      callback(null, { instanceId: 1, send () {} } as any)
+      return true
+    })
+
+    const response = await consumer.fetch({
+      node: 1,
+      connectionPool: pool,
+      isolationLevel,
+      topics: [
+        {
+          topicId,
+          partitions: [
+            { partition: 0, fetchOffset: 0n, currentLeaderEpoch: -1, lastFetchedEpoch: -1, partitionMaxBytes: 1024 }
+          ]
+        }
+      ]
+    })
+    const batches = response.responses[0].partitions[0].records!
+    deepStrictEqual(
+      batches.map(batch => batch.firstOffset),
+      [0n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n]
+    )
+    deepStrictEqual(
+      batches.map(batch => batch.records.length),
+      isolationLevel === FetchIsolationLevels.READ_COMMITTED ? [0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0] : Array(11).fill(1)
+    )
+    strictEqual(batches[10].firstOffset + BigInt(batches[10].lastOffsetDelta) + 1n, 14n)
+    strictEqual(response.responses[0].partitions[1].records![0].records.length, 1)
+  })
 }
 
 for (const records of [undefined, []]) {

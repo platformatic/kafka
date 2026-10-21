@@ -440,6 +440,8 @@ Fetches messages directly from a specific node without allocating a stream.
 
 The return value is the raw response from Kafka.
 
+With `FetchIsolationLevels.READ_COMMITTED`, aborted data batches have their `records` arrays emptied, while their batch headers and control batches are retained. Advance the fetch offset using `batch.firstOffset + BigInt(batch.lastOffsetDelta) + 1n`, including for empty and control batches, so that fetching progresses even when a response contains only aborted data.
+
 Options:
 
 | Property       | Type                  | Default   | Description                                                                                                                                                                                                                                                                           |

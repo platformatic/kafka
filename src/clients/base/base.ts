@@ -77,7 +77,7 @@ interface KnownBroker extends BrokerWithRack {
 
 export interface BaseEvents extends TypedEvents {
   'client:broker:connect': (payload: ConnectionPoolEventPayload) => void
-  'client:broker:disconnect': (payload: ConnectionPoolEventPayload) => void
+  'client:broker:disconnect': (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
   'client:broker:failed': (payload: ConnectionPoolEventPayload) => void
   'client:broker:drain': (payload: ConnectionPoolEventPayload) => void
   'client:broker:sasl:handshake': (payload: ConnectionPoolEventPayload & { mechanisms: string[] }) => void

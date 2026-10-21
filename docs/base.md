@@ -9,7 +9,7 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 | Name                                         | Description                                                                                  |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `client:broker:connect`                      | Emitted when connecting to a broker.                                                         |
-| `client:broker:disconnect`                   | Emitted when disconnecting from a broker.                                                    |
+| `client:broker:disconnect`                   | Emitted when disconnecting from a broker. `reason` is `'idle'` for an idle close.            |
 | `client:broker:failed`                       | Emitted when a broker connection fails.                                                      |
 | `client:broker:drain`                        | Emitted when a broker is ready to be triggered by requests.                                  |
 | `client:broker:sasl:handshake`               | Emitted when SASL handshake with a broker is completed.                                      |
@@ -39,6 +39,8 @@ Creates a new base client.
 | `connectTimeout`        | `number`               | `5000`    | Client connection timeout.                                                                                                                                         |
 | `requestTimeout`        | `number`               | `30000`   | Local timeout in milliseconds while waiting for a response to an in-flight request.                                                                                |
 | `maxInflights`          | `number`               | `5`       | Amount of request to send in parallel to Kafka without awaiting for responses, when allowed from the protocol.                                                     |
+| `keepAlive`             | `KeepAliveOptions`     |           | Enables TCP keep-alive on broker connections. See section below.                                                                                                   |
+| `connectionsMaxIdle`    | `number`               |           | Close a broker connection that has had no traffic and no pending requests for this many milliseconds. The next request reconnects. `0` or unset disables it.       |
 | `handleBackPressure`    | `boolean`              | `false`   | If set to `true`, the client will respect the return value of [`socket.write`][node-socket-write] and wait for a `drain` even before resuming sending of requests. |
 | `tls`                   | `TLSConnectionOptions` |           | Configures TLS for broker connections. See section below.                                                                                                          |
 | `ssl`                   | `TLSConnectionOptions` |           | Alias for `tls`. Configures TLS for broker connections. See section below. If both are provided, `tls` overrides this.                                             |
@@ -123,6 +125,20 @@ Both options are valid and control different things:
 - `requestTimeout`: client-side timeout that limits how long this client waits for a response on an in-flight request.
 
 In practice, `requestTimeout` is the guard for `TimeoutError: Request timed out` coming from the connection layer.
+
+## TCP keep-alive
+
+Setting `keepAlive` enables TCP keep-alive on every broker connection, plaintext or TLS. Each key maps to the matching argument of Node.js [`socket.setKeepAlive()`][node-socket-set-keep-alive]:
+
+| Property       | Type     | Description                                                                                                 |
+| -------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `initialDelay` | `number` | Milliseconds of inactivity before the first probe. `0` uses the operating system default.                   |
+| `interval`     | `number` | Milliseconds between probes. Requires Node.js 24.19.0 or 26.4.0 and later.                                  |
+| `count`        | `number` | Number of unanswered probes before the connection is dropped. Requires Node.js 24.19.0 or 26.4.0 and later. |
+
+Node.js truncates `initialDelay` and `interval` to whole seconds, so values below `1000` become `0`; with `strict` enabled they are rejected instead. Setting `interval` or `count` on an older Node.js version throws a `UserError`.
+
+`keepAlive` is applied after the socket is created, so it takes precedence over `keepAlive` and `keepAliveInitialDelay` passed in `tls`.
 
 ## Connecting to Kafka via TLS connection
 
@@ -283,3 +299,4 @@ The `authenticate` function receives the following parameters:
 **Important**: The `authenticate` function should never throw exceptions, especially when using async functions. The function is not awaited and exceptions are not handled, which can lead to memory leaks, resource leaks, and unexpected behavior. Always wrap your code in a try-catch block and pass errors to the callback instead.
 
 [node-socket-write]: https://nodejs.org/dist/latest/docs/api/stream.html#writablewritechunk-encoding-callback
+[node-socket-set-keep-alive]: https://nodejs.org/dist/latest/docs/api/net.html#socketsetkeepalive

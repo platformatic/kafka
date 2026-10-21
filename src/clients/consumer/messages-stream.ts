@@ -16,7 +16,7 @@ import {
 } from '../../diagnostic.ts'
 import type { GenericError } from '../../errors.ts'
 import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
-import type { ConnectionPool } from '../../network/connection-pool.ts'
+import type { ConnectionPool, ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
@@ -118,7 +118,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #deserializationErrorHandler: DeserializationErrorHandler | undefined
   #context: unknown
   #onConsumerGroupJoin: () => void
-  #onBrokerDisconnect: () => void
+  #onBrokerDisconnect: (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
   #pushRecordsOperation: (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
@@ -232,7 +232,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
-    this.#onBrokerDisconnect = () => {
+    this.#onBrokerDisconnect = payload => {
+      // Closing an unused connection says nothing about partition leadership
+      if (payload.reason === 'idle') {
+        return
+      }
+
       this.#partitionsEpochs.clear()
     }
 

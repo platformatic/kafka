@@ -263,6 +263,7 @@ test('get should handle connection disconnect event', async t => {
 
   // Verify the pool emitted the disconnect event
   deepStrictEqual(disconnectSpy.mock.calls.length, 1)
+  deepStrictEqual(disconnectSpy.mock.calls[0].arguments, [{ broker, connection }])
 
   // Try to get the connection again - should create a new one
   const newConnection = await connectionPool.get(broker)
@@ -322,6 +323,47 @@ test('get should evict a connection whose request timed out', { timeout: 3000 },
   ok(newConnection !== connection)
 
   await newConnection.close()
+})
+
+test('get should open a new connection after an idle one is closed', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  const [payload] = await once(connectionPool, 'disconnect')
+  strictEqual(payload.reason, 'idle')
+
+  const newConnection = await connectionPool.get(broker)
+  ok(newConnection !== connection)
+  strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
+})
+
+test('get should open a new connection while an idle one is closing', { timeout: 3000 }, async t => {
+  const { port } = await createServer(t)
+
+  const connectionPool = new ConnectionPool('test-client', { connectionsMaxIdle: 100 })
+  t.after(() => connectionPool.close())
+
+  const broker = { host: 'localhost', port }
+  const connection = await connectionPool.get(broker)
+
+  const closed = once(connection, 'close')
+  const replacement = new Promise<Connection>((resolve, reject) => {
+    connection.once('closing', () => {
+      connectionPool.get(broker).then(resolve, reject)
+    })
+  })
+
+  const newConnection = await replacement
+  await closed
+
+  ok(newConnection !== connection)
+  strictEqual(newConnection.status, ConnectionStatuses.CONNECTED)
+  strictEqual(connectionPool.getEstablishedConnection(broker), newConnection)
 })
 
 test('get should handle errors and remove connection', async t => {

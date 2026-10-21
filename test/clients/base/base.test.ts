@@ -42,6 +42,7 @@ import {
   type CallbackWithPromise,
   type ClientDiagnosticEvent,
   type ClusterMetadata,
+  type KeepAliveOptions,
   Writer
 } from '../../../src/index.ts'
 import {
@@ -222,6 +223,27 @@ test('constructor validates SASL reauthentication options', t => {
     ...options,
     sasl: { ...options.sasl, reauthFraction: 1, reauthLeadTime: 0, lazyReauthentication: true }
   })
+  t.after(() => client.close())
+})
+
+test('constructor validates keep-alive and idle connection options', t => {
+  const options = {
+    clientId: 'test-client',
+    bootstrapBrokers: ['localhost:9092'],
+    strict: true
+  }
+
+  throws(() => new Base({ ...options, keepAlive: true as unknown as KeepAliveOptions }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { initialDelay: 500 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { interval: 500 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { count: 0 } }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, keepAlive: { delay: 1000 } as KeepAliveOptions }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, connectionsMaxIdle: -1 }), { code: 'PLT_KFK_USER' })
+
+  new Base({ ...options, keepAlive: {} }).close()
+  new Base({ ...options, keepAlive: { initialDelay: 0 } }).close()
+
+  const client = new Base({ ...options, keepAlive: { initialDelay: 1000 }, connectionsMaxIdle: 60000 })
   t.after(() => client.close())
 })
 

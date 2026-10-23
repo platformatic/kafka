@@ -69,7 +69,7 @@ import {
 } from '../../errors.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
-import { IS_CONTROL } from '../../protocol/records.ts'
+import { IS_CONTROL, IS_TRANSACTIONAL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch, kUpdateCommittedOffset } from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
@@ -2856,30 +2856,29 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         const abortedTransactions = partition.abortedTransactions ?? []
         if (abortedTransactions.length) {
-          const abortedRanges = new Map<bigint, [bigint, bigint]>()
+          // The broker repeats overlapping aborted transactions on every fetch, so
+          // this state is local to the partition response, not the consumer position.
+          const pending = [...abortedTransactions].sort((a, b) =>
+            a.firstOffset < b.firstOffset ? -1 : a.firstOffset > b.firstOffset ? 1 : 0)
+          const abortedProducers = new Set<bigint>()
+          let next = 0
 
-          // Find first offsets
-          // For last offsets we set -1n as special value. It allows us to detect open ranges, whichs means
-          // that Kafka has not sent the control marker. In that case we ignore the range for safety.
-          for (const aborted of abortedTransactions) {
-            abortedRanges.set(aborted.producerId, [aborted.firstOffset, -1n])
-          }
+          for (const batch of partition.records) {
+            const lastOffset = batch.firstOffset + BigInt(batch.lastOffsetDelta)
+            while (next < pending.length && pending[next].firstOffset <= lastOffset) {
+              abortedProducers.add(pending[next++].producerId)
+            }
 
-          // Now find last offsets
-          for (const batch of partition.records!) {
-            if (batch.attributes & IS_CONTROL && batch.records[0].key?.readInt16BE(2) === 0) {
-              const abortedRange = abortedRanges.get(batch.producerId)
-              if (abortedRange) {
-                abortedRange[1] = batch.firstOffset
+            if (batch.attributes & IS_CONTROL) {
+              if (batch.records[0]?.key?.readInt16BE(2) === 0) {
+                abortedProducers.delete(batch.producerId)
               }
+            } else if (batch.attributes & IS_TRANSACTIONAL && abortedProducers.has(batch.producerId)) {
+              // Preserve batch offsets even when the entire response is aborted. Both
+              // MessagesStream and low-level fetch callers need them to advance.
+              batch.records = []
             }
           }
-
-          // Filter all records in the aborted ranges
-          partition.records = partition.records!.filter(r => {
-            const toSkip = abortedRanges.get(r.producerId)
-            return !toSkip || !(toSkip[1] !== -1n && r.firstOffset >= toSkip[0] && r.firstOffset < toSkip[1])
-          })
         }
 
         // Important: The control records are not filtered here but in the MessagesStream to allow proper offset tracking

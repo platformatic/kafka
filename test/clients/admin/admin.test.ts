@@ -422,7 +422,16 @@ test('listTopics should list topics and support diagnostic channels', async t =>
 
 test('listTopics should tolerate only partition metadata errors without retrying', async t => {
   for (const version of [0, 12]) {
-    for (const scenario of ['partitions', 'topic', 'mixed', 'empty']) {
+    for (const scenario of [
+      'partitions',
+      'non-retryable-partitions',
+      'topic',
+      'retryable-topic',
+      'mixed',
+      'empty',
+      'no-partition-errors',
+      'no-topics'
+    ]) {
       await t.test(`Metadata v${version}: ${scenario}`, async t => {
         const admin = createAdmin(t, { retries: 3, retryDelay: 1 })
         const response: MetadataResponse = {
@@ -437,7 +446,7 @@ test('listTopics should tolerate only partition metadata errors without retrying
             isInternal: name === '__internal',
             partitions: [
               {
-                errorCode: 5,
+                errorCode: 0,
                 partitionIndex: 0,
                 leaderId: -1,
                 leaderEpoch: 0,
@@ -450,13 +459,24 @@ test('listTopics should tolerate only partition metadata errors without retrying
           }))
         }
         const errors: Record<string, [number, null]> = {}
-        if (scenario === 'partitions' || scenario === 'mixed') {
+        if (scenario === 'no-partition-errors' || scenario === 'no-topics') {
           errors['/topics/0/partitions/0'] = [5, null]
-          errors['/topics/1/partitions/0'] = [5, null]
+          if (scenario === 'no-topics') {
+            response.topics = []
+          }
         }
-        if (scenario === 'topic' || scenario === 'mixed') {
-          response.topics[2].errorCode = 29
-          errors['/topics/2'] = [29, null]
+        const onlyPartitionErrors = scenario === 'partitions' || scenario === 'non-retryable-partitions'
+        if (onlyPartitionErrors || scenario === 'mixed') {
+          const errorCode = scenario === 'non-retryable-partitions' ? 29 : 5
+          for (const index of [0, 1]) {
+            response.topics[index].partitions[0].errorCode = errorCode
+            errors[`/topics/${index}/partitions/0`] = [errorCode, null]
+          }
+        }
+        if (scenario === 'topic' || scenario === 'retryable-topic' || scenario === 'mixed') {
+          const errorCode = scenario === 'retryable-topic' ? 5 : 29
+          response.topics[2].errorCode = errorCode
+          errors['/topics/2'] = [errorCode, null]
         }
 
         const error = new ResponseError(3, version, errors, response)
@@ -481,7 +501,7 @@ test('listTopics should tolerate only partition metadata errors without retrying
         admin[kApis] = [{ apiKey: 3, name: 'Metadata', minVersion: version, maxVersion: version }]
         admin[kGetBootstrapConnection] = callback => callback(null, connection)
 
-        if (scenario === 'partitions') {
+        if (onlyPartitionErrors) {
           deepStrictEqual(await admin.listTopics(), ['a-topic', 'z-topic'])
           strictEqual(requests, 1)
           deepStrictEqual(await admin.listTopics({ includeInternals: true }), ['__internal', 'a-topic', 'z-topic'])

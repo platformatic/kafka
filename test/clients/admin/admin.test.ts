@@ -1,8 +1,9 @@
-import { deepStrictEqual, ok, strictEqual } from 'node:assert'
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 import { scheduler } from 'node:timers/promises'
 import { type ListOffsetsResponse } from '../../../src/apis/consumer/list-offsets-v9.ts'
+import { type MetadataResponse } from '../../../src/apis/metadata/metadata-v12.ts'
 import {
   ClientQuotaEntityTypes,
   ClientQuotaKeys,
@@ -420,6 +421,107 @@ test('listTopics should list topics and support diagnostic channels', async t =>
   ok(topics.includes(topic1))
   ok(topics.includes(topic2))
   ok(topics.includes(topic3))
+})
+
+test('listTopics should tolerate only partition metadata errors without retrying', async t => {
+  for (const version of [0, 12]) {
+    for (const scenario of [
+      'partitions',
+      'non-retryable-partitions',
+      'topic',
+      'retryable-topic',
+      'mixed',
+      'empty',
+      'no-partition-errors',
+      'no-topics'
+    ]) {
+      await t.test(`Metadata v${version}: ${scenario}`, async t => {
+        const admin = createAdmin(t, { retries: 3, retryDelay: 1 })
+        const response: MetadataResponse = {
+          throttleTimeMs: 0,
+          brokers: [],
+          clusterId: 'cluster',
+          controllerId: 0,
+          topics: ['z-topic', '__internal', 'a-topic', 'a-topic'].map(name => ({
+            errorCode: 0,
+            name,
+            topicId: randomUUID(),
+            isInternal: name === '__internal',
+            partitions: [
+              {
+                errorCode: 0,
+                partitionIndex: 0,
+                leaderId: -1,
+                leaderEpoch: 0,
+                replicaNodes: [0],
+                isrNodes: [],
+                offlineReplicas: []
+              }
+            ],
+            topicAuthorizedOperations: 0
+          }))
+        }
+        const errors: Record<string, [number, null]> = {}
+        if (scenario === 'no-partition-errors' || scenario === 'no-topics') {
+          errors['/topics/0/partitions/0'] = [5, null]
+          if (scenario === 'no-topics') {
+            response.topics = []
+          }
+        }
+        const onlyPartitionErrors = scenario === 'partitions' || scenario === 'non-retryable-partitions'
+        if (onlyPartitionErrors || scenario === 'mixed') {
+          const errorCode = scenario === 'non-retryable-partitions' ? 29 : 5
+          for (const index of [0, 1]) {
+            response.topics[index].partitions[0].errorCode = errorCode
+            errors[`/topics/${index}/partitions/0`] = [errorCode, null]
+          }
+        }
+        if (scenario === 'topic' || scenario === 'retryable-topic' || scenario === 'mixed') {
+          const errorCode = scenario === 'retryable-topic' ? 5 : 29
+          response.topics[2].errorCode = errorCode
+          errors['/topics/2'] = [errorCode, null]
+        }
+
+        const error = new ResponseError(3, version, errors, response)
+        let requests = 0
+        const connection = {
+          send<ReturnType> (
+            apiKey: number,
+            apiVersion: number,
+            _payload: () => Writer,
+            _responseParser: ResponseParser<ReturnType>,
+            _hasRequestHeaderTaggedFields: boolean,
+            _hasResponseHeaderTaggedFields: boolean,
+            callback: Callback<ReturnType>
+          ) {
+            strictEqual(apiKey, 3)
+            strictEqual(apiVersion, version)
+            requests++
+            callback(error)
+          }
+        } as unknown as Connection
+
+        admin[kApis] = [{ apiKey: 3, name: 'Metadata', minVersion: version, maxVersion: version }]
+        admin[kGetBootstrapConnection] = callback => callback(null, connection)
+
+        if (onlyPartitionErrors) {
+          deepStrictEqual(await admin.listTopics(), ['a-topic', 'z-topic'])
+          strictEqual(requests, 1)
+          deepStrictEqual(await admin.listTopics({ includeInternals: true }), ['__internal', 'a-topic', 'z-topic'])
+          strictEqual(requests, 2)
+        } else {
+          await rejects(admin.listTopics(), failure => {
+            ok(failure instanceof MultipleErrors)
+            strictEqual(failure.code, MultipleErrors.code)
+            strictEqual(failure.message, 'Listing topics failed.')
+            strictEqual(failure.findBy('code', ResponseError.code), error)
+            strictEqual(error.code, ResponseError.code)
+            return true
+          })
+        }
+      })
+    }
+  }
 })
 
 test('listTopics should validate options in strict mode', async t => {

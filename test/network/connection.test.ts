@@ -791,7 +791,8 @@ test('Connection.send should time out eventually (custom timeout)', async t => {
   } catch (error) {
     deepStrictEqual((error as Error).message, 'Request timed out')
     const elapsed = performance.now() - startTime
-    strictEqual(elapsed >= customTimeout, true, 'Should not time out before the custom timeout')
+    // Allow 50ms for differences between libuv's cached loop time and performance.now().
+    strictEqual(elapsed >= customTimeout - 50, true, 'Should not time out significantly before the custom timeout')
     // Allow 10% tolerance
     strictEqual(elapsed < customTimeout * 1.1, true, 'Should time out with custom timeout')
   }
@@ -802,6 +803,14 @@ test('Connection.send should destroy the socket and close the connection when a 
   const customTimeout = 500
   const connection = new Connection('test-client', { requestTimeout: customTimeout })
   t.after(() => connection.close())
+
+  const events: string[] = []
+  let statusOnClosing: string | undefined
+  connection.on('closing', () => {
+    events.push('closing')
+    statusOnClosing = connection.status
+  })
+  connection.on('close', () => events.push('close'))
 
   let serverSocket: Socket | undefined
   server.on('connection', socket => {
@@ -834,6 +843,7 @@ test('Connection.send should destroy the socket and close the connection when a 
             false, // hasResponseHeaderTaggedFields
             (err, returnValue) => {
               callCount++
+              events.push('callback')
               if (err) {
                 reject(err)
               } else {
@@ -858,6 +868,8 @@ test('Connection.send should destroy the socket and close the connection when a 
     await once(connection, 'close')
     strictEqual(connection.status, ConnectionStatuses.CLOSED)
     strictEqual(callCount, 1, 'the timed-out request callback must not be invoked a second time by the close cascade')
+    strictEqual(statusOnClosing, ConnectionStatuses.CLOSING)
+    deepStrictEqual(events, ['closing', 'callback', 'close'])
   } finally {
     serverSocket?.destroy()
   }

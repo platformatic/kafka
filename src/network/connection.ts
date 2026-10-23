@@ -640,6 +640,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#afterDrainRequests = this.#afterDrainRequests.filter(r => r !== request)
 
     this.#status = ConnectionStatuses.CLOSING
+    this.emit('closing')
 
     request.callback(new TimeoutError('Request timed out', { canRetry: true }), null)
 

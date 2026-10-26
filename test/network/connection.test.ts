@@ -1419,6 +1419,153 @@ test('Connection should fail requests without response waiting for the drain whe
   await rejects(() => waiting, { code: UserError.code, message: 'Broker requires TLS.' })
 })
 
+test('Connection should fail requests without response started while closing a connection waiting for the drain', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { handleBackPressure: true, maxInflights: 1 })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+  simulateBackPressure(connection)
+
+  // The first request is written and fills the buffer, the second one waits for a free slot in the queue
+  const inflight = sendDummyRequest(connection, false)
+  const queued = sendDummyRequest(connection, true)
+  const results = Promise.allSettled([inflight, queued])
+
+  await connection.close()
+
+  // Failing the first request starts the second one: without the fix it waits for a drain which never happens
+  const [inflightResult, queuedResult] = await results
+  strictEqual((inflightResult as PromiseRejectedResult).reason.message, 'Connection closed')
+  strictEqual((queuedResult as PromiseRejectedResult).reason.message, 'Connection closed')
+})
+
+test('Connection should fail requests with response started while closing a connection waiting for the drain', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { handleBackPressure: true, maxInflights: 1, requestTimeout: 500 })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+  simulateBackPressure(connection)
+
+  const inflight = sendDummyRequest(connection, false)
+  const queued = sendDummyRequest(connection, false)
+  const results = Promise.allSettled([inflight, queued])
+
+  await connection.close()
+
+  // Without the fix the second request times out on the closed connection and moves it back to closing,
+  // so any later close() would wait forever
+  const [inflightResult, queuedResult] = await results
+  strictEqual((inflightResult as PromiseRejectedResult).reason.message, 'Connection closed')
+  strictEqual((queuedResult as PromiseRejectedResult).reason.message, 'Connection closed')
+  strictEqual(connection.status, ConnectionStatuses.CLOSED)
+})
+
+// Answers every request frame with an empty response carrying the same correlation id
+function respondToRequests (socket: Socket, data: Buffer): void {
+  let offset = 0
+
+  while (offset + 12 <= data.length) {
+    const size = data.readInt32BE(offset)
+    const response = Buffer.alloc(8)
+    response.writeInt32BE(4, 0)
+    response.writeInt32BE(data.readInt32BE(offset + 8), 4)
+    socket.write(response)
+    offset += 4 + size
+  }
+}
+
+test('Connection should not wait for the drain of a previous socket when reconnecting', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { handleBackPressure: true })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+  simulateBackPressure(connection)
+
+  strictEqual(await sendDummyRequest(connection, true), false)
+  await connection.close()
+
+  // The new socket has never been written, so requests must be sent right away
+  await connection.connect('localhost', port)
+  strictEqual(await sendDummyRequest(connection, true), true)
+})
+
+test('Connection should discard partial responses of a previous socket when reconnecting', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client')
+  t.after(() => connection.close())
+
+  let connections = 0
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+
+    if (connections++ === 0) {
+      // Send only the beginning of a response
+      socket.once('data', () => {
+        socket.write(Buffer.from([0x00, 0x00, 0x00, 0x08, 0x00, 0x00]))
+      })
+    } else {
+      socket.on('data', data => respondToRequests(socket, data))
+    }
+  })
+
+  await connection.connect('localhost', port)
+  const request = sendDummyRequest(connection, false)
+  await once(connection.socket, 'data')
+  connection.socket.destroy()
+  await rejects(() => request, { code: 'PLT_KFK_NETWORK', message: 'Connection closed' })
+
+  // Without the fix the new response is appended to the partial one and its correlation id is not recognized
+  await connection.connect('localhost', port)
+  strictEqual(await sendDummyRequest(connection, false), 'response')
+})
+
+test('Connection should not complete requests of a previous socket again when reconnecting', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { maxInflights: 2 })
+  t.after(() => connection.close())
+
+  let respond = false
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+    socket.on('data', data => {
+      if (respond) {
+        respondToRequests(socket, data)
+      }
+    })
+  })
+
+  // Every socket closes with a request still inflight
+  for (let i = 0; i < 3; i++) {
+    await connection.connect('localhost', port)
+    const request = sendDummyRequest(connection, false)
+    connection.socket.destroy()
+    await rejects(() => request, { code: 'PLT_KFK_NETWORK', message: 'Connection closed' })
+  }
+
+  respond = true
+  await connection.connect('localhost', port)
+
+  // Without the fix, requests of previous sockets are completed again on every close, which releases their slot in
+  // the requests queue more than once and eventually loses the callbacks of new requests: this never settles
+  const results = await Promise.all(Array.from({ length: 4 }, () => sendDummyRequest(connection, false)))
+  deepStrictEqual(results, ['response', 'response', 'response', 'response'])
+})
+
 test('Connection should handle request serialization errors', async t => {
   const { port } = await createServer(t)
   const connection = new Connection('test-client')

@@ -929,25 +929,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       this.#detectMissingTLS = false
 
       if (this.#isTLSRecord(chunk)) {
-        const error = new UserError('Broker requires TLS.')
         this.#status = ConnectionStatuses.ERROR
-
-        // Requests waiting for the drain were never written, so they all fail, including the ones that do not
-        // expect a response: their callback is only invoked once written, and nothing else would complete them.
-        for (const request of this.#afterDrainRequests) {
-          clearTimeout(request.timeoutHandle!)
-          request.callback(error, undefined)
-        }
-
-        this.#afterDrainRequests = []
-
-        for (const request of this.#inflightRequests.values()) {
-          clearTimeout(request.timeoutHandle!)
-          request.callback(error, undefined)
-        }
-
-        this.#inflightRequests.clear()
-
+        this.#failPendingRequests(new UserError('Broker requires TLS.'))
         this.#socket.destroy()
         return
       }
@@ -1089,19 +1072,33 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#status = ConnectionStatuses.CLOSED
     this.emit('close')
 
-    const error = new NetworkError('Connection closed')
+    this.#failPendingRequests(new NetworkError('Connection closed'))
+  }
+
+  #failPendingRequests (error: Error): void {
+    // Reset the state bound to the socket before failing its requests. Each failure releases a slot in the requests
+    // queue and synchronously starts the next queued request, which must fail right away instead of waiting for a
+    // drain which will never happen. This also leaves a clean state if the connection is connected again.
+    const afterDrainRequests = this.#afterDrainRequests
+    const inflightRequests = this.#inflightRequests
+    this.#afterDrainRequests = []
+    this.#inflightRequests = new Map()
+    this.#socketMustBeDrained = false
+    this.#responseBuffer = new DynamicBuffer()
+    this.#responseReader = new Reader(this.#responseBuffer)
+    this.#nextMessage = 0
 
     // Requests waiting for the drain were never written, so they all fail, including the ones that do not
     // expect a response: their callback is only invoked once written, and nothing else would complete them.
-    for (const request of this.#afterDrainRequests) {
+    for (const request of afterDrainRequests) {
       if (!request.timedOut) {
         request.callback(error, undefined)
       }
     }
 
-    for (const inflight of this.#inflightRequests.values()) {
-      if (!inflight.timedOut) {
-        inflight.callback(error, undefined)
+    for (const request of inflightRequests.values()) {
+      if (!request.timedOut) {
+        request.callback(error, undefined)
       }
     }
   }

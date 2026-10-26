@@ -1332,6 +1332,93 @@ test('Connection should handle close with in-flight and after-drain requests', a
   })
 })
 
+// Sends a request with a dummy payload. It resolves with the result of the parser or, for requests without response,
+// with whether the socket can be written
+function sendDummyRequest (connection: Connection, noResponse: boolean): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    connection.send(
+      0, // apiKey
+      0, // apiVersion
+      () => {
+        const writer = Writer.create()
+        writer.appendInt32(42)
+        writer.context.noResponse = noResponse
+        return writer
+      },
+      function () {
+        return 'response'
+      }, // Dummy parser
+      false, // hasRequestHeaderTaggedFields
+      false, // hasResponseHeaderTaggedFields
+      (err, result) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(result)
+        }
+      }
+    )
+  })
+}
+
+// Every write is accepted but reports a full buffer
+function simulateBackPressure (connection: Connection): void {
+  const socket = connection.socket
+  const originalWrite = socket.write
+  socket.write = function write (...args: any[]) {
+    originalWrite.call(socket, ...(args as unknown as Parameters<typeof originalWrite>))
+    return false
+  }
+}
+
+test('Connection should fail requests without response waiting for the drain when closing', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { handleBackPressure: true })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+  })
+
+  await connection.connect('localhost', port)
+  simulateBackPressure(connection)
+
+  // The first request is written and fills the buffer, the second one waits for the drain
+  const written = sendDummyRequest(connection, true)
+  const waiting = sendDummyRequest(connection, true)
+
+  strictEqual(await written, false)
+
+  await connection.close()
+
+  // Without the fix the second callback is never invoked and this promise never settles
+  await rejects(() => waiting, { code: 'PLT_KFK_NETWORK', message: 'Connection closed' })
+})
+
+test('Connection should fail requests without response waiting for the drain when detecting a TLS broker', async t => {
+  const { server, port } = await createServer(t)
+  const connection = new Connection('test-client', { handleBackPressure: true })
+  t.after(() => connection.close())
+
+  server.on('connection', socket => {
+    socket.on('error', () => {})
+    socket.once('data', () => {
+      socket.write(Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x50]))
+    })
+  })
+
+  await connection.connect('localhost', port)
+  simulateBackPressure(connection)
+
+  const written = sendDummyRequest(connection, true)
+  const waiting = sendDummyRequest(connection, true)
+
+  strictEqual(await written, false)
+
+  // Without the fix the second callback is never invoked and this promise never settles
+  await rejects(() => waiting, { code: UserError.code, message: 'Broker requires TLS.' })
+})
+
 test('Connection should handle request serialization errors', async t => {
   const { port } = await createServer(t)
   const connection = new Connection('test-client')

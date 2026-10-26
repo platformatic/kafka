@@ -932,11 +932,11 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         const error = new UserError('Broker requires TLS.')
         this.#status = ConnectionStatuses.ERROR
 
+        // Requests waiting for the drain were never written, so they all fail, including the ones that do not
+        // expect a response: their callback is only invoked once written, and nothing else would complete them.
         for (const request of this.#afterDrainRequests) {
-          if (!request.noResponse) {
-            clearTimeout(request.timeoutHandle!)
-            request.callback(error, undefined)
-          }
+          clearTimeout(request.timeoutHandle!)
+          request.callback(error, undefined)
         }
 
         this.#afterDrainRequests = []
@@ -1091,8 +1091,10 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     const error = new NetworkError('Connection closed')
 
+    // Requests waiting for the drain were never written, so they all fail, including the ones that do not
+    // expect a response: their callback is only invoked once written, and nothing else would complete them.
     for (const request of this.#afterDrainRequests) {
-      if (!request.noResponse && !request.timedOut) {
+      if (!request.timedOut) {
         request.callback(error, undefined)
       }
     }

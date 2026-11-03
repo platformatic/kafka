@@ -2242,12 +2242,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     attemptErrors.push(error)
 
     if (!rejoinError) {
-      if (error instanceof MultipleErrors && error.errors.length > 0) {
-        const nestedMessages = error.errors.map(error => error.message).join(' ')
-        callback(new MultipleErrors(`${error.message} ${nestedMessages}`, error.errors))
-      } else {
-        callback(error)
-      }
+      callback(error)
       return
     }
 

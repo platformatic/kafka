@@ -6569,6 +6569,35 @@ test('joinGroup should handle errors from Base.metadata', async t => {
   }
 })
 
+test('joinGroup should preserve metadata retry errors without appending child messages', async t => {
+  const consumer = createConsumer(t)
+  const attempts = Array.from({ length: 3 }, () => {
+    const cause = new Error('connect ECONNREFUSED 127.0.0.1:9092')
+    const connectionError = new NetworkError('Connection to localhost:9092 failed.', { cause })
+    return new MultipleErrors('Cannot connect to any broker.', [connectionError])
+  })
+  const metadataError = new MultipleErrors('metadata failed 3 times.', attempts)
+
+  mockMetadata(consumer, 1, metadataError)
+
+  // Resolve protocol metadata first so the failure does not require a broker connection.
+  await rejects(consumer.joinGroup({ protocolsMetadata: () => Buffer.alloc(0) }), error => {
+    ok(error instanceof MultipleErrors)
+    strictEqual(error, metadataError)
+    strictEqual(error.message, 'metadata failed 3 times.')
+    strictEqual(error.code, 'PLT_KFK_MULTIPLE')
+    strictEqual(error.errors.length, 3)
+
+    for (let index = 0; index < attempts.length; index++) {
+      strictEqual(error.errors[index], attempts[index])
+      strictEqual(error.errors[index].errors[0].code, 'PLT_KFK_NETWORK')
+      strictEqual(error.errors[index].errors[0].cause, attempts[index].errors[0].cause)
+    }
+
+    return true
+  })
+})
+
 test('joinGroup should handle errors from Base.metadata during sync', async t => {
   const topic = await createTopic(t, true, 3)
   const groupId = createGroupId()

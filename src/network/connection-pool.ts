@@ -264,6 +264,11 @@ export class ConnectionPool extends TypedEventEmitter<ConnectionPoolEvents> {
       this.#remove(key, connection)
     })
 
+    // A socket can emit 'error' more than once (e.g. ECONNRESET followed by a write-after-destroy
+    // error). The once() above handles the first; this persistent listener keeps a handler attached
+    // so a later emission is not rethrown by Node as an unhandled 'error' event.
+    connection.on('error', () => {})
+
     connection.on('drain', () => {
       this.emit('drain', eventPayload)
     })

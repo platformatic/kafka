@@ -1070,6 +1070,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
   #onClose (): void {
     this.#status = ConnectionStatuses.CLOSED
+    // A socket closed by the broker never goes through close(), so the reauthentication timer must be cleared here
+    clearTimeout(this.#reauthenticationTimeout)
     this.emit('close')
 
     this.#failPendingRequests(new NetworkError('Connection closed'))

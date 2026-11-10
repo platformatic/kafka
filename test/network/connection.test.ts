@@ -2328,6 +2328,25 @@ test('Connection should not close for connectionsMaxIdle during SASL reauthentic
   deepStrictEqual(events, ['reauthenticated', 'idle'])
 })
 
+test('Connection should clear the reauthentication timer when the socket is closed remotely', async t => {
+  // The SASL test broker returns a 5000 ms session, so the reauthentication timer is due after 4000 ms
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const connection = new Connection('test-client', {
+    sasl: { mechanism: SASLMechanisms.PLAIN, username: 'admin', password: 'admin' }
+  })
+  t.after(() => connection.close())
+
+  await connection.connect(saslBroker.host, saslBroker.port)
+
+  // Destroying the socket without an error is what a broker-side close looks like: only 'close' is emitted
+  const closed = once(connection, 'close')
+  connection.socket.destroy()
+  await closed
+
+  t.mock.timers.tick(4000)
+  strictEqual(connection.status, ConnectionStatuses.CLOSED)
+})
+
 test('Connection.reauthenticate should do nothing when SASL is not configured', async t => {
   const { port } = await createServer(t)
   const connection = new Connection('test-client')

@@ -143,6 +143,37 @@ test('kAutocommit does not overlap an in-flight commit', () => {
   stream.destroy()
 })
 
+test('kAutocommit with a callback also commits offsets queued while a commit was in flight', () => {
+  const consumer = createFakeConsumer(true)
+  const commits: Array<{ offsets: Array<{ offset: bigint }>; callback: (error: Error | null) => void }> = []
+  mockMethod(consumer, 'commit', () => true, undefined, undefined, (_original, ...args) => {
+    commits.push({ offsets: args[0].offsets, callback: args.at(-1) })
+    return true
+  })
+  const stream = createStream(consumer)
+  stream.offsetsToCommit.set('test-topic:0', { topic: 'test-topic', partition: 0, offset: 5n, leaderEpoch: 0 })
+  stream[kAutocommit]()
+
+  // A cooperative rebalance starts while that commit is in flight, after offset 6 was queued
+  consumer.isActive = () => false
+  stream.offsetsToCommit.set('test-topic:0', { topic: 'test-topic', partition: 0, offset: 6n, leaderEpoch: 0 })
+  let flushed = false
+  stream[kAutocommit](error => {
+    strictEqual(error, null)
+    flushed = true
+  })
+
+  commits[0].callback(null)
+  strictEqual(commits.length, 2)
+  deepStrictEqual(commits[1].offsets.map(({ offset }) => offset), [6n])
+  strictEqual(flushed, false)
+
+  commits[1].callback(null)
+  strictEqual(flushed, true)
+  strictEqual(stream.offsetsToCommit.size, 0)
+  stream.destroy()
+})
+
 test('ILLEGAL_GENERATION ProtocolError has needsRejoin: true so kAutocommit destroys the stream', () => {
   const error = new ProtocolError('ILLEGAL_GENERATION', null, {}, {})
   ok(error.needsRejoin, 'ILLEGAL_GENERATION requires a group rejoin')

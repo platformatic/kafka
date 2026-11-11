@@ -69,6 +69,8 @@ export const kClientType = Symbol('plt.kafka.base.clientType')
 export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 export const kContext = Symbol('plt.kafka.base.context')
 
+const MAX_RETRY_ERRORS = 10
+
 let currentInstance = 0
 
 interface KnownBroker extends BrokerWithRack {
@@ -442,6 +444,12 @@ export class Base<
       if (error) {
         // Only retry if all the errors in the chain are retriable.
         const retriable = !findErrorBy(error, 'canRetry', false)
+
+        // Keep the first error and the most recent ones, so long retry runs don't grow the list forever.
+        if (errors.length >= MAX_RETRY_ERRORS) {
+          errors.splice(1, 1)
+        }
+
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {

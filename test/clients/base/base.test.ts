@@ -1254,6 +1254,43 @@ test('kPerformWithRetry should clear retry errors after eventual success', async
   await client.close()
 })
 
+test('kPerformWithRetry should keep the first and the most recent errors on long retry runs', async t => {
+  const client = createBase(t, { retries: 20, retryDelay: 0 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+      retryCallback(new Error(`failed ${attempts}`))
+    },
+    callback,
+    0,
+    []
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 21)
+  strictEqual(error instanceof MultipleErrors, true)
+  strictEqual(error.message, 'testOperation failed 21 times.')
+  deepStrictEqual(
+    error.errors.map((e: Error) => e.message),
+    [
+      'failed 1',
+      'failed 13',
+      'failed 14',
+      'failed 15',
+      'failed 16',
+      'failed 17',
+      'failed 18',
+      'failed 19',
+      'failed 20',
+      'failed 21'
+    ]
+  )
+})
+
 test('initialization should not fail when maxInflights is specifically set to undefined', async t => {
   const client = createBase(t, { maxInflights: undefined })
 

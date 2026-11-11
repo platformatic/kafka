@@ -27,6 +27,7 @@ import {
   consumerFetchesChannel,
   consumerGroupChannel,
   consumerGroupHeartbeatV1,
+  type ConsumerGroupLostPayload,
   consumerHeartbeatChannel,
   type ConsumerHeartbeatStalledPayload,
   consumerLagChannel,
@@ -7114,6 +7115,179 @@ test('#heartbeat should emit events when it was cancelled while waiting for API 
   await once(consumer, 'consumer:heartbeat:cancel')
 })
 
+test('group loss should report failed heartbeat recovery and re-arm after a successful join', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 300 })
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+  consumer.on('error', () => {})
+
+  await consumer.joinGroup()
+  consumer[kOptions].retries = 0
+
+  for (let episode = 0; episode < 2; episode++) {
+    const lost = new Promise<ConsumerGroupLostPayload>(resolve => consumer.once('consumer:group:lost', resolve))
+    const failure = new ProtocolError('COORDINATOR_NOT_AVAILABLE')
+    mockAPI(consumer[kConnections], joinGroupV9.api.key, failure)
+    mockAPI(consumer[kConnections], heartbeatV4.api.key, new ProtocolError('REBALANCE_IN_PROGRESS'))
+
+    const payload = await lost
+    strictEqual(payload.groupId, consumer.groupId)
+    strictEqual(payload.memberId, consumer.memberId)
+    strictEqual(payload.generationId, consumer.generationId)
+    strictEqual(payload.operation, 'joinGroup')
+    ok(findErrorBy(payload.error, 'apiId', 'COORDINATOR_NOT_AVAILABLE'))
+    strictEqual(consumer.isActive(), false)
+
+    // Another failed manual recovery does not start a new membership episode.
+    mockUnavailableAPI(consumer, 'JoinGroup')
+    await rejects(consumer.joinGroup(), UnsupportedApiError)
+    strictEqual(losses.length, episode + 1)
+
+    await consumer.joinGroup()
+  }
+})
+
+test('group loss should report exhausted rejoin retries once', async t => {
+  const consumer = createConsumer(t)
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+  await consumer.joinGroup()
+
+  consumer[kOptions].retries = 1
+  consumer[kOptions].retryDelay = 10
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (original, ...args) => {
+      const [name, callback] = args
+      if (name === 'JoinGroup') {
+        callback(new ProtocolError('UNKNOWN_MEMBER_ID'))
+      } else {
+        original(...args)
+      }
+      return true
+    }
+  )
+  await rejects(consumer.joinGroup(), MultipleErrors)
+
+  strictEqual(losses.length, 1)
+  strictEqual(losses[0].operation, 'joinGroup')
+  ok(losses[0].error instanceof MultipleErrors)
+})
+
+test('group loss should report a failed sync during recovery', async t => {
+  const consumer = createConsumer(t)
+  await consumer.joinGroup()
+
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+  mockUnavailableAPI(consumer, 'SyncGroup')
+  await rejects(consumer.joinGroup(), UnsupportedApiError)
+
+  strictEqual(losses.length, 1)
+  strictEqual(losses[0].operation, 'syncGroup')
+  ok(losses[0].error instanceof UnsupportedApiError)
+})
+
+test('group loss should not report an initial join failure or voluntary leave', async t => {
+  const consumer = createConsumer(t)
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+
+  mockUnavailableAPI(consumer, 'JoinGroup')
+  await rejects(consumer.joinGroup(), UnsupportedApiError)
+  await consumer.joinGroup()
+  await consumer.leaveGroup()
+  mockUnavailableAPI(consumer, 'JoinGroup')
+  await rejects(consumer.joinGroup(), UnsupportedApiError)
+
+  strictEqual(losses.length, 0)
+})
+
+test('group loss should report a failed commit-triggered rejoin', async t => {
+  const consumer = createConsumer(t, { autocommit: false, retries: 1 })
+  const topic = await createTopic(t, true)
+  const stream = await consumer.consume({ topics: [topic] })
+  stream.on('error', () => {})
+
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+  mockAPI(consumer[kConnections], offsetCommitV9.api.key, new ProtocolError('ILLEGAL_GENERATION'))
+  mockUnavailableAPI(consumer, 'JoinGroup')
+
+  await rejects(
+    consumer.commit({ offsets: [{ topic, partition: 0, offset: 1n, leaderEpoch: -1 }] }),
+    UnsupportedApiError
+  )
+
+  strictEqual(losses.length, 1)
+  strictEqual(losses[0].operation, 'joinGroup')
+  strictEqual(consumer.isActive(), false)
+})
+
+test('group loss should report a failed OffsetFetch-triggered rejoin', async t => {
+  const consumer = createConsumer(t, { retries: 1 })
+  const topic = await createTopic(t)
+  await consumer.joinGroup()
+
+  const losses: ConsumerGroupLostPayload[] = []
+  consumer.on('consumer:group:lost', payload => losses.push(payload))
+  mockAPI(consumer[kConnections], offsetFetchV9.api.key, new ProtocolError('UNKNOWN_MEMBER_ID'))
+  mockUnavailableAPI(consumer, 'JoinGroup')
+
+  await rejects(consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] }), UnsupportedApiError)
+
+  strictEqual(losses.length, 1)
+  strictEqual(losses[0].operation, 'joinGroup')
+  strictEqual(consumer.isActive(), false)
+})
+
+test('group loss should not fire during a successful OffsetFetch-triggered rejoin', async t => {
+  const consumer = createConsumer(t, { retries: 1 })
+  const topic = await createTopic(t)
+  await consumer.joinGroup()
+
+  let lost = false
+  consumer.on('consumer:group:lost', () => {
+    lost = true
+  })
+  mockAPI(consumer[kConnections], offsetFetchV9.api.key, new ProtocolError('UNKNOWN_MEMBER_ID'))
+
+  await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+
+  strictEqual(lost, false)
+  strictEqual(consumer.isActive(), true)
+})
+
+test('group loss and errors should not fire when closing during a rejoin retry delay', async t => {
+  const consumer = createConsumer(t, { heartbeatInterval: 300, retries: 1, retryDelay: 10000 })
+  let lost = false
+  const errors: Error[] = []
+  consumer.on('consumer:group:lost', () => {
+    lost = true
+  })
+  consumer.on('error', error => errors.push(error))
+  await consumer.joinGroup()
+
+  const retrying = new Promise<void>(resolve => {
+    mockAPI(consumer[kConnections], joinGroupV9.api.key, null, null, (_original, ...args) => {
+      args.at(-1)(new ProtocolError('UNKNOWN_MEMBER_ID'))
+      resolve()
+      return false
+    })
+  })
+  mockAPI(consumer[kConnections], heartbeatV4.api.key, new ProtocolError('REBALANCE_IN_PROGRESS'))
+
+  await retrying
+  await consumer.close(true)
+
+  strictEqual(lost, false)
+  deepStrictEqual(errors, [])
+})
+
 test('#heartbeat should emit a stalled event when heartbeats stop succeeding', async t => {
   const consumer = createConsumer(t, { heartbeatInterval: 500, heartbeatStallTimeout: 1000 })
 
@@ -7177,6 +7351,10 @@ test('#heartbeat should emit a stalled event when a rejoin retries indefinitely'
   })
 
   consumer.on('error', () => {})
+  let lost = false
+  consumer.on('consumer:group:lost', () => {
+    lost = true
+  })
   const stalled = new Promise(resolve => {
     consumer.once('consumer:heartbeat:stalled', resolve)
   })
@@ -7210,12 +7388,17 @@ test('#heartbeat should emit a stalled event when a rejoin retries indefinitely'
   ok(payload.lastError)
   // The rejoin pause is bounded: rebalanceTimeout (6 seconds in these tests) plus the stall timeout
   ok(payload.stalledFor >= 6900)
+  strictEqual(lost, false)
 })
 
 test('#heartbeat should not emit a stalled event when a rejoin succeeds within the extended window', async t => {
   const consumer = createConsumer(t, { heartbeatInterval: 3000, heartbeatStallTimeout: 300 })
 
   let stalled = false
+  let lost = false
+  consumer.on('consumer:group:lost', () => {
+    lost = true
+  })
   consumer.on('consumer:heartbeat:stalled', () => {
     stalled = true
   })
@@ -7250,6 +7433,7 @@ test('#heartbeat should not emit a stalled event when a rejoin succeeds within t
   await sleep(3500)
 
   strictEqual(stalled, false)
+  strictEqual(lost, false)
 })
 
 test('#heartbeat should honor a per-operation heartbeatStallTimeout', async t => {

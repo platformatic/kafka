@@ -153,6 +153,25 @@ const registry = new ConfluentSchemaRegistry({
 })
 ```
 
+#### Schema versions with the same `$id`
+
+The registry caches compiled validators by their numeric Confluent schema ID. By default, AJV also registers compiled schemas by their JSON Schema `$id` (`id` in draft-04). Loading two versions with the same `$id` into the same registry instance can therefore fail with a duplicate schema ID error, even when their Confluent schema IDs differ.
+
+To allow these versions to coexist, set `jsonAjvOptions.addUsedSchema` to `false`:
+
+```typescript
+const registry = new ConfluentSchemaRegistry({
+  url: 'http://localhost:8081',
+  jsonAjvOptions: {
+    addUsedSchema: false
+  }
+})
+```
+
+This disables AJV's automatic registration of compiled schemas by `$id`. Each version's validator is still cached by its Confluent schema ID. References within a schema continue to work, but a separate schema cannot rely on a previously compiled schema being registered in AJV for cross-schema `$ref` resolution.
+
+The option applies to all supported drafts. AJV's default, `addUsedSchema: true`, remains unchanged.
+
 ### Protocol Buffers
 
 ```typescript

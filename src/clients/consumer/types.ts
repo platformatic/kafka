@@ -244,6 +244,14 @@ export interface ConsumerGroupAutocommitErrorPayload {
   error: Error
 }
 
+export interface ConsumerGroupLostPayload {
+  groupId: string
+  memberId: string | null
+  generationId: number
+  error: Error
+  operation: 'joinGroup' | 'syncGroup'
+}
+
 export interface ConsumerHeartbeatPayload {
   groupId?: string
   memberId?: string | null

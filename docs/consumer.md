@@ -19,9 +19,21 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:heartbeat:cancel`       | `ConsumerHeartbeatPayload`            | Emitted if a scheduled heartbeat has been canceled.                                                                                                                                          |
 | `consumer:heartbeat:end`          | `ConsumerHeartbeatPayload?`           | Emitted during successful heartbeats.                                                                                                                                                        |
 | `consumer:heartbeat:error`        | `ConsumerHeartbeatErrorPayload`       | Emitted during failed heartbeats.                                                                                                                                                            |
-| `consumer:heartbeat:stalled`      | `ConsumerHeartbeatStalledPayload`     | Emitted once per stall episode when no heartbeat has succeeded within `heartbeatStallTimeout`. Heartbeat handling is unchanged after the event; a successful heartbeat re-arms the tracking. |
+| `consumer:heartbeat:stalled`      | `ConsumerHeartbeatStalledPayload`     | Emitted once per stall episode when no heartbeat has succeeded within `heartbeatStallTimeout`. Heartbeat handling is unchanged after the event; a successful heartbeat re-arms the tracking. A stall during a rejoin indicates slow recovery, not terminal membership loss. |
+| `consumer:group:lost`             | `ConsumerGroupLostPayload`            | Emitted when classic group membership recovery fails with no further retry scheduled, including rejoins triggered by heartbeats, commits, or offset fetches, and synchronization failures. |
 | `consumer:lag`                    | `Offsets`                             | Emitted during periodic lag monitoring with calculated lag data for topics and partitions.                                                                                                   |
 | `consumer:lag:error`              | `Error`                               | Emitted when lag calculation fails during monitoring operations.                                                                                                                             |
+
+The `consumer:group:lost` payload contains `groupId`, `memberId`, `generationId`, `error`, and `operation`.
+The operation is `joinGroup` or `syncGroup`, identifying the step that exhausted recovery, even when a heartbeat,
+commit, or offset fetch triggered the rejoin. The error preserves the underlying cause, including all attempts
+when retries are exhausted. The member ID can be `null` if the broker rejected the previous membership.
+
+This event fires at most once per established membership. A successful `joinGroup()` re-arms it.
+An initial join failure, a voluntary `leaveGroup()`, and shutdown do not emit it. No loss event is emitted
+after `close()` starts. Existing callback and promise errors remain unchanged, and a failed heartbeat-triggered
+rejoin still emits `error` outside shutdown. The consumer group protocol is unaffected: its heartbeat recovery
+continues retrying rather than emitting this terminal event.
 
 ## Constructor
 

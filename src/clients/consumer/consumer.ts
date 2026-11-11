@@ -123,6 +123,7 @@ import {
   type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
+  type ConsumerGroupLostPayload,
   type ConsumerGroupOptions,
   type ConsumerGroupRebalancePayload,
   type ConsumerHeartbeatErrorPayload,
@@ -163,6 +164,7 @@ interface FetchSession {
 export interface ConsumerEvents extends BaseEvents {
   'consumer:group:join': (payload: ConsumerGroupJoinPayload) => void
   'consumer:group:leave': (payload: ConsumerGroupLeavePayload) => void
+  'consumer:group:lost': (payload: ConsumerGroupLostPayload) => void
   'consumer:group:rejoin': () => void
   'consumer:group:rebalance': (payload: ConsumerGroupRebalancePayload) => void
   'consumer:group:autocommit:error': (payload: ConsumerGroupAutocommitErrorPayload) => void
@@ -189,6 +191,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #members: Map<string, ExtendedGroupProtocolSubscription>
   #membershipActive: boolean
+  #membershipEstablished: boolean
   #isLeader: boolean
   #protocol: string | null
   #coordinatorId: number | null
@@ -245,6 +248,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#assignments = []
     this.#members = new Map()
     this.#membershipActive = false
+    this.#membershipEstablished = false
     this.#isLeader = false
     this.#protocol = null
     this.#coordinatorId = null
@@ -810,6 +814,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       this.#lastHeartbeat = null
+      this.#membershipEstablished = false
       callback(null)
     })
 
@@ -1390,7 +1395,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #listCommittedOffsets (
     options: ListCommitsOptions,
     callback: CallbackWithPromise<Offsets>,
-    staleMemberEpochRetries = 0
+    membershipRetries = 0
   ): void {
     const topics: OffsetFetchRequestTopic[] = []
 
@@ -1436,8 +1441,24 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       (error, response) => {
         if (error) {
           if (
+            !this.#useConsumerGroupProtocol &&
+            membershipRetries < (this[kOptions].retries as number) &&
+            this.#getRejoinError(error)
+          ) {
+            this.joinGroup({}, joinError => {
+              if (joinError) {
+                callback(joinError)
+                return
+              }
+
+              this.#listCommittedOffsets(options, callback, membershipRetries + 1)
+            })
+            return
+          }
+
+          if (
             this.#useConsumerGroupProtocol &&
-            staleMemberEpochRetries < (this[kOptions].retries as number) &&
+            membershipRetries < (this[kOptions].retries as number) &&
             findErrorBy(error, 'apiId', 'STALE_MEMBER_EPOCH')
           ) {
             this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, heartbeatError => {
@@ -1446,7 +1467,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 return
               }
 
-              this.#listCommittedOffsets(options, callback, staleMemberEpochRetries + 1)
+              this.#listCommittedOffsets(options, callback, membershipRetries + 1)
             })
             return
           }
@@ -1578,6 +1599,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             )
 
             this.#joinGroup(options, error => {
+              if (this[kClosed] || !this.#membershipActive) {
+                return
+              }
+
               if (error) {
                 this.emitWithDebug(null, 'error', error)
 
@@ -2210,7 +2235,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             }
 
             if (error) {
-              this.#retryJoinGroup(options, callback, attempt, attemptErrors, error)
+              this.#retryJoinGroup(options, callback, attempt, attemptErrors, error, 'syncGroup')
               return
             }
 
@@ -2226,7 +2251,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<string>,
     attempt: number,
     attemptErrors: Error[],
-    error: Error
+    error: Error,
+    operation: ConsumerGroupLostPayload['operation'] = 'joinGroup'
   ): void {
     const retries = this[kOptions].retries! as number
     const memberId = this.memberId
@@ -2242,12 +2268,16 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     attemptErrors.push(error)
 
     if (!rejoinError) {
+      this.#reportGroupLost(error, operation)
       callback(error)
       return
     }
 
     if (attempt >= retries) {
-      callback(attempt > 0 ? new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors) : error)
+      const terminalError =
+        attempt > 0 ? new MultipleErrors(`joinGroup failed ${attempt + 1} times.`, attemptErrors) : error
+      this.#reportGroupLost(terminalError, operation)
+      callback(terminalError)
       return
     }
 
@@ -2268,6 +2298,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }, delay)
 
     this.once('client:close', onClose)
+  }
+
+  #reportGroupLost (error: Error, operation: ConsumerGroupLostPayload['operation']): void {
+    if (this[kClosed] || !this.#membershipActive || !this.#membershipEstablished) {
+      return
+    }
+
+    // A failed recovery ends this membership episode. Only a successful sync re-arms it.
+    this.#membershipEstablished = false
+    this.emitWithDebug('consumer', 'group:lost', {
+      groupId: this.groupId,
+      memberId: this.memberId,
+      generationId: this.generationId,
+      error,
+      operation
+    })
   }
 
   #completeClassicSyncGroup (
@@ -2341,6 +2387,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.#heartbeat(options)
     }, options.heartbeatInterval)
 
+    this.#membershipEstablished = true
     this.emitWithDebug('consumer', 'group:join', {
       groupId: this.groupId,
       memberId: this.memberId,

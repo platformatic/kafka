@@ -25,6 +25,8 @@ Options:
 | `partitioner`           | `(message: MessageToProduce<Key, Value, HeaderKey, HeaderValue>, key: Buffer \| undefined, context?: PartitionerContext) => number` | Partitioner to use to assign a partition to messages that lack it.<br/><br/>It is a function that receives a message and an optional serialized key and should return the partition number.                                                                                                                                                        |
 | `autocreateTopics`      | `boolean`                                                                                                                           | Whether to ask brokers to auto-create missing topics during produce requests.                                                                                                                                                                                                                                                                      |
 | `repeatOnStaleMetadata` | `boolean`                                                                                                                           | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                                                                                                                                                                                                     |
+| `linger`                | `number`                                                                                                                            | Time in milliseconds to wait for other `send()` calls so that their messages are produced in the same request. Default is `0`, which disables it. See [Batching messages across calls](#batching-messages-across-calls).                                                                                                                           |
+| `batchMaxBytes`         | `number`                                                                                                                            | When `linger` is set, how many bytes of keys, values and headers can be waiting before they are sent without waiting further. Default is `16384`.                                                                                                                                                                                                  |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                                                                                   | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                            |
 | `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`                                                                       | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                            |
 | `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`                                                                        | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
@@ -71,6 +73,35 @@ Options:
 | `messages` | `MessageToProduce<Key, Value, HeaderKey, HeaderValue>[]` | The messages to send. |
 
 It also accepts all options of the constructor except `serializers`.
+
+#### Batching messages across calls
+
+By default each `send()` call is produced on its own: a hundred concurrent calls which send one message each result in a hundred requests.
+
+When the producer is created with `linger` greater than zero, the messages of a `send()` call wait for up to that many milliseconds, and are produced in the same request as the messages of the other calls made in the meantime. They are sent before that time once `batchMaxBytes` bytes are waiting, counting the keys, values and headers of all the messages regardless of their partition.
+
+```typescript
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializers,
+  linger: 5,
+  batchMaxBytes: 65536
+})
+
+// These are produced with a single request
+await Promise.all(events.map(event => producer.send({ messages: [{ topic: 'events', value: event }] })))
+```
+
+This increases the throughput of applications which send many small messages concurrently, at the cost of up to `linger` milliseconds of latency for each call. An application which awaits each `send()` before making the next one only gets the additional latency.
+
+Things to know:
+
+- Each call still resolves with the offsets of its own messages: for each partition, the offset of the first message it sent there.
+- Only calls made with the same `acks`, `compression`, `idempotent`, `autocreateTopics` and `repeatOnStaleMetadata` share a request. When a call uses different settings, what is waiting is sent first, so that messages are produced in the order they were sent.
+- If the request fails, all the calls which were part of it fail with the same error.
+- Calls made within a transaction, or which specify `producerId` or `producerEpoch`, are never delayed.
+- `close()` sends what is waiting before closing the producer.
 
 ### `getSendTopicPartitions<Key, Value, HeaderKey, HeaderValue>(options)`
 

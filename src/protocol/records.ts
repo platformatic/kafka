@@ -8,8 +8,8 @@ import {
   compressionsAlgorithmsByBitmask
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
-import { INT32_SIZE, INT64_SIZE, type NullableString } from './definitions.ts'
-import { type Reader } from './reader.ts'
+import { INT32_SIZE, INT64_SIZE, INT8_SIZE, type NullableString } from './definitions.ts'
+import { Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
 export const CURRENT_RECORD_VERSION = 2
@@ -402,8 +402,8 @@ function finalizeRecordsBatch (
   options: Partial<CreateRecordsBatchOptions>,
   prepared: PreparedRecordsBatch
 ): Writer {
-  const writer = Writer.create()
-    // Phase 1: Prepare the message from Attributes (included) to the end
+  // Phase 1: Prepare the message from Attributes (included) to the end
+  const body = Writer.create()
     .appendInt16(prepared.attributes)
     // LastOffsetDelta, FirstTimestamp and MaxTimestamp are extracted from the messages
     .appendInt32(messages.length - 1)
@@ -413,18 +413,23 @@ function finalizeRecordsBatch (
     .appendInt16(options.producerEpoch ?? 0)
     .appendInt32(prepared.firstSequence)
     .appendInt32(messages.length) // Number of records
-    .appendFrom(prepared.buffer)
+    .appendFrom(prepared.buffer).buffer
 
-  // Phase 2: Prepend the PartitionLeaderEpoch, Magic and CRC, then the Length and firstOffset, in reverse order
-  return (
-    writer
-      .appendUnsignedInt32(crc32c(writer.dynamicBuffer), false)
-      .appendInt8(CURRENT_RECORD_VERSION, false)
-      .appendInt32(options.partitionLeaderEpoch ?? 0, false)
-      .prependLength()
-      // FirstOffset is 0
-      .appendInt64(0n, false)
-  )
+  /*
+    The body above is made of several small buffers for each record and it has to be contiguous to compute the CRC.
+    That contiguous copy is what gets returned, rather than the original pieces, so that whoever serializes
+    the batch next (the produce request and then the connection) only has to deal with two buffers.
+  */
+
+  // Phase 2: Prepare FirstOffset, Length, PartitionLeaderEpoch, Magic and CRC
+  const head = Buffer.allocUnsafe(BATCH_HEAD + INT32_SIZE + INT8_SIZE + INT32_SIZE)
+  head.writeBigInt64BE(0n, 0) // FirstOffset is 0
+  head.writeInt32BE(INT32_SIZE + INT8_SIZE + INT32_SIZE + body.length, INT64_SIZE)
+  head.writeInt32BE(options.partitionLeaderEpoch ?? 0, BATCH_HEAD)
+  head.writeInt8(CURRENT_RECORD_VERSION, BATCH_HEAD + INT32_SIZE)
+  head.writeUInt32BE(crc32c(body), BATCH_HEAD + INT32_SIZE + INT8_SIZE)
+
+  return Writer.create().append(head).append(body)
 }
 
 export function createRecordsBatch (

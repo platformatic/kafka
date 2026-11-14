@@ -1,5 +1,5 @@
 import { allowedFetchIsolationLevels, allowedGroupProtocols, FetchIsolationLevels } from '../../apis/enumerations.ts'
-import { ajv } from '../../utils.ts'
+import { compileLazily } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
 import { allowedMessagesStreamFallbackModes, allowedMessagesStreamModes, type ConsumerOptions } from './types.ts'
@@ -235,12 +235,12 @@ export const getLagOptionsSchema = {
   additionalProperties: false
 }
 
-export const groupOptionsValidator = ajv.compile({
+export const groupOptionsValidator = compileLazily({
   ...groupOptionsSchema,
   dependentSchemas: groupOptionsAdditionalValidations
 })
 
-export const groupIdAndOptionsValidator = ajv.compile({
+export const groupIdAndOptionsValidator = compileLazily({
   type: 'object',
   properties: {
     groupId: idProperty,
@@ -251,13 +251,13 @@ export const groupIdAndOptionsValidator = ajv.compile({
   dependentSchemas: groupOptionsAdditionalValidations
 })
 
-export const consumeOptionsValidator = ajv.compile(consumeOptionsSchema)
-export const consumerOptionsValidator = ajv.compile(consumerOptionsSchema)
-export const fetchOptionsValidator = ajv.compile(fetchOptionsSchema)
-export const commitOptionsValidator = ajv.compile(commitOptionsSchema)
-export const listCommitsOptionsValidator = ajv.compile(listCommitsOptionsSchema)
-export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
-export const getLagOptionsValidator = ajv.compile(getLagOptionsSchema)
+export const consumeOptionsValidator = compileLazily(consumeOptionsSchema)
+export const consumerOptionsValidator = compileLazily(consumerOptionsSchema)
+export const fetchOptionsValidator = compileLazily(fetchOptionsSchema)
+export const commitOptionsValidator = compileLazily(commitOptionsSchema)
+export const listCommitsOptionsValidator = compileLazily(listCommitsOptionsSchema)
+export const listOffsetsOptionsValidator = compileLazily(listOffsetsOptionsSchema)
+export const getLagOptionsValidator = compileLazily(getLagOptionsSchema)
 
 export const defaultConsumerOptions = {
   autocommit: true,

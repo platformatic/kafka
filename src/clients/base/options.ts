@@ -1,5 +1,5 @@
 import { allowedSASLMechanisms } from '../../apis/enumerations.ts'
-import { ajv } from '../../utils.ts'
+import { compileLazily } from '../../utils.ts'
 import { version } from '../../version.ts'
 import { type BaseOptions } from './types.ts'
 
@@ -94,9 +94,9 @@ export const metadataOptionsSchema = {
   additionalProperties: false
 }
 
-export const baseOptionsValidator = ajv.compile(baseOptionsSchema)
+export const baseOptionsValidator = compileLazily(baseOptionsSchema)
 
-export const metadataOptionsValidator = ajv.compile(metadataOptionsSchema)
+export const metadataOptionsValidator = compileLazily(metadataOptionsSchema)
 
 export const defaultPort = 9092
 export const defaultBaseOptions: Partial<BaseOptions> = {

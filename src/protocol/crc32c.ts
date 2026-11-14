@@ -77,9 +77,10 @@ export function loadNativeCRC32C (): typeof jsCRC32C | null {
     const { crc32c: nativeImplementation } = require('@node-rs/crc32')
 
     return function nativeCRC32C (data: Buffer | Uint8Array | DynamicBuffer): number {
+      // A Buffer is a Uint8Array already, there is no need to copy it
       const bytes: Uint8Array = DynamicBuffer.isDynamicBuffer(data)
         ? ((data as DynamicBuffer).buffer as Uint8Array)
-        : new Uint8Array(data as Uint8Array)
+        : (data as Uint8Array)
 
       return nativeImplementation(bytes)
     }

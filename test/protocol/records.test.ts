@@ -551,3 +551,21 @@ for (const [compression, algorithm] of Object.entries<CompressionAlgorithmSpecif
     }
   )
 }
+
+test('createRecordsBatch returns the batch as a head and a contiguous body', () => {
+  const messages: MessageRecord[] = []
+  for (let i = 0; i < 100; i++) {
+    messages.push({ topic: 'topic', partition: 0, key: Buffer.from(`key-${i}`), value: Buffer.from(`value-${i}`) })
+  }
+
+  const writer = createRecordsBatch(messages)
+
+  // Whoever serializes the batch next must not have to merge several small buffers for each record
+  strictEqual(writer.buffers.length, 2)
+  strictEqual(writer.buffers[0].length, 21)
+
+  const batch = readRecordsBatch(Reader.from(writer))
+  strictEqual(batch.length, writer.length - 12)
+  strictEqual(batch.records.length, 100)
+  strictEqual(batch.records[99].value!.toString(), 'value-99')
+})

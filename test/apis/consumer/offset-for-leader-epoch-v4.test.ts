@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { offsetForLeaderEpochV4, Reader, ResponseError } from '../../../src/index.ts'
+import { offsetForLeaderEpochV4 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = offsetForLeaderEpochV4
 

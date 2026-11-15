@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { describeQuorumV1, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { describeQuorumV1 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import type { DescribeQuorumRequestTopic, DescribeQuorumResponse } from '../../../src/apis/admin/describe-quorum-v2.ts'
 import type {
   DescribeQuorumRequestTopic as DescribeQuorumRequestTopicV1,

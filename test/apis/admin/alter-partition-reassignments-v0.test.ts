@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { alterPartitionReassignmentsV0, Reader } from '../../../src/index.ts'
+import { alterPartitionReassignmentsV0 } from '../../../src/apis/index.ts'
+import { Reader } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = alterPartitionReassignmentsV0
 

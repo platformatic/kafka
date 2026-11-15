@@ -1,13 +1,7 @@
 import { strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import {
-  getTelemetrySubscriptionsV0,
-  listClientMetricsResourcesV0,
-  pushTelemetryV0,
-  Reader,
-  ResponseError,
-  Writer
-} from '../../../src/index.ts'
+import { getTelemetrySubscriptionsV0, listClientMetricsResourcesV0, pushTelemetryV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 function appendUnknownTag (writer: Writer): Writer {
   return writer.appendUnsignedVarInt(1).appendUnsignedVarInt(42).appendUnsignedVarInt(2).append(Buffer.from([1, 2]))

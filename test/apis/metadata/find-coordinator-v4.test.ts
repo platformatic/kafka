@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { findCoordinatorV4, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { findCoordinatorV4 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = findCoordinatorV4
 

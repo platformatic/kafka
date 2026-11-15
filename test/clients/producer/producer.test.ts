@@ -12,6 +12,7 @@ import {
   kOptions
 } from '../../../src/clients/base/base.ts'
 import type { ClusterMetadata } from '../../../src/clients/base/types.ts'
+import { initProducerIdV5, produceV11 } from '../../../src/apis/index.ts'
 import {
   baseMetadataChannel,
   type ClientDiagnosticEvent,
@@ -19,7 +20,6 @@ import {
   ConfluentSchemaRegistry,
   Connection,
   GenericError,
-  initProducerIdV5,
   instancesChannel,
   MessagesStreamModes,
   MultipleErrors,
@@ -29,7 +29,6 @@ import {
   type ProduceResult,
   producerInitIdempotentChannel,
   producerSendsChannel,
-  produceV11,
   ProtocolError,
   stringDeserializers,
   stringSerializer,

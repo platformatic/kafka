@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import { kClosed, kConnections, kMetadata } from '../../../src/clients/base/base.ts'
+import { consumerGroupHeartbeatV0 } from '../../../src/apis/index.ts'
 import {
-  consumerGroupHeartbeatV0,
   MultipleErrors,
   ProduceAcks,
   ResponseError,

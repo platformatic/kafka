@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { FeatureUpgradeTypes, Reader, ResponseError, Writer, updateFeaturesV1 } from '../../../src/index.ts'
+import { updateFeaturesV1 } from '../../../src/apis/index.ts'
+import { FeatureUpgradeTypes, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = updateFeaturesV1
 

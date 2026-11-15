@@ -14,12 +14,10 @@ import {
   produceV9,
   produceV10,
   produceV11,
-  Reader,
-  ResponseError,
   txnOffsetCommitV3,
-  txnOffsetCommitV4,
-  Writer
-} from '../../../src/index.ts'
+  txnOffsetCommitV4
+} from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 function appendUnknownRootTag (writer: Writer): Writer {
   return writer.appendUnsignedVarInt(1).appendUnsignedVarInt(42).appendUnsignedVarInt(2).append(Buffer.from([1, 2]))

@@ -4,7 +4,8 @@ import {
   type DescribeConfigsRequestResource,
   type DescribeConfigsResponseResult
 } from '../../../src/apis/admin/describe-configs-v3.ts'
-import { Reader, ResponseError, Writer, describeConfigsV3 } from '../../../src/index.ts'
+import { describeConfigsV3 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import { ConfigSources, ConfigTypes } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeConfigsV3

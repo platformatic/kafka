@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, saslHandshakeV0, Writer } from '../../../src/index.ts'
+import { saslHandshakeV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = saslHandshakeV0
 

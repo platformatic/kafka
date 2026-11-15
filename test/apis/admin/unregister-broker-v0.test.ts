@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, Writer, unregisterBrokerV0 } from '../../../src/index.ts'
+import { unregisterBrokerV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = unregisterBrokerV0
 

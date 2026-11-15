@@ -8,21 +8,18 @@ import {
 } from '../../../src/apis/metadata/find-coordinator-v6.ts'
 import { kConnections, kGetApi, kOptions } from '../../../src/clients/base/base.ts'
 import { Transaction } from '../../../src/clients/producer/transaction.ts'
+import { addOffsetsToTxnV4, addPartitionsToTxnV5, endTxnV4, txnOffsetCommitV4 } from '../../../src/apis/index.ts'
 import {
-  addOffsetsToTxnV4,
-  addPartitionsToTxnV5,
   type API,
   type Callback,
   type ClientDiagnosticEvent,
   type Connection,
-  endTxnV4,
   type Message,
   MessagesStreamModes,
   MultipleErrors,
   ProduceAcks,
   producerTransactionsChannel,
   ProtocolError,
-  txnOffsetCommitV4,
   UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'

@@ -10,14 +10,12 @@ import {
 } from '../apis/callbacks.ts'
 import { type Callback, type ResponseParser } from '../apis/definitions.ts'
 import { allowedSASLMechanisms, SASLMechanisms, type SASLMechanismValue } from '../apis/enumerations.ts'
-import {
-  apiVersionsV1,
-  saslAuthenticateV0,
-  saslAuthenticateV1,
-  saslAuthenticateV2,
-  saslHandshakeV1
-} from '../apis/index.ts'
+import * as apiVersionsV1 from '../apis/metadata/api-versions-v1.ts'
+import * as saslAuthenticateV0 from '../apis/security/sasl-authenticate-v0.ts'
+import * as saslAuthenticateV1 from '../apis/security/sasl-authenticate-v1.ts'
+import * as saslAuthenticateV2 from '../apis/security/sasl-authenticate-v2.ts'
 import { type SaslAuthenticateResponse, type SASLAuthenticationAPI } from '../apis/security/sasl-authenticate-v2.ts'
+import * as saslHandshakeV1 from '../apis/security/sasl-handshake-v1.ts'
 import { clientSoftwareName, clientSoftwareVersion } from '../clients/base/options.ts'
 import {
   connectionsApiChannel,

@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { getTelemetrySubscriptionsV0, Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
+import { getTelemetrySubscriptionsV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = getTelemetrySubscriptionsV0
 

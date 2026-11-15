@@ -1,7 +1,8 @@
 import { deepStrictEqual } from 'node:assert'
 import test from 'node:test'
 import { ListOffsetTimestamps } from '../../../src/apis/enumerations.ts'
-import { listOffsetsV0, Reader, Writer } from '../../../src/index.ts'
+import { listOffsetsV0 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('ListOffsets exposes Kafka special timestamps', () => {
   deepStrictEqual(ListOffsetTimestamps, {

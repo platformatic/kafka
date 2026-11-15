@@ -1,5 +1,6 @@
 import { pbkdf2Sync, randomBytes } from 'crypto'
-import { alterUserScramCredentialsV0, Connection } from '../../src/index.ts'
+import { alterUserScramCredentialsV0 } from '../../src/apis/index.ts'
+import { Connection } from '../../src/index.ts'
 
 // Create passwords as Confluent Kafka images don't support it
 export async function createScramUsers (broker: { host: string; port: number }) {

@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { createRecordsBatch, fetchV4, Reader, Writer } from '../../../src/index.ts'
+import { fetchV4 } from '../../../src/apis/index.ts'
+import { createRecordsBatch, Reader, Writer } from '../../../src/index.ts'
 
 test('Fetch v4 preserves the Consumer request arguments and normalizes its response', () => {
   const request = fetchV4.createRequest(100, 1, 1024, 0, 9, 2, [{ topicId: 'topic', partitions: [{ partition: 0, currentLeaderEpoch: -1, lastFetchedEpoch: -1, fetchOffset: 4n, partitionMaxBytes: 512 }] }], [{ topicId: 'forgotten-topic', partitions: [0] }], '')

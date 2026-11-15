@@ -1,7 +1,8 @@
 import { ifError, strictEqual } from 'node:assert'
 import test from 'node:test'
 import { type SaslAuthenticateResponse } from '../../../src/apis/security/sasl-authenticate-v2.ts'
-import { type CallbackWithPromise, type Connection, type saslAuthenticateV2, saslPlain } from '../../../src/index.ts'
+import { type saslAuthenticateV2 } from '../../../src/apis/index.ts'
+import { type CallbackWithPromise, type Connection, saslPlain } from '../../../src/index.ts'
 
 // Test Plain SASL authentication
 test('authenticate should create proper payload with username and password - promise', async () => {

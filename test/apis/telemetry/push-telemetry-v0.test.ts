@@ -1,7 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { gzipSync } from 'node:zlib'
-import { pushTelemetryV0, Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
+import { pushTelemetryV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, TelemetryCompressionTypes, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = pushTelemetryV0
 

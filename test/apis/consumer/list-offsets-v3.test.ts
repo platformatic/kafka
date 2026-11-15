@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { listOffsetsV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { listOffsetsV3 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listOffsetsV3
 

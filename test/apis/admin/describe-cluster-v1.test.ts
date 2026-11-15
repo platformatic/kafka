@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, Writer, describeClusterV1 } from '../../../src/index.ts'
+import { describeClusterV1 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import { DescribeClusterEndpointTypes } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeClusterV1

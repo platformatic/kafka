@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { describeGroupsV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { describeGroupsV2 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = describeGroupsV2
 

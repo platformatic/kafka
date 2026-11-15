@@ -19,6 +19,12 @@ import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
   apiVersionsV1,
   apiVersionsV3,
+  metadataV0,
+  metadataV1,
+  metadataV10,
+  metadataV8
+} from '../../../src/apis/index.ts'
+import {
   AuthenticationError,
   Base,
   baseApisChannel,
@@ -29,10 +35,6 @@ import {
   NetworkError,
   Reader,
   ResponseError,
-  metadataV0,
-  metadataV1,
-  metadataV10,
-  metadataV8,
   type ResponseParser,
   sleep,
   TimeoutError,

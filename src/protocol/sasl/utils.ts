@@ -1,4 +1,4 @@
-import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/index.ts'
+import { createPromisifiedCallback, kCallbackPromise, type CallbackWithPromise } from '../../apis/callbacks.ts'
 import { AuthenticationError } from '../../errors.ts'
 import { type CredentialProvider } from '../../network/connection.ts'
 

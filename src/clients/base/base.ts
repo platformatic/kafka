@@ -7,7 +7,7 @@ import {
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import { type API, type Callback } from '../../apis/definitions.ts'
-import * as apis from '../../apis/index.ts'
+import { apiLoaders } from '../../apis/loaders.ts'
 import {
   api as apiVersionsV1,
   type ApiVersionsResponse,
@@ -64,6 +64,9 @@ export const kAfterCreate = Symbol('plt.kafka.base.afterCreate')
 export const kContext = Symbol('plt.kafka.base.context')
 
 let currentInstance = 0
+
+// The codecs which have been loaded so far, by export name. They are shared by all the clients.
+const loadedApis = new Map<string, API<any, any>>()
 
 interface KnownBroker extends BrokerWithRack {
   lastSeen: number
@@ -563,11 +566,26 @@ export class Base<
 
     // Starting from the highest version, we need to find the first one that is supported
     for (let i = maxVersion; i >= minVersion; i--) {
-      const apiName = (name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i) as keyof typeof apis
-      const candidate = apis[apiName] as unknown as { api: API<RequestArguments, ResponseType> }
+      const apiName = name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i
+      const loaded = loadedApis.get(apiName)
 
-      if (candidate) {
-        callback(null, candidate.api)
+      if (loaded) {
+        callback(null, loaded)
+        return
+      }
+
+      const loader = apiLoaders[apiName]
+
+      if (loader) {
+        loader().then(
+          module => {
+            loadedApis.set(apiName, module.api)
+            callback(null, module.api)
+          },
+          /* c8 ignore next - Only reachable when a file of the package is missing */
+          error => callback(error)
+        )
+
         return
       }
     }

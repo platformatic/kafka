@@ -22,7 +22,16 @@
     "README.md"
   ],
   "type": "module",
-  "exports": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./apis": {
+      "types": "./dist/apis/index.d.ts",
+      "default": "./dist/apis/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",

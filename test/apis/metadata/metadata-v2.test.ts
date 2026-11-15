@@ -1,6 +1,7 @@
 import { strictEqual } from 'node:assert'
 import test from 'node:test'
-import { metadataV2, Reader, Writer } from '../../../src/index.ts'
+import { metadataV2 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('Metadata v2 reads the cluster id and normalizes unavailable fields', () => {
   strictEqual(metadataV2.createRequest(null).length, 4)

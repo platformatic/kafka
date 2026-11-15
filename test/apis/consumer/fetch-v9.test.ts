@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { createRecordsBatch, crc32c, fetchV9, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { fetchV9 } from '../../../src/apis/index.ts'
+import { createRecordsBatch, crc32c, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = fetchV9
 

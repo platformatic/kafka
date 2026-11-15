@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { Reader, ResponseError, Writer, alterClientQuotasV1 } from '../../../src/index.ts'
+import { alterClientQuotasV1 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import { ClientQuotaEntityTypes, ClientQuotaKeys } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = alterClientQuotasV1

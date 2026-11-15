@@ -2,13 +2,8 @@ import { deepStrictEqual, match, ok, rejects, strictEqual } from 'node:assert'
 import { randomBytes } from 'node:crypto'
 import test from 'node:test'
 import { type SaslAuthenticateResponse } from '../../../src/apis/security/sasl-authenticate-v2.ts'
-import {
-  AuthenticationError,
-  type CallbackWithPromise,
-  type Connection,
-  type saslAuthenticateV2,
-  saslScramSha
-} from '../../../src/index.ts'
+import { type saslAuthenticateV2 } from '../../../src/apis/index.ts'
+import { AuthenticationError, type CallbackWithPromise, type Connection, saslScramSha } from '../../../src/index.ts'
 import * as scramShaModule from '../../../src/protocol/sasl/scram-sha.ts'
 import { defaultCrypto, type ScramAlgorithmDefinition } from '../../../src/protocol/sasl/scram-sha.ts'
 

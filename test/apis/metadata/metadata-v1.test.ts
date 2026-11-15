@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { metadataV1, Reader, Writer } from '../../../src/index.ts'
+import { metadataV1 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('Metadata v1 reads the controller and broker rack', () => {
   strictEqual(metadataV1.createRequest(null).length, 4)

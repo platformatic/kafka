@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { alterPartitionV3, Reader } from '../../../src/index.ts'
+import { alterPartitionV3 } from '../../../src/apis/index.ts'
+import { Reader } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = alterPartitionV3
 const topicId = '12345678-1234-1234-1234-123456789abc'

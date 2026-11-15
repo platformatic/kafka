@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { alterPartitionV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { alterPartitionV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 test('AlterPartition v0 ignores leader recovery state and normalizes its response', () => {
   const { api, createRequest, parseResponse } = alterPartitionV0

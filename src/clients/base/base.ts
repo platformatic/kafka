@@ -1,4 +1,4 @@
-import { type ValidateFunction } from 'ajv'
+import type { ValidateFunction } from 'ajv'
 import { type EventEmitter } from 'node:events'
 import {
   createPromisifiedCallback,
@@ -28,16 +28,10 @@ import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/c
 import { type Broker, type Connection } from '../../network/connection.ts'
 import { parseBroker } from '../../network/utils.ts'
 import { kInstance } from '../../symbols.ts'
-import { ajv, debugDump, loggers } from '../../utils.ts'
+import { debugDump, loggers } from '../../utils.ts'
 import { type Metrics } from '../metrics.ts'
-import {
-  baseOptionsValidator,
-  clientSoftwareName,
-  clientSoftwareVersion,
-  defaultBaseOptions,
-  defaultPort,
-  metadataOptionsValidator
-} from './options.ts'
+import { clientSoftwareName, clientSoftwareVersion, defaultBaseOptions, defaultPort } from './options.ts'
+import { baseOptionsValidator, metadataOptionsValidator } from './validators.ts'
 import {
   type BaseOptions,
   type BrokerWithRack,
@@ -630,7 +624,13 @@ export class Base<
   }
 
   [kFormatValidationErrors] (validator: ValidateFunction<unknown>, targetName: string) {
-    return ajv.errorsText(validator.errors, { dataVar: '$dataVar$' }).replaceAll('$dataVar$', targetName) + '.'
+    // This is what the errorsText method of ajv returns, without having to load ajv
+    const errors = validator.errors ?? []
+    const text = errors.length
+      ? errors.map(error => `$dataVar$${error.instancePath} ${error.message}`).join(', ')
+      : 'No errors'
+
+    return text.replaceAll('$dataVar$', targetName) + '.'
   }
 
   [kAfterCreate] (type: ClientType): void {

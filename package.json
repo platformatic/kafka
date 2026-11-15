@@ -32,7 +32,7 @@
     "format": "prettier -w benchmarks playground regression src test",
     "prepare": "npm run build",
     "test": "c8 -c test/config/c8-local.json ./scripts/node --test --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
-    "test:ci": "./scripts/node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
+    "test:ci": "./scripts/node --test --experimental-test-coverage --test-coverage-include='src/**' --test-coverage-exclude='src/clients/*/validators.ts' --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test-reporter=cleaner-spec-reporter 'test/*.test.ts' 'test/*/*.test.ts' 'test/*/*/*.test.ts'",
     "test:integrity": "./scripts/node --test --test-reporter=cleaner-spec-reporter 'regression/integrity/*.test.ts'",
     "test:performance": "./scripts/node --test --test-concurrency=1 --test-reporter=cleaner-spec-reporter 'regression/performance/*.test.ts'",
     "test:regression": "npm run test:integrity",
@@ -53,6 +53,7 @@
     "postpublish": "git push origin && git push origin -f --tags",
     "generate:apis": "node scripts/generate-apis.ts",
     "generate:errors": "node scripts/generate-errors.ts",
+    "generate:validators": "node scripts/generate-validators.ts",
     "create:api": "node scripts/create-api.ts"
   },
   "dependencies": {

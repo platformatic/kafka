@@ -29,6 +29,11 @@ npm run test:memory
 npm run test:compat
 ```
 
+The validators of the client options (`src/clients/*/validators.ts`) are generated from the JSON schemas
+in the `options.ts` files, so that importing the package neither loads `ajv` nor compiles anything. After
+changing a schema, or adding a validator to `scripts/generate-validators.ts`, run
+`npm run generate:validators`. `test/clients/validators.test.ts` fails when they are out of date.
+
 Memory tests (`test/memory/*.memory-test.ts`) use `--expose-gc` and a 3-broker cluster
 with sustained backpressure to detect heap leaks. They are excluded from CI due to resource
 requirements but should be run manually when modifying the consumer stream, fetch loop, or

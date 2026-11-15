@@ -66,13 +66,13 @@ import {
   type Serializer,
   type SerializerWithHeaders
 } from '../serde.ts'
+import { defaultBatchMaxBytes } from './options.ts'
 import {
-  defaultBatchMaxBytes,
   produceOptionsValidator,
   producerOptionsValidator,
   producerStreamOptionsValidator,
   sendOptionsValidator
-} from './options.ts'
+} from './validators.ts'
 import { defaultPartitioner } from './partitioners.ts'
 import { ProducerStream } from './producer-stream.ts'
 import { Transaction } from './transaction.ts'

@@ -1,7 +1,6 @@
 import { allowedSASLMechanisms } from '../../apis/enumerations.ts'
-import { compileLazily } from '../../utils.ts'
 import { version } from '../../version.ts'
-import { type BaseOptions } from './types.ts'
+import type { BaseOptions } from './types.ts'
 
 // Note: clientSoftwareName can only contain alphanumeric characters, hyphens and dots
 export const clientSoftwareName = 'platformatic-kafka'
@@ -93,10 +92,6 @@ export const metadataOptionsSchema = {
   },
   additionalProperties: false
 }
-
-export const baseOptionsValidator = compileLazily(baseOptionsSchema)
-
-export const metadataOptionsValidator = compileLazily(metadataOptionsSchema)
 
 export const defaultPort = 9092
 export const defaultBaseOptions: Partial<BaseOptions> = {

@@ -1,0 +1,244 @@
+#!/usr/bin/env -S node
+
+import { _, type KeywordCxt, str, stringify } from 'ajv'
+import type { KeywordErrorCxt } from 'ajv/dist/types/index.js'
+import { Ajv2020 } from 'ajv/dist/2020.js'
+import ucs2lengthModule from 'ajv/dist/runtime/ucs2length.js'
+import standalone from 'ajv/dist/standalone/index.js'
+import { readFile, writeFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import type { EnumerationDefinition } from '../src/utils.ts'
+
+/*
+  The validators of the options of the clients are generated ahead of time from their JSON schemas, so that
+  importing the package neither loads ajv nor compiles anything.
+
+  The schemas in the options.ts files are the only place to edit. After changing one of them, run:
+
+    npm run generate:validators
+
+  test/clients/validators.test.ts fails when the generated files do not match the schemas.
+*/
+
+// These are CommonJS modules transpiled from ES modules, so what they export is in their default property
+const standaloneCode = standalone.default
+const ucs2length = ucs2lengthModule.default
+
+export const ajv = new Ajv2020({
+  allErrors: true,
+  coerceTypes: false,
+  strict: true,
+  code: { source: true, esm: true, lines: true }
+})
+
+// The keywords are defined via code, rather than via a validation function, as that is the only form which
+// can be written in the generated validators.
+ajv.addKeyword({
+  keyword: 'bigint',
+  schemaType: 'boolean',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`typeof ${cxt.data} !== "bigint"`)
+  },
+  error: { message: 'must be bigint' }
+})
+
+ajv.addKeyword({
+  keyword: 'map',
+  schemaType: 'boolean',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`!(${cxt.data} instanceof Map)`)
+  },
+  error: { message: 'must be Map' }
+})
+
+ajv.addKeyword({
+  keyword: 'function',
+  schemaType: 'boolean',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`typeof ${cxt.data} !== "function"`)
+  },
+  error: { message: 'must be function' }
+})
+
+ajv.addKeyword({
+  keyword: 'buffer',
+  schemaType: 'boolean',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`!Buffer.isBuffer(${cxt.data})`)
+  },
+  error: { message: 'must be Buffer' }
+})
+
+ajv.addKeyword({
+  keyword: 'gteProperty',
+  schemaType: 'string',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`!(${cxt.data} >= ${cxt.it.parentData}[${cxt.schema as string}])`)
+  },
+  error: {
+    message: (cxt: KeywordErrorCxt) => str`must be greater than or equal to $dataVar$/${cxt.schema as string}`
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'lteProperty',
+  schemaType: 'string',
+  code (cxt: KeywordCxt) {
+    cxt.fail(_`!(${cxt.data} < ${cxt.it.parentData}[${cxt.schema as string}])`)
+  },
+  error: {
+    message: (cxt: KeywordErrorCxt) => str`must be less than or equal to $dataVar$/${cxt.schema as string}`
+  }
+})
+
+ajv.addKeyword({
+  keyword: 'enumeration', // This mimics the enum keyword but defines a custom error message
+  schemaType: 'object',
+  code (cxt: KeywordCxt) {
+    const { allowed } = cxt.schema as EnumerationDefinition<string | number>
+    cxt.fail(_`!${stringify(allowed)}.includes(${cxt.data})`)
+  },
+  error: {
+    message: (cxt: KeywordErrorCxt) => str`${(cxt.schema as EnumerationDefinition<string | number>).errorMessage!}`
+  }
+})
+
+// The validators to generate for each client, and the schema in its options.ts file each one comes from
+export const sources: Record<string, Record<string, string>> = {
+  base: {
+    baseOptionsValidator: 'baseOptionsSchema',
+    metadataOptionsValidator: 'metadataOptionsSchema'
+  },
+  producer: {
+    produceOptionsValidator: 'produceOptionsSchema',
+    producerOptionsValidator: 'producerOptionsSchema',
+    sendOptionsValidator: 'sendOptionsSchema',
+    producerStreamOptionsValidator: 'producerStreamOptionsSchema'
+  },
+  consumer: {
+    groupOptionsValidator: 'groupOptionsValidationSchema',
+    groupIdAndOptionsValidator: 'groupIdAndOptionsSchema',
+    consumeOptionsValidator: 'consumeOptionsSchema',
+    consumerOptionsValidator: 'consumerOptionsSchema',
+    fetchOptionsValidator: 'fetchOptionsSchema',
+    commitOptionsValidator: 'commitOptionsSchema',
+    listCommitsOptionsValidator: 'listCommitsOptionsSchema',
+    listOffsetsOptionsValidator: 'listOffsetsOptionsSchema',
+    getLagOptionsValidator: 'getLagOptionsSchema'
+  },
+  admin: {
+    createTopicsOptionsValidator: 'createTopicOptionsSchema',
+    createPartitionsOptionsValidator: 'createPartitionsOptionsSchema',
+    listTopicsOptionsValidator: 'listTopicOptionsSchema',
+    deleteTopicsOptionsValidator: 'deleteTopicOptionsSchema',
+    listGroupsOptionsValidator: 'listGroupsOptionsSchema',
+    describeGroupsOptionsValidator: 'describeGroupsOptionsSchema',
+    deleteGroupsOptionsValidator: 'deleteGroupsOptionsSchema',
+    removeMembersFromConsumerGroupOptionsValidator: 'removeMembersFromConsumerGroupOptionsSchema',
+    describeClientQuotasOptionsValidator: 'describeClientQuotasOptionsSchema',
+    alterClientQuotasOptionsValidator: 'alterClientQuotasOptionsSchema',
+    describeLogDirsOptionsValidator: 'describeLogDirsOptionsSchema',
+    alterConsumerGroupOffsetsOptionsValidator: 'alterConsumerGroupOffsetsOptionsSchema',
+    deleteConsumerGroupOffsetsOptionsValidator: 'deleteConsumerGroupOffsetsOptionsSchema',
+    deleteRecordsOptionsValidator: 'deleteRecordsOptionsSchema',
+    listConsumerGroupOffsetsOptionsValidator: 'listConsumerGroupOffsetsOptionsSchema',
+    describeConfigsOptionsValidator: 'describeConfigsOptionsSchema',
+    alterConfigsOptionsValidator: 'alterConfigsOptionsSchema',
+    incrementalAlterConfigsOptionsValidator: 'incrementalAlterConfigsOptionsSchema',
+    createAclsOptionsValidator: 'createAclsOptionsSchema',
+    describeAclsOptionsValidator: 'describeAclsOptionsSchema',
+    deleteAclsOptionsValidator: 'deleteAclsOptionsSchema',
+    adminListOffsetsOptionsValidator: 'adminListOffsetsOptionsSchema',
+    findCoordinatorOptionsValidator: 'findCoordinatorOptionsSchema'
+  }
+}
+
+const header = `// This is autogenerated from the generate:validators script, do not edit manually.
+// @ts-nocheck
+/* eslint-disable */
+import type { ValidateFunction } from 'ajv'
+`
+
+export function validatorsFile (source: string): URL {
+  return new URL(`../src/clients/${source}/validators.ts`, import.meta.url)
+}
+
+export async function generateValidators (source: string): Promise<string> {
+  const schemas = (await import(`../src/clients/${source}/options.ts`)) as Record<string, object>
+
+  const names: Record<string, string> = {}
+  for (const [name, schema] of Object.entries(sources[source])) {
+    if (!schemas[schema]) {
+      throw new Error(`Cannot find the schema ${schema} for ${name}.`)
+    }
+
+    const key = `${source}:${name}`
+    ajv.removeSchema(key)
+    ajv.addSchema(schemas[schema], key)
+    names[name] = key
+  }
+
+  let code = standaloneCode(ajv, names)
+
+  // The only runtime helper of ajv which the schemas need is the one to measure strings, which is inlined
+  const ucs2lengthHelper = 'require("ajv/dist/runtime/ucs2length").default'
+  if (code.includes(ucs2lengthHelper)) {
+    code = code.replaceAll(ucs2lengthHelper, 'ucs2length') + '\n' + ucs2length.toString() + '\n'
+  }
+
+  // The validators must not depend on ajv at all
+  if (code.includes('require(') || /^import /m.test(code)) {
+    throw new Error(`The validators for ${source} need a runtime helper of ajv, which is not supported.`)
+  }
+
+  code = code.replace(/^"use strict";/, '')
+
+  for (const name of Object.keys(names)) {
+    const pattern = new RegExp(`^export const ${name} = (\\w+);`, 'm')
+
+    if (!pattern.test(code)) {
+      throw new Error(`Cannot find the export of ${name} in the generated code.`)
+    }
+
+    code = code.replace(pattern, `export const ${name}: ValidateFunction = $1 as unknown as ValidateFunction;`)
+  }
+
+  return header + code.trimEnd() + '\n'
+}
+
+export async function checkValidators (): Promise<string[]> {
+  const stale: string[] = []
+
+  for (const source of Object.keys(sources)) {
+    const expected = await generateValidators(source)
+    const current = await readFile(validatorsFile(source), 'utf-8').catch(() => '')
+
+    if (current !== expected) {
+      stale.push(source)
+    }
+  }
+
+  return stale
+}
+
+// The options.ts files indirectly import the generated files, so those must exist and export all the
+// validators before the schemas can be loaded. Missing ones are replaced by placeholders.
+async function ensureValidatorsFiles (): Promise<void> {
+  for (const [source, validators] of Object.entries(sources)) {
+    const current = await readFile(validatorsFile(source), 'utf-8').catch(() => '')
+    const names = Object.keys(validators)
+
+    if (names.some(name => !current.includes(`export const ${name}:`))) {
+      const placeholders = names.map(name => `export const ${name}: ValidateFunction = undefined\n`).join('')
+      await writeFile(validatorsFile(source), header + placeholders, 'utf-8')
+    }
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await ensureValidatorsFiles()
+
+  for (const source of Object.keys(sources)) {
+    await writeFile(validatorsFile(source), await generateValidators(source), 'utf-8')
+  }
+}

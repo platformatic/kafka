@@ -16,18 +16,31 @@ import { createConsumer, createProducer, createTestGroupId, createTopic, kafkaBo
 
 const produceApiKey = 0
 
-// Counts the Produce requests which are written to the brokers from now on
+// Counts the Produce requests which are written to the brokers from now on and do not fail.
+// The ones which fail are not counted since a broker can reject the first requests for a topic
+// which was just created, for instance while it is still becoming the leader, and the client retries.
 function countProduceRequests (t: TestContext): () => number {
   let count = 0
 
-  function onApi (context: ConnectionDiagnosticEvent): void {
+  function onStart (context: ConnectionDiagnosticEvent): void {
     if (context.apiKey === produceApiKey) {
       count++
     }
   }
 
-  connectionsApiChannel.start.subscribe(onApi as (message: unknown) => void)
-  t.after(() => connectionsApiChannel.start.unsubscribe(onApi as (message: unknown) => void))
+  function onError (context: ConnectionDiagnosticEvent): void {
+    if (context.apiKey === produceApiKey) {
+      count--
+    }
+  }
+
+  connectionsApiChannel.start.subscribe(onStart as (message: unknown) => void)
+  connectionsApiChannel.error.subscribe(onError as (message: unknown) => void)
+
+  t.after(() => {
+    connectionsApiChannel.start.unsubscribe(onStart as (message: unknown) => void)
+    connectionsApiChannel.error.unsubscribe(onError as (message: unknown) => void)
+  })
 
   return () => count
 }

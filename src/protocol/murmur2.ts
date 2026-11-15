@@ -1,4 +1,9 @@
-import { LRUCache } from 'mnemonist'
+import type { LRUCache as LRUCacheType } from 'mnemonist'
+import { createRequire } from 'node:module'
+
+// mnemonist only exposes its single modules to require(), and its main entry point loads all of them
+const require = createRequire(import.meta.url)
+const LRUCache: typeof LRUCacheType = require('mnemonist/lru-cache.js')
 
 // This is a Javascript port of
 // https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/utils/Utils.java#L492

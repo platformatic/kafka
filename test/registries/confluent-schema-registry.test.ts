@@ -394,6 +394,69 @@ test('supports JSON Schema drafts 04, 06, 07, and 2020-12', async () => {
   }
 })
 
+test('configures AJV registration for JSON schema versions with the same ID', async t => {
+  const drafts = [
+    { name: 'default', uri: undefined, idKeyword: '$id' },
+    { name: 'draft-04', uri: 'http://json-schema.org/draft-04/schema#', idKeyword: 'id' },
+    { name: 'draft-06', uri: 'http://json-schema.org/draft-06/schema#', idKeyword: '$id' },
+    { name: 'draft-07', uri: 'http://json-schema.org/draft-07/schema#', idKeyword: '$id' },
+    { name: '2020-12', uri: 'https://json-schema.org/draft/2020-12/schema', idKeyword: '$id' }
+  ]
+
+  for (const draft of drafts) {
+    for (const addUsedSchema of [undefined, true, false]) {
+      await t.test(`${draft.name}, addUsedSchema: ${addUsedSchema ?? 'default'}`, async t => {
+        const registry = new ConfluentSchemaRegistry({
+          url: confluentSchemaRegistryUrl,
+          jsonAjvOptions: addUsedSchema === undefined ? undefined : { addUsedSchema }
+        })
+        const schemas = [1, 10].map(minimum => ({
+          ...(draft.uri ? { $schema: draft.uri } : {}),
+          [draft.idKeyword]: 'https://example.com/versioned.json',
+          type: 'object',
+          definitions: { value: { type: 'integer', minimum } },
+          properties: { value: { $ref: '#/definitions/value' } },
+          required: ['value']
+        }))
+        let fetches = 0
+        t.mock.method(globalThis, 'fetch', async () => {
+          return new Response(JSON.stringify({ schemaType: 'JSON', schema: JSON.stringify(schemas[fetches++]) }))
+        })
+
+        for (const id of [1, 2]) {
+          const error = await new Promise<Error | undefined>(resolve => {
+            registry.fetchSchema(id, error => resolve(error as Error | undefined))
+          })
+
+          if (id === 2 && addUsedSchema !== false) {
+            match(error!.message, /already exists/)
+            strictEqual(registry.get(2), undefined)
+          } else {
+            strictEqual(error, undefined)
+          }
+        }
+
+        // Each Confluent ID must retain its own validation rules, including local references.
+        const validateFirst = registry.get(1)!.schema as (data: unknown) => boolean
+        strictEqual(validateFirst({ value: 1 }), true)
+        strictEqual(validateFirst({ value: 0 }), false)
+
+        if (addUsedSchema === false) {
+          const validateSecond = registry.get(2)!.schema as (data: unknown) => boolean
+          strictEqual(validateSecond({ value: 10 }), true)
+          strictEqual(validateSecond({ value: 1 }), false)
+          strictEqual(validateFirst({ value: 1 }), true)
+
+          strictEqual(registry.get(1)!.schema, validateFirst)
+          strictEqual(registry.get(2)!.schema, validateSecond)
+        }
+
+        strictEqual(fetches, 2)
+      })
+    }
+  }
+})
+
 test('deduplicates concurrent fetches for the same JSON schema ID', async () => {
   const subject = createSubject()
   const schemaId = await registerSchema(

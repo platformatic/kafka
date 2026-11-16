@@ -649,20 +649,66 @@ test('readRecordsBatch throws when the records are truncated', () => {
   throws(() => readRecordsBatch(Reader.from(encoded)), { code: 'OUT_OF_BOUNDS' })
 })
 
-test('createRecordsBatch returns the batch as a head and a contiguous body', () => {
+test('createRecordsBatch returns the batch as a single buffer', () => {
   const messages: MessageRecord[] = []
   for (let i = 0; i < 100; i++) {
     messages.push({ topic: 'topic', partition: 0, key: Buffer.from(`key-${i}`), value: Buffer.from(`value-${i}`) })
   }
 
-  const writer = createRecordsBatch(messages)
+  for (const compression of ['none', 'gzip'] as const) {
+    const writer = createRecordsBatch(messages, { compression })
 
-  // Whoever serializes the batch next must not have to merge several small buffers for each record
-  strictEqual(writer.buffers.length, 2)
-  strictEqual(writer.buffers[0].length, 21)
+    // Whoever serializes the batch next must not have to merge several small buffers for each record
+    strictEqual(writer.buffers.length, 1)
 
-  const batch = readRecordsBatch(Reader.from(writer))
-  strictEqual(batch.length, writer.length - 12)
-  strictEqual(batch.records.length, 100)
-  strictEqual(batch.records[99].value!.toString(), 'value-99')
+    const batch = readRecordsBatch(Reader.from(writer))
+    strictEqual(batch.length, writer.length - 12)
+    strictEqual(batch.records.length, 100)
+    strictEqual(batch.records[99].key!.toString(), 'key-99')
+    strictEqual(batch.records[99].value!.toString(), 'value-99')
+  }
+})
+
+test('createRecordsBatch encodes records exactly as createRecord does', () => {
+  const messages: MessageRecord[] = [
+    { topic: 'topic', partition: 0, value: Buffer.from('first'), timestamp: 1000n },
+    { topic: 'topic', partition: 0, key: Buffer.alloc(0), value: Buffer.alloc(0), timestamp: 1001n },
+    { topic: 'topic', partition: 0, key: Buffer.alloc(200, 1), value: Buffer.alloc(20000, 2), timestamp: 999n },
+    {
+      topic: 'topic',
+      partition: 0,
+      key: Buffer.from('key'),
+      value: Buffer.from('value'),
+      headers: new Map([
+        [Buffer.from('a'), Buffer.from('1')],
+        [Buffer.from('b'), Buffer.alloc(0)]
+      ]),
+      timestamp: 1000n + 2n ** 31n - 1n
+    },
+    { topic: 'topic', partition: 0, value: Buffer.from('last'), headers: new Map(), timestamp: 1000n - 2n ** 31n }
+  ]
+
+  const expected = Buffer.concat(messages.map((message, i) => createRecord({ ...message }, i, 1000n).buffer))
+  const batch = createRecordsBatch(messages).buffer
+
+  deepStrictEqual(batch.subarray(61), expected)
+})
+
+test('createRecordsBatch preserves timestamps which are far from the first one', () => {
+  const firstTimestamp = 1_700_000_000_000n
+  // More than 2 ** 31 milliseconds, which is about 24 days, in both directions and up to the int64 limits
+  const deltas = [0n, 2n ** 31n, -(2n ** 31n) - 1n, 2n ** 40n, -(2n ** 40n), 2n ** 62n, -(2n ** 62n)]
+
+  const messages: MessageRecord[] = deltas.map(delta => {
+    return { topic: 'topic', partition: 0, value: Buffer.from('value'), timestamp: firstTimestamp + delta }
+  })
+
+  const batch = readRecordsBatch(Reader.from(createRecordsBatch(messages)))
+
+  strictEqual(batch.firstTimestamp, firstTimestamp)
+  strictEqual(batch.maxTimestamp, firstTimestamp + 2n ** 62n)
+  deepStrictEqual(
+    batch.records.map(record => record.timestampDelta),
+    deltas
+  )
 })

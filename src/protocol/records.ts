@@ -1,4 +1,4 @@
-import { DynamicBuffer, int64ZigZagDecode, intZigZagDecode, OutOfBoundsError } from '@platformatic/dynamic-buffer'
+import { int64ZigZagDecode, intZigZagDecode, OutOfBoundsError } from '@platformatic/dynamic-buffer'
 import { UnsupportedCompressionError } from '../errors.ts'
 import type { NumericMap } from '../utils.ts'
 import {
@@ -8,8 +8,8 @@ import {
   compressionsAlgorithmsByBitmask
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
-import { INT32_SIZE, INT64_SIZE, INT8_SIZE, type NullableString } from './definitions.ts'
-import { Reader } from './reader.ts'
+import { INT32_SIZE, INT64_SIZE, type NullableString } from './definitions.ts'
+import { type Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
 export const CURRENT_RECORD_VERSION = 2
@@ -331,9 +331,93 @@ function readRecords (buffer: Buffer, count: number, records: KafkaRecord[]): vo
   }
 }
 
+// Offset of the records in a batch: BATCH_HEAD, PartitionLeaderEpoch, Magic, CRC and the fields from Attributes on
+const RECORDS_OFFSET = 61
+// Offset of the Attributes, which is where the data covered by the CRC starts
+const CRC_DATA_OFFSET = 21
+
+const INT32_MIN = -0x80000000
+const INT32_MAX = 0x7fffffff
+
+/*
+  Records are written straight into the buffer of their batch with the helpers below.
+
+  Using a Writer for each record means several small buffers for each of them, which then must be merged
+  to compute the CRC of the batch. Here the exact size of every record is computed first, so that a single
+  buffer of the right size can be allocated and nothing has to be merged, copied twice or grown.
+*/
+function sizeOfVarInt (value: number): number {
+  const encoded = ((value << 1) ^ (value >> 31)) >>> 0
+
+  if (encoded < 0x80) {
+    return 1
+  } else if (encoded < 0x4000) {
+    return 2
+  } else if (encoded < 0x200000) {
+    return 3
+  } else if (encoded < 0x10000000) {
+    return 4
+  }
+
+  return 5
+}
+
+function sizeOfVarInt64 (value: bigint): number {
+  let encoded = BigInt.asUintN(64, (value << 1n) ^ (value >> 63n))
+  let size = 1
+
+  while (encoded > 0x7fn) {
+    size++
+    encoded >>= 7n
+  }
+
+  return size
+}
+
+function sizeOfVarIntBytes (value: Buffer | null | undefined): number {
+  // A missing value is encoded as a length of -1, which takes a single byte
+  return value == null ? 1 : sizeOfVarInt(value.length) + value.length
+}
+
+function writeVarInt (buffer: Buffer, value: number, position: number): number {
+  let encoded = ((value << 1) ^ (value >> 31)) >>> 0
+
+  while (encoded > 0x7f) {
+    buffer[position++] = (encoded & 0x7f) | 0x80
+    encoded >>>= 7
+  }
+
+  buffer[position++] = encoded
+  return position
+}
+
+function writeVarInt64 (buffer: Buffer, value: bigint, position: number): number {
+  let encoded = BigInt.asUintN(64, (value << 1n) ^ (value >> 63n))
+
+  while (encoded > 0x7fn) {
+    buffer[position++] = Number(encoded & 0x7fn) | 0x80
+    encoded >>= 7n
+  }
+
+  buffer[position++] = Number(encoded)
+  return position
+}
+
+function writeVarIntBytes (buffer: Buffer, value: Buffer | null | undefined, position: number): number {
+  if (value == null) {
+    return writeVarInt(buffer, -1, position)
+  }
+
+  position = writeVarInt(buffer, value.length, position)
+  buffer.set(value, position)
+
+  return position + value.length
+}
+
 interface PreparedRecordsBatch {
   attributes: number
-  buffer: DynamicBuffer
+  // The encoded records, preceded by as many unused bytes as requested
+  buffer: Buffer
   firstSequence: number
   firstTimestamp: bigint
   maxTimestamp: bigint
@@ -341,27 +425,102 @@ interface PreparedRecordsBatch {
 
 function prepareRecordsBatch (
   messages: MessageRecord[],
-  options: Partial<CreateRecordsBatchOptions>
+  options: Partial<CreateRecordsBatchOptions>,
+  reserved: number
 ): PreparedRecordsBatch {
+  const count = messages.length
   const now = BigInt(Date.now())
   const firstTimestamp = messages[0].timestamp ?? now
   let maxTimestamp = firstTimestamp
 
-  const buffer = new DynamicBuffer()
-  for (let i = 0; i < messages.length; i++) {
-    let ts = messages[i].timestamp ?? now
+  /*
+    First pass: compute the size of each record.
+
+    Timestamp deltas are kept as numbers when they fit in 32 bits, which is true unless a batch spans more than
+    24 days, so that BigInt is only used to subtract. NaN marks the deltas which need the full 64 bits.
+  */
+  const sizes = new Int32Array(count)
+  const deltas = new Float64Array(count)
+  let size = reserved
+
+  for (let i = 0; i < count; i++) {
+    const message = messages[i]
+    let ts = message.timestamp ?? now
 
     /* c8 ignore next 3 - Hard to test */
     if (typeof ts === 'number') {
       ts = BigInt(ts)
     }
 
-    messages[i].timestamp = ts
+    message.timestamp = ts
 
     if (ts > maxTimestamp) maxTimestamp = ts
 
-    const record = createRecord(messages[i], i, firstTimestamp)
-    buffer.appendFrom(record.dynamicBuffer)
+    const delta = Number(ts - firstTimestamp)
+    let recordSize = 1 // Attributes
+
+    if (delta >= INT32_MIN && delta <= INT32_MAX) {
+      deltas[i] = delta
+      recordSize += sizeOfVarInt(delta)
+    } else {
+      deltas[i] = NaN
+      recordSize += sizeOfVarInt64(ts - firstTimestamp)
+    }
+
+    recordSize += sizeOfVarInt(i) + sizeOfVarIntBytes(message.key) + sizeOfVarIntBytes(message.value)
+
+    const headers = message.headers
+
+    if (headers == null) {
+      recordSize += 1
+    } else {
+      recordSize += sizeOfVarInt(headers.size)
+
+      for (const [key, value] of headers) {
+        recordSize += sizeOfVarIntBytes(key) + sizeOfVarIntBytes(value)
+      }
+    }
+
+    sizes[i] = recordSize
+    size += sizeOfVarInt(recordSize) + recordSize
+  }
+
+  // Second pass: write the records
+  const buffer = Buffer.allocUnsafe(size)
+  let position = reserved
+
+  for (let i = 0; i < count; i++) {
+    const message = messages[i]
+
+    position = writeVarInt(buffer, sizes[i], position)
+    buffer[position++] = 0 // Attributes are unused for now
+
+    const delta = deltas[i]
+
+    // NaN is the only value which is different from itself
+    /* eslint-disable-next-line no-self-compare */
+    if (delta === delta) {
+      position = writeVarInt(buffer, delta, position)
+    } else {
+      position = writeVarInt64(buffer, (message.timestamp as bigint) - firstTimestamp, position)
+    }
+
+    position = writeVarInt(buffer, i, position)
+    position = writeVarIntBytes(buffer, message.key, position)
+    position = writeVarIntBytes(buffer, message.value, position)
+
+    const headers = message.headers
+
+    if (headers == null) {
+      position = writeVarInt(buffer, 0, position)
+    } else {
+      position = writeVarInt(buffer, headers.size, position)
+
+      for (const [key, value] of headers) {
+        position = writeVarIntBytes(buffer, key, position)
+        position = writeVarIntBytes(buffer, value, position)
+      }
+    }
   }
 
   let attributes = 0
@@ -397,72 +556,79 @@ function getCompressionAlgorithm (
   return algorithm
 }
 
+/*
+  Fills in everything which precedes the records and returns the batch.
+
+  When the records are not compressed, prepared.buffer already has room for those fields in front of the records.
+  When they are, the compressed records are copied after them in a new buffer.
+*/
 function finalizeRecordsBatch (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions>,
-  prepared: PreparedRecordsBatch
+  prepared: PreparedRecordsBatch,
+  compressed?: Buffer
 ): Writer {
-  // Phase 1: Prepare the message from Attributes (included) to the end
-  const body = Writer.create()
-    .appendInt16(prepared.attributes)
-    // LastOffsetDelta, FirstTimestamp and MaxTimestamp are extracted from the messages
-    .appendInt32(messages.length - 1)
-    .appendInt64(BigInt(prepared.firstTimestamp))
-    .appendInt64(BigInt(prepared.maxTimestamp))
-    .appendInt64(options.producerId ?? -1n)
-    .appendInt16(options.producerEpoch ?? 0)
-    .appendInt32(prepared.firstSequence)
-    .appendInt32(messages.length) // Number of records
-    .appendFrom(prepared.buffer).buffer
+  let batch = prepared.buffer
 
-  /*
-    The body above is made of several small buffers for each record and it has to be contiguous to compute the CRC.
-    That contiguous copy is what gets returned, rather than the original pieces, so that whoever serializes
-    the batch next (the produce request and then the connection) only has to deal with two buffers.
-  */
+  if (compressed) {
+    batch = Buffer.allocUnsafe(RECORDS_OFFSET + compressed.length)
+    batch.set(compressed, RECORDS_OFFSET)
+  }
 
-  // Phase 2: Prepare FirstOffset, Length, PartitionLeaderEpoch, Magic and CRC
-  const head = Buffer.allocUnsafe(BATCH_HEAD + INT32_SIZE + INT8_SIZE + INT32_SIZE)
-  head.writeBigInt64BE(0n, 0) // FirstOffset is 0
-  head.writeInt32BE(INT32_SIZE + INT8_SIZE + INT32_SIZE + body.length, INT64_SIZE)
-  head.writeInt32BE(options.partitionLeaderEpoch ?? 0, BATCH_HEAD)
-  head.writeInt8(CURRENT_RECORD_VERSION, BATCH_HEAD + INT32_SIZE)
-  head.writeUInt32BE(crc32c(body), BATCH_HEAD + INT32_SIZE + INT8_SIZE)
+  batch.writeBigInt64BE(0n, 0) // FirstOffset is 0
+  batch.writeInt32BE(batch.length - BATCH_HEAD, 8) // Length
+  batch.writeInt32BE(options.partitionLeaderEpoch ?? 0, 12)
+  batch.writeInt8(CURRENT_RECORD_VERSION, 16)
+  batch.writeInt16BE(prepared.attributes, 21)
+  // LastOffsetDelta, FirstTimestamp and MaxTimestamp are extracted from the messages
+  batch.writeInt32BE(messages.length - 1, 23)
+  batch.writeBigInt64BE(BigInt(prepared.firstTimestamp), 27)
+  batch.writeBigInt64BE(BigInt(prepared.maxTimestamp), 35)
+  batch.writeBigInt64BE(options.producerId ?? -1n, 43)
+  batch.writeInt16BE(options.producerEpoch ?? 0, 51)
+  batch.writeInt32BE(prepared.firstSequence, 53)
+  batch.writeInt32BE(messages.length, 57) // Number of records
 
-  return Writer.create().append(head).append(body)
+  // The CRC covers everything from the Attributes to the end of the batch
+  batch.writeUInt32BE(crc32c(batch.subarray(CRC_DATA_OFFSET)), 17)
+
+  return Writer.create().append(batch)
 }
 
 export function createRecordsBatch (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions> = {}
 ): Writer {
-  const prepared = prepareRecordsBatch(messages, options)
   const algorithm = getCompressionAlgorithm(options.compression)
 
-  if (algorithm) {
-    prepared.attributes |= algorithm.bitmask
-    prepared.buffer = new DynamicBuffer(algorithm.compressSync(prepared.buffer.buffer))
+  if (!algorithm) {
+    return finalizeRecordsBatch(messages, options, prepareRecordsBatch(messages, options, RECORDS_OFFSET))
   }
 
-  return finalizeRecordsBatch(messages, options, prepared)
+  const prepared = prepareRecordsBatch(messages, options, 0)
+  prepared.attributes |= algorithm.bitmask
+
+  return finalizeRecordsBatch(messages, options, prepared, algorithm.compressSync(prepared.buffer))
 }
 
 export async function createRecordsBatchAsync (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions> = {}
 ): Promise<Writer> {
-  const prepared = prepareRecordsBatch(messages, options)
   const algorithm = getCompressionAlgorithm(options.compression)
 
-  if (algorithm) {
-    prepared.attributes |= algorithm.bitmask
-    const compressed = algorithm.compress
-      ? await algorithm.compress(prepared.buffer.buffer)
-      : algorithm.compressSync(prepared.buffer.buffer)
-    prepared.buffer = new DynamicBuffer(compressed)
+  if (!algorithm) {
+    return finalizeRecordsBatch(messages, options, prepareRecordsBatch(messages, options, RECORDS_OFFSET))
   }
 
-  return finalizeRecordsBatch(messages, options, prepared)
+  const prepared = prepareRecordsBatch(messages, options, 0)
+  prepared.attributes |= algorithm.bitmask
+
+  const compressed = algorithm.compress
+    ? await algorithm.compress(prepared.buffer)
+    : algorithm.compressSync(prepared.buffer)
+
+  return finalizeRecordsBatch(messages, options, prepared, compressed)
 }
 
 // TODO: Early bail out if there are not enough bytes to read all the records as it might be truncated

@@ -1112,8 +1112,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       const messagesByDestination = new Map<number, MessageRecord[]>()
 
-      // Track the number of messages per partition so we can update the sequence number
-      const messagesPerPartition = new NumericMap()
+      /*
+        Track the number of messages per partition so we can update the sequence number.
+        Sequences only exist for idempotent producers, so nothing is tracked otherwise. The count is
+        kept by topic and then by partition so that no key has to be built for each message.
+      */
+      const messagesPerPartition = produceOptions.sequences ? new Map<string, Map<number, number>>() : undefined
 
       // Normalize the partition of all messages, then enqueue them to their destination
       for (const message of messages) {
@@ -1128,18 +1132,29 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           messagesByDestination.set(leader, destination)
         }
 
-        const messagePartitionKey = `${message.topic}:${partition}`
-        messagesPerPartition.postIncrement(messagePartitionKey, 1, 0)
+        if (messagesPerPartition) {
+          let topicMessages = messagesPerPartition.get(topic)
+          if (!topicMessages) {
+            topicMessages = new Map()
+            messagesPerPartition.set(topic, topicMessages)
+          }
+
+          topicMessages.set(partition!, (topicMessages.get(partition!) ?? 0) + 1)
+        }
+
         destination.push(message)
       }
 
       // Track nodes so that we can get their ID for delayed write reporting
       const nodes: number[] = []
-      const sequenceSnapshot = produceOptions.sequences ? new NumericMap() : undefined
+      if (messagesPerPartition) {
+        const sequenceSnapshot = new NumericMap()
 
-      if (sequenceSnapshot) {
-        for (const [partitionKey, messagesCount] of messagesPerPartition) {
-          sequenceSnapshot.set(partitionKey, this.#sequences.postIncrement(partitionKey, messagesCount, 0))
+        for (const [topic, topicMessages] of messagesPerPartition) {
+          for (const [partition, messagesCount] of topicMessages) {
+            const partitionKey = `${topic}:${partition}`
+            sequenceSnapshot.set(partitionKey, this.#sequences.postIncrement(partitionKey, messagesCount, 0))
+          }
         }
 
         produceOptions = { ...produceOptions, sequences: sequenceSnapshot }

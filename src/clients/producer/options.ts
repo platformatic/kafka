@@ -35,11 +35,16 @@ export const produceOptionsSchema = {
   additionalProperties: false
 }
 
+// How many bytes of messages can be waiting, when lingering is enabled, before they are sent without waiting further
+export const defaultBatchMaxBytes = 16_384
+
 export const produceOptionsValidator = compileLazily(produceOptionsSchema)
 export const producerOptionsValidator = compileLazily({
   type: 'object',
   properties: {
     ...produceOptionsProperties,
+    linger: { type: 'number', minimum: 0 },
+    batchMaxBytes: { type: 'integer', minimum: 1 },
     serializers: serdeProperties,
     beforeSerialization: { function: true },
     registry: { type: 'object' }

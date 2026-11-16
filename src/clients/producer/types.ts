@@ -53,6 +53,8 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
 export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
   ProduceOptions<Key, Value, HeaderKey, HeaderValue> & {
     transactionalId?: string
+    linger?: number
+    batchMaxBytes?: number
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
     beforeSerialization?: BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>
     registry?: SchemaRegistry<unknown, unknown, Key, Value, HeaderKey, HeaderValue>

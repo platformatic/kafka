@@ -67,6 +67,7 @@ import {
   type SerializerWithHeaders
 } from '../serde.ts'
 import {
+  defaultBatchMaxBytes,
   produceOptionsValidator,
   producerOptionsValidator,
   producerStreamOptionsValidator,
@@ -91,6 +92,22 @@ export function noopSerializer (data?: Buffer): Buffer | undefined {
   return data
 }
 
+/*
+  The send() calls which are waiting to be produced together when lingering is enabled.
+  All of them were made with the same settings, see #lingerKey.
+*/
+interface PendingSends {
+  key: string
+  topics: Set<string>
+  messages: MessageRecord[]
+  // For each send(), how many of the messages above belong to it and who to notify
+  sends: { count: number, callback: CallbackWithPromise<ProduceResult> }[]
+  bytes: number
+  sendOptions: Required<SendOptions<any, any, any, any>>
+  produceOptions: Partial<CreateRecordsBatchOptions>
+  timer: NodeJS.Timeout
+}
+
 export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
   ProducerOptions<Key, Value, HeaderKey, HeaderValue>
 > {
@@ -107,6 +124,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #coordinatorId: number | undefined
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
   #streams: Set<ProducerStream<Key, Value, HeaderKey, HeaderValue>>
+  #linger: number
+  #batchMaxBytes: number
+  #pendingSends: PendingSends | undefined
   #sendOperation: (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProduceResult>
@@ -155,6 +175,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#headerKeySerializer = serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
     this.#streams = new Set()
+    this.#linger = options.linger ?? 0
+    this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
     this[kOptions].transactionalId ??= randomUUID()
 
     if (this[kPrometheus]) {
@@ -213,6 +235,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (this[kClosed]) {
       callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    // Messages which are still lingering must be sent before closing
+    if (this.#pendingSends) {
+      this.#flushPendingSends(() => {
+        this.close(force as boolean, callback!)
+      })
+
       return callback[kCallbackPromise]
     }
 
@@ -1062,6 +1093,27 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const topicsArray = Array.from(topics)
+
+    if (this.#linger > 0) {
+      /*
+        Transactions and explicit producer IDs are never merged with other send() calls.
+        Whatever is lingering is sent first, so that messages are still produced in the order they were sent.
+      */
+      if (this.#transaction || typeof options.producerId !== 'undefined' || typeof options.producerEpoch !== 'undefined') {
+        this.#flushPendingSends()
+      } else {
+        this.#lingerSend(
+          topicsArray,
+          messages,
+          options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+          produceOptions,
+          callback
+        )
+
+        return
+      }
+    }
+
     if (this.#transaction) {
       // Get the metadata for topics, we need to normalize the partitions
       this[kMetadata]({ topics: topicsArray, autocreateTopics: options.autocreateTopics }, (error, metadata) => {
@@ -1094,6 +1146,173 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         callback
       )
     }
+  }
+
+  /*
+    Queues the messages of a send() call so that they are produced together with the ones of the other calls
+    made within the linger time, or until batchMaxBytes are waiting.
+
+    Only calls made with the same settings can share a produce request. When the settings change, what is
+    waiting is sent first.
+  */
+  #lingerSend (
+    topics: string[],
+    messages: MessageRecord[],
+    sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+    produceOptions: Partial<CreateRecordsBatchOptions>,
+    callback: CallbackWithPromise<ProduceResult>
+  ): void {
+    const key = `${sendOptions.acks}:${produceOptions.compression}:${sendOptions.idempotent}:${sendOptions.autocreateTopics}:${sendOptions.repeatOnStaleMetadata}`
+
+    if (this.#pendingSends && this.#pendingSends.key !== key) {
+      this.#flushPendingSends()
+    }
+
+    let pending = this.#pendingSends
+
+    if (!pending) {
+      pending = this.#pendingSends = {
+        key,
+        topics: new Set(),
+        messages: [],
+        sends: [],
+        bytes: 0,
+        sendOptions,
+        produceOptions,
+        timer: setTimeout(() => this.#flushPendingSends(), this.#linger)
+      }
+    }
+
+    for (const topic of topics) {
+      pending.topics.add(topic)
+    }
+
+    for (const message of messages) {
+      pending.messages.push(message)
+      pending.bytes += (message.key?.length ?? 0) + message.value.length
+
+      if (message.headers) {
+        for (const [headerKey, headerValue] of message.headers) {
+          pending.bytes += headerKey.length + headerValue.length
+        }
+      }
+    }
+
+    pending.sends.push({ count: messages.length, callback })
+
+    if (pending.bytes >= this.#batchMaxBytes) {
+      this.#flushPendingSends()
+    }
+  }
+
+  #flushPendingSends (onComplete?: () => void): void {
+    const pending = this.#pendingSends
+
+    if (!pending) {
+      onComplete?.()
+      return
+    }
+
+    this.#pendingSends = undefined
+    clearTimeout(pending.timer)
+
+    const { messages, sends } = pending
+
+    this.#performSend(
+      Array.from(pending.topics),
+      messages,
+      pending.sendOptions as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+      pending.produceOptions,
+      (error, result) => {
+        // A single send() gets exactly what it would have got without lingering
+        if (sends.length === 1) {
+          sends[0].callback(error, result)
+          onComplete?.()
+          return
+        }
+
+        if (error) {
+          for (const send of sends) {
+            send.callback(error)
+          }
+
+          onComplete?.()
+          return
+        }
+
+        if (!result!.offsets) {
+          for (const send of sends) {
+            send.callback(null, { unwritableNodes: result!.unwritableNodes?.slice() })
+          }
+
+          onComplete?.()
+          return
+        }
+
+        /*
+          The broker returns the offset of the first message of each partition. Messages keep their order
+          within a partition, so the offset of each message is that one plus the number of messages which
+          precede it in the same partition. Each send() is given the offset of its own first message.
+        */
+        const firstOffsets = new Map<string, Map<number, bigint>>()
+
+        for (const { topic, partition, offset } of result!.offsets) {
+          let topicOffsets = firstOffsets.get(topic)
+          if (!topicOffsets) {
+            topicOffsets = new Map()
+            firstOffsets.set(topic, topicOffsets)
+          }
+
+          topicOffsets.set(partition, offset)
+        }
+
+        const produced = new Map<string, Map<number, number>>()
+        let index = 0
+
+        for (const send of sends) {
+          const offsets: NonNullable<ProduceResult['offsets']> = []
+          const seen = new Map<string, Set<number>>()
+
+          for (const end = index + send.count; index < end; index++) {
+            const topic = messages[index].topic
+            const partition = messages[index].partition!
+
+            let topicProduced = produced.get(topic)
+            if (!topicProduced) {
+              topicProduced = new Map()
+              produced.set(topic, topicProduced)
+            }
+
+            const position = topicProduced.get(partition) ?? 0
+            topicProduced.set(partition, position + 1)
+
+            let topicSeen = seen.get(topic)
+            if (!topicSeen) {
+              topicSeen = new Set()
+              seen.set(topic, topicSeen)
+            }
+
+            if (!topicSeen.has(partition)) {
+              topicSeen.add(partition)
+
+              const firstOffset = firstOffsets.get(topic)?.get(partition)
+
+              /* c8 ignore next 3 - The broker always returns an offset for the partitions it was sent */
+              if (typeof firstOffset === 'undefined') {
+                continue
+              }
+
+              // When the broker does not assign offsets (-1), there is nothing to add to
+              offsets.push({ topic, partition, offset: firstOffset < 0n ? firstOffset : firstOffset + BigInt(position) })
+            }
+          }
+
+          send.callback(null, { offsets })
+        }
+
+        onComplete?.()
+      }
+    )
   }
 
   #performSend (

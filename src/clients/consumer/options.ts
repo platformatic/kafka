@@ -259,6 +259,13 @@ export const listCommitsOptionsValidator = ajv.compile(listCommitsOptionsSchema)
 export const listOffsetsOptionsValidator = ajv.compile(listOffsetsOptionsSchema)
 export const getLagOptionsValidator = ajv.compile(getLagOptionsSchema)
 
+/*
+  Default per-partition fetch limit, which matches the max.partition.fetch.bytes default of the Java client.
+  A larger value lets a single fetch response hold a very large amount of records, which are all decoded and
+  pushed to the stream in one synchronous pass: this blocks the event loop and raises the peak memory usage.
+*/
+export const defaultMaxBytesPerPartition = 1_048_576 // 1 MB
+
 export const defaultConsumerOptions = {
   autocommit: true,
   sessionTimeout: 60_000, // One minute

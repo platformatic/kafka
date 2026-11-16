@@ -21,6 +21,7 @@ import {
   CompressionAlgorithms,
   ConfluentSchemaRegistry,
   type Connection,
+  type ConsumeOptions,
   Consumer,
   consumerCommitsChannel,
   consumerConsumesChannel,
@@ -34,6 +35,7 @@ import {
   consumerOffsetsChannel,
   COOPERATIVE_STICKY_ASSIGNOR,
   defaultConsumerOptions,
+  defaultMaxBytesPerPartition,
   type ExtendedGroupProtocolSubscription,
   FetchIsolationLevels,
   fetchV12,
@@ -1313,7 +1315,7 @@ test('consume should return a MessagesStream instance and support diagnostic cha
           deserializers: {},
           highWaterMark: defaultConsumerOptions.highWaterMark,
           maxBytes: defaultConsumerOptions.maxBytes,
-          maxBytesPerPartition: defaultConsumerOptions.maxBytes
+          maxBytesPerPartition: defaultMaxBytesPerPartition
         },
         operationId: mockedOperationId
       })
@@ -1335,6 +1337,38 @@ test('consume should return a MessagesStream instance and support diagnostic cha
   strictEqual(stream.closed, false, 'Stream should not be closed initially')
 
   verifyTracingChannel()
+})
+
+test('consume should default maxBytesPerPartition to 1MB', async t => {
+  const consumer = createConsumer(t)
+  const options: ConsumeOptions<Buffer, Buffer, Buffer, Buffer> = { topics: [] }
+
+  const stream = await consumer.consume(options)
+  t.after(() => stream.close())
+
+  strictEqual(defaultMaxBytesPerPartition, 1_048_576)
+  strictEqual(options.maxBytes, defaultConsumerOptions.maxBytes)
+  strictEqual(options.maxBytesPerPartition, defaultMaxBytesPerPartition)
+})
+
+test('consume should not default maxBytesPerPartition above maxBytes', async t => {
+  const consumer = createConsumer(t)
+  const options: ConsumeOptions<Buffer, Buffer, Buffer, Buffer> = { topics: [], maxBytes: 1000 }
+
+  const stream = await consumer.consume(options)
+  t.after(() => stream.close())
+
+  strictEqual(options.maxBytesPerPartition, 1000)
+})
+
+test('consume should use the maxBytesPerPartition of the consumer when not specified', async t => {
+  const consumer = createConsumer(t, { maxBytesPerPartition: 1_048_576 * 8 })
+  const options: ConsumeOptions<Buffer, Buffer, Buffer, Buffer> = { topics: [] }
+
+  const stream = await consumer.consume(options)
+  t.after(() => stream.close())
+
+  strictEqual(options.maxBytesPerPartition, 1_048_576 * 8)
 })
 
 test('consume should automatically join the group if not already joined', async t => {

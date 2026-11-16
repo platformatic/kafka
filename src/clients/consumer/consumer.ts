@@ -108,6 +108,7 @@ import {
   consumeOptionsValidator,
   consumerOptionsValidator,
   defaultConsumerOptions,
+  defaultMaxBytesPerPartition,
   fetchOptionsValidator,
   getLagOptionsValidator,
   groupIdAndOptionsValidator,
@@ -421,7 +422,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     options.autocommit ??= this[kOptions].autocommit! ?? true
     options.maxBytes ??= this[kOptions].maxBytes!
-    options.maxBytesPerPartition ??= this[kOptions].maxBytesPerPartition ?? options.maxBytes
+    // A partition can never be granted more than the limit of the whole response
+    options.maxBytesPerPartition ??=
+      this[kOptions].maxBytesPerPartition ?? Math.min(options.maxBytes, defaultMaxBytesPerPartition)
     options.highWaterMark ??= this[kOptions].highWaterMark!
     options.registry ??= this[kOptions].registry
     options.beforeDeserialization ??= this[kOptions].beforeDeserialization

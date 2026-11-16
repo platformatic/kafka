@@ -83,6 +83,15 @@ test('the main entry point should export all the codecs', () => {
   }
 })
 
+test('the main entry point should export the types of the codecs through their names', () => {
+  // This is checked by the compiler: the types must be the same ones the apis entry point exports
+  const response: main.metadataV12.MetadataResponse = {} as apis.metadataV12.MetadataResponse
+  const request: apis.produceV11.ProduceRequest = {} as main.produceV11.ProduceRequest
+  const fetched: main.fetchV17.FetchResponse = {} as apis.fetchV17.FetchResponse
+
+  ok(response && request && fetched)
+})
+
 test('the main entry point should not load the codecs until they are used', () => {
   const output = runScript(`
     import { createRequire } from 'node:module'

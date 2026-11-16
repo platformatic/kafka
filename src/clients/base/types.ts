@@ -51,6 +51,7 @@ export interface BaseOptions extends ConnectionOptions {
   timeout?: number
   retries?: number | boolean
   retryDelay?: number | RetryDelayGetter
+  maxRetryErrors?: number
   metadataMaxAge?: number
   knownBrokersMaxAge?: number
   maxAbsentKnownBrokers?: number
@@ -65,4 +66,5 @@ export interface MetadataOptions {
   forceUpdate?: boolean
   metadataMaxAge?: number
   retries?: number
+  maxRetryErrors?: number
 }

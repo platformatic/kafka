@@ -30,6 +30,7 @@ Creates a new base client.
 | `timeout`               | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`               | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
 | `retryDelay`            | `number` \| `function` | `1000`    | Amount of time in milliseconds to wait between retries, or a function to calculate custom delays. See section below.                                               |
+| `maxRetryErrors`        | `number`               | `10`      | Maximum number of errors kept while retrying an operation. The first error and the most recent ones are kept.                                                      |
 | `metadataMaxAge`        | `number`               | 5 seconds | Maximum lifetime of cluster metadata.                                                                                                                              |
 | `knownBrokersMaxAge`    | `number`               | 1 hour    | How long a broker missing from metadata responses is kept as a connection fallback. `0` drops it at the next metadata update.                                      |
 | `maxAbsentKnownBrokers` | `number`               | `10`      | Maximum number of brokers missing from the latest metadata response kept as connection fallbacks, keeping the most recently seen. `0` disables the fallbacks.      |
@@ -78,6 +79,7 @@ The return value is a [`ClusterMetadata`](./other.md#clustermetadata) object.
 | `forceUpdate`      | `boolean`  | `false`   | Whether to retrieve metadata even if the in-memory cache is still valid. |
 | `autocreateTopics` | `boolean`  | `false`   | Whether to autocreate missing topics.                                    |
 | `metadataMaxAge`   | `number`   | 5 seconds | Maximum lifetime of cluster metadata.                                    |
+| `maxRetryErrors`   | `number`   | `10`      | Overrides the client `maxRetryErrors` option for this call.              |
 
 ### `close([callback])`
 

@@ -1,12 +1,9 @@
-import * as AjvDraft04Module from 'ajv-draft-04'
-import draft06MetaSchema from 'ajv/dist/refs/json-schema-draft-06.json' with { type: 'json' }
-import { Ajv, type AnySchema, type ErrorObject, type Options, type ValidateFunction } from 'ajv'
-import { Ajv2020 } from 'ajv/dist/2020.js'
-import avro, { type Type } from 'avsc'
+import type { Ajv, AnySchema, ErrorObject, Options, ValidateFunction } from 'ajv'
+import type { Type } from 'avsc'
 import { createRequire } from 'node:module'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
-import { type parse, type Root } from 'protobufjs'
+import type { parse, Root } from 'protobufjs'
 import { type Callback } from '../apis/definitions.ts'
 import {
   type BeforeDeserializationHook,
@@ -40,7 +37,11 @@ type JsonSchemaValidator = {
   compile: (schema: AnySchema) => ValidateFunction
   errorsText: Ajv['errorsText']
 }
-const AjvDraft04 = AjvDraft04Module.default as unknown as new (options: Options) => JsonSchemaValidator
+type JsonSchemaValidators = {
+  latest: JsonSchemaValidator
+  draft7: JsonSchemaValidator
+  draft04: JsonSchemaValidator
+}
 
 type ConfluentSchemaRegistryMessageToProduce = MessageToProduce<unknown, unknown, unknown, unknown>
 
@@ -230,9 +231,9 @@ export class ConfluentSchemaRegistry<
   #protobufParse: typeof parse | undefined
   #protobufTypeMapper: ConfluentSchemaRegistryProtobufTypeMapper
   #jsonValidateSend: boolean
-  #jsonAjv: Ajv2020
-  #jsonAjvDraft7: Ajv
-  #jsonAjvDraft04: JsonSchemaValidator
+  #jsonAjvOptions: Options
+  #jsonAjv: Promise<JsonSchemaValidators> | undefined
+  #jsonErrorsText: Ajv['errorsText'] | undefined
   #pendingFetches: Map<number, Promise<void>>
   #auth: ConfluentSchemaRegistryOptions['auth'] | undefined
   #headers: ConfluentSchemaRegistryOptions['headers'] | undefined
@@ -248,11 +249,7 @@ export class ConfluentSchemaRegistry<
     this.#schemas = new Map()
     this.#protobufTypeMapper = options.protobufTypeMapper ?? defaultProtobufTypeMapper
     this.#jsonValidateSend = options.jsonValidateSend ?? false
-    const jsonAjvOptions = { allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions }
-    this.#jsonAjv = new Ajv2020(jsonAjvOptions)
-    this.#jsonAjvDraft7 = new Ajv(jsonAjvOptions)
-    this.#jsonAjvDraft7.addMetaSchema(draft06MetaSchema)
-    this.#jsonAjvDraft04 = new AjvDraft04(jsonAjvOptions)
+    this.#jsonAjvOptions = { allErrors: true, coerceTypes: false, strict: true, ...options.jsonAjvOptions }
     this.#auth = options.auth
     this.#headers = options.headers
     this.#timeout = options.timeout ?? defaultConfluentSchemaRegistryOptions.timeout
@@ -490,35 +487,60 @@ export class ConfluentSchemaRegistry<
     const schemaType = responseBody.schemaType ?? 'AVRO'
 
     switch (schemaType) {
-      case 'AVRO':
+      case 'AVRO': {
+        // The libraries for each format are only loaded when a schema of that format is found
+        const { default: avro } = await import('avsc')
         this.#schemas.set(id, { id, type: 'avro', schema: avro.Type.forSchema(JSON.parse(schema)) })
         break
+      }
       case 'PROTOBUF':
         this.#protobufParse ??= this.#loadProtobuf()
         this.#schemas.set(id, { id, type: 'protobuf', schema: this.#protobufParse!(schema).root })
         break
       case 'JSON': {
         const jsonSchema = JSON.parse(schema) as AnySchema
-        this.#schemas.set(id, { id, type: 'json', schema: this.#getJsonAjv(jsonSchema).compile(jsonSchema) })
+        const validator = await this.#getJsonAjv(jsonSchema)
+        this.#schemas.set(id, { id, type: 'json', schema: validator.compile(jsonSchema) })
         break
       }
     }
   }
 
-  #getJsonAjv (schema: AnySchema): JsonSchemaValidator {
+  async #loadJsonAjv (): Promise<JsonSchemaValidators> {
+    const [{ Ajv2020 }, { Ajv }, { default: AjvDraft04Module }, { default: draft06MetaSchema }] = await Promise.all([
+      import('ajv/dist/2020.js'),
+      import('ajv'),
+      import('ajv-draft-04'),
+      import('ajv/dist/refs/json-schema-draft-06.json', { with: { type: 'json' } })
+    ])
+
+    const AjvDraft04 = AjvDraft04Module as unknown as new (options: Options) => JsonSchemaValidator
+    const latest = new Ajv2020(this.#jsonAjvOptions)
+    const draft7 = new Ajv(this.#jsonAjvOptions)
+    draft7.addMetaSchema(draft06MetaSchema)
+
+    this.#jsonErrorsText = latest.errorsText.bind(latest)
+
+    return { latest, draft7, draft04: new AjvDraft04(this.#jsonAjvOptions) }
+  }
+
+  async #getJsonAjv (schema: AnySchema): Promise<JsonSchemaValidator> {
+    this.#jsonAjv ??= this.#loadJsonAjv()
+    const validators = await this.#jsonAjv
+
     if (typeof schema !== 'object' || schema === null || typeof schema.$schema !== 'string') {
-      return this.#jsonAjv
+      return validators.latest
     }
 
     if (schema.$schema.includes('draft-04')) {
-      return this.#jsonAjvDraft04
+      return validators.draft04
     }
 
     if (schema.$schema.includes('draft-06') || schema.$schema.includes('draft-07')) {
-      return this.#jsonAjvDraft7
+      return validators.draft7
     }
 
-    return this.#jsonAjv
+    return validators.latest
   }
 
   #schemaSerializer (
@@ -567,7 +589,7 @@ export class ConfluentSchemaRegistry<
           const valid = validate(data)
           if (!valid) {
             throw new SchemaValidationError(
-              `JSON Schema validation failed before serialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
+              `JSON Schema validation failed before serialization: ${this.#jsonErrorsText!(validate.errors)}`,
               {
                 schemaId,
                 schemaType: 'json',
@@ -653,7 +675,7 @@ export class ConfluentSchemaRegistry<
 
         if (!valid) {
           throw new SchemaValidationError(
-            `JSON Schema validation failed before deserialization: ${this.#jsonAjv.errorsText(validate.errors)}`,
+            `JSON Schema validation failed before deserialization: ${this.#jsonErrorsText!(validate.errors)}`,
             {
               schemaId,
               schemaType: 'json',

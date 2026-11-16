@@ -2445,6 +2445,240 @@ test('fetch should refresh metadata and reset leader epoch when leadership moves
   ])
 })
 
+async function fetchAcrossLeadershipChange (
+  t: TestContext,
+  leadersBefore: number[],
+  leadersAfter: number[]
+): Promise<{ sentTo: number[]; response: FetchResponse }> {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { retryDelay: 0 })
+  const pool = consumer[kCreateConnectionPool]()
+  const sentTo: number[] = []
+  let metadataCalls = 0
+  let connectedTo = -1
+
+  t.after(() => pool.close())
+
+  const createMetadata = (leaders: number[]): ClusterMetadata => ({
+    id: 'cluster',
+    controllerId: 0,
+    brokers: new Map([0, 1, 2].map(nodeId => [nodeId, { nodeId, ...broker, rack: null }])),
+    topics: new Map([
+      [
+        topic,
+        {
+          id: topicId,
+          partitions: leaders.map(leader => ({
+            leader,
+            leaderEpoch: 1,
+            replicas: [0, 1, 2],
+            isr: [0, 1, 2],
+            offlineReplicas: []
+          })),
+          partitionsCount: leaders.length,
+          lastUpdate: Date.now()
+        }
+      ]
+    ]),
+    lastUpdate: Date.now()
+  })
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, createMetadata(metadataCalls++ === 0 ? leadersBefore : leadersAfter))
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, target: { nodeId: number }, callback: CallbackWithPromise<unknown>) => {
+      connectedTo = target.nodeId
+      callback(null, { instanceId: 1, send () {} })
+      return true
+    }
+  )
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      const api = (...args: unknown[]) => {
+        const done = args.at(-1) as CallbackWithPromise<FetchResponse>
+        const response = { throttleTimeMs: 0, errorCode: 0, sessionId: 0, nodeEndpoints: [], responses: [] }
+        sentTo.push(connectedTo)
+
+        // The first request reaches the old leader, which has just lost the leadership
+        if (sentTo.length === 1) {
+          done(new ResponseError(1, 17, { '': [6, null] }, response), undefined)
+          return
+        }
+
+        done(null, { ...response, sessionId: 42 })
+      }
+
+      callback(null, api)
+      return true
+    }
+  )
+
+  const response = await consumer.fetch({
+    connectionPool: pool,
+    node: 0,
+    topics: [
+      {
+        topicId,
+        partitions: leadersBefore.map((_, partition) => ({
+          partition,
+          currentLeaderEpoch: 1,
+          fetchOffset: 0n,
+          lastFetchedEpoch: 1,
+          partitionMaxBytes: 1048576
+        }))
+      }
+    ]
+  })
+
+  return { sentTo, response }
+}
+
+test('fetch should not retry against the new leader when the request partitions move to another node', async t => {
+  // Retrying against node 1 would reuse the fetch session of the caller's own requests to node 1
+  const { sentTo, response } = await fetchAcrossLeadershipChange(t, [0], [1])
+
+  deepStrictEqual(sentTo, [0])
+  deepStrictEqual(response, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, responses: [], nodeEndpoints: [] })
+})
+
+test('fetch should not retry against the requested node when the request partitions get different leaders', async t => {
+  // Node 0 leads none of the partitions anymore, so every retry against it would fail with NOT_LEADER_OR_FOLLOWER
+  const { sentTo, response } = await fetchAcrossLeadershipChange(t, [0, 0], [1, 2])
+
+  deepStrictEqual(sentTo, [0])
+  deepStrictEqual(response, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, responses: [], nodeEndpoints: [] })
+})
+
+test('fetch should keep retrying against the requested node while it still leads the request partitions', async t => {
+  const { sentTo, response } = await fetchAcrossLeadershipChange(t, [0, 0], [0, 0])
+
+  deepStrictEqual(sentTo, [0, 0])
+  strictEqual(response.sessionId, 42)
+})
+
+test('fetch should keep retrying against the preferred read replica the request was sent to', async t => {
+  const topic = 'test-topic'
+  const topicId = '00000000-0000-0000-0000-000000000001'
+  const consumer = createConsumer(t, { retryDelay: 0 })
+  const metadata = createPreferredReplicaMetadata(topic, topicId)
+  const pool = consumer[kCreateConnectionPool]()
+  const sentTo: number[] = []
+  let apiCalls = 0
+  let connectedTo = -1
+
+  t.after(() => pool.close())
+
+  // Node 0 leads the partition and points the consumer to its replica on node 1
+  await seedPreferredReadReplicas(t, consumer, metadata, {
+    throttleTimeMs: 0,
+    errorCode: 0,
+    sessionId: 0,
+    nodeEndpoints: [],
+    responses: [
+      {
+        topicId,
+        partitions: [
+          {
+            partitionIndex: 0,
+            errorCode: 0,
+            highWatermark: 0n,
+            lastStableOffset: 0n,
+            logStartOffset: 0n,
+            divergingEpoch: { epoch: -1, endOffset: -1n },
+            currentLeader: { leaderId: -1, leaderEpoch: -1 },
+            snapshotId: { endOffset: -1n, epoch: -1 },
+            abortedTransactions: [],
+            preferredReadReplica: 1,
+            records: []
+          }
+        ]
+      }
+    ]
+  })
+
+  mockMetadata(
+    consumer,
+    () => true,
+    null,
+    null,
+    (_original, _options, callback: CallbackWithPromise<unknown>) => {
+      callback(null, metadata)
+      return true
+    }
+  )
+  mockConnectionPoolGet(
+    pool,
+    () => true,
+    null,
+    null,
+    (_original, target: { nodeId: number }, callback: CallbackWithPromise<unknown>) => {
+      connectedTo = target.nodeId
+      callback(null, { instanceId: 1, send () {} })
+      return true
+    }
+  )
+  mockMethod(
+    consumer,
+    kGetApi,
+    () => true,
+    null,
+    null,
+    (_original, _name, callback: CallbackWithPromise<unknown>) => {
+      // The first attempt fails before reaching the broker, so the preferred read replica stays cached
+      if (apiCalls++ === 0) {
+        callback(new Error('Temporary failure'))
+        return true
+      }
+
+      callback(null, (...args: unknown[]) => {
+        sentTo.push(connectedTo)
+        ;(args.at(-1) as CallbackWithPromise<FetchResponse>)(null, {
+          throttleTimeMs: 0,
+          errorCode: 0,
+          sessionId: 42,
+          nodeEndpoints: [],
+          responses: []
+        })
+      })
+      return true
+    }
+  )
+
+  const response = await consumer.fetch({
+    connectionPool: pool,
+    node: 1,
+    topics: [
+      {
+        topicId,
+        partitions: [
+          { partition: 0, currentLeaderEpoch: 0, fetchOffset: 0n, lastFetchedEpoch: 0, partitionMaxBytes: 1048576 }
+        ]
+      }
+    ]
+  })
+
+  deepStrictEqual(sentTo, [1])
+  strictEqual(response.sessionId, 42)
+})
+
 test('fetch should start a new session with no forgotten partitions when the broker drops the session', async t => {
   const topicId = '00000000-0000-0000-0000-000000000001'
   const consumer = createConsumer(t)

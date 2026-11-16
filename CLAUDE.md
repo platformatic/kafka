@@ -34,6 +34,11 @@ in the `options.ts` files, so that importing the package neither loads `ajv` nor
 changing a schema, or adding a validator to `scripts/generate-validators.ts`, run
 `npm run generate:validators`. `test/clients/validators.test.ts` fails when they are out of date.
 
+The API codecs are loaded on demand through two generated tables, `src/apis/loaders.ts` and
+`src/apis/deprecated.ts`. After adding or removing a codec in one of the `src/apis/*/index.ts` files, run
+`npm run generate:loaders`. `test/apis/loaders.test.ts` fails when they are out of date. Codecs are loaded
+with `require()`, so they must not use a top-level `await`.
+
 Memory tests (`test/memory/*.memory-test.ts`) use `--expose-gc` and a 3-broker cluster
 with sustained backpressure to detect heap leaks. They are excluded from CI due to resource
 requirements but should be run manually when modifying the consumer stream, fetch loop, or

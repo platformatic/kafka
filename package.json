@@ -61,6 +61,7 @@
     "prepublishOnly": "npm run build && npm run lint",
     "postpublish": "git push origin && git push origin -f --tags",
     "generate:apis": "node scripts/generate-apis.ts",
+    "generate:loaders": "node scripts/generate-api-loaders.ts",
     "generate:errors": "node scripts/generate-errors.ts",
     "generate:validators": "node scripts/generate-validators.ts",
     "create:api": "node scripts/create-api.ts"

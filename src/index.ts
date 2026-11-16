@@ -9,9 +9,11 @@ export * from './utils.ts'
 export * from './network/index.ts'
 export * from './protocol/index.ts'
 
-// APIs. The codecs of each API version are only exported from @platformatic/kafka/apis.
+// APIs. The codecs of each API version are exported from @platformatic/kafka/apis.
+// Here they are only loaded when used, and they are deprecated.
 export * from './apis/callbacks.ts'
 export * from './apis/definitions.ts'
+export * from './apis/deprecated.ts'
 export * from './apis/enumerations.ts'
 export * from './apis/tagged-fields.ts'
 export { TelemetryCompressionTypes, type TelemetryCompressionType } from './apis/telemetry/compression-types.ts'

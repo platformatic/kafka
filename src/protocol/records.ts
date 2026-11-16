@@ -1,4 +1,4 @@
-import { DynamicBuffer } from '@platformatic/dynamic-buffer'
+import { DynamicBuffer, int64ZigZagDecode, intZigZagDecode, OutOfBoundsError } from '@platformatic/dynamic-buffer'
 import { UnsupportedCompressionError } from '../errors.ts'
 import type { NumericMap } from '../utils.ts'
 import {
@@ -9,7 +9,7 @@ import {
 } from './compression.ts'
 import { crc32c } from './crc32c.ts'
 import { INT32_SIZE, INT64_SIZE, type NullableString } from './definitions.ts'
-import { Reader } from './reader.ts'
+import { type Reader } from './reader.ts'
 import { Writer } from './writer.ts'
 
 export const CURRENT_RECORD_VERSION = 2
@@ -211,6 +211,126 @@ export function readRecord (reader: Reader): KafkaRecord {
   }
 }
 
+/*
+  Records are decoded from a contiguous Buffer with the helpers below rather than through a Reader.
+
+  A fetch response can contain hundreds of thousands of records and each of them needs at least six varints.
+  Going through the Reader costs a chunk lookup and a tuple allocation for each of those, while here the
+  position is tracked in a module variable and nothing is allocated but the record itself.
+
+  The helpers are synchronous and never re-entered, so sharing the position is safe.
+*/
+let recordsPosition = 0
+
+function readRecordVarInt (buffer: Buffer): number {
+  let value = 0
+  let shift = 0
+  let byte: number
+
+  do {
+    if (recordsPosition >= buffer.length) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    byte = buffer[recordsPosition++]
+    value += (byte & 0x7f) << shift
+    shift += 7
+  } while (byte >= 0x80)
+
+  return intZigZagDecode(value)
+}
+
+function readRecordVarInt64 (buffer: Buffer): bigint {
+  const start = recordsPosition
+  let value = 0
+  let shift = 0
+  let byte: number
+
+  // Most values, like timestamp deltas, fit in 28 bits and can be decoded without using BigInt
+  do {
+    if (recordsPosition >= buffer.length) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    if (shift === 28) {
+      recordsPosition = start
+      return readRecordLongVarInt64(buffer)
+    }
+
+    byte = buffer[recordsPosition++]
+    value |= (byte & 0x7f) << shift
+    shift += 7
+  } while (byte >= 0x80)
+
+  return BigInt(intZigZagDecode(value))
+}
+
+function readRecordLongVarInt64 (buffer: Buffer): bigint {
+  let value = 0n
+  let shift = 0n
+  let byte: number
+
+  do {
+    if (recordsPosition >= buffer.length) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    byte = buffer[recordsPosition++]
+    value += BigInt(byte & 0x7f) << shift
+    shift += 7n
+  } while (byte >= 0x80)
+
+  return int64ZigZagDecode(value)
+}
+
+function readRecordVarIntBytes (buffer: Buffer): Buffer | null {
+  const length = readRecordVarInt(buffer)
+
+  if (length === -1) {
+    return null
+  }
+
+  const end = recordsPosition + length
+
+  if (length < 0 || end > buffer.length) {
+    throw new OutOfBoundsError('Out of bounds.')
+  }
+
+  const value = buffer.subarray(recordsPosition, end)
+  recordsPosition = end
+
+  return value
+}
+
+// This must decode exactly what readRecord decodes
+function readRecords (buffer: Buffer, count: number, records: KafkaRecord[]): void {
+  recordsPosition = 0
+
+  for (let i = 0; i < count; i++) {
+    const length = readRecordVarInt(buffer)
+
+    if (recordsPosition >= buffer.length) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    const attributes = buffer.readInt8(recordsPosition++)
+    const timestampDelta = readRecordVarInt64(buffer)
+    const offsetDelta = readRecordVarInt(buffer)
+    const key = readRecordVarIntBytes(buffer)
+    const value = readRecordVarIntBytes(buffer)
+
+    const headersCount = readRecordVarInt(buffer)
+    const headers: [Buffer | null, Buffer | null][] = []
+
+    for (let j = 0; j < headersCount; j++) {
+      const headerKey = readRecordVarIntBytes(buffer)
+      headers.push([headerKey, readRecordVarIntBytes(buffer)])
+    }
+
+    records.push({ length, attributes, timestampDelta, offsetDelta, key, value, headers })
+  }
+}
+
 interface PreparedRecordsBatch {
   attributes: number
   buffer: DynamicBuffer
@@ -362,28 +482,22 @@ export function readRecordsBatch (reader: Reader): RecordsBatch {
   const recordsLength = reader.readInt32()
   const compression = batch.attributes & IS_COMPRESSED
 
-  if (compression !== 0) {
-    const algorithm = compressionsAlgorithmsByBitmask[compression]
+  const algorithm = compression !== 0 ? compressionsAlgorithmsByBitmask[compression] : undefined
 
-    if (!algorithm) {
-      throw new UnsupportedCompressionError(`Unsupported compression algorithm with bitmask ${compression}`)
-    }
-
-    // The length of all headers immediately following Length up to the length of the Records array
-    const headersLength = reader.position - initialPosition - INT32_SIZE - INT64_SIZE
-    const compressedDataLen = batch.length - headersLength
-    const buffer = algorithm.decompressSync(reader.buffer.slice(reader.position, reader.position + compressedDataLen))
-
-    // Move the original reader to the end of the compressed data
-    reader.skip(compressedDataLen)
-
-    // Replace the reader with the decompressed buffer
-    reader = Reader.from(buffer)
+  if (compression !== 0 && !algorithm) {
+    throw new UnsupportedCompressionError(`Unsupported compression algorithm with bitmask ${compression}`)
   }
 
-  for (let i = 0; i < recordsLength; i++) {
-    batch.records.push(readRecord(reader))
+  // Everything from here to the end of the batch is the records, which might be compressed
+  const recordsEnd = initialPosition + BATCH_HEAD + batch.length
+  let records = reader.buffer.slice(reader.position, recordsEnd)
+  reader.position = recordsEnd
+
+  if (algorithm) {
+    records = algorithm.decompressSync(records)
   }
+
+  readRecords(records, recordsLength, batch.records)
 
   return batch
 }

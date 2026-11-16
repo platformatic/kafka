@@ -1,5 +1,7 @@
-import { ok, strictEqual } from 'node:assert'
+import { DynamicBuffer } from '@platformatic/dynamic-buffer'
+import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
+import { gunzipSync } from 'node:zlib'
 import {
   compressionsAlgorithms,
   createRecord,
@@ -551,3 +553,98 @@ for (const [compression, algorithm] of Object.entries<CompressionAlgorithmSpecif
     }
   )
 }
+
+test('readRecordsBatch decodes the same records as readRecord, however the data is chunked', () => {
+  let seed = 1234
+
+  function random (max: number): number {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed % max
+  }
+
+  function bytes (max: number): Buffer {
+    const buffer = Buffer.allocUnsafe(random(max))
+
+    for (let i = 0; i < buffer.length; i++) {
+      buffer[i] = random(256)
+    }
+
+    return buffer
+  }
+
+  // Deltas which need from one to ten bytes as varints, in both directions
+  const deltas = [0n, 1n, -1n, 63n, 64n, 8191n, -8192n, 134217727n, 134217728n, -134217729n, 2n ** 40n, -(2n ** 62n)]
+
+  for (const compression of ['none', 'gzip'] as const) {
+    for (let iteration = 0; iteration < 50; iteration++) {
+      const firstTimestamp = 2n ** 62n + BigInt(random(1000))
+      const messages: MessageRecord[] = []
+
+      for (let i = 0; i < 1 + random(40); i++) {
+        const headers = new Map<Buffer, Buffer>()
+
+        for (let j = 0; j < random(4); j++) {
+          headers.set(bytes(20), bytes(300))
+        }
+
+        messages.push({
+          topic: 'topic',
+          partition: 0,
+          key: random(4) === 0 ? undefined : bytes(40),
+          value: bytes(random(10) === 0 ? 70000 : 200),
+          headers,
+          timestamp: i === 0 ? firstTimestamp : firstTimestamp + deltas[random(deltas.length)]
+        })
+      }
+
+      const encoded = createRecordsBatch(messages, { compression }).buffer
+
+      // Split the batch in chunks of random sizes, and surround it with other data
+      const chunks: Buffer[] = [bytes(10)]
+      const prefix = chunks[0].length
+
+      for (let position = 0; position < encoded.length;) {
+        const size = 1 + random(random(3) === 0 ? 100000 : 50)
+        chunks.push(encoded.subarray(position, position + size))
+        position += size
+      }
+
+      chunks.push(bytes(10))
+
+      const reader = Reader.from(new DynamicBuffer(chunks))
+      reader.skip(prefix)
+      const batch = readRecordsBatch(reader)
+
+      strictEqual(reader.position, prefix + encoded.length)
+      strictEqual(batch.records.length, messages.length)
+
+      // Decode the records one by one through the Reader
+      let expectedReader = Reader.from(encoded)
+      expectedReader.skip(57)
+      const count = expectedReader.readInt32()
+
+      if (compression !== 'none') {
+        expectedReader = Reader.from(gunzipSync(encoded.subarray(61)))
+      }
+
+      const expected = []
+      for (let i = 0; i < count; i++) {
+        expected.push(readRecord(expectedReader))
+      }
+
+      deepStrictEqual(batch.records, expected)
+    }
+  }
+})
+
+test('readRecordsBatch throws when the records are truncated', () => {
+  const messages: MessageRecord[] = [
+    { topic: 'topic', partition: 0, key: Buffer.from('key'), value: Buffer.from('value'), timestamp: 1n }
+  ]
+  const encoded = createRecordsBatch(messages).buffer
+
+  // Claim more records than the batch contains
+  encoded.writeInt32BE(5, 57)
+
+  throws(() => readRecordsBatch(Reader.from(encoded)), { code: 'OUT_OF_BOUNDS' })
+})

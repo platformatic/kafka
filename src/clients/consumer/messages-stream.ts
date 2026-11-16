@@ -878,7 +878,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     const headerKeyDeserializer = this.#headerKeyDeserializer
     const headerValueDeserializer = this.#headerValueDeserializer
 
-    let diagnosticContext: DiagnosticContext<unknown>
+    /*
+      Publishing on the diagnostic channel requires a context object and five publications for each message.
+      That is only worth paying for when somebody is listening.
+    */
+    const tracing = consumerReceivesChannel.hasSubscribers
+    let diagnosticContext: DiagnosticContext<unknown> | undefined
 
     let canPush = true
 
@@ -939,7 +944,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
           // Process messages
           for (const record of batch.records) {
-            const messageToConsume: MessageToConsumeWithDeserializationError = { ...record, topic, partition }
+            /*
+              The record was just decoded and is not shared with anything else, so it is extended in place rather
+              than copied. The before-deserialization hook path already does the same.
+            */
+            const messageToConsume = record as MessageToConsumeWithDeserializationError
+            messageToConsume.topic = topic
+            messageToConsume.partition = partition
+
             const offset = batch.firstOffset + BigInt(record.offsetDelta)
 
             if (offset < requestedOffsets.get(key)!) {
@@ -947,14 +959,16 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               continue
             }
 
-            diagnosticContext = createDiagnosticContext({
-              client: this.#consumer,
-              stream: this,
-              operation: 'receive',
-              raw: record
-            })
+            if (tracing) {
+              diagnosticContext = createDiagnosticContext({
+                client: this.#consumer,
+                stream: this,
+                operation: 'receive',
+                raw: record
+              })
 
-            consumerReceivesChannel.start.publish(diagnosticContext)
+              consumerReceivesChannel.start.publish(diagnosticContext)
+            }
 
             const commit = autocommit
               ? noopCallback
@@ -1030,8 +1044,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                     channel, which is where callers should react to it: logging here would be a log
                     storm waiting to happen.
                   */
-                  diagnosticContext.error = error
-                  consumerReceivesChannel.error.publish(diagnosticContext)
+                  if (diagnosticContext) {
+                    diagnosticContext.error = error
+                    consumerReceivesChannel.error.publish(diagnosticContext)
+                  }
 
                   // A hook failure happens before anything is deserialized, so nothing can be kept
                   const headersFailed = hookFailed || payloadType === 'headerKey' || payloadType === 'headerValue'
@@ -1055,8 +1071,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 } else if (action === DeserializationErrorActions.SKIP) {
                   continue
                 } else {
-                  diagnosticContext.error = error
-                  consumerReceivesChannel.error.publish(diagnosticContext)
+                  if (diagnosticContext) {
+                    diagnosticContext.error = error
+                    consumerReceivesChannel.error.publish(diagnosticContext)
+                  }
 
                   this.destroy(
                     hookFailed ? (error as Error) : new UserError('Failed to deserialize a message.', { cause: error })
@@ -1089,21 +1107,26 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 toJSON: messageToJSON
               } as Message
 
-              diagnosticContext.result = message
-
-              consumerReceivesChannel.asyncStart.publish(diagnosticContext)
-
-              canPush = this.push(message)
-
-              consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
+              if (diagnosticContext) {
+                diagnosticContext.result = message
+                consumerReceivesChannel.asyncStart.publish(diagnosticContext)
+                canPush = this.push(message)
+                consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
+              } else {
+                canPush = this.push(message)
+              }
             } catch (error) {
-              diagnosticContext.error = error
-              consumerReceivesChannel.error.publish(diagnosticContext)
+              if (diagnosticContext) {
+                diagnosticContext.error = error
+                consumerReceivesChannel.error.publish(diagnosticContext)
+              }
 
               this.destroy(new UserError('Failed to process a message.', { cause: error }))
               return
             } finally {
-              consumerReceivesChannel.end.publish(diagnosticContext)
+              if (diagnosticContext) {
+                consumerReceivesChannel.end.publish(diagnosticContext)
+              }
             }
           }
         }

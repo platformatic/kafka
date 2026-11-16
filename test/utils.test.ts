@@ -4,6 +4,7 @@ import { mock, test } from 'node:test'
 import {
   NumericMap,
   ajv,
+  compileLazily,
   debugDump,
   enumErrorMessage,
   groupByProperty,
@@ -210,4 +211,47 @@ test('NumericMap.postIncrement increments and returns old value', () => {
 
   strictEqual(map.postIncrement('key3', 1, 10), 5)
   strictEqual(map.get('key3'), 6)
+})
+
+test('compileLazily should compile the schema on the first use only', () => {
+  const schema = { type: 'object', properties: { count: { type: 'number' } }, additionalProperties: false }
+  const compilations: unknown[] = []
+  const original = ajv.compile
+
+  ajv.compile = function (this: typeof ajv, ...args: Parameters<typeof ajv.compile>) {
+    compilations.push(args[0])
+    return original.apply(this, args)
+  } as typeof ajv.compile
+
+  try {
+    const validate = compileLazily(schema)
+
+    strictEqual(validate.schema, schema)
+    deepStrictEqual(compilations, [])
+
+    strictEqual(validate({ count: 1 }), true)
+    strictEqual(validate.errors, null)
+    deepStrictEqual(compilations, [schema])
+
+    strictEqual(validate({ count: 'one' }), false)
+    strictEqual(validate.errors!.length, 1)
+    strictEqual(validate.errors![0].instancePath, '/count')
+    strictEqual(ajv.errorsText(validate.errors), 'data/count must be number')
+
+    strictEqual(validate({ count: 2 }), true)
+    strictEqual(validate.errors, null)
+    deepStrictEqual(compilations, [schema])
+
+    strictEqual(typeof validate.schemaEnv, 'object')
+  } finally {
+    ajv.compile = original
+  }
+})
+
+test('compileLazily should expose the properties of the compiled validator', () => {
+  const validate = compileLazily({ type: 'string' })
+
+  strictEqual(validate.schemaEnv.schema, validate.schema)
+  strictEqual(validate('a'), true)
+  strictEqual(validate(1), false)
 })

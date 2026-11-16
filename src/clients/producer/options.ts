@@ -1,7 +1,7 @@
 import { allowedProduceAcks, ProduceAcks } from '../../apis/enumerations.ts'
 import { allowedCompressionsAlgorithms, compressionsAlgorithms } from '../../protocol/compression.ts'
 import { messageSchema } from '../../protocol/records.ts'
-import { ajv, enumErrorMessage } from '../../utils.ts'
+import { compileLazily, enumErrorMessage } from '../../utils.ts'
 import { serdeProperties } from '../serde.ts'
 import { allowedProducerStreamReportModes, type ProducerStreamOptions, ProducerStreamReportModes } from './types.ts'
 
@@ -35,8 +35,8 @@ export const produceOptionsSchema = {
   additionalProperties: false
 }
 
-export const produceOptionsValidator = ajv.compile(produceOptionsSchema)
-export const producerOptionsValidator = ajv.compile({
+export const produceOptionsValidator = compileLazily(produceOptionsSchema)
+export const producerOptionsValidator = compileLazily({
   type: 'object',
   properties: {
     ...produceOptionsProperties,
@@ -57,7 +57,7 @@ export const sendOptionsSchema = {
   additionalProperties: false
 }
 
-export const sendOptionsValidator = ajv.compile(sendOptionsSchema)
+export const sendOptionsValidator = compileLazily(sendOptionsSchema)
 
 export const defaultProducerStreamOptions = {
   batchSize: 100,
@@ -77,4 +77,4 @@ export const producerStreamOptionsSchema = {
   additionalProperties: false
 }
 
-export const producerStreamOptionsValidator = ajv.compile(producerStreamOptionsSchema)
+export const producerStreamOptionsValidator = compileLazily(producerStreamOptionsSchema)

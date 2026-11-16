@@ -1,4 +1,5 @@
 import { type DynamicBuffer } from '@platformatic/dynamic-buffer'
+import type { AnySchema, ValidateFunction } from 'ajv'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import debug from 'debug'
 import { inspect } from 'node:util'
@@ -22,6 +23,34 @@ export type DebugDumpLogger = (...args: any[]) => void
 export { setTimeout as sleep } from 'node:timers/promises'
 
 export const ajv = new Ajv2020({ allErrors: true, coerceTypes: false, strict: true })
+
+// Compiling a schema is expensive, and most of the validators are never invoked by a process:
+// it is done the first time the validator is used rather than when the module is loaded.
+export function compileLazily<T = unknown> (schema: AnySchema): ValidateFunction<T> {
+  let compiled: ValidateFunction<T> | undefined
+
+  function getCompiled (): ValidateFunction<T> {
+    compiled ??= ajv.compile<T>(schema)
+    return compiled
+  }
+
+  const validate = function (this: unknown, ...args: Parameters<ValidateFunction<T>>): boolean {
+    const compiled = getCompiled()
+    const valid = compiled.apply(this, args)
+    validate.errors = compiled.errors
+    return valid
+  } as ValidateFunction<T>
+
+  validate.schema = schema
+
+  Object.defineProperties(validate, {
+    schemaEnv: { get: () => getCompiled().schemaEnv, enumerable: true },
+    source: { get: () => getCompiled().source, enumerable: true },
+    evaluated: { get: () => getCompiled().evaluated, enumerable: true }
+  })
+
+  return validate
+}
 
 export const loggers: Record<string, debug.Debugger> = {
   protocol: debug('plt:kafka:protocol'),

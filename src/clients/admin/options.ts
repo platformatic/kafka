@@ -11,7 +11,7 @@ import {
   KafkaConsumerGroupStates,
   IncrementalAlterConfigOperationTypes
 } from '../../apis/enumerations.ts'
-import { ajv, listErrorMessage } from '../../utils.ts'
+import { compileLazily, listErrorMessage } from '../../utils.ts'
 import { idProperty } from '../base/options.ts'
 
 export const groupsProperties = {
@@ -673,26 +673,26 @@ export const findCoordinatorOptionsSchema = {
   additionalProperties: false
 }
 
-export const createTopicsOptionsValidator = ajv.compile(createTopicOptionsSchema)
-export const createPartitionsOptionsValidator = ajv.compile(createPartitionsOptionsSchema)
-export const listTopicsOptionsValidator = ajv.compile(listTopicOptionsSchema)
-export const deleteTopicsOptionsValidator = ajv.compile(deleteTopicOptionsSchema)
-export const listGroupsOptionsValidator = ajv.compile(listGroupsOptionsSchema)
-export const describeGroupsOptionsValidator = ajv.compile(describeGroupsOptionsSchema)
-export const deleteGroupsOptionsValidator = ajv.compile(deleteGroupsOptionsSchema)
-export const removeMembersFromConsumerGroupOptionsValidator = ajv.compile(removeMembersFromConsumerGroupOptionsSchema)
-export const describeClientQuotasOptionsValidator = ajv.compile(describeClientQuotasOptionsSchema)
-export const alterClientQuotasOptionsValidator = ajv.compile(alterClientQuotasOptionsSchema)
-export const describeLogDirsOptionsValidator = ajv.compile(describeLogDirsOptionsSchema)
-export const alterConsumerGroupOffsetsOptionsValidator = ajv.compile(alterConsumerGroupOffsetsOptionsSchema)
-export const deleteConsumerGroupOffsetsOptionsValidator = ajv.compile(deleteConsumerGroupOffsetsOptionsSchema)
-export const deleteRecordsOptionsValidator = ajv.compile(deleteRecordsOptionsSchema)
-export const listConsumerGroupOffsetsOptionsValidator = ajv.compile(listConsumerGroupOffsetsOptionsSchema)
-export const describeConfigsOptionsValidator = ajv.compile(describeConfigsOptionsSchema)
-export const alterConfigsOptionsValidator = ajv.compile(alterConfigsOptionsSchema)
-export const incrementalAlterConfigsOptionsValidator = ajv.compile(incrementalAlterConfigsOptionsSchema)
-export const createAclsOptionsValidator = ajv.compile(createAclsOptionsSchema)
-export const describeAclsOptionsValidator = ajv.compile(describeAclsOptionsSchema)
-export const deleteAclsOptionsValidator = ajv.compile(deleteAclsOptionsSchema)
-export const adminListOffsetsOptionsValidator = ajv.compile(adminListOffsetsOptionsSchema)
-export const findCoordinatorOptionsValidator = ajv.compile(findCoordinatorOptionsSchema)
+export const createTopicsOptionsValidator = compileLazily(createTopicOptionsSchema)
+export const createPartitionsOptionsValidator = compileLazily(createPartitionsOptionsSchema)
+export const listTopicsOptionsValidator = compileLazily(listTopicOptionsSchema)
+export const deleteTopicsOptionsValidator = compileLazily(deleteTopicOptionsSchema)
+export const listGroupsOptionsValidator = compileLazily(listGroupsOptionsSchema)
+export const describeGroupsOptionsValidator = compileLazily(describeGroupsOptionsSchema)
+export const deleteGroupsOptionsValidator = compileLazily(deleteGroupsOptionsSchema)
+export const removeMembersFromConsumerGroupOptionsValidator = compileLazily(removeMembersFromConsumerGroupOptionsSchema)
+export const describeClientQuotasOptionsValidator = compileLazily(describeClientQuotasOptionsSchema)
+export const alterClientQuotasOptionsValidator = compileLazily(alterClientQuotasOptionsSchema)
+export const describeLogDirsOptionsValidator = compileLazily(describeLogDirsOptionsSchema)
+export const alterConsumerGroupOffsetsOptionsValidator = compileLazily(alterConsumerGroupOffsetsOptionsSchema)
+export const deleteConsumerGroupOffsetsOptionsValidator = compileLazily(deleteConsumerGroupOffsetsOptionsSchema)
+export const deleteRecordsOptionsValidator = compileLazily(deleteRecordsOptionsSchema)
+export const listConsumerGroupOffsetsOptionsValidator = compileLazily(listConsumerGroupOffsetsOptionsSchema)
+export const describeConfigsOptionsValidator = compileLazily(describeConfigsOptionsSchema)
+export const alterConfigsOptionsValidator = compileLazily(alterConfigsOptionsSchema)
+export const incrementalAlterConfigsOptionsValidator = compileLazily(incrementalAlterConfigsOptionsSchema)
+export const createAclsOptionsValidator = compileLazily(createAclsOptionsSchema)
+export const describeAclsOptionsValidator = compileLazily(describeAclsOptionsSchema)
+export const deleteAclsOptionsValidator = compileLazily(deleteAclsOptionsSchema)
+export const adminListOffsetsOptionsValidator = compileLazily(adminListOffsetsOptionsSchema)
+export const findCoordinatorOptionsValidator = compileLazily(findCoordinatorOptionsSchema)

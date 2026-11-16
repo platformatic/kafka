@@ -903,6 +903,34 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     return requestNode ?? fallbackNode
   }
 
+  // Whether every partition of the request can still be fetched from node, as its leader or its preferred read replica
+  #nodeServesRequest (
+    metadata: ClusterMetadata,
+    node: number,
+    topics: FetchRequestTopic[],
+    topicIds: Map<string, string>,
+    now: number
+  ): boolean {
+    for (const topicRequest of topics) {
+      const topic = topicIds.get(topicRequest.topicId)
+
+      if (!topic) {
+        continue
+      }
+
+      for (const { partition } of topicRequest.partitions) {
+        if (
+          metadata.topics.get(topic)!.partitions[partition].leader !== node &&
+          this[kGetFetchNode](metadata, topic, partition, now) !== node
+        ) {
+          return false
+        }
+      }
+    }
+
+    return true
+  }
+
   #fetch (
     options: FetchOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<FetchResponse>
@@ -912,7 +940,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this[kPerformWithRetry]<FetchResponse>(
       'fetch',
-      retryCallback => {
+      (retryCallback, attempt) => {
         this[kMetadata]({ topics: this.topics.current, forceUpdate: refreshMetadata }, (error, metadata) => {
           if (error) {
             refreshMetadata = NetworkError.isRetryable(error)
@@ -923,7 +951,19 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           refreshMetadata = false
 
           const topicIds = this.#topicIdsById(metadata!)
-          const node = this.#fetchNodeForRequest(metadata!, options.node, options.topics, topicIds, Date.now())
+          const now = Date.now()
+          const node = this.#fetchNodeForRequest(metadata!, options.node, options.topics, topicIds, now)
+
+          // On a retry after leadership moved off options.node, answer empty so the caller regroups the partitions:
+          // resending collides with another fetch session (INVALID_FETCH_SESSION_EPOCH) or hits NOT_LEADER_OR_FOLLOWER.
+          if (
+            attempt > 0 &&
+            (node !== options.node || !this.#nodeServesRequest(metadata!, node, options.topics, topicIds, now))
+          ) {
+            retryCallback(null, { throttleTimeMs: 0, errorCode: 0, sessionId: 0, responses: [], nodeEndpoints: [] })
+            return
+          }
+
           const broker = metadata!.brokers.get(node)
 
           if (!broker) {

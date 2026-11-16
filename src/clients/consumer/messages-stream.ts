@@ -1224,6 +1224,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         // rebalance cannot deadlock on a stream that is going away.
         const onAutocommit = (error: Error | null): void => {
           this.removeListener('close', onClose)
+
+          // The in-flight commit only carried the offsets queued when it was sent. Flush the ones
+          // queued since as well, or the cooperative rebalance revokes them uncommitted.
+          if (!error) {
+            this[kAutocommit](callback)
+            return
+          }
+
           callback(error)
         }
         const onClose = (): void => {

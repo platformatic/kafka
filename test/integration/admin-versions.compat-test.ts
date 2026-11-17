@@ -248,12 +248,22 @@ test('DescribeLogDirs reports log directories at every version', async t => {
 
   await forEachVersion(t, probe, 'DescribeLogDirs', async version => {
     const admin = await pinApiVersions(createAdmin(t), { DescribeLogDirs: version })
-    const described = await admin.describeLogDirs({ topics: [{ name: topic, partitions: [0] }] })
 
-    ok(described.length > 0, `DescribeLogDirs v${version} returned no brokers`)
-    ok(
-      described.some(broker => broker.results.some(result => result.topics.some(entry => entry.name === topic))),
-      `DescribeLogDirs v${version} did not report ${topic}`
+    // The log of a partition is created by the broker which hosts it once it has processed the creation of
+    // the topic, so a read straight after the creation races it. This is a broker behaviour, not a codec one.
+    await waitFor(
+      async () => {
+        const described = await admin.describeLogDirs({ topics: [{ name: topic, partitions: [0] }] })
+
+        ok(described.length > 0, `DescribeLogDirs v${version} returned no brokers`)
+        ok(
+          described.some(broker => broker.results.some(result => result.topics.some(entry => entry.name === topic))),
+          `DescribeLogDirs v${version} did not report ${topic}`
+        )
+
+        return true
+      },
+      { interval: 200, timeout: 15000 }
     )
   })
 })

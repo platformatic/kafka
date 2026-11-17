@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@platformatic/dynamic-buffer':
+        specifier: ^0.5.0
+        version: 0.5.0
+      '@platformatic/wasm-utils':
         specifier: ^0.4.0
         version: 0.4.0
-      '@platformatic/wasm-utils':
-        specifier: ^0.3.0
-        version: 0.3.0
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -38,7 +38,7 @@ importers:
     devDependencies:
       '@actions/artifact':
         specifier: ^6.3.1
-        version: 6.3.1(supports-color@7.2.0)
+        version: 6.3.1
       '@babel/generator':
         specifier: ^8.0.6
         version: 8.0.6
@@ -53,7 +53,7 @@ importers:
         version: 8.0.6
       '@confluentinc/kafka-javascript':
         specifier: ^1.10.1
-        version: 1.10.1(supports-color@7.2.0)
+        version: 1.10.1
       '@opentelemetry/instrumentation':
         specifier: ^0.222.0
         version: 0.222.0(@opentelemetry/api@1.9.1)(supports-color@7.2.0)
@@ -960,16 +960,16 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@platformatic/dynamic-buffer@0.4.0':
-    resolution: {integrity: sha512-eCL++LyBjSsqalm4I67dl+gVqLSKd6gPYCieD72S5KqqAkmSAgAYNHt+lL+iVXssWPSfbuIJ5PEwpn5JVD73Xw==}
+  '@platformatic/dynamic-buffer@0.5.0':
+    resolution: {integrity: sha512-iUyF211Jr1WzpwWHp+M/Kh2UWCOpqhizRijIvQwvK/XXTbmtSw05NJH3q53RkHmTWLXfTE+M1IZ6ROlAI/CW+Q==}
     engines: {node: '>= 22.19.0'}
 
   '@platformatic/rdkafka@4.1.2':
     resolution: {integrity: sha512-kCdTWWi67WCfHEfTH88UFsFm8c4UxuMt9ZXtU2WQu1LHdbFYe85/5OJ2VD4CWH9sg3M08DEtFyS7JH7gvpC+2g==}
     engines: {node: '>=16'}
 
-  '@platformatic/wasm-utils@0.3.0':
-    resolution: {integrity: sha512-tK7M2HMtVQrHBuQ/TSaDIk3YCEV6+EUQcConDrIH1kbQ7ZQiCWGrp7Jn+vd0FxoAsq2O8ZXGhANxwNpkPR8Maw==}
+  '@platformatic/wasm-utils@0.4.0':
+    resolution: {integrity: sha512-q/Ezc4ZxVm8ZaEYIk8uS/fDsryJIiLAu/FQTgCy0yHgEVmUtWzQYg/F1KnFRRiJrjqLSkEnA28PS3TjrGiSmnA==}
     engines: {node: '>= 22.19.0'}
 
   '@protobuf-ts/runtime-rpc@2.11.1':
@@ -2916,12 +2916,12 @@ packages:
 
 snapshots:
 
-  '@actions/artifact@6.3.1(supports-color@7.2.0)':
+  '@actions/artifact@6.3.1':
     dependencies:
       '@actions/core': 3.0.1
       '@actions/github': 9.1.1
       '@actions/http-client': 4.0.1
-      '@azure/storage-blob': 12.34.0(supports-color@7.2.0)
+      '@azure/storage-blob': 12.34.0
       '@octokit/core': 7.0.8
       '@octokit/plugin-request-log': 6.0.0(@octokit/core@7.0.8)
       '@octokit/plugin-retry': 8.1.1(@octokit/core@7.0.8)
@@ -3026,37 +3026,37 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@azure/core-auth@1.11.0(supports-color@7.2.0)':
+  '@azure/core-auth@1.11.0':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
 
-  '@azure/core-client@1.11.1(supports-color@7.2.0)':
+  '@azure/core-client@1.11.1':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-auth': 1.11.0(supports-color@7.2.0)
-      '@azure/core-rest-pipeline': 1.25.0(supports-color@7.2.0)
+      '@azure/core-auth': 1.11.0
+      '@azure/core-rest-pipeline': 1.25.0
       '@azure/core-tracing': 1.4.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
-      '@azure/logger': 1.4.0(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
 
-  '@azure/core-http-compat@2.5.0(@azure/core-client@1.11.1(supports-color@7.2.0))(@azure/core-rest-pipeline@1.25.0(supports-color@7.2.0))':
+  '@azure/core-http-compat@2.5.0(@azure/core-client@1.11.1)(@azure/core-rest-pipeline@1.25.0)':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-client': 1.11.1(supports-color@7.2.0)
-      '@azure/core-rest-pipeline': 1.25.0(supports-color@7.2.0)
+      '@azure/core-client': 1.11.1
+      '@azure/core-rest-pipeline': 1.25.0
 
-  '@azure/core-lro@2.7.2(supports-color@7.2.0)':
+  '@azure/core-lro@2.7.2':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
-      '@azure/logger': 1.4.0(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
@@ -3065,14 +3065,14 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@azure/core-rest-pipeline@1.25.0(supports-color@7.2.0)':
+  '@azure/core-rest-pipeline@1.25.0':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-auth': 1.11.0(supports-color@7.2.0)
+      '@azure/core-auth': 1.11.0
       '@azure/core-tracing': 1.4.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
-      '@azure/logger': 1.4.0(supports-color@7.2.0)
-      '@typespec/ts-http-runtime': 0.3.9(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
+      '@typespec/ts-http-runtime': 0.3.9
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
@@ -3081,10 +3081,10 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@azure/core-util@1.14.0(supports-color@7.2.0)':
+  '@azure/core-util@1.14.0':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@typespec/ts-http-runtime': 0.3.9(supports-color@7.2.0)
+      '@typespec/ts-http-runtime': 0.3.9
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
@@ -3094,42 +3094,42 @@ snapshots:
       fast-xml-parser: 5.11.2
       tslib: 2.8.1
 
-  '@azure/logger@1.4.0(supports-color@7.2.0)':
+  '@azure/logger@1.4.0':
     dependencies:
-      '@typespec/ts-http-runtime': 0.3.9(supports-color@7.2.0)
+      '@typespec/ts-http-runtime': 0.3.9
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
 
-  '@azure/storage-blob@12.34.0(supports-color@7.2.0)':
+  '@azure/storage-blob@12.34.0':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-auth': 1.11.0(supports-color@7.2.0)
-      '@azure/core-client': 1.11.1(supports-color@7.2.0)
-      '@azure/core-http-compat': 2.5.0(@azure/core-client@1.11.1(supports-color@7.2.0))(@azure/core-rest-pipeline@1.25.0(supports-color@7.2.0))
-      '@azure/core-lro': 2.7.2(supports-color@7.2.0)
+      '@azure/core-auth': 1.11.0
+      '@azure/core-client': 1.11.1
+      '@azure/core-http-compat': 2.5.0(@azure/core-client@1.11.1)(@azure/core-rest-pipeline@1.25.0)
+      '@azure/core-lro': 2.7.2
       '@azure/core-paging': 1.7.0
-      '@azure/core-rest-pipeline': 1.25.0(supports-color@7.2.0)
+      '@azure/core-rest-pipeline': 1.25.0
       '@azure/core-tracing': 1.4.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
       '@azure/core-xml': 1.6.0
-      '@azure/logger': 1.4.0(supports-color@7.2.0)
-      '@azure/storage-common': 12.5.0(@azure/core-client@1.11.1(supports-color@7.2.0))(supports-color@7.2.0)
+      '@azure/logger': 1.4.0
+      '@azure/storage-common': 12.5.0(@azure/core-client@1.11.1)
       apache-arrow: 21.2.0
       events: 3.3.0
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
 
-  '@azure/storage-common@12.5.0(@azure/core-client@1.11.1(supports-color@7.2.0))(supports-color@7.2.0)':
+  '@azure/storage-common@12.5.0(@azure/core-client@1.11.1)':
     dependencies:
       '@azure/abort-controller': 2.2.0
-      '@azure/core-auth': 1.11.0(supports-color@7.2.0)
-      '@azure/core-http-compat': 2.5.0(@azure/core-client@1.11.1(supports-color@7.2.0))(@azure/core-rest-pipeline@1.25.0(supports-color@7.2.0))
-      '@azure/core-rest-pipeline': 1.25.0(supports-color@7.2.0)
+      '@azure/core-auth': 1.11.0
+      '@azure/core-http-compat': 2.5.0(@azure/core-client@1.11.1)(@azure/core-rest-pipeline@1.25.0)
+      '@azure/core-rest-pipeline': 1.25.0
       '@azure/core-tracing': 1.4.0
-      '@azure/core-util': 1.14.0(supports-color@7.2.0)
-      '@azure/logger': 1.4.0(supports-color@7.2.0)
+      '@azure/core-util': 1.14.0
+      '@azure/logger': 1.4.0
       events: 3.3.0
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -3183,9 +3183,9 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@confluentinc/kafka-javascript@1.10.1(supports-color@7.2.0)':
+  '@confluentinc/kafka-javascript@1.10.1':
     dependencies:
-      '@mapbox/node-pre-gyp': 2.0.3(supports-color@7.2.0)
+      '@mapbox/node-pre-gyp': 2.0.3
       bindings: 1.5.0
       js-yaml: 4.3.2
       nan: 2.29.0
@@ -3305,11 +3305,11 @@ snapshots:
 
   '@lukeed/ms@2.0.2': {}
 
-  '@mapbox/node-pre-gyp@2.0.3(supports-color@7.2.0)':
+  '@mapbox/node-pre-gyp@2.0.3':
     dependencies:
       consola: 3.4.2
       detect-libc: 2.1.2
-      https-proxy-agent: 7.0.6(supports-color@7.2.0)
+      https-proxy-agent: 7.0.6
       node-fetch: 2.7.0
       nopt: 8.1.0
       semver: 7.8.5
@@ -3643,16 +3643,16 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@platformatic/dynamic-buffer@0.4.0': {}
+  '@platformatic/dynamic-buffer@0.5.0': {}
 
   '@platformatic/rdkafka@4.1.2':
     dependencies:
       bindings: 1.5.0
       nan: 2.29.0
 
-  '@platformatic/wasm-utils@0.3.0':
+  '@platformatic/wasm-utils@0.4.0':
     dependencies:
-      '@platformatic/dynamic-buffer': 0.4.0
+      '@platformatic/dynamic-buffer': 0.5.0
 
   '@protobuf-ts/runtime-rpc@2.11.1':
     dependencies:
@@ -3660,9 +3660,9 @@ snapshots:
 
   '@protobuf-ts/runtime@2.11.1': {}
 
-  '@stylistic/eslint-plugin@2.11.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)':
+  '@stylistic/eslint-plugin@2.11.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       eslint: 9.39.5(supports-color@7.2.0)
       eslint-visitor-keys: 4.2.1
       espree: 10.4.0
@@ -3794,7 +3794,7 @@ snapshots:
       '@typescript-eslint/parser': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       '@typescript-eslint/scope-manager': 8.71.0
       '@typescript-eslint/type-utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 8.71.0
       eslint: 9.39.5(supports-color@7.2.0)
       ignore: 7.0.12
@@ -3808,7 +3808,7 @@ snapshots:
     dependencies:
       '@typescript-eslint/scope-manager': 8.71.0
       '@typescript-eslint/types': 8.71.0
-      '@typescript-eslint/typescript-estree': 8.71.0(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/typescript-estree': 8.71.0(typescript@6.0.3)
       '@typescript-eslint/visitor-keys': 8.71.0
       debug: 4.4.3(supports-color@7.2.0)
       eslint: 9.39.5(supports-color@7.2.0)
@@ -3816,7 +3816,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/project-service@8.71.0(supports-color@7.2.0)(typescript@6.0.3)':
+  '@typescript-eslint/project-service@8.71.0(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/tsconfig-utils': 8.71.0(typescript@6.0.3)
       '@typescript-eslint/types': 8.71.0
@@ -3837,8 +3837,8 @@ snapshots:
   '@typescript-eslint/type-utils@8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
       '@typescript-eslint/types': 8.71.0
-      '@typescript-eslint/typescript-estree': 8.71.0(supports-color@7.2.0)(typescript@6.0.3)
-      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/typescript-estree': 8.71.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       debug: 4.4.3(supports-color@7.2.0)
       eslint: 9.39.5(supports-color@7.2.0)
       ts-api-utils: 2.5.0(typescript@6.0.3)
@@ -3848,9 +3848,9 @@ snapshots:
 
   '@typescript-eslint/types@8.71.0': {}
 
-  '@typescript-eslint/typescript-estree@8.71.0(supports-color@7.2.0)(typescript@6.0.3)':
+  '@typescript-eslint/typescript-estree@8.71.0(typescript@6.0.3)':
     dependencies:
-      '@typescript-eslint/project-service': 8.71.0(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/project-service': 8.71.0(typescript@6.0.3)
       '@typescript-eslint/tsconfig-utils': 8.71.0(typescript@6.0.3)
       '@typescript-eslint/types': 8.71.0
       '@typescript-eslint/visitor-keys': 8.71.0
@@ -3863,12 +3863,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/utils@8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)':
+  '@typescript-eslint/utils@8.71.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)':
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@9.39.5(supports-color@7.2.0))
       '@typescript-eslint/scope-manager': 8.71.0
       '@typescript-eslint/types': 8.71.0
-      '@typescript-eslint/typescript-estree': 8.71.0(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/typescript-estree': 8.71.0(typescript@6.0.3)
       eslint: 9.39.5(supports-color@7.2.0)
       typescript: 6.0.3
     transitivePeerDependencies:
@@ -3879,10 +3879,10 @@ snapshots:
       '@typescript-eslint/types': 8.71.0
       eslint-visitor-keys: 5.0.1
 
-  '@typespec/ts-http-runtime@0.3.9(supports-color@7.2.0)':
+  '@typespec/ts-http-runtime@0.3.9':
     dependencies:
-      http-proxy-agent: 7.0.2(supports-color@7.2.0)
-      https-proxy-agent: 7.0.6(supports-color@7.2.0)
+      http-proxy-agent: 7.0.2
+      https-proxy-agent: 7.0.6
       tslib: 2.8.1
     transitivePeerDependencies:
       - supports-color
@@ -4758,14 +4758,14 @@ snapshots:
 
   html-escaper@2.0.2: {}
 
-  http-proxy-agent@7.0.2(supports-color@7.2.0):
+  http-proxy-agent@7.0.2:
     dependencies:
       agent-base: 7.1.4
       debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
-  https-proxy-agent@7.0.6(supports-color@7.2.0):
+  https-proxy-agent@7.0.6:
     dependencies:
       agent-base: 7.1.4
       debug: 4.4.3(supports-color@7.2.0)
@@ -5106,7 +5106,7 @@ snapshots:
   neostandard@0.13.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3):
     dependencies:
       '@humanwhocodes/gitignore-to-minimatch': 1.0.2
-      '@stylistic/eslint-plugin': 2.11.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@stylistic/eslint-plugin': 2.11.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       eslint: 9.39.5(supports-color@7.2.0)
       eslint-plugin-n: 17.24.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       eslint-plugin-promise: 7.3.0(eslint@9.39.5(supports-color@7.2.0))
@@ -5807,8 +5807,8 @@ snapshots:
     dependencies:
       '@typescript-eslint/eslint-plugin': 8.71.0(@typescript-eslint/parser@8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3))(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
       '@typescript-eslint/parser': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
-      '@typescript-eslint/typescript-estree': 8.71.0(supports-color@7.2.0)(typescript@6.0.3)
-      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@typescript-eslint/typescript-estree': 8.71.0(typescript@6.0.3)
+      '@typescript-eslint/utils': 8.71.0(eslint@9.39.5(supports-color@7.2.0))(typescript@6.0.3)
       eslint: 9.39.5(supports-color@7.2.0)
       typescript: 6.0.3
     transitivePeerDependencies:

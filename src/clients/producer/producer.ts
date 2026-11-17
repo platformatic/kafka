@@ -1164,7 +1164,22 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ): void {
     const key = `${sendOptions.acks}:${produceOptions.compression}:${sendOptions.idempotent}:${sendOptions.autocreateTopics}:${sendOptions.repeatOnStaleMetadata}`
 
-    if (this.#pendingSends && this.#pendingSends.key !== key) {
+    let bytes = 0
+
+    for (const message of messages) {
+      bytes += (message.key?.length ?? 0) + (message.value?.length ?? 0)
+
+      if (message.headers) {
+        for (const [headerKey, headerValue] of message.headers) {
+          bytes += (headerKey?.length ?? 0) + (headerValue?.length ?? 0)
+        }
+      }
+    }
+
+    if (
+      this.#pendingSends &&
+      (this.#pendingSends.key !== key || this.#pendingSends.bytes + bytes > this.#batchMaxBytes)
+    ) {
       this.#flushPendingSends()
     }
 
@@ -1189,14 +1204,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     for (const message of messages) {
       pending.messages.push(message)
-      pending.bytes += (message.key?.length ?? 0) + message.value.length
-
-      if (message.headers) {
-        for (const [headerKey, headerValue] of message.headers) {
-          pending.bytes += headerKey.length + headerValue.length
-        }
-      }
     }
+
+    pending.bytes += bytes
 
     pending.sends.push({ count: messages.length, callback })
 

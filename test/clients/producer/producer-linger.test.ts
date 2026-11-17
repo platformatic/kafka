@@ -176,17 +176,56 @@ test('send should not wait for the linger time once batchMaxBytes are waiting', 
 
   const produceRequests = countProduceRequests(t)
 
-  // Neither of the first two calls reaches the limit, the third one does
+  // Together the two calls reach the limit exactly
   const results = await Promise.all([
-    producer.send({ messages: [{ topic, value: 'a'.repeat(40) }] }),
-    producer.send({ messages: [{ topic, value: 'b'.repeat(40) }] }),
-    producer.send({ messages: [{ topic, value: 'c'.repeat(40) }] })
+    producer.send({ messages: [{ topic, value: 'a'.repeat(50) }] }),
+    producer.send({ messages: [{ topic, value: 'b'.repeat(50) }] })
   ])
 
   strictEqual(produceRequests(), 1)
   deepStrictEqual(
     results.map(result => result.offsets![0].offset),
+    [0n, 1n]
+  )
+})
+
+test('send should send what is waiting before a call which would exceed batchMaxBytes', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The first two calls wait. The third would take them over the limit, so they are sent first,
+  // then the third reaches the limit on its own and is sent without waiting either.
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(40) }] }),
+    producer.send({ messages: [{ topic, value: 'b'.repeat(40) }] }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(100) }] })
+  ])
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
     [0n, 1n, 2n]
+  )
+})
+
+test('send should accept null values and null header values when lingering', async t => {
+  const producer = createProducer(t, { linger: 10 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic, key: Buffer.from('k'), value: null as unknown as Buffer }] }),
+    producer.send({
+      messages: [{ topic, value: Buffer.from('v'), headers: new Map([[Buffer.from('h'), null as unknown as Buffer]]) }]
+    })
+  ])
+
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n]
   )
 })
 
@@ -205,8 +244,9 @@ test('send should not merge calls made with different settings', async t => {
   ])
 
   strictEqual(produceRequests(), 3)
-  strictEqual(results[0].offsets![0].offset, 0n)
-  strictEqual(results[1].offsets![0].offset, 1n)
+  // The first request can be rejected and retried while the broker is still picking up the new topic,
+  // so another one can be written before it. Only the merged calls are known to be consecutive.
+  strictEqual(results[1].offsets![0].offset, results[0].offsets![0].offset + 1n)
   deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n, 2n, 3n])
 })
 

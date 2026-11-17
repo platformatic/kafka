@@ -7,8 +7,13 @@ import * as api from '../../src/index.ts'
 import { ajv, type OptionsValidator } from '../../src/index.ts'
 
 test('the generated validators should match the schemas', async () => {
-  // If this fails, run: npm run generate:validators
-  deepStrictEqual(await checkValidators(), [])
+  const outdated = await checkValidators()
+
+  deepStrictEqual(
+    outdated,
+    [],
+    `The generated validators of these clients are out of date: ${outdated.join(', ')}. Run: npm run generate:validators`
+  )
 })
 
 test('ajv setup', () => {

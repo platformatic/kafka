@@ -64,7 +64,8 @@ import {
   type BeforeHookPayloadType,
   type BeforeSerializationHook,
   type Serializer,
-  type SerializerWithHeaders
+  type SerializerWithHeaders,
+  stringSerializer
 } from '../serde.ts'
 import { defaultBatchMaxBytes } from './options.ts'
 import {
@@ -85,6 +86,9 @@ import {
   type ProducerStreamOptions,
   type SendOptions
 } from './types.ts'
+
+// How many serialized header keys a producer keeps, see #serializeHeaderKey
+const maxSerializedHeaderKeys = 256
 
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
@@ -120,6 +124,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #valueSerializer: SerializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
+  #serializedHeaderKeys: Map<string, Buffer>
   #metricsProducedMessages: Counter | undefined
   #coordinatorId: number | undefined
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
@@ -174,6 +179,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#valueSerializer = serializers?.value ?? (noopSerializer as Serializer<Value>)
     this.#headerKeySerializer = serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
+    this.#serializedHeaderKeys = new Map()
     this.#streams = new Set()
     this.#linger = options.linger ?? 0
     this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
@@ -1053,25 +1059,41 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const topic = message.topic
       let key: Buffer | undefined
       let value: Buffer | undefined
-      let headers = new Map<HeaderKey, HeaderValue>()
-      const serializedHeaders = new Map<Buffer, Buffer>()
+      let headers: Map<HeaderKey, HeaderValue> | undefined
+      let serializedHeaders: Map<Buffer, Buffer> | undefined
       const metadata = message.metadata
 
       try {
         if (message.headers) {
-          headers =
-            message.headers instanceof Map
-              ? (message.headers as Map<HeaderKey, HeaderValue>)
-              : new Map(Object.entries(message.headers) as [HeaderKey, HeaderValue][])
+          serializedHeaders = new Map()
 
-          for (const [key, value] of headers) {
-            serializedHeaders.set(
-              this.#headerKeySerializer(key as HeaderKey, metadata)!,
-              this.#headerValueSerializer(value, metadata)!
-            )
+          if (message.headers instanceof Map) {
+            headers = message.headers as Map<HeaderKey, HeaderValue>
+
+            for (const [headerKey, headerValue] of headers) {
+              serializedHeaders.set(
+                this.#serializeHeaderKey(headerKey, metadata),
+                this.#headerValueSerializer(headerValue, metadata)!
+              )
+            }
+          } else {
+            // The serializers of the key and the value receive the headers as a map, which is filled on the way
+            const source = message.headers as Record<string, HeaderValue>
+            headers = new Map()
+
+            for (const name of Object.keys(source)) {
+              const headerValue = source[name]
+
+              headers.set(name as HeaderKey, headerValue)
+              serializedHeaders.set(
+                this.#serializeHeaderKey(name as HeaderKey, metadata),
+                this.#headerValueSerializer(headerValue, metadata)!
+              )
+            }
           }
         }
 
+        headers ??= new Map()
         key = this.#keySerializer(message.key, headers, message)
         value = this.#valueSerializer(message.value, headers, message)!
       } catch (error) {
@@ -1657,6 +1679,29 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     return error
+  }
+
+  /*
+    Applications use a handful of header keys, which are the same for every message. When they are serialized
+    with the string serializer of this package the result only depends on the key, so it is kept. Nothing can be
+    assumed for other serializers, which also receive the metadata of the message.
+  */
+  #serializeHeaderKey (key: HeaderKey, metadata: unknown): Buffer {
+    if (this.#headerKeySerializer !== (stringSerializer as Serializer<HeaderKey>) || typeof key !== 'string') {
+      return this.#headerKeySerializer(key, metadata)!
+    }
+
+    let serialized = this.#serializedHeaderKeys.get(key)
+
+    if (!serialized) {
+      serialized = Buffer.from(key, 'utf-8')
+
+      if (this.#serializedHeaderKeys.size < maxSerializedHeaderKeys) {
+        this.#serializedHeaderKeys.set(key, serialized)
+      }
+    }
+
+    return serialized
   }
 
   #beforeSerialization (

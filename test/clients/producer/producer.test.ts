@@ -919,6 +919,173 @@ test('send should support messages with headers', async t => {
   strictEqual(result2.offsets?.length, 1)
 })
 
+test('send should produce the same headers for every message when the string serializer is used', async t => {
+  const topic = await createTopic(t)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+
+  // The same keys are used by several messages, across two calls, both as an object and as a map
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { first: 'a', second: 'b' } },
+      { topic, key: 'key-1', value: 'value-1', headers: { second: 'c', first: 'd' } },
+      { topic, key: 'key-2', value: 'value-2' },
+      { topic, key: 'key-3', value: 'value-3', headers: {} }
+    ]
+  })
+
+  await producer.send({
+    messages: [
+      {
+        topic,
+        key: 'key-4',
+        value: 'value-4',
+        headers: new Map([
+          ['first', 'e'],
+          ['third', 'f']
+        ])
+      }
+    ]
+  })
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push([message.key, Array.from(message.headers)])
+  }
+
+  deepStrictEqual(headers, [
+    [
+      'key-0',
+      [
+        ['first', 'a'],
+        ['second', 'b']
+      ]
+    ],
+    [
+      'key-1',
+      [
+        ['second', 'c'],
+        ['first', 'd']
+      ]
+    ],
+    ['key-2', []],
+    ['key-3', []],
+    [
+      'key-4',
+      [
+        ['first', 'e'],
+        ['third', 'f']
+      ]
+    ]
+  ])
+})
+
+test('send should keep producing headers after many different keys have been used', async t => {
+  const topic = await createTopic(t)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+
+  // More keys than the producer keeps
+  const count = 300
+  const messages = []
+  for (let i = 0; i < count; i++) {
+    messages.push({ topic, key: `key-${i}`, value: `value-${i}`, headers: { [`header-${i}`]: `${i}` } })
+  }
+
+  await producer.send({ messages })
+  await producer.send({ messages })
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push(Array.from(message.headers))
+  }
+
+  const expected = messages.map((_, i) => [[`header-${i}`, `${i}`]])
+  deepStrictEqual(headers, [...expected, ...expected])
+})
+
+test('send should call custom header serializers for every header of every message', async t => {
+  const topic = await createTopic(t)
+  const headerKeys: [string, unknown][] = []
+  const headerValues: [string, unknown][] = []
+  const received: Map<string, string>[] = []
+
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      key (data, headers) {
+        received.push(headers!)
+        return stringSerializer(data)
+      },
+      value (data, headers) {
+        received.push(headers!)
+        return stringSerializer(data)
+      },
+      headerKey (data, metadata) {
+        headerKeys.push([data!, metadata])
+        return Buffer.from(data!.toUpperCase())
+      },
+      headerValue (data, metadata) {
+        headerValues.push([data!, metadata])
+        return Buffer.from(data!)
+      }
+    }
+  })
+
+  const map = new Map([['first', 'c']])
+
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { first: 'a', second: 'b' }, metadata: 'metadata-0' },
+      { topic, key: 'key-1', value: 'value-1', headers: map, metadata: 'metadata-1' },
+      { topic, key: 'key-2', value: 'value-2' }
+    ]
+  })
+
+  deepStrictEqual(headerKeys, [
+    ['first', 'metadata-0'],
+    ['second', 'metadata-0'],
+    ['first', 'metadata-1']
+  ])
+  deepStrictEqual(headerValues, [
+    ['a', 'metadata-0'],
+    ['b', 'metadata-0'],
+    ['c', 'metadata-1']
+  ])
+
+  // The serializers of the key and the value always receive a map, which is the one of the message when it has one
+  strictEqual(received.length, 6)
+  deepStrictEqual(Array.from(received[0]), [
+    ['first', 'a'],
+    ['second', 'b']
+  ])
+  strictEqual(received[1], received[0])
+  strictEqual(received[2], map)
+  strictEqual(received[3], map)
+  deepStrictEqual(Array.from(received[4]), [])
+  strictEqual(received[5], received[4])
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push(Array.from(message.headers))
+  }
+
+  deepStrictEqual(headers, [
+    [
+      ['FIRST', 'a'],
+      ['SECOND', 'b']
+    ],
+    [['FIRST', 'c']],
+    []
+  ])
+})
+
 test('send should support messages with no key and no partition', async t => {
   const topic = await createTopic(t, true, 4)
   const producer = createProducer(t)

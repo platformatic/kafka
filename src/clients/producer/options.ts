@@ -1,7 +1,7 @@
 import { allowedProduceAcks, ProduceAcks } from '../../apis/enumerations.ts'
 import { allowedCompressionsAlgorithms, compressionsAlgorithms } from '../../protocol/compression.ts'
 import { messageSchema } from '../../protocol/records.ts'
-import { compileLazily, enumErrorMessage } from '../../utils.ts'
+import { enumErrorMessage } from '../../utils.ts'
 import { serdeProperties } from '../serde.ts'
 import { allowedProducerStreamReportModes, type ProducerStreamOptions, ProducerStreamReportModes } from './types.ts'
 
@@ -38,8 +38,7 @@ export const produceOptionsSchema = {
 // How many bytes of messages can be waiting, when lingering is enabled, before they are sent without waiting further
 export const defaultBatchMaxBytes = 16_384
 
-export const produceOptionsValidator = compileLazily(produceOptionsSchema)
-export const producerOptionsValidator = compileLazily({
+export const producerOptionsSchema = {
   type: 'object',
   properties: {
     ...produceOptionsProperties,
@@ -50,7 +49,7 @@ export const producerOptionsValidator = compileLazily({
     registry: { type: 'object' }
   },
   additionalProperties: true
-})
+}
 
 export const sendOptionsSchema = {
   type: 'object',
@@ -61,8 +60,6 @@ export const sendOptionsSchema = {
   required: ['messages'],
   additionalProperties: false
 }
-
-export const sendOptionsValidator = compileLazily(sendOptionsSchema)
 
 export const defaultProducerStreamOptions = {
   batchSize: 100,
@@ -81,5 +78,3 @@ export const producerStreamOptionsSchema = {
   },
   additionalProperties: false
 }
-
-export const producerStreamOptionsValidator = compileLazily(producerStreamOptionsSchema)

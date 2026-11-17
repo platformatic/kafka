@@ -1,5 +1,4 @@
 import { allowedFetchIsolationLevels, allowedGroupProtocols, FetchIsolationLevels } from '../../apis/enumerations.ts'
-import { compileLazily } from '../../utils.ts'
 import { idProperty, topicWithPartitionAndOffsetProperties } from '../base/options.ts'
 import { serdeProperties } from '../serde.ts'
 import { allowedMessagesStreamFallbackModes, allowedMessagesStreamModes, type ConsumerOptions } from './types.ts'
@@ -235,12 +234,12 @@ export const getLagOptionsSchema = {
   additionalProperties: false
 }
 
-export const groupOptionsValidator = compileLazily({
+export const groupOptionsValidationSchema = {
   ...groupOptionsSchema,
   dependentSchemas: groupOptionsAdditionalValidations
-})
+}
 
-export const groupIdAndOptionsValidator = compileLazily({
+export const groupIdAndOptionsSchema = {
   type: 'object',
   properties: {
     groupId: idProperty,
@@ -249,15 +248,7 @@ export const groupIdAndOptionsValidator = compileLazily({
   required: ['groupId'],
   additionalProperties: true,
   dependentSchemas: groupOptionsAdditionalValidations
-})
-
-export const consumeOptionsValidator = compileLazily(consumeOptionsSchema)
-export const consumerOptionsValidator = compileLazily(consumerOptionsSchema)
-export const fetchOptionsValidator = compileLazily(fetchOptionsSchema)
-export const commitOptionsValidator = compileLazily(commitOptionsSchema)
-export const listCommitsOptionsValidator = compileLazily(listCommitsOptionsSchema)
-export const listOffsetsOptionsValidator = compileLazily(listOffsetsOptionsSchema)
-export const getLagOptionsValidator = compileLazily(getLagOptionsSchema)
+}
 
 /*
   Default per-partition fetch limit, which matches the max.partition.fetch.bytes default of the Java client.

@@ -1,4 +1,5 @@
 // General
+export { ajv, type OptionsValidator } from './ajv.ts'
 export * from './diagnostic.ts'
 export * from './errors.ts'
 export * from './events.ts'

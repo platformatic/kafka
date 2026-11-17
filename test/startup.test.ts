@@ -15,7 +15,7 @@ test('importing the package should not load the libraries which are only needed 
   })
 
   const loaded = (JSON.parse(output) as string[]).map(file => file.replaceAll('\\', '/'))
-  const unexpected = /node_modules\/(avsc|protobufjs|ajv-draft-04|mnemonist\/index)/
+  const unexpected = /node_modules\/(ajv|avsc|protobufjs|ajv-draft-04)\/|node_modules\/mnemonist\/index/
 
   deepStrictEqual(
     loaded.filter(file => unexpected.test(file)),

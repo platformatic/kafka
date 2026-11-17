@@ -1,4 +1,4 @@
-import { type ValidateFunction } from 'ajv'
+import type { ValidateFunction } from 'ajv'
 import { randomUUID } from 'node:crypto'
 import {
   type CallbackWithPromise,
@@ -103,19 +103,18 @@ import {
   encodeConsumerProtocolSubscription
 } from './consumer-protocol.ts'
 import { MessagesStream } from './messages-stream.ts'
+import { defaultConsumerOptions, defaultMaxBytesPerPartition } from './options.ts'
 import {
   commitOptionsValidator,
   consumeOptionsValidator,
   consumerOptionsValidator,
-  defaultConsumerOptions,
-  defaultMaxBytesPerPartition,
   fetchOptionsValidator,
   getLagOptionsValidator,
   groupIdAndOptionsValidator,
   groupOptionsValidator,
   listCommitsOptionsValidator,
   listOffsetsOptionsValidator
-} from './options.ts'
+} from './validators.ts'
 import { COOPERATIVE_STICKY_ASSIGNOR, cooperativeStickyAssigner, roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {

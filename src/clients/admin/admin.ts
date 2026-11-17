@@ -140,7 +140,7 @@ import {
   listGroupsOptionsValidator,
   listTopicsOptionsValidator,
   removeMembersFromConsumerGroupOptionsValidator
-} from './options.ts'
+} from './validators.ts'
 import {
   type AdminListOffsetsOptions,
   type AdminOptions,

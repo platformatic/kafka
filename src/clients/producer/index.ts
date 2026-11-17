@@ -1,4 +1,5 @@
 export * from './options.ts'
+export * from './validators.ts'
 export * from './partitioners.ts'
 export * from './producer-stream.ts'
 export * from './producer.ts'

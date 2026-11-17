@@ -16,7 +16,7 @@ import {
   ProtocolError,
   ResponseError
 } from '../../../src/index.ts'
-import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
+import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch } from '../../../src/symbols.ts'
 import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
 
 const topic = 'test-topic'
@@ -1234,3 +1234,143 @@ test('should fall back to leader when preferred read replica fetch fails', async
 
   stream.destroy()
 })
+
+function createUncommittedPartitionConsumerMock () {
+  const consumer = createOffsetRefreshConsumerMock()
+
+  // The group never committed anything for the partition
+  consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map([[topic, [-1n]]]))
+  }
+
+  // Serve offsets 0-2 once, then keep every other fetch pending
+  let served = false
+  consumer.fetch = (_: object, callback: CallbackWithPromise<FetchResponse>) => {
+    if (served) {
+      return
+    }
+
+    served = true
+    const response = createFetchResponse(-1)
+    response.responses[0].partitions[0].records = [createRecordsBatch(0n, ['first', 'second', 'third'])]
+    callback(null, response)
+  }
+
+  return consumer
+}
+
+async function consumeFirstBatch (stream: MessagesStream<unknown, unknown, unknown, unknown>) {
+  stream.on('error', error => {
+    throw error
+  })
+
+  await new Promise<void>(resolve => {
+    stream.on('data', message => {
+      if (message.offset === 2n) {
+        resolve()
+      }
+    })
+  })
+
+  stream.pause()
+  strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 3n)
+}
+
+const triggers = {
+  'group join': (consumer: any) => consumer.emit('consumer:group:join'),
+  'assignment refresh': (_: any, stream: MessagesStream<unknown, unknown, unknown, unknown>) =>
+    stream[kRefreshOffsetsAndFetch]()
+}
+
+for (const [name, trigger] of Object.entries(triggers)) {
+  test(
+    `should restart a revoked partition without committed offsets from the fallback offset on reassignment (${name})`,
+    { timeout: 5_000 },
+    async () => {
+      const consumer = createUncommittedPartitionConsumerMock()
+      const stream = new MessagesStream(consumer, committedStreamOptions)
+      await consumeFirstBatch(stream)
+
+      // The partition moves to another member before anything was committed
+      let restored = new Promise<void>(resolve => stream.once('offsets', resolve))
+      consumer.assignments = []
+      trigger(consumer, stream)
+      await restored
+
+      // ...and later comes back. Offsets 0-2 were never committed, so they must be fetched again
+      // from the fallback offset instead of resuming after the last offset this member fetched.
+      restored = new Promise<void>(resolve => stream.once('offsets', resolve))
+      consumer.assignments = [{ topic, partitions: [0] }]
+      trigger(consumer, stream)
+      await restored
+
+      strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 0n)
+      stream.destroy()
+    }
+  )
+}
+
+test(
+  'should restart a revoked partition from the fallback offset when revoke and reassign coalesce into one refresh',
+  { timeout: 5_000 },
+  async () => {
+    const consumer = createUncommittedPartitionConsumerMock()
+    const stream = new MessagesStream(consumer, committedStreamOptions)
+    await consumeFirstBatch(stream)
+
+    let committedCalls = 0
+    let resolveDelayedStarted!: () => void
+    const delayedStarted = new Promise<void>(resolve => {
+      resolveDelayedStarted = resolve
+    })
+    consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+      committedCalls++
+
+      if (committedCalls === 1) {
+        resolveDelayedStarted()
+        setTimeout(() => callback(null, new Map([[topic, [-1n]]])), 50)
+        return
+      }
+
+      callback(null, new Map([[topic, [-1n]]]))
+    }
+
+    // Revoke p0 while keeping another partition, so the first refresh queries committed offsets and stays inflight
+    consumer.assignments = [{ topic, partitions: [1] }]
+    consumer.emit('consumer:group:join')
+    await delayedStarted
+
+    // p0 comes back while the first refresh is still running: the two rebalances share the next refresh
+    consumer.assignments = [{ topic, partitions: [0] }]
+    const restored = new Promise<void>(resolve => {
+      stream.on('offsets', () => {
+        if (committedCalls === 2) {
+          resolve()
+        }
+      })
+    })
+    consumer.emit('consumer:group:join')
+    await restored
+
+    strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 0n)
+    stream.destroy()
+  }
+)
+
+test(
+  'should keep the fetch position of a partition without committed offsets which stays assigned',
+  { timeout: 5_000 },
+  async () => {
+    const consumer = createUncommittedPartitionConsumerMock()
+    const stream = new MessagesStream(consumer, committedStreamOptions)
+    await consumeFirstBatch(stream)
+
+    const restored = new Promise<void>(resolve => stream.once('offsets', resolve))
+    consumer.generationId = 2
+    consumer.emit('consumer:group:join')
+    await restored
+
+    strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 3n)
+    stream.destroy()
+  }
+)

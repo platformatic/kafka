@@ -23,6 +23,7 @@ import {
   kAutocommit,
   kDeserializationError,
   kGetFetchNode,
+  kForgetRevokedPartitions,
   kInstance,
   kRefreshOffsetsAndFetch,
   kUpdateCommittedOffset
@@ -99,6 +100,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
   #offsetsToFetch: Map<string, bigint>
+  #assignedPartitions: Set<string>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
   #commitWaiters: Map<string, Array<{ offset: bigint; callback: Callback<void> }>>
@@ -251,6 +253,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
+    this.#assignedPartitions = new Set()
     if (offsets) {
       for (const { topic, partition, offset } of offsets) {
         this.#offsetsToFetch.set(partitionKey(topic, partition), offset)
@@ -1358,6 +1361,8 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #refreshOffsets (callback: Callback<void>) {
+    this.#forgetRevokedPartitions()
+
     /* c8 ignore next 4 - Hard to test */
     if (this.#topics.length === 0) {
       callback(null)
@@ -1430,6 +1435,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   }
 
   #scheduleRefreshOffsetsAndFetch (destroyOnError = true) {
+    // The epoch is bumped right below, so there is nothing else to do if a position is dropped.
+    this.#forgetRevokedPartitions()
+
     // Invalidate outstanding fetches immediately, not only after restoration completes.
     this.#offsetsEpoch++
     this.#refreshOffsetsDestroyOnError ||= destroyOnError
@@ -1468,8 +1476,57 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     })
   }
 
+  // Called by the consumer every time its assignments change, including when partitions are
+  // only revoked, which does not refresh the offsets.
+  [kForgetRevokedPartitions] (): void {
+    if (this.#forgetRevokedPartitions()) {
+      // A fetch issued before the revocation may still be inflight: invalidate it, otherwise its
+      // response would write back the position of the revoked partition.
+      // Partitions which are still assigned are fetched again from their current position.
+      this.#offsetsEpoch++
+    }
+  }
+
   [kRefreshOffsetsAndFetch] () {
     this.#scheduleRefreshOffsetsAndFetch(false)
+  }
+
+  // When a partition is revoked, the position this stream reached on it is no longer meaningful:
+  // another member may have consumed it in the meanwhile, and the records this stream fetched
+  // were never committed. If it is kept, #assignOffsets prefers it over the fallback offset when
+  // the partition is assigned back without a committed offset, and the stream silently skips
+  // every record between the fallback offset and that position.
+  //
+  // Returns true if any position was dropped.
+  #forgetRevokedPartitions (): boolean {
+    // Only committed mode restores positions from the group, other modes keep their positions on purpose.
+    if (this.#mode !== MessagesStreamModes.COMMITTED) {
+      return false
+    }
+
+    // Unknown assignments (not joined yet, or after leaving the group) mean nothing is owned.
+    const assigned = new Set<string>()
+    for (const topic of this.#topics) {
+      const assignment = this.#assignmentsForTopic(topic)
+
+      if (!assignment) {
+        continue
+      }
+
+      for (const partition of assignment.partitions) {
+        assigned.add(partitionKey(topic, partition))
+      }
+    }
+
+    let forgotten = false
+    for (const key of this.#assignedPartitions) {
+      if (!assigned.has(key) && this.#offsetsToFetch.delete(key)) {
+        forgotten = true
+      }
+    }
+
+    this.#assignedPartitions = assigned
+    return forgotten
   }
 
   #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {

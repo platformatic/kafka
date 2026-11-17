@@ -6,4 +6,4 @@ allowBuilds:
   '@confluentinc/kafka-javascript': false
   '@platformatic/rdkafka': false
 minimumReleaseAgeExclude:
-  - '@platformatic/wasm-utils@0.3.0'
+  - '@platformatic/wasm-utils@0.4.0'

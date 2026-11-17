@@ -1086,6 +1086,35 @@ test('send should call custom header serializers for every header of every messa
   ])
 })
 
+test('send should only produce the own properties of an object of headers', async t => {
+  const topic = await createTopic(t)
+
+  for (const serializers of [
+    stringSerializers,
+    // With serializers which are not the ones of this package the headers are also given to them as a map
+    { ...stringSerializers, value: (data?: string, headers?: Map<string, string>) => Buffer.from(`${data}:${headers!.size}`) }
+  ]) {
+    const producer = createProducer<string, string, string, string>(t, { serializers })
+    const headers = Object.create({ inherited: 'no' }) as Record<string, string>
+    headers.own = 'yes'
+
+    await producer.send({ messages: [{ topic, key: 'key', value: 'value', headers }] })
+  }
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push([message.value, Array.from(message.headers)])
+  }
+
+  deepStrictEqual(messages, [
+    ['value', [['own', 'yes']]],
+    ['value:1', [['own', 'yes']]]
+  ])
+})
+
 test('send should support messages with no key and no partition', async t => {
   const topic = await createTopic(t, true, 4)
   const producer = createProducer(t)

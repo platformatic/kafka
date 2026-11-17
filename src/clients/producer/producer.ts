@@ -64,6 +64,7 @@ import {
   type BeforeHookPayloadType,
   type BeforeSerializationHook,
   type Serializer,
+  jsonSerializer,
   type SerializerWithHeaders,
   stringSerializer
 } from '../serde.ts'
@@ -87,6 +88,13 @@ import {
   type SendOptions
 } from './types.ts'
 
+// Used with Map.forEach(), which unlike for...of does not allocate an array for each entry
+let headersBytes = 0
+
+function addHeaderBytes (value: Buffer | null | undefined, key: Buffer | null | undefined): void {
+  headersBytes += (key?.length ?? 0) + (value?.length ?? 0)
+}
+
 // How many serialized header keys a producer keeps, see #serializeHeaderKey
 const maxSerializedHeaderKeys = 256
 
@@ -95,6 +103,9 @@ const maxSerializedHeaderKeys = 256
 export function noopSerializer (data?: Buffer): Buffer | undefined {
   return data
 }
+
+// The serializers which ignore the headers and the message they are given
+const dataOnlySerializers = new Set<unknown>([noopSerializer, stringSerializer, jsonSerializer])
 
 /*
   The send() calls which are waiting to be produced together when lingering is enabled.
@@ -125,6 +136,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #headerKeySerializer: Serializer<HeaderKey>
   #headerValueSerializer: Serializer<HeaderValue>
   #serializedHeaderKeys: Map<string, Buffer>
+  #serializersUseHeaders: boolean
   #metricsProducedMessages: Counter | undefined
   #coordinatorId: number | undefined
   #transaction: Transaction<Key, Value, HeaderKey, HeaderValue> | undefined
@@ -180,6 +192,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#headerKeySerializer = serializers?.headerKey ?? (noopSerializer as Serializer<HeaderKey>)
     this.#headerValueSerializer = serializers?.headerValue ?? (noopSerializer as Serializer<HeaderValue>)
     this.#serializedHeaderKeys = new Map()
+    // The serializers of this package only look at the data, so the map of the headers is not built for them
+    this.#serializersUseHeaders =
+      !dataOnlySerializers.has(this.#keySerializer) || !dataOnlySerializers.has(this.#valueSerializer)
     this.#streams = new Set()
     this.#linger = options.linger ?? 0
     this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
@@ -1079,12 +1094,19 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           } else {
             // The serializers of the key and the value receive the headers as a map, which is filled on the way
             const source = message.headers as Record<string, HeaderValue>
-            headers = new Map()
 
-            for (const name of Object.keys(source)) {
+            if (this.#serializersUseHeaders) {
+              headers = new Map()
+            }
+
+            for (const name in source) {
+              if (!Object.hasOwn(source, name)) {
+                continue
+              }
+
               const headerValue = source[name]
 
-              headers.set(name as HeaderKey, headerValue)
+              headers?.set(name as HeaderKey, headerValue)
               serializedHeaders.set(
                 this.#serializeHeaderKey(name as HeaderKey, metadata),
                 this.#headerValueSerializer(headerValue, metadata)!
@@ -1093,7 +1115,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
         }
 
-        headers ??= new Map()
+        if (this.#serializersUseHeaders) {
+          headers ??= new Map()
+        }
+
         key = this.#keySerializer(message.key, headers, message)
         value = this.#valueSerializer(message.value, headers, message)!
       } catch (error) {
@@ -1192,9 +1217,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       bytes += (message.key?.length ?? 0) + (message.value?.length ?? 0)
 
       if (message.headers) {
-        for (const [headerKey, headerValue] of message.headers) {
-          bytes += (headerKey?.length ?? 0) + (headerValue?.length ?? 0)
-        }
+        headersBytes = 0
+        message.headers.forEach(addHeaderBytes)
+        bytes += headersBytes
       }
     }
 

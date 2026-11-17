@@ -60,7 +60,8 @@ for (const invalidMembership of ['generation', 'member']) {
 
       await consumer.commit({ offsets: [{ topic, partition: 0, offset: 10n, leaderEpoch: -1 }] })
 
-      strictEqual(rejoins, 1)
+      // Heartbeats can also detect stale membership and trigger an additional rejoin.
+      strictEqual(rejoins >= 1, true)
       strictEqual(metadataCalls > initialMetadataCalls, true)
       strictEqual(assignerCalls > initialAssignerCalls, true)
       strictEqual(selectorCalls > initialSelectorCalls, true)

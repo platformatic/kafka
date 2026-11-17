@@ -1,5 +1,9 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { test, type TestContext } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
+import type { Callback } from '../../../src/apis/definitions.ts'
+import type { ProduceResponse } from '../../../src/apis/producer/produce-v11.ts'
+import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   type ConnectionDiagnosticEvent,
   connectionsApiChannel,
@@ -12,7 +16,14 @@ import {
   type TopicWithPartitionAndOffset,
   UserError
 } from '../../../src/index.ts'
-import { createConsumer, createProducer, createTestGroupId, createTopic, kafkaBootstrapServers } from '../../helpers.ts'
+import {
+  createConsumer,
+  createProducer,
+  createTestGroupId,
+  createTopic,
+  kafkaBootstrapServers,
+  mockAPI
+} from '../../helpers.ts'
 
 const produceApiKey = 0
 
@@ -236,23 +247,61 @@ test('send should limit what waits for a request in flight', async t => {
   const topic = await createTopic(t, true)
   await producer.metadata({ topics: [topic] })
 
-  const produceRequests = countProduceRequests(t)
+  /*
+    The Produce requests are answered by the test, which decides when each of them completes.
+    Nothing is sent to the brokers: other tests set quotas on them while this one runs, and producing this
+    many bytes for real would get the connection throttled.
+  */
+  const requests: Callback<ProduceResponse>[] = []
+  mockAPI(producer[kConnections], produceApiKey, null, null, (_original: unknown, ...args: unknown[]) => {
+    requests.push(args.at(-1) as Callback<ProduceResponse>)
+    return true
+  })
 
-  // The first call is sent at once. The second and the third wait for it, the fourth would take what is
-  // waiting over 256 KiB: they are sent while the first request is still in flight. The fourth is sent
-  // once nothing is in flight anymore.
-  const results = await Promise.all([
-    producer.send({ messages: [{ topic, value: 'a'.repeat(100) }] }),
-    producer.send({ messages: [{ topic, value: 'b'.repeat(100_000) }] }),
-    producer.send({ messages: [{ topic, value: 'c'.repeat(100_000) }] }),
-    producer.send({ messages: [{ topic, value: 'd'.repeat(100_000) }] })
-  ])
+  function respond (index: number): void {
+    requests[index](null, {
+      responses: [
+        { name: topic, partitionResponses: [{ index: 0, errorCode: 0, baseOffset: BigInt(index) }] }
+      ]
+    } as unknown as ProduceResponse)
+  }
 
-  strictEqual(produceRequests(), 3)
-  deepStrictEqual(
-    results.map(result => result.offsets![0].offset),
-    [0n, 1n, 2n, 3n]
-  )
+  const completed: string[] = []
+  function send (letter: string, length: number): Promise<void> {
+    return producer.send({ messages: [{ topic, value: letter.repeat(length) }] }).then(() => {
+      completed.push(letter)
+    })
+  }
+
+  // The first call reaches batchMaxBytes on its own and is sent at once
+  const sends = [send('a', 100)]
+  await sleep(10)
+  strictEqual(requests.length, 1)
+
+  // The second and the third wait for it, as together they are below 256 KiB
+  sends.push(send('b', 100_000), send('c', 100_000))
+  await sleep(10)
+  strictEqual(requests.length, 1)
+
+  // The fourth would take what is waiting over 256 KiB, so the second and the third are sent
+  sends.push(send('d', 100_000))
+  await sleep(10)
+  strictEqual(requests.length, 2)
+
+  // The fourth is only sent once nothing is in flight anymore
+  respond(0)
+  await sleep(10)
+  strictEqual(requests.length, 2)
+  deepStrictEqual(completed, ['a'])
+
+  respond(1)
+  await sleep(10)
+  strictEqual(requests.length, 3)
+  deepStrictEqual(completed, ['a', 'b', 'c'])
+
+  respond(2)
+  await Promise.all(sends)
+  deepStrictEqual(completed, ['a', 'b', 'c', 'd'])
 })
 
 test('send should fail the calls which were waiting for a request in flight on their own', async t => {

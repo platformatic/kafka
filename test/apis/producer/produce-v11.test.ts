@@ -1,10 +1,10 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
+import { produceV11 } from '../../../src/apis/index.ts'
 import {
   compressionsAlgorithms,
   type MessageRecord,
   ProduceAcks,
-  produceV11,
   Reader,
   ResponseError,
   Writer

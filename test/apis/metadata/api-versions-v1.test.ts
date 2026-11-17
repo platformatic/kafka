@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { apiVersionsV1, protocolAPIsById, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { apiVersionsV1 } from '../../../src/apis/index.ts'
+import { protocolAPIsById, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = apiVersionsV1
 

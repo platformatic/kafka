@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve as resolvePaths } from 'node:path'
+import { type saslAuthenticateV2 } from '../../src/apis/index.ts'
 import {
   AuthenticationError,
   EMPTY_BUFFER,
@@ -12,7 +13,6 @@ import {
   type CallbackWithPromise,
   type Connection,
   type CredentialProvider,
-  type saslAuthenticateV2,
   type SASLCustomAuthenticator,
   type SASLMechanismValue
 } from '../../src/index.ts'

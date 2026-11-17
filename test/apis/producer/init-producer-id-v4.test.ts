@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { initProducerIdV4, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { initProducerIdV4 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = initProducerIdV4
 

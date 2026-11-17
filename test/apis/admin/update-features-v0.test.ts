@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { FeatureUpgradeTypes, Reader, ResponseError, updateFeaturesV0, Writer } from '../../../src/index.ts'
+import { updateFeaturesV0 } from '../../../src/apis/index.ts'
+import { FeatureUpgradeTypes, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 test('UpdateFeatures v0 converts upgrade types to the legacy allowDowngrade flag and parses feature results', () => {
   const { api, createRequest, parseResponse } = updateFeaturesV0

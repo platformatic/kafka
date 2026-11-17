@@ -7,7 +7,8 @@ import {
   type CallbackWithPromise
 } from '../../apis/callbacks.ts'
 import { type API, type Callback } from '../../apis/definitions.ts'
-import * as apis from '../../apis/index.ts'
+import { getApi, loadApi } from '../../apis/lazy.ts'
+import { apiLoaders } from '../../apis/loaders.ts'
 import {
   api as apiVersionsV1,
   type ApiVersionsResponse,
@@ -563,11 +564,21 @@ export class Base<
 
     // Starting from the highest version, we need to find the first one that is supported
     for (let i = maxVersion; i >= minVersion; i--) {
-      const apiName = (name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i) as keyof typeof apis
-      const candidate = apis[apiName] as unknown as { api: API<RequestArguments, ResponseType> }
+      const apiName = name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i
+      const loaded = getApi(apiName)
 
-      if (candidate) {
-        callback(null, candidate.api)
+      if (loaded) {
+        callback(null, loaded)
+        return
+      }
+
+      /* c8 ignore next 8 - Only reachable when the package is bundled */
+      if (apiLoaders[apiName]) {
+        loadApi(apiName).then(
+          api => callback(null, api),
+          error => callback(error)
+        )
+
         return
       }
     }

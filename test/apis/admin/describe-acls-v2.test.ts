@@ -1,9 +1,9 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
+import { describeAclsV2 } from '../../../src/apis/index.ts'
 import {
   AclOperations,
   AclPermissionTypes,
-  describeAclsV2,
   ResourcePatternTypes,
   Reader,
   ResourceTypes,

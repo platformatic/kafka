@@ -1,6 +1,7 @@
 import { strictEqual } from 'node:assert'
 import test from 'node:test'
-import { metadataV3, Reader, Writer } from '../../../src/index.ts'
+import { metadataV3 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('Metadata v3 reads throttle time without the auto-create request field', () => {
   strictEqual(metadataV3.createRequest(null).length, 4)

@@ -48,6 +48,20 @@ Sends a low-level Kafka protocol request over the connection.
 - `hasResponseHeaderTaggedFields`: whether the response header includes tagged fields.
 - `callback`: completion callback receiving the parsed response.
 
+The request and response codecs of each version of each Kafka API are exported from `@platformatic/kafka/apis`, named after the API and the version. The clients only load the versions they negotiate with the broker.
+
+Importing the codecs from the main entry point still works, but it is deprecated and will be removed in the next major version. Those exports load the codec the first time it is used, and emit a `DeprecationWarning` with code `PLT_KFK_DEP_APIS` once per process.
+
+```typescript
+import { Connection } from '@platformatic/kafka'
+import { metadataV12 } from '@platformatic/kafka/apis'
+
+const connection = new Connection('my-client')
+await connection.connect('localhost', 9092)
+
+const metadata = await metadataV12.api.async(connection, ['my-topic'], false, false)
+```
+
 #### `reauthenticate()`
 
 Starts SASL re-authentication when the current connection uses SASL and the broker session requires renewal.

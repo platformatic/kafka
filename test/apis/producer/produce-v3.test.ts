@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { type MessageRecord, ProduceAcks, produceV3, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { produceV3 } from '../../../src/apis/index.ts'
+import { type MessageRecord, ProduceAcks, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = produceV3
 

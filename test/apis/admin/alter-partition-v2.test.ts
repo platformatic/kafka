@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { alterPartitionV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { alterPartitionV2 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 test('AlterPartition v2 accepts ISR epochs but only writes broker IDs', () => {
   const { api, createRequest, parseResponse } = alterPartitionV2

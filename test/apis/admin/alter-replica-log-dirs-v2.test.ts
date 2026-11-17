@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { alterReplicaLogDirsV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { alterReplicaLogDirsV2 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = alterReplicaLogDirsV2
 

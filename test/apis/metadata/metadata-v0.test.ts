@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { metadataV0, Reader, Writer } from '../../../src/index.ts'
+import { metadataV0 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('Metadata v0 uses the legacy wire shape and normalizes omitted fields', () => {
   const request = Reader.from(metadataV0.createRequest(['topic']))

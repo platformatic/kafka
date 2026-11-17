@@ -1,7 +1,8 @@
 import { deepStrictEqual } from 'node:assert'
 import test from 'node:test'
 import { ListOffsetTimestamps } from '../../../src/apis/enumerations.ts'
-import { listOffsetsV1, Reader, Writer } from '../../../src/index.ts'
+import { listOffsetsV1 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('ListOffsets v1 omits legacy max_num_offsets and returns one offset', () => {
   const request = listOffsetsV1.createRequest(-1, 1, [{ name: 'topic', partitions: [{ partitionIndex: 2, currentLeaderEpoch: 4, timestamp: ListOffsetTimestamps.LATEST }] }])

@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { apiVersionsV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { apiVersionsV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 test('ApiVersions v0 uses the legacy wire shape and normalizes throttle time', () => {
   strictEqual(apiVersionsV0.createRequest('client', '1.0.0').length, 0)

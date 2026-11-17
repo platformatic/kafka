@@ -1,13 +1,13 @@
 import { deepStrictEqual, ok, rejects } from 'node:assert'
 import { once } from 'node:events'
 import { before, test } from 'node:test'
+import { metadataV12 } from '../../../src/apis/index.ts'
 import {
   allowedSASLMechanisms,
   AuthenticationError,
   Base,
   findErrorBy,
   Connection,
-  metadataV12,
   MultipleErrors,
   NetworkError,
   parseBroker,

@@ -9,6 +9,7 @@ import {
   type SaslAuthenticateResponse,
   type SASLAuthenticationAPI
 } from '../../src/apis/security/sasl-authenticate-v2.ts'
+import { metadataV12, saslHandshakeV1 } from '../../src/apis/index.ts'
 import {
   allowedSASLMechanisms,
   AuthenticationError,
@@ -21,11 +22,9 @@ import {
   ConnectionStatuses,
   type CredentialProvider,
   instancesChannel,
-  metadataV12,
   NetworkError,
   parseBroker,
   type Reader,
-  saslHandshakeV1,
   SASLMechanisms,
   type SASLMechanismValue,
   saslOAuthBearer,

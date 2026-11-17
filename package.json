@@ -22,7 +22,16 @@
     "README.md"
   ],
   "type": "module",
-  "exports": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./apis": {
+      "types": "./dist/apis/index.d.ts",
+      "default": "./dist/apis/index.js"
+    }
+  },
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",
@@ -52,6 +61,7 @@
     "prepublishOnly": "npm run build && npm run lint",
     "postpublish": "git push origin && git push origin -f --tags",
     "generate:apis": "node scripts/generate-apis.ts",
+    "generate:loaders": "node scripts/generate-api-loaders.ts",
     "generate:errors": "node scripts/generate-errors.ts",
     "generate:validators": "node scripts/generate-validators.ts",
     "create:api": "node scripts/create-api.ts"

@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { deleteGroupsV2, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { deleteGroupsV2 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = deleteGroupsV2
 

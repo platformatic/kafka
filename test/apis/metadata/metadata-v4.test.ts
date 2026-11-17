@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { metadataV4, Reader, Writer } from '../../../src/index.ts'
+import { metadataV4 } from '../../../src/apis/index.ts'
+import { Reader, Writer } from '../../../src/index.ts'
 
 test('Metadata v4 adds auto-create topics while retaining the classic response', () => {
   const request = Reader.from(metadataV4.createRequest(['topic'], true))

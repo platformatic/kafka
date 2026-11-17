@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { metadataV12, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { metadataV12 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import type { MetadataRequestTopic } from '../../../src/apis/metadata/metadata-v12.ts'
 
 const { createRequest, parseResponse } = metadataV12

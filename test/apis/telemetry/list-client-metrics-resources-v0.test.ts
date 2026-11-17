@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, throws } from 'node:assert'
 import test from 'node:test'
-import { ConfigResourceTypes, listClientMetricsResourcesV0, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { listClientMetricsResourcesV0 } from '../../../src/apis/index.ts'
+import { ConfigResourceTypes, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { createRequest, parseResponse } = listClientMetricsResourcesV0
 

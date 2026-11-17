@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
 import test from 'node:test'
-import { createPartitionsV0, createPartitionsV1, createPartitionsV2, Reader, type Writer } from '../../../src/index.ts'
+import { createPartitionsV0, createPartitionsV1, createPartitionsV2 } from '../../../src/apis/index.ts'
+import { Reader, type Writer } from '../../../src/index.ts'
 
 type Topic = { name: string; count: number; assignments: null | { brokerIds: number[] }[] }
 type CreateRequest = (topics: Topic[], timeoutMs: number, validateOnly: boolean) => Writer

@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
-import { ConfigResourceTypes, listConfigResourcesV1, Reader, ResponseError, Writer } from '../../../src/index.ts'
+import { listConfigResourcesV1 } from '../../../src/apis/index.ts'
+import { ConfigResourceTypes, Reader, ResponseError, Writer } from '../../../src/index.ts'
 
 const { api, createRequest, parseResponse } = listConfigResourcesV1
 

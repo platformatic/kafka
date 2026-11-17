@@ -1,7 +1,8 @@
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert'
 import test from 'node:test'
 import { type DescribeUserScramCredentialsResponseResult } from '../../../src/apis/admin/describe-user-scram-credentials-v0.ts'
-import { Reader, ResponseError, Writer, describeUserScramCredentialsV0 } from '../../../src/index.ts'
+import { describeUserScramCredentialsV0 } from '../../../src/apis/index.ts'
+import { Reader, ResponseError, Writer } from '../../../src/index.ts'
 import { ScramMechanisms } from '../../../src/apis/enumerations.ts'
 
 const { createRequest, parseResponse } = describeUserScramCredentialsV0

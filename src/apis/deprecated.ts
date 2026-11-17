@@ -249,6 +249,12 @@ import type * as $saslAuthenticateV1 from './security/sasl-authenticate-v1.ts'
 import type * as $saslAuthenticateV2 from './security/sasl-authenticate-v2.ts'
 import type * as $saslHandshakeV0 from './security/sasl-handshake-v0.ts'
 import type * as $saslHandshakeV1 from './security/sasl-handshake-v1.ts'
+import type * as $shareAcknowledgeV1 from './consumer/share-acknowledge-v1.ts'
+import type * as $shareAcknowledgeV2 from './consumer/share-acknowledge-v2.ts'
+import type * as $shareFetchV1 from './consumer/share-fetch-v1.ts'
+import type * as $shareFetchV2 from './consumer/share-fetch-v2.ts'
+import type * as $shareGroupDescribeV1 from './admin/share-group-describe-v1.ts'
+import type * as $shareGroupHeartbeatV1 from './consumer/share-group-heartbeat-v1.ts'
 import type * as $syncGroupV0 from './consumer/sync-group-v0.ts'
 import type * as $syncGroupV1 from './consumer/sync-group-v1.ts'
 import type * as $syncGroupV2 from './consumer/sync-group-v2.ts'
@@ -2940,6 +2946,92 @@ export const saslHandshakeV1 = /* @__PURE__ */ lazy<typeof $saslHandshakeV1>('./
 export declare namespace saslHandshakeV1 {
   export type SaslHandshakeRequest = $saslHandshakeV1.SaslHandshakeRequest
   export type SaslHandshakeResponse = $saslHandshakeV1.SaslHandshakeResponse
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareAcknowledgeV1 = /* @__PURE__ */ lazy<typeof $shareAcknowledgeV1>('./consumer/share-acknowledge-v1')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareAcknowledgeV1 {
+  export type ShareAcknowledgeRequest = $shareAcknowledgeV1.ShareAcknowledgeRequest
+  export type ShareAcknowledgeRequestAcknowledgementBatch = $shareAcknowledgeV1.ShareAcknowledgeRequestAcknowledgementBatch
+  export type ShareAcknowledgeRequestPartition = $shareAcknowledgeV1.ShareAcknowledgeRequestPartition
+  export type ShareAcknowledgeRequestTopic = $shareAcknowledgeV1.ShareAcknowledgeRequestTopic
+  export type ShareAcknowledgeResponse = $shareAcknowledgeV1.ShareAcknowledgeResponse
+  export type ShareAcknowledgeResponseCurrentLeader = $shareAcknowledgeV1.ShareAcknowledgeResponseCurrentLeader
+  export type ShareAcknowledgeResponseNodeEndpoint = $shareAcknowledgeV1.ShareAcknowledgeResponseNodeEndpoint
+  export type ShareAcknowledgeResponsePartition = $shareAcknowledgeV1.ShareAcknowledgeResponsePartition
+  export type ShareAcknowledgeResponseTopic = $shareAcknowledgeV1.ShareAcknowledgeResponseTopic
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareAcknowledgeV2 = /* @__PURE__ */ lazy<typeof $shareAcknowledgeV2>('./consumer/share-acknowledge-v2')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareAcknowledgeV2 {
+  export type ShareAcknowledgeRequest = $shareAcknowledgeV2.ShareAcknowledgeRequest
+  export type ShareAcknowledgeRequestAcknowledgementBatch = $shareAcknowledgeV2.ShareAcknowledgeRequestAcknowledgementBatch
+  export type ShareAcknowledgeRequestPartition = $shareAcknowledgeV2.ShareAcknowledgeRequestPartition
+  export type ShareAcknowledgeRequestTopic = $shareAcknowledgeV2.ShareAcknowledgeRequestTopic
+  export type ShareAcknowledgeResponse = $shareAcknowledgeV2.ShareAcknowledgeResponse
+  export type ShareAcknowledgeResponseCurrentLeader = $shareAcknowledgeV2.ShareAcknowledgeResponseCurrentLeader
+  export type ShareAcknowledgeResponseNodeEndpoint = $shareAcknowledgeV2.ShareAcknowledgeResponseNodeEndpoint
+  export type ShareAcknowledgeResponsePartition = $shareAcknowledgeV2.ShareAcknowledgeResponsePartition
+  export type ShareAcknowledgeResponseTopic = $shareAcknowledgeV2.ShareAcknowledgeResponseTopic
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareFetchV1 = /* @__PURE__ */ lazy<typeof $shareFetchV1>('./consumer/share-fetch-v1')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareFetchV1 {
+  export type ShareFetchRequest = $shareFetchV1.ShareFetchRequest
+  export type ShareFetchRequestAcknowledgementBatch = $shareFetchV1.ShareFetchRequestAcknowledgementBatch
+  export type ShareFetchRequestForgottenTopic = $shareFetchV1.ShareFetchRequestForgottenTopic
+  export type ShareFetchRequestPartition = $shareFetchV1.ShareFetchRequestPartition
+  export type ShareFetchRequestTopic = $shareFetchV1.ShareFetchRequestTopic
+  export type ShareFetchResponse = $shareFetchV1.ShareFetchResponse
+  export type ShareFetchResponseAcquiredRecords = $shareFetchV1.ShareFetchResponseAcquiredRecords
+  export type ShareFetchResponseCurrentLeader = $shareFetchV1.ShareFetchResponseCurrentLeader
+  export type ShareFetchResponseNodeEndpoint = $shareFetchV1.ShareFetchResponseNodeEndpoint
+  export type ShareFetchResponsePartition = $shareFetchV1.ShareFetchResponsePartition
+  export type ShareFetchResponseTopic = $shareFetchV1.ShareFetchResponseTopic
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareFetchV2 = /* @__PURE__ */ lazy<typeof $shareFetchV2>('./consumer/share-fetch-v2')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareFetchV2 {
+  export type ShareFetchRequest = $shareFetchV2.ShareFetchRequest
+  export type ShareFetchRequestAcknowledgementBatch = $shareFetchV2.ShareFetchRequestAcknowledgementBatch
+  export type ShareFetchRequestForgottenTopic = $shareFetchV2.ShareFetchRequestForgottenTopic
+  export type ShareFetchRequestPartition = $shareFetchV2.ShareFetchRequestPartition
+  export type ShareFetchRequestTopic = $shareFetchV2.ShareFetchRequestTopic
+  export type ShareFetchResponse = $shareFetchV2.ShareFetchResponse
+  export type ShareFetchResponseAcquiredRecords = $shareFetchV2.ShareFetchResponseAcquiredRecords
+  export type ShareFetchResponseCurrentLeader = $shareFetchV2.ShareFetchResponseCurrentLeader
+  export type ShareFetchResponseNodeEndpoint = $shareFetchV2.ShareFetchResponseNodeEndpoint
+  export type ShareFetchResponsePartition = $shareFetchV2.ShareFetchResponsePartition
+  export type ShareFetchResponseTopic = $shareFetchV2.ShareFetchResponseTopic
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareGroupDescribeV1 = /* @__PURE__ */ lazy<typeof $shareGroupDescribeV1>('./admin/share-group-describe-v1')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareGroupDescribeV1 {
+  export type ShareGroupDescribeRequest = $shareGroupDescribeV1.ShareGroupDescribeRequest
+  export type ShareGroupDescribeResponse = $shareGroupDescribeV1.ShareGroupDescribeResponse
+  export type ShareGroupDescribeResponseGroup = $shareGroupDescribeV1.ShareGroupDescribeResponseGroup
+  export type ShareGroupDescribeResponseMember = $shareGroupDescribeV1.ShareGroupDescribeResponseMember
+  export type ShareGroupDescribeResponseMemberAssignment = $shareGroupDescribeV1.ShareGroupDescribeResponseMemberAssignment
+  export type ShareGroupDescribeResponseMemberTopic = $shareGroupDescribeV1.ShareGroupDescribeResponseMemberTopic
+}
+
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export const shareGroupHeartbeatV1 = /* @__PURE__ */ lazy<typeof $shareGroupHeartbeatV1>('./consumer/share-group-heartbeat-v1')
+/** @deprecated Import it from `@platformatic/kafka/apis` instead. */
+export declare namespace shareGroupHeartbeatV1 {
+  export type ShareGroupHeartbeatRequest = $shareGroupHeartbeatV1.ShareGroupHeartbeatRequest
+  export type ShareGroupHeartbeatResponse = $shareGroupHeartbeatV1.ShareGroupHeartbeatResponse
+  export type ShareGroupHeartbeatResponseAssignment = $shareGroupHeartbeatV1.ShareGroupHeartbeatResponseAssignment
+  export type ShareGroupHeartbeatResponseAssignmentTopicPartition = $shareGroupHeartbeatV1.ShareGroupHeartbeatResponseAssignmentTopicPartition
 }
 
 /** @deprecated Import it from `@platformatic/kafka/apis` instead. */

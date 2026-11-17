@@ -433,15 +433,23 @@ export class Base<
     attempt: number = 0,
     errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean,
-    retryLimit?: number
+    retryLimit?: number,
+    maxRetryErrors?: number
   ): void | Promise<ReturnType> {
     const retries = retryLimit ?? (this[kOptions].retries! as number)
+    const maxErrors = maxRetryErrors ?? this[kOptions].maxRetryErrors!
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {
       if (error) {
         // Only retry if all the errors in the chain are retriable.
         const retriable = !findErrorBy(error, 'canRetry', false)
+
+        // Keep the first error and the most recent ones, so long retry runs don't grow the list forever.
+        if (errors.length >= maxErrors) {
+          errors.splice(maxErrors > 1 ? 1 : 0, 1)
+        }
+
         errors.push(error)
 
         if (attempt < retries && retriable && !shouldSkipRetry?.(error)) {
@@ -460,7 +468,16 @@ export class Base<
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             try {
-              this[kPerformWithRetry](operationId, operation, callback, attempt + 1, errors, shouldSkipRetry, retries)
+              this[kPerformWithRetry](
+                operationId,
+                operation,
+                callback,
+                attempt + 1,
+                errors,
+                shouldSkipRetry,
+                retries,
+                maxErrors
+              )
             } catch (error) {
               errors.push(error)
               callback(new MultipleErrors(`${operationId} failed ${attempt + 1} times.`, errors))
@@ -670,7 +687,7 @@ export class Base<
 
     this[kPerformDeduplicated](
       // Unique key to avoid mixing callbacks
-      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}-${options.retries ?? 'default'}`,
+      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}-${options.retries ?? 'default'}-${options.maxRetryErrors ?? 'default'}`,
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
@@ -793,7 +810,8 @@ export class Base<
           0,
           [],
           undefined,
-          options.retries
+          options.retries,
+          options.maxRetryErrors
         )
       },
       callback

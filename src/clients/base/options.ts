@@ -36,6 +36,7 @@ export const baseOptionsSchema = {
     connectTimeout: { type: 'number', minimum: 0 },
     retries: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'boolean' }] },
     retryDelay: { oneOf: [{ type: 'number', minimum: 0 }, { function: true }] },
+    maxRetryErrors: { type: 'integer', minimum: 1 },
     maxInflights: { type: 'number', minimum: 0 },
     keepAlive: {
       type: 'object',
@@ -89,7 +90,8 @@ export const metadataOptionsSchema = {
     autocreateTopics: { type: 'boolean' },
     forceUpdate: { type: 'boolean' },
     metadataMaxAge: { type: 'number', minimum: 0 },
-    retries: { type: 'number', minimum: 0 }
+    retries: { type: 'number', minimum: 0 },
+    maxRetryErrors: { type: 'integer', minimum: 1 }
   },
   additionalProperties: false
 }
@@ -105,6 +107,7 @@ export const defaultBaseOptions: Partial<BaseOptions> = {
   timeout: 5000,
   retries: 3,
   retryDelay: 1000,
+  maxRetryErrors: 10,
   metadataMaxAge: 5000, // 5 seconds
   knownBrokersMaxAge: 3_600_000, // 1 hour
   maxAbsentKnownBrokers: 10,

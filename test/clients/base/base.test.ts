@@ -1254,6 +1254,138 @@ test('kPerformWithRetry should clear retry errors after eventual success', async
   await client.close()
 })
 
+test('kPerformWithRetry should keep the first and the most recent errors on long retry runs', async t => {
+  const client = createBase(t, { retries: 20, retryDelay: 0 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+      retryCallback(new Error(`failed ${attempts}`))
+    },
+    callback,
+    0,
+    []
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 21)
+  strictEqual(error instanceof MultipleErrors, true)
+  strictEqual(error.message, 'testOperation failed 21 times.')
+  deepStrictEqual(
+    error.errors.map((e: Error) => e.message),
+    [
+      'failed 1',
+      'failed 13',
+      'failed 14',
+      'failed 15',
+      'failed 16',
+      'failed 17',
+      'failed 18',
+      'failed 19',
+      'failed 20',
+      'failed 21'
+    ]
+  )
+})
+
+test('kPerformWithRetry should respect the maxRetryErrors option', async t => {
+  const client = createBase(t, { retries: 5, retryDelay: 0, maxRetryErrors: 3 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+      retryCallback(new Error(`failed ${attempts}`))
+    },
+    callback,
+    0,
+    []
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 6)
+  deepStrictEqual(
+    error.errors.map((e: Error) => e.message),
+    ['failed 1', 'failed 5', 'failed 6']
+  )
+})
+
+test('kPerformWithRetry should keep only the most recent error when maxRetryErrors is 1', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0, maxRetryErrors: 1 })
+  const callback = createPromisifiedCallback<string>()
+  let attempts = 0
+
+  const result = client[kPerformWithRetry]<string>(
+    'testOperation',
+    retryCallback => {
+      attempts++
+      retryCallback(new Error(`failed ${attempts}`))
+    },
+    callback,
+    0,
+    []
+  )
+
+  const error = await (result as Promise<string>).catch(e => e)
+  strictEqual(attempts, 4)
+  deepStrictEqual(
+    error.errors.map((e: Error) => e.message),
+    ['failed 4']
+  )
+})
+
+test('metadata should support overriding maxRetryErrors', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0 })
+  let attempts = 0
+
+  mockConnectionPoolGetFirstAvailable(
+    client[kConnections],
+    () => true,
+    undefined,
+    undefined,
+    (_original, _brokers, callback) => {
+      attempts++
+      callback(new NetworkError(`Connection closed ${attempts}`))
+      return true
+    }
+  )
+
+  const error = await new Promise<MultipleErrors>((resolve, reject) => {
+    client[kMetadata]({ topics: [], maxRetryErrors: 2 }, error => {
+      if (error) {
+        resolve(error as MultipleErrors)
+        return
+      }
+
+      reject(new Error('Expected metadata to fail'))
+    })
+  })
+
+  strictEqual(attempts, 4)
+  deepStrictEqual(
+    error.errors.map((e: Error) => e.message),
+    ['Connection closed 1', 'Connection closed 4']
+  )
+})
+
+test('maxRetryErrors should be validated in strict mode', async t => {
+  throws(
+    () =>
+      new Base({ clientId: 'test-client', bootstrapBrokers: ['localhost:9092'], maxRetryErrors: 0, strict: true }),
+    { message: '/options/maxRetryErrors must be >= 1.' }
+  )
+
+  const client = createBase(t, { strict: true })
+  await rejects(client.metadata({ topics: [], maxRetryErrors: 0 }), {
+    message: '/options/maxRetryErrors must be >= 1.'
+  })
+})
+
 test('initialization should not fail when maxInflights is specifically set to undefined', async t => {
   const client = createBase(t, { maxInflights: undefined })
 

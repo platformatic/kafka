@@ -80,6 +80,8 @@ By default each `send()` call is produced on its own: a hundred concurrent calls
 
 When the producer is created with `linger` greater than zero, the messages of a `send()` call wait for up to that many milliseconds, and are produced in the same request as the messages of the other calls made in the meantime. They are sent before that time once `batchMaxBytes` bytes are waiting, counting the keys, values and headers of all the messages regardless of their partition.
 
+While a request made this way is in flight, reaching `batchMaxBytes` does not send another one: the messages keep waiting, up to 256 KiB of them, and are sent when that request completes or when the `linger` time expires. A producer which is faster than the broker therefore makes larger requests, not more of them. A producer whose `batchMaxBytes` is larger than 256 KiB is not affected.
+
 ```typescript
 const producer = new Producer({
   clientId: 'my-producer',

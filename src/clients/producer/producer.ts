@@ -86,6 +86,13 @@ import {
   type SendOptions
 } from './types.ts'
 
+/*
+  How many bytes can be waiting while a lingered request is in flight, see #lingerSend.
+  It is kept well below the default limit of the brokers for a batch of records (message.max.bytes, 1 MiB),
+  as all the messages might be for the same partition.
+*/
+const lingerInflightMaxBytes = 262144
+
 // Don't move this function as being in the same file will enable V8 to remove.
 // For futher info, ask Matteo.
 export function noopSerializer (data?: Buffer): Buffer | undefined {
@@ -127,6 +134,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #linger: number
   #batchMaxBytes: number
   #pendingSends: PendingSends | undefined
+  #lingerInflight: number
   #sendOperation: (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProduceResult>
@@ -177,6 +185,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#streams = new Set()
     this.#linger = options.linger ?? 0
     this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
+    this.#lingerInflight = 0
     this[kOptions].transactionalId ??= randomUUID()
 
     if (this[kPrometheus]) {
@@ -1152,6 +1161,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     Queues the messages of a send() call so that they are produced together with the ones of the other calls
     made within the linger time, or until batchMaxBytes are waiting.
 
+    While a request made this way is in flight, reaching batchMaxBytes does not send another one: the messages
+    keep waiting, up to lingerInflightMaxBytes, and are sent when the request completes or when the linger
+    time expires. A producer which is faster than the broker therefore sends requests which
+    are larger, not more numerous, and the cost of making a request is paid less often.
+
     Only calls made with the same settings can share a produce request. When the settings change, what is
     waiting is sent first.
   */
@@ -1176,10 +1190,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
-    if (
-      this.#pendingSends &&
-      (this.#pendingSends.key !== key || this.#pendingSends.bytes + bytes > this.#batchMaxBytes)
-    ) {
+    // A producer configured to wait for more than lingerInflightMaxBytes is not affected
+    const maxBytes =
+      this.#lingerInflight > 0 ? Math.max(this.#batchMaxBytes, lingerInflightMaxBytes) : this.#batchMaxBytes
+
+    if (this.#pendingSends && (this.#pendingSends.key !== key || this.#pendingSends.bytes + bytes > maxBytes)) {
       this.#flushPendingSends()
     }
 
@@ -1210,7 +1225,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     pending.sends.push({ count: messages.length, callback })
 
-    if (pending.bytes >= this.#batchMaxBytes) {
+    if (pending.bytes >= maxBytes) {
       this.#flushPendingSends()
     }
   }
@@ -1228,12 +1243,21 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const { messages, sends } = pending
 
+    this.#lingerInflight++
+
     this.#performSend(
       Array.from(pending.topics),
       messages,
       pending.sendOptions as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
       pending.produceOptions,
       (error, result) => {
+        this.#lingerInflight--
+
+        // What has been waiting for this request is sent before the calls are notified, as they might send more
+        if (this.#lingerInflight === 0 && this.#pendingSends && this.#pendingSends.bytes >= this.#batchMaxBytes) {
+          this.#flushPendingSends()
+        }
+
         // A single send() gets exactly what it would have got without lingering
         if (sends.length === 1) {
           sends[0].callback(error, result)

@@ -211,6 +211,68 @@ test('send should send what is waiting before a call which would exceed batchMax
   )
 })
 
+test('send should let the calls made while a request is in flight wait for it', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The first call reaches the limit on its own and is sent. Each of the others reaches it too, but they
+  // are made while the first request is in flight: they are all sent together once it completes.
+  const results = await Promise.all(
+    ['a', 'b', 'c', 'd', 'e', 'f'].map(letter => producer.send({ messages: [{ topic, value: letter.repeat(100) }] }))
+  )
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n, 3n, 4n, 5n]
+  )
+})
+
+test('send should limit what waits for a request in flight', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The first call is sent at once. The second and the third wait for it, the fourth would take what is
+  // waiting over 256 KiB: they are sent while the first request is still in flight. The fourth is sent
+  // once nothing is in flight anymore.
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(100) }] }),
+    producer.send({ messages: [{ topic, value: 'b'.repeat(100_000) }] }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(100_000) }] }),
+    producer.send({ messages: [{ topic, value: 'd'.repeat(100_000) }] })
+  ])
+
+  strictEqual(produceRequests(), 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n, 3n]
+  )
+})
+
+test('send should fail the calls which were waiting for a request in flight on their own', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  // The second request is for a topic which does not exist and cannot be created
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(100) }] }),
+    producer.send({ messages: [{ topic: 'invalid topic name', value: 'b'.repeat(100) }], autocreateTopics: false }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(100) }] })
+  ])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['fulfilled', 'rejected', 'fulfilled']
+  )
+})
+
 test('send should accept null values and null header values when lingering', async t => {
   const producer = createProducer(t, { linger: 10 })
   const topic = await createTopic(t, true)

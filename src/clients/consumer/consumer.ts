@@ -191,6 +191,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #assignments: TopicPartition[]
 
   #members: Map<string, ExtendedGroupProtocolSubscription>
+  #groupOptions: GroupOptions
   #membershipActive: boolean
   #membershipEstablished: boolean
   #isLeader: boolean
@@ -248,6 +249,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#assignments = []
     this.#members = new Map()
+    this.#groupOptions = {}
     this.#membershipActive = false
     this.#membershipEstablished = false
     this.#isLeader = false
@@ -780,6 +782,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#validateGroupOptions(options)
 
+    // Internal rejoins must preserve group options supplied to consume or joinGroup.
+    this.#groupOptions = {
+      sessionTimeout: options.sessionTimeout,
+      rebalanceTimeout: options.rebalanceTimeout,
+      heartbeatInterval: options.heartbeatInterval,
+      heartbeatStallTimeout: options.heartbeatStallTimeout,
+      protocols: options.protocols,
+      protocolsMetadata: options.protocolsMetadata,
+      partitionAssigner: options.partitionAssigner,
+      partitionAssignerTopicsSelector: options.partitionAssignerTopicsSelector
+    }
+
     this.#membershipActive = true
     this.#joinGroup(options as Required<GroupOptions>, callback)
 
@@ -1240,7 +1254,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       error => {
         if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error)) {
-          this.joinGroup({}, joinError => {
+          this.joinGroup({ ...this.#groupOptions }, joinError => {
             if (joinError) {
               callback(joinError)
               return
@@ -1488,7 +1502,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             membershipRetries < (this[kOptions].retries as number) &&
             this.#getRejoinError(error)
           ) {
-            this.joinGroup({}, joinError => {
+            this.joinGroup({ ...this.#groupOptions }, joinError => {
               if (joinError) {
                 callback(joinError)
                 return

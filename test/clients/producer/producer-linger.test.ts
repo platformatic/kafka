@@ -244,8 +244,9 @@ test('send should not merge calls made with different settings', async t => {
   ])
 
   strictEqual(produceRequests(), 3)
-  strictEqual(results[0].offsets![0].offset, 0n)
-  strictEqual(results[1].offsets![0].offset, 1n)
+  // The first request can be rejected and retried while the broker is still picking up the new topic,
+  // so another one can be written before it. Only the merged calls are known to be consecutive.
+  strictEqual(results[1].offsets![0].offset, results[0].offsets![0].offset + 1n)
   deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n, 2n, 3n])
 })
 

@@ -98,7 +98,8 @@ export const consumeOptionsSchema = {
     onCorruptedMessage: { function: true },
     onDeserializationError: { function: true },
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...consumeOptionsProperties,
+    batch: { oneOf: [{ type: 'boolean' }, { type: 'integer', minimum: 1 }] }
   },
   required: ['topics'],
   additionalProperties: false
@@ -256,6 +257,7 @@ export const groupIdAndOptionsSchema = {
   pushed to the stream in one synchronous pass: this blocks the event loop and raises the peak memory usage.
 */
 export const defaultMaxBytesPerPartition = 1_048_576 // 1 MB
+export const defaultBatchSize = 100
 
 export const defaultConsumerOptions = {
   autocommit: true,

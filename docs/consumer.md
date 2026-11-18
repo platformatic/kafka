@@ -45,7 +45,7 @@ Options:
 | ------------------------------- | ------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | groupId                         | `string`                                                     |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
 | groupInstanceId                 | `string`                                                     |                           | Consumer group instance ID.                                                                                                                                                                                                                                                                                                                                                                          |
-| autocommit                      | `boolean \| number`                                          | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, then messages are committed immediately.<br/><br/> If it is a number, it specifies how often offsets will be committed. Only the last offset for a topic-partition is committed.<br/><br/>If set to `false`, then each message read from the stream will have a `commit` method which should be used to manually commit offsets. |
+| autocommit                      | `boolean \| number`                                          | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, offsets are committed after each fetch. If it is a number, it specifies how often offsets are committed. Only the last offset for a topic-partition is committed.<br/><br/> If it is `false`, call `message.commit()` or, in batch mode, `batch.commit()` to commit offsets manually. |
 | minBytes                        | `number`                                                     | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytes                        | `number`                                                     | 50MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytesPerPartition            | `number`                                                     | 1MB                       | Maximum amount of data the broker should return for each partition in a stream fetch request. If not set, it defaults to 1MB or to `maxBytes`, whichever is lower. The value might not be respected by Kafka.                                                                                                                                                                                                                      |
@@ -54,7 +54,7 @@ Options:
 | deserializers                   | `Deserializers<Key, Value, HeaderKey, HeaderValue>`          |                           | Object that specifies which deserialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                                            |
 | beforeDeserialization           | `BeforeDeserializationHook`                                  |                           | Hook function called before deserialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                                                            |
 | registry                        | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>` |                           | Schema registry instance for automatic deserialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `deserializers` or `beforeDeserialization`.                                             |
-| highWaterMark                   | `number`                                                     | `1024`                    | The maximum amount of messages to store in memory before delaying fetch requests. Note that this severely impacts both performance at the cost of memory use.                                                                                                                                                                                                                                        |
+| highWaterMark                   | `number`                                                     | `1024`                    | Buffer threshold in messages before delaying fetch requests. In batch mode the threshold is `Math.ceil(highWaterMark / batchSize)` batches. An in-flight fetch can still fill the buffer beyond this threshold. |
 | sessionTimeout                  | `number`                                                     | 1 minute                  | Amount of time in milliseconds to wait for a consumer to send the heartbeat before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with broker configuration property `group.consumer.session.timeout.ms`.                                                                              |
 | rebalanceTimeout                | `number`                                                     | 2 minutes                 | Amount of time in milliseconds to wait for a consumer to confirm the rebalancing before considering it down.<br/><br/> This is only relevant when Kafka creates a new group.                                                                                                                                                                                                                         |
 | heartbeatInterval               | `number`                                                     | 3 seconds                 | Interval in milliseconds between heartbeats.<br/><br/> Not supported for `groupProtocol=consumer`, instead it is set with the broker configuration property `group.consumer.heartbeat.interval`.                                                                                                                                                                                                     |
@@ -160,6 +160,10 @@ This method will return `false` during consumer group rebalancing.
 Creates a stream to consume messages from topics.
 
 The return value is a stream of type `MessagesStream<Key, Value, HeaderKey, HeaderValue>`.
+With `batch: true` or a numeric batch size, its fifth type parameter is
+`MessagesBatch<Key, Value, HeaderKey, HeaderValue>` instead of `Message<Key, Value, HeaderKey, HeaderValue>`.
+In TypeScript, a dynamic `boolean` selects the message-stream overload. Branch on the flag before calling
+`consume()` to infer the correct item type in each branch.
 
 Creating `new Consumer(...)` does not start consuming yet. Group join/rejoin and actual fetch/start happen when `consume()` is called and a stream is created.
 
@@ -172,7 +176,8 @@ Options:
 | `topics`                 | `string[]`                      |          | Topics to consume.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `mode`                   | `string`                        | `LATEST` | Where to start fetching new messages.<br/><br/> The valid values are defined in the `MessagesStreamModes` enumeration (see below).                                                                                                                                                                                                                                                                                                                           |
 | `fallbackMode`           | `string`                        | `LATEST` | Where to start fetching new messages when offset information is lacking for the consumer group.<br/><br/> The valid values are defined in the `MessagesStreamFallbackModes` enumeration (see below).                                                                                                                                                                                                                                                         |
-| `maxFetches`             | `number`                        | `0`      | The maximum number of fetches to perform on each partition before automatically closing the stream. Setting to zero will disable automating closing. <br/><br/>Note that [`Array.fromAsync`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/fromAsync) can be used to create an array out of a stream.                                                                                                               |
+| `maxFetches`             | `number`                        | `0`      | Number of fetch responses to process before automatically closing the stream. `0` disables automatic closing. When specified, this also overrides the stream's `highWaterMark`, measured in batches in batch mode and messages otherwise. |
+| `batch`                  | `boolean \| number`             | `false`  | `false` emits individual messages. `true` emits batches of up to 100 messages, and a positive integer sets the maximum batch size. Available only on `consume()`. With manual commits, call `batch.commit()`; `message.commit()` is a no-op on messages in a batch. |
 | `offsets`                | `TopicWithPartitionAndOffset[]` |          | When manual offset mode is specified, a list of topic-partition-offset triplets.                                                                                                                                                                                                                                                                                                                                                                             |
 | `onDeserializationError` | `DeserializationErrorHandler`   |          | A callback invoked if a deserialiser throws. It receives a context object containing the original thrown value, payload type, raw record, actual offset and timestamp, and commit function. Return `DeserializationErrorActions.SKIP` to continue or `DeserializationErrorActions.FAIL` to destroy the stream.                                                                                                                                               |
 | `onCorruptedMessage`     | `CorruptedMessageHandler`       |          | **Deprecated:** Use `onDeserializationError` instead. A callback that will be invoked if a deserialiser throws. The original thrown value is passed unchanged as the final `error` argument and is typed as `unknown`. If the function returns `true`, then the stream will throw an error and thus it will be destroyed. Note that the stream will not wait for the `commit` function to finish so make sure you handle callbacks and promises accordingly. |
@@ -220,6 +225,15 @@ The callback is synchronous and must return one of:
 | `CONTINUE` | The record is emitted in a degraded form and consumption continues.             |
 
 With autocommit enabled, the offset of a skipped or continued record remains eligible for commit.
+In batch mode, `CONTINUE` also skips the failed record instead of delivering it with a degraded payload.
+
+With `autocommit: false`, the error handler's `commit()` commits the failed record's offset plus one.
+**In batch mode, it does not wait for the pending batch to be emitted.** It can also commit earlier valid
+messages in the same partition that have not been emitted yet. If the stream closes before emitting them,
+those messages will not be redelivered when resuming from that committed offset.
+To avoid this, return `SKIP` without calling the error handler's `commit()`, then call `batch.commit()` after
+processing the batch.
+
 `onDeserializationError` and the deprecated `onCorruptedMessage` cannot be configured together.
 
 #### Continuing with the raw payload
@@ -381,8 +395,43 @@ same batch.
 
 ## Batch consumption
 
-`MessagesStream` can be combined with the [`hwp`](https://www.npmjs.com/package/hwp) batch operator when an
-application needs to process multiple messages together:
+Pass `batch` to `consume()` to process several messages with a single stream read:
+
+```typescript
+const stream = await consumer.consume({
+  topics: ['events'],
+  batch: 100,
+  autocommit: false
+})
+
+for await (const batch of stream) {
+  await processBatch(batch.messages)
+  await batch.commit()
+}
+```
+
+Each `MessagesBatch` has these properties:
+
+| Property | Description |
+| --- | --- |
+| `topic`, `partition` | The topic and partition shared by all messages. |
+| `messages` | Array of `Message` items. Their `commit()` method is a no-op, even with `autocommit: false`. |
+| `firstOffset`, `lastOffset` | Bigint offsets of the first and last delivered messages. |
+| `leaderEpoch` | Record batch leader epoch of the last delivered message. |
+| `commit()` | With manual commits, commits the offset of the next deliverable message or the end of the partition's fetch response. This includes skipped records and control markers before that boundary. With autocommit, this method is a no-op. |
+| `toJSON()` | Returns a JSON-friendly representation with offsets as strings and each message serialized using its own `toJSON()`. |
+
+The batch size is a maximum, not a target. A batch never spans topic-partitions or fetch responses.
+The last batch in a response may be shorter and is emitted without waiting for another fetch.
+Empty batches are never emitted. `batch: 1` still emits batch objects, but offers no reduction in the number of stream reads.
+
+If the stream is destroyed while processing a response, any batch that has not been pushed is discarded.
+These records can be redelivered when consumption restarts from the committed offset.
+
+### Batching across partitions or with a timeout
+
+Use the [`hwp`](https://www.npmjs.com/package/hwp) batch operator on a per-message stream if a batch
+needs to span topic-partitions or be released after a timeout:
 
 ```typescript
 import { batchIterator } from 'hwp'
@@ -426,10 +475,6 @@ The complete runnable example is available in [`examples/batching`](../examples/
 ```bash
 KAFKA_BROKER=localhost:9092 ./scripts/node examples/batching/index.ts
 ```
-
-Batch consumption will not be implemented as a separate API in the client. Keeping batching as an operator over the
-existing stream avoids duplicating stream lifecycle and offset semantics while allowing applications to choose their
-batch size, timeout and processing strategy.
 
 ## Rack-aware fetching
 

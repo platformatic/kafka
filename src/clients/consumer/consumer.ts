@@ -104,21 +104,11 @@ import {
 } from './consumer-protocol.ts'
 import { MessagesStream } from './messages-stream.ts'
 import { defaultConsumerOptions, defaultMaxBytesPerPartition } from './options.ts'
-import {
-  commitOptionsValidator,
-  consumeOptionsValidator,
-  consumerOptionsValidator,
-  fetchOptionsValidator,
-  getLagOptionsValidator,
-  groupIdAndOptionsValidator,
-  groupOptionsValidator,
-  listCommitsOptionsValidator,
-  listOffsetsOptionsValidator
-} from './validators.ts'
 import { COOPERATIVE_STICKY_ASSIGNOR, cooperativeStickyAssigner, roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
+  type ConsumeBatchOptions,
   type ConsumeOptions,
   type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupJoinPayload,
@@ -141,11 +131,24 @@ import {
   type GroupProtocolSubscription,
   type ListCommitsOptions,
   type ListOffsetsOptions,
+  type MessagesBatch,
+  type MessagesStreamItem,
   type Offsets,
   type OffsetsWithTimestamps,
   type PreferredReadReplica
 } from './types.ts'
 import { nextFetchEpoch, partitionKey } from './utils.ts'
+import {
+  commitOptionsValidator,
+  consumeOptionsValidator,
+  consumerOptionsValidator,
+  fetchOptionsValidator,
+  getLagOptionsValidator,
+  groupIdAndOptionsValidator,
+  groupOptionsValidator,
+  listCommitsOptionsValidator,
+  listOffsetsOptionsValidator
+} from './validators.ts'
 
 interface TopicPartition {
   topicId: string
@@ -209,7 +212,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #clientRack: string
   #fetchSessions: Map<number, FetchSession>
   #preferredReadReplicas: Map<string, PreferredReadReplica>
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>>
   #lagMonitoring: NodeJS.Timeout | null
   #streamContext: unknown
 
@@ -392,6 +395,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   consume (
+    options: ConsumeBatchOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>
+    >
+  ): void
+  consume (
+    options: ConsumeBatchOptions<Key, Value, HeaderKey, HeaderValue>
+  ): Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>>
+  consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   ): void
@@ -400,11 +412,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ): Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback?: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
-  ): void | Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>> {
-    if (!callback) {
-      callback = createPromisifiedCallback<MessagesStream<Key, Value, HeaderKey, HeaderValue>>()
-    }
+    streamCallback?:
+      | CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+      | CallbackWithPromise<
+          MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>
+        >
+  ): void | Promise<
+    MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+  > {
+    const callback =
+      (streamCallback as CallbackWithPromise<
+        MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+      > | undefined) ??
+      createPromisifiedCallback<
+        MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+      >()
 
     if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
@@ -839,7 +861,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+    >
   ): void {
     consumerConsumesChannel.traceCallback(
       this.#performConsume,
@@ -2105,7 +2129,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performConsume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     trackTopics: boolean,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+    >
   ): void {
     // Subscribe all topics
     let joinNeeded = this.memberId === null
@@ -2145,10 +2171,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     // Create the stream and start consuming
-    const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
-      this,
-      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
-    )
+    const stream = new MessagesStream<
+      Key,
+      Value,
+      HeaderKey,
+      HeaderValue,
+      MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>
+    >(this, options)
     this.#streams.add(stream)
 
     this.#metricActiveStreams?.inc()

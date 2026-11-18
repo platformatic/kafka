@@ -81,7 +81,7 @@ Each tracing channel publishes events with the following common properties:
 | `plt:kafka:producer:sends`             | `Producer`       | Traces a `Producer.send` request.                                                                                            |
 | `plt:kafka:consumer:group`             | `Consumer`       | Traces a `Consumer.findGroupCoordinator`, `Consumer.joinGroup` or `Consumer.leaveGroup` requests.                            |
 | `plt:kafka:consumer:heartbeat`         | `Consumer`       | Traces the `Consumer` heartbeat requests.                                                                                    |
-| `plt:kafka:consumer:receives`          | `Consumer`       | Traces processing of every message.                                                                                          |
+| `plt:kafka:consumer:receives`          | `Consumer`       | Traces every message. In batch mode, each delivered message's `asyncStart` and `asyncEnd` events run around the push of its batch. |
 | `plt:kafka:consumer:fetches`           | `Consumer`       | Traces a `Consumer.fetch` request.                                                                                           |
 | `plt:kafka:consumer:consumes`          | `Consumer`       | Traces a `Consumer.consume` request.                                                                                         |
 | `plt:kafka:consumer:commits`           | `Consumer`       | Traces a `Consumer.commit` request.                                                                                          |

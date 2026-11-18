@@ -1,5 +1,5 @@
 import { Unpromise } from '@watchable/unpromise'
-import { deepStrictEqual } from 'node:assert'
+import { deepStrictEqual, ok } from 'node:assert'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
@@ -14,6 +14,8 @@ import { type TestContext } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Admin, type AdminOptions } from '../src/clients/admin/index.ts'
 import { kGetApi, kMetadata } from '../src/clients/base/base.ts'
+import { type ProduceResponse } from '../src/apis/producer/produce-v11.ts'
+import { findErrorBy } from '../src/errors.ts'
 import {
   Base,
   type BaseOptions,
@@ -22,6 +24,8 @@ import {
   type CallbackWithPromise,
   type Connection,
   type ConnectionPool,
+  type ConnectionDiagnosticEvent,
+  connectionsApiChannel,
   Consumer,
   type ConsumerOptions,
   MultipleErrors,
@@ -157,6 +161,77 @@ export async function createTopic (
   }
 
   return topic
+}
+
+/*
+  Picks partitions of the topic led by different brokers, then makes the client believe that they are all led by
+  the broker of the first one, as if the others had just moved away. A produce request for all of them reaches a
+  broker which appends the first partition and rejects the others with NOT_LEADER_OR_FOLLOWER.
+
+  The client needs a metadataMaxAge longer than the test, or the cache can be refreshed before the send.
+  assertPartiallyRejected() checks that a Produce request since then appended some partitions and had the others
+  rejected.
+*/
+export async function misdirectPartitions (
+  t: TestContext,
+  client: Base<BaseOptions>,
+  topic: string
+): Promise<{ partitions: number[], assertPartiallyRejected: () => void }> {
+  const metadata = await client.metadata({ topics: [topic] })
+  const { partitions } = metadata.topics.get(topic)!
+
+  // A leader which has not caught up with the new topic rejects all of its partitions with UNKNOWN_TOPIC_OR_PARTITION.
+  // The retry then refreshes the metadata and undoes the change below, so wait until every leader serves its partitions.
+  const admin = createAdmin(t)
+  await waitFor(
+    () =>
+      admin.listOffsets({
+        topics: [{ name: topic, partitions: partitions.map((_, partitionIndex) => ({ partitionIndex, timestamp: -1n })) }]
+      }),
+    { interval: 100, timeout: 30000 }
+  )
+
+  const leaders = new Set<number>()
+  const selected: number[] = []
+
+  for (let i = 0; i < partitions.length; i++) {
+    if (!leaders.has(partitions[i].leader)) {
+      leaders.add(partitions[i].leader)
+      selected.push(i)
+    }
+  }
+
+  if (selected.length < 2) {
+    throw new Error(`All the partitions of ${topic} are led by broker ${partitions[0].leader}, 2 leaders are needed.`)
+  }
+
+  // The metadata is cached by reference, so the next sends see this until it is refreshed
+  for (const partition of selected) {
+    partitions[partition] = { ...partitions[partition], leader: partitions[selected[0]].leader }
+  }
+
+  // The error codes of the partitions of each Produce request which failed
+  const failed: number[][] = []
+
+  function onError (context: ConnectionDiagnosticEvent): void {
+    const response = findErrorBy(context.error as Error, 'code', 'PLT_KFK_RESPONSE')?.response as ProduceResponse
+
+    if (context.apiKey === 0 && response) {
+      failed.push(response.responses.flatMap(topic => topic.partitionResponses.map(partition => partition.errorCode)))
+    }
+  }
+
+  connectionsApiChannel.error.subscribe(onError as (message: unknown) => void)
+  t.after(() => connectionsApiChannel.error.unsubscribe(onError as (message: unknown) => void))
+
+  function assertPartiallyRejected (): void {
+    ok(
+      failed.some(codes => codes.includes(0) && codes.some(code => code !== 0)),
+      `No Produce request appended some partitions and rejected others, failed ones: ${JSON.stringify(failed)}`
+    )
+  }
+
+  return { partitions: selected, assertPartiallyRejected }
 }
 
 export function mockMethod (

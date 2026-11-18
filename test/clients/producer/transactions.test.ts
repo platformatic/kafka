@@ -29,6 +29,7 @@ import {
   createProducer,
   createTopic,
   createTracingChannelVerifier,
+  misdirectPartitions,
   mockAPI,
   mockConnectionPoolGet,
   mockConnectionPoolGetFirstAvailable,
@@ -740,6 +741,35 @@ test('send should reject out-of transaction requests', async t => {
     idempotent: true,
     acks: ProduceAcks.ALL
   })
+})
+
+test('send should produce the partitions of a transaction which moved to other leaders', async t => {
+  const producer = createProducer(t, {
+    strict: true,
+    idempotent: true,
+    transactionalId: randomUUID(),
+    // Bounded, so that a partition which is never produced to its leader fails the send
+    retries: 2,
+    metadataMaxAge: 600_000
+  })
+  const testTopic = await createTopic(t, true, 3)
+
+  const transaction = await producer.beginTransaction()
+  const { partitions, assertPartiallyRejected } = await misdirectPartitions(t, producer, testTopic)
+  strictEqual(partitions.length, 3)
+
+  // The leader of the first partition rejects the other two, which are then produced to their leaders at once
+  const result = await transaction.send({
+    messages: partitions.map(partition => ({ topic: testTopic, partition, value: Buffer.from(`value-${partition}`) }))
+  })
+
+  await transaction.commit()
+
+  assertPartiallyRejected()
+  deepStrictEqual(
+    result.offsets!.sort((a, b) => a.partition - b.partition),
+    partitions.map(partition => ({ topic: testTopic, partition, offset: 0n }))
+  )
 })
 
 test('send should reject requests from another transaction', async t => {

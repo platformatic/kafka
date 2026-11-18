@@ -19,6 +19,7 @@ import {
   compressionsAlgorithms,
   ConfluentSchemaRegistry,
   Connection,
+  findErrorBy,
   GenericError,
   instancesChannel,
   MessagesStreamModes,
@@ -30,12 +31,14 @@ import {
   producerInitIdempotentChannel,
   producerSendsChannel,
   ProtocolError,
+  Reader,
   stringDeserializers,
   stringSerializer,
   stringSerializers,
   type TopicWithPartitionAndOffset,
   UnsupportedApiError,
-  UserError
+  UserError,
+  Writer
 } from '../../../src/index.ts'
 import type { CreateRecordsBatchOptions, MessageRecord } from '../../../src/protocol/records.ts'
 import {
@@ -181,6 +184,114 @@ function mockProducerApis (producer: Producer, getProducerId: () => bigint, prod
       return true
     }
   )
+}
+
+// Mocks the brokers 0 to 2 and a topic whose partitions are led by the brokers returned by getLeaders
+function mockLeaders (producer: Producer, topic: string, getLeaders: () => number[]): void {
+  mockMethod(
+    producer,
+    kMetadata,
+    () => true,
+    null,
+    undefined,
+    (_original, _options, callback) => {
+      const metadata = createProducerMetadata(topic)
+      const [partition] = metadata.topics.get(topic)!.partitions
+      const leaders = getLeaders()
+
+      metadata.brokers = new Map([0, 1, 2].map(id => [id, { host: `broker-${id}`, port: 9092, rack: null }]))
+      metadata.topics.get(topic)!.partitions = leaders.map(leader => ({ ...partition, leader }))
+      metadata.topics.get(topic)!.partitionsCount = leaders.length
+      callback(null, metadata)
+      return true
+    }
+  )
+
+  mockMethod(
+    producer,
+    kGetConnection,
+    () => true,
+    null,
+    undefined,
+    (_original, broker, callback) => {
+      callback(null, { host: broker.host } as unknown as Connection)
+      return true
+    }
+  )
+}
+
+function describeRequest (connection: Connection, messages: MessageRecord[]): string {
+  return `${connection.host}:${[...new Set(messages.map(m => m.partition!))].sort().join(',')}`
+}
+
+function createPartitionsResponse (
+  topic: string,
+  partitions: { index: number; errorCode?: number; offset?: bigint }[]
+): ProduceResponse {
+  const response = createProduceResponse(topic, 0)
+  const [template] = response.responses[0].partitionResponses
+
+  response.responses[0].partitionResponses = partitions.map(({ index, errorCode = 0, offset = -1n }) => {
+    return { ...template, index, errorCode, baseOffset: offset }
+  })
+
+  return response
+}
+
+// Like a real broker, it appends the partitions it leads and rejects the others with NOT_LEADER_OR_FOLLOWER
+function createBrokerResponse (
+  topic: string,
+  connection: Connection,
+  messages: MessageRecord[],
+  leaders: number[],
+  errorCodes: Record<string, number> = {}
+): ProduceResponse {
+  const partitions = [...new Set(messages.map(m => m.partition!))].sort()
+
+  return createPartitionsResponse(
+    topic,
+    partitions.map(index => {
+      if (`broker-${leaders[index]}` !== connection.host) {
+        return { index, errorCode: 6 }
+      }
+
+      const errorCode = errorCodes[connection.host!]
+      return errorCode ? { index, errorCode } : { index, offset: BigInt((index + 1) * 10) }
+    })
+  )
+}
+
+// Goes through the real parser, so that failed partitions raise the same ResponseError a broker response does
+function respond (apiCallback: ProduceApiCallback, response: ProduceResponse): void {
+  const writer = Writer.create()
+    .appendArray(response.responses, (w, topic) => {
+      w.appendString(topic.name).appendArray(topic.partitionResponses, (w, partition) => {
+        w.appendInt32(partition.index)
+          .appendInt16(partition.errorCode)
+          .appendInt64(partition.baseOffset)
+          .appendInt64(partition.logAppendTimeMs)
+          .appendInt64(partition.logStartOffset)
+          .appendArray(partition.recordErrors, () => {})
+          .appendString(partition.errorMessage)
+      })
+    })
+    .appendInt32(response.throttleTimeMs)
+    .appendInt8(0)
+
+  let parsed: ProduceResponse
+
+  try {
+    parsed = produceV11.parseResponse(0, produceV11.api.key, 11, Reader.from(writer))
+  } catch (error) {
+    apiCallback(error as Error)
+    return
+  }
+
+  apiCallback(null, parsed)
+}
+
+function sortOffsets (offsets: TopicWithPartitionAndOffset[] | undefined): TopicWithPartitionAndOffset[] {
+  return [...(offsets ?? [])].sort((a, b) => a.partition - b.partition)
 }
 
 test('constructor should initialize properly', t => {
@@ -2375,4 +2486,320 @@ test('getSendConnections should handle errors from ConnectionPool.get', async t 
       return true
     }
   )
+})
+
+test('send should only retry the partitions which failed in a partially failed produce request', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => [0, 0])
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // NOT_ENOUGH_REPLICAS, which is retried
+      const partitions =
+        requests.length === 1
+          ? [
+              { index: 0, offset: 10n },
+              { index: 1, errorCode: 19 }
+            ]
+          : [{ index: 1, offset: 20n }]
+
+      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+  })
+
+  deepStrictEqual(requests, ['broker-0:0,1', 'broker-0:1'])
+  deepStrictEqual(sortOffsets(result.offsets), [
+    { topic: testTopic, partition: 0, offset: 10n },
+    { topic: testTopic, partition: 1, offset: 20n }
+  ])
+})
+
+test('send should retry each failed partition on its own leader after the leaders moved', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let leaders = [0, 0]
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => leaders)
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // Both partitions move away from broker 0, to different brokers, before the first request lands
+      leaders = [1, 2]
+      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, leaders))
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+  })
+
+  deepStrictEqual(requests.slice(0, 1), ['broker-0:0,1'])
+  deepStrictEqual(requests.slice(1).sort(), ['broker-1:0', 'broker-2:1'])
+  deepStrictEqual(sortOffsets(result.offsets), [
+    { topic: testTopic, partition: 0, offset: 10n },
+    { topic: testTopic, partition: 1, offset: 20n }
+  ])
+})
+
+test('send should not resend appended partitions when recovering the idempotent producer', async t => {
+  const producer = createProducer(t, { idempotent: true, retries: 3, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  const sent: Array<{ producerId: bigint; partitions: number[] }> = []
+  let initCalls = 0
+
+  mockLeaders(producer, testTopic, () => [0, 0])
+  mockProducerApis(
+    producer,
+    () => BigInt(++initCalls),
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      sent.push({ producerId: produceOptions!.producerId!, partitions: [...new Set(messages.map(m => m.partition!))] })
+
+      // OUT_OF_ORDER_SEQUENCE_NUMBER, which makes the producer get a new producer ID
+      const partitions =
+        sent.length === 1
+          ? [
+              { index: 0, offset: 10n },
+              { index: 1, errorCode: 45 }
+            ]
+          : [{ index: 1, offset: 20n }]
+
+      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+  })
+
+  deepStrictEqual(sent, [
+    { producerId: 1n, partitions: [0, 1] },
+    { producerId: 2n, partitions: [1] }
+  ])
+  deepStrictEqual(sortOffsets(result.offsets), [
+    { topic: testTopic, partition: 0, offset: 10n },
+    { topic: testTopic, partition: 1, offset: 20n }
+  ])
+})
+
+test('send should keep the appended partitions when repeating the send after stale metadata', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let leaders = [0, 0]
+  let metadataClears = 0
+  const requests: string[] = []
+
+  const clearMetadata = producer.clearMetadata.bind(producer)
+  producer.clearMetadata = () => {
+    metadataClears++
+    clearMetadata()
+  }
+
+  mockLeaders(producer, testTopic, () => leaders)
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // Only partition 1 moves, so broker 0 still appends partition 0
+      leaders = [0, 1]
+      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, leaders))
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+  })
+
+  strictEqual(metadataClears, 1)
+  deepStrictEqual(requests, ['broker-0:0,1', 'broker-1:1'])
+  deepStrictEqual(sortOffsets(result.offsets), [
+    { topic: testTopic, partition: 0, offset: 10n },
+    { topic: testTopic, partition: 1, offset: 20n }
+  ])
+})
+
+test('send should produce to every leader in the same attempt when the leaders moved', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let metadataCalls = 0
+  const requests: string[] = []
+
+  // Both partitions were led by broker 0 when the send started, then they moved to brokers 1 and 2
+  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, [1, 2]))
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+  })
+
+  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
+  deepStrictEqual(sortOffsets(result.offsets), [
+    { topic: testTopic, partition: 0, offset: 10n },
+    { topic: testTopic, partition: 1, offset: 20n }
+  ])
+})
+
+test('send should report the partitions appended by a leader when another leader fails', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let metadataCalls = 0
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // MESSAGE_TOO_LARGE on broker 1, which is not retried
+      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, [1, 2], { 'broker-1': 10 }))
+    }
+  )
+
+  await rejects(
+    () =>
+      producer.send({
+        messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+      }),
+    error => {
+      ok(findErrorBy(error as Error, 'apiId', 'MESSAGE_TOO_LARGE'))
+      deepStrictEqual((error as GenericError).produced, { offsets: [{ topic: testTopic, partition: 1, offset: 20n }] })
+      return true
+    }
+  )
+
+  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
+})
+
+test('send should report the partitions appended before the retries ran out', async t => {
+  const producer = createProducer(t, { idempotent: false, retries: 2, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => [0, 0])
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // Partition 1 never gets enough replicas
+      const partitions =
+        requests.length === 1
+          ? [
+              { index: 0, offset: 10n },
+              { index: 1, errorCode: 19 }
+            ]
+          : [{ index: 1, errorCode: 19 }]
+
+      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
+    }
+  )
+
+  await rejects(
+    () =>
+      producer.send({
+        messages: [0, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
+      }),
+    error => {
+      deepStrictEqual((error as GenericError).produced, { offsets: [{ topic: testTopic, partition: 0, offset: 10n }] })
+      return true
+    }
+  )
+
+  deepStrictEqual(requests, ['broker-0:0,1', 'broker-0:1', 'broker-0:1'])
+})
+
+test('send should report the busy brokers when no response is requested and the leaders moved', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let metadataCalls = 0
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+
+      // The socket of broker 2 is full
+      apiCallback!(null, connection.host !== 'broker-2')
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') })),
+    acks: ProduceAcks.NO_RESPONSE
+  })
+
+  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
+  deepStrictEqual(result, { unwritableNodes: [2] })
+})
+
+test('send should not write again what was written when no response is requested and another leader fails', async t => {
+  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
+  const testTopic = await createTopic(t)
+  let metadataCalls = 0
+  let connectionFailed = false
+  const requests: string[] = []
+
+  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
+  mockMethod(
+    producer,
+    kGetConnection,
+    () => true,
+    null,
+    undefined,
+    (original, broker, callback) => {
+      if (broker.host === 'broker-2' && !connectionFailed) {
+        connectionFailed = true
+        callback(new NetworkError('Connection failed.'))
+        return true
+      }
+
+      original(broker, callback)
+      return true
+    }
+  )
+  mockProducerApis(
+    producer,
+    () => 1n,
+    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
+      requests.push(describeRequest(connection, messages))
+      apiCallback!(null, true)
+    }
+  )
+
+  const result = await producer.send({
+    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') })),
+    acks: ProduceAcks.NO_RESPONSE
+  })
+
+  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
+  deepStrictEqual(result, { unwritableNodes: [] })
+  ok(connectionFailed)
 })

@@ -26,7 +26,8 @@ export const produceOptionsProperties = {
   },
   partitioner: { function: true },
   autocreateTopics: { type: 'boolean' },
-  repeatOnStaleMetadata: { type: 'boolean' }
+  repeatOnStaleMetadata: { type: 'boolean' },
+  deliveryTimeout: { type: 'number', exclusiveMinimum: 0 }
 }
 
 export const produceOptionsSchema = {

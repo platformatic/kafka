@@ -1504,7 +1504,21 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       return false
     }
 
-    // Unknown assignments (not joined yet, or after leaving the group) mean nothing is owned.
+    const assigned = this.#assignedPartitionKeys()
+
+    let forgotten = false
+    for (const key of this.#assignedPartitions) {
+      if (!assigned.has(key) && this.#offsetsToFetch.delete(key)) {
+        forgotten = true
+      }
+    }
+
+    this.#assignedPartitions = assigned
+    return forgotten
+  }
+
+  // Unknown assignments (not joined yet, or after leaving the group) mean nothing is owned.
+  #assignedPartitionKeys (): Set<string> {
     const assigned = new Set<string>()
     for (const topic of this.#topics) {
       const assignment = this.#assignmentsForTopic(topic)
@@ -1518,22 +1532,25 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
     }
 
-    let forgotten = false
-    for (const key of this.#assignedPartitions) {
-      if (!assigned.has(key) && this.#offsetsToFetch.delete(key)) {
-        forgotten = true
-      }
-    }
-
-    this.#assignedPartitions = assigned
-    return forgotten
+    return assigned
   }
 
   #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {
+    // In committed mode only the partitions assigned right now get a position. The offsets list covers the
+    // whole topic and a response can arrive after a revocation: a position written for a partition this
+    // stream does not own would be kept when it is assigned back, instead of resolving its offset again.
+    const assigned = this.#mode === MessagesStreamModes.COMMITTED ? this.#assignedPartitionKeys() : undefined
+
     for (const [topic, partitions] of offsets) {
       for (let i = 0; i < partitions.length; i++) {
-        if (!this.#offsetsToFetch.has(`${topic}:${i}`)) {
-          this.#offsetsToFetch.set(`${topic}:${i}`, partitions[i])
+        const key = partitionKey(topic, i)
+
+        if (assigned && !assigned.has(key)) {
+          continue
+        }
+
+        if (!this.#offsetsToFetch.has(key)) {
+          this.#offsetsToFetch.set(key, partitions[i])
         }
       }
     }
@@ -1541,6 +1558,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     for (const [topic, partitions] of commits) {
       for (let i = 0; i < partitions.length; i++) {
         const offset = partitions[i]
+
+        if (assigned && !assigned.has(partitionKey(topic, i))) {
+          continue
+        }
 
         if (offset >= 0n) {
           this.#offsetsToFetch.set(`${topic}:${i}`, offset)

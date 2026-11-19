@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual } from 'node:assert'
-import { EventEmitter } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
 import type { FetchRequestTopic, FetchResponse } from '../../../src/apis/consumer/fetch-v17.ts'
@@ -16,7 +16,7 @@ import {
   ProtocolError,
   ResponseError
 } from '../../../src/index.ts'
-import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch } from '../../../src/symbols.ts'
+import { kAutocommit, kForgetRevokedPartitions, kGetFetchNode, kRefreshOffsetsAndFetch } from '../../../src/symbols.ts'
 import { createConsumer, mockConnectionPoolGet, mockMetadata, mockMethod } from '../../helpers.ts'
 
 const topic = 'test-topic'
@@ -1371,6 +1371,96 @@ test(
     await restored
 
     strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 3n)
+    stream.destroy()
+  }
+)
+
+function createTwoPartitionUncommittedConsumerMock (latest: () => bigint) {
+  const consumer = createOffsetRefreshConsumerMock()
+  const partition = { leader: 1, leaderEpoch: 0 }
+
+  consumer.assignments = [{ topic, partitions: [0, 1] }]
+  consumer.metadata = (_: object, callback: CallbackWithPromise<any>) => {
+    callback(null, { topics: new Map([[topic, { id: 'test-topic-id', partitions: [partition, partition] }]]) })
+  }
+  consumer.listOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map([[topic, [latest(), latest()]]]))
+  }
+  // The group never committed anything
+  consumer.listCommittedOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+    callback(null, new Map([[topic, [-1n, -1n]]]))
+  }
+
+  return consumer
+}
+
+// What the consumer does on every assignment change
+function assign (consumer: any, stream: MessagesStream<unknown, unknown, unknown, unknown>, partitions: number[]) {
+  consumer.assignments = [{ topic, partitions }]
+  stream[kForgetRevokedPartitions]()
+}
+
+async function refresh (stream: MessagesStream<unknown, unknown, unknown, unknown>) {
+  const restored = once(stream, 'offsets')
+  stream[kRefreshOffsetsAndFetch]()
+  await restored
+}
+
+test(
+  'should resolve the fallback offset again for a partition assigned back after a refresh while it was revoked',
+  { timeout: 5_000 },
+  async () => {
+    let latest = 5n
+    const consumer = createTwoPartitionUncommittedConsumerMock(() => latest)
+    const stream = new MessagesStream(consumer, {
+      ...committedStreamOptions,
+      fallbackMode: MessagesStreamFallbackModes.LATEST
+    })
+    await refresh(stream)
+    strictEqual(stream.offsetsToFetch.get(`${topic}:1`), 5n)
+
+    // p1 is revoked, then offsets are refreshed for another reason while it is not assigned
+    assign(consumer, stream, [0])
+    latest = 8n
+    await refresh(stream)
+    strictEqual(stream.offsetsToFetch.has(`${topic}:1`), false)
+
+    // p1 comes back without a committed offset: the fallback is resolved now, not at the previous refresh
+    latest = 12n
+    assign(consumer, stream, [0, 1])
+    await refresh(stream)
+    strictEqual(stream.offsetsToFetch.get(`${topic}:1`), 12n)
+
+    stream.destroy()
+  }
+)
+
+test(
+  'should not let a refresh response that completes after a revocation restore the revoked partition',
+  { timeout: 5_000 },
+  async () => {
+    let latest = 5n
+    const consumer = createTwoPartitionUncommittedConsumerMock(() => latest)
+    const stream = new MessagesStream(consumer, {
+      ...committedStreamOptions,
+      fallbackMode: MessagesStreamFallbackModes.LATEST
+    })
+    await refresh(stream)
+
+    // A refresh queries the offsets while p1 is assigned, and p1 is revoked before the answer arrives
+    let answer!: () => void
+    consumer.listOffsets = (_: object, callback: CallbackWithPromise<any>) => {
+      answer = () => callback(null, new Map([[topic, [latest, latest]]]))
+    }
+    latest = 8n
+    const restored = once(stream, 'offsets')
+    stream[kRefreshOffsetsAndFetch]()
+    assign(consumer, stream, [0])
+    answer()
+    await restored
+
+    strictEqual(stream.offsetsToFetch.has(`${topic}:1`), false)
+    strictEqual(stream.offsetsToFetch.get(`${topic}:0`), 5n)
     stream.destroy()
   }
 )

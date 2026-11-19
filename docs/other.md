@@ -173,8 +173,8 @@ The types of the `key`, `value` and `headers` fields are determined by the curre
 
 `Message` also provides a `.toJSON()` method for debugging and logging.
 
-`headers` is an accessor rather than an own property of the message: the `Map` of a message without headers is only
-created when it is read. It is therefore not copied by `{ ...message }` nor listed by `Object.keys(message)`.
+`headers` is an accessor rather than an own property of the message: the `Map` is only created when it is read, from
+the content of `headerEntries` at that time. It is therefore not copied by `{ ...message }` nor listed by `Object.keys(message)`.
 Use `message.headers` or `message.headerEntries` directly, or `.toJSON()`.
 
 ### `MessageToProduce<Key, Value, HeaderKey, HeaderValue>`

@@ -1175,7 +1175,6 @@ export class MessagesStream<
 
                   if (headersFailed) {
                     headers = record.headers.length > 0 ? new Map<HeaderKey, HeaderValue>() : undefined
-                    headerEntries.length = 0
 
                     // Every entry is overwritten, including the ones which were never deserialized
                     for (let i = 0; i < headersCount; i++) {

@@ -14,10 +14,17 @@ import { Writer } from './writer.ts'
 
 export const CURRENT_RECORD_VERSION = 2
 export const IS_COMPRESSED = 0b111 // Bits 0, 1 and/or 2 set
-// Byte 3 is timestamp type, currently unused by this package
+export const IS_LOG_APPEND_TIME = 1 << 3 // Bit 3 set: the broker assigned the timestamps (LogAppendTime)
 export const IS_TRANSACTIONAL = 1 << 4 // Bit 4 set
 export const IS_CONTROL = 1 << 5 // Bits 5 set
 export const BATCH_HEAD = INT64_SIZE + INT32_SIZE // FirstOffset + Length
+
+export const TimestampTypes = {
+  CREATE_TIME: 'CreateTime',
+  LOG_APPEND_TIME: 'LogAppendTime'
+} as const
+
+export type TimestampType = (typeof TimestampTypes)[keyof typeof TimestampTypes]
 
 export interface MessageBase<Key = Buffer, Value = Buffer> {
   key?: Key
@@ -53,6 +60,7 @@ export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown
   topic: string
   partition: number
   timestamp: string
+  timestampType: TimestampType
   offset: string
   leaderEpoch: number
   metadata: Record<string, unknown>
@@ -64,6 +72,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
 > {
   headers: Map<HeaderKey, HeaderValue>
   headerEntries: Array<[HeaderKey, HeaderValue]>
+  timestampType: TimestampType
   offset: bigint
   leaderEpoch: number
   metadata: Record<string, unknown>

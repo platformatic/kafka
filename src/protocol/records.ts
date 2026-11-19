@@ -320,11 +320,21 @@ function readRecords (buffer: Buffer, count: number, records: KafkaRecord[]): vo
     const value = readRecordVarIntBytes(buffer)
 
     const headersCount = readRecordVarInt(buffer)
-    const headers: [Buffer | null, Buffer | null][] = []
+
+    // Each header takes at least two bytes, so a count beyond that is corrupted and must not be allocated
+    if (headersCount > (buffer.length - recordsPosition) >> 1) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    /*
+      The array is allocated at its final length: the first push on an empty array reserves room for 17 elements,
+      while records usually have a few headers.
+    */
+    const headers: [Buffer | null, Buffer | null][] = headersCount > 0 ? new Array(headersCount) : []
 
     for (let j = 0; j < headersCount; j++) {
       const headerKey = readRecordVarIntBytes(buffer)
-      headers.push([headerKey, readRecordVarIntBytes(buffer)])
+      headers[j] = [headerKey, readRecordVarIntBytes(buffer)]
     }
 
     records.push({ length, attributes, timestampDelta, offsetDelta, key, value, headers })

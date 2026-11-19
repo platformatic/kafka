@@ -1088,7 +1088,10 @@ export class MessagesStream<
               // Without headers, the Map is only needed by the deserializers which read it
               let headers: Map<HeaderKey, HeaderValue> | undefined =
                 deserializersUseHeaders || record.headers.length > 0 ? new Map<HeaderKey, HeaderValue>() : undefined
-              const headerEntries: Array<[HeaderKey, HeaderValue]> = []
+              // Allocated at its final length, as a push on an empty array reserves room for 17 elements
+              const recordHeaders = record.headers
+              const headersCount = recordHeaders.length
+              const headerEntries: Array<[HeaderKey, HeaderValue]> = headersCount > 0 ? new Array(headersCount) : []
               let payloadType: BeforeHookPayloadType = 'headerKey'
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
@@ -1104,15 +1107,16 @@ export class MessagesStream<
                   throw hookError.error
                 }
 
-                for (const [headerKey, headerValue] of record.headers) {
+                for (let i = 0; i < headersCount; i++) {
+                  const header = recordHeaders[i]
                   payloadType = 'headerKey'
                   /* c8 ignore next - Hard to test */
-                  const deserializedHeaderKey = headerKeyDeserializer(headerKey ?? undefined, messageToConsume)
+                  const deserializedHeaderKey = headerKeyDeserializer(header[0] ?? undefined, messageToConsume)
                   payloadType = 'headerValue'
                   /* c8 ignore next - Hard to test */
-                  const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
+                  const deserializedHeaderValue = headerValueDeserializer(header[1] ?? undefined, messageToConsume)
                   headers!.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
-                  headerEntries.push([deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue])
+                  headerEntries[i] = [deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue]
                 }
 
                 payloadType = 'key'
@@ -1168,11 +1172,12 @@ export class MessagesStream<
 
                   if (headersFailed) {
                     headers = record.headers.length > 0 ? new Map<HeaderKey, HeaderValue>() : undefined
-                    headerEntries.length = 0
 
-                    for (const [headerKey, headerValue] of record.headers) {
-                      headers!.set(headerKey as HeaderKey, headerValue as HeaderValue)
-                      headerEntries.push([headerKey as HeaderKey, headerValue as HeaderValue])
+                    // Every entry is overwritten, including the ones which were never deserialized
+                    for (let i = 0; i < headersCount; i++) {
+                      const header = recordHeaders[i]
+                      headers!.set(header[0] as HeaderKey, header[1] as HeaderValue)
+                      headerEntries[i] = [header[0] as HeaderKey, header[1] as HeaderValue]
                     }
                   }
 

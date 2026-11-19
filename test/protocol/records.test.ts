@@ -649,6 +649,31 @@ test('readRecordsBatch throws when the records are truncated', () => {
   throws(() => readRecordsBatch(Reader.from(encoded)), { code: 'OUT_OF_BOUNDS' })
 })
 
+test('readRecordsBatch throws when the headers count of a record exceeds the remaining data', () => {
+  const messages: MessageRecord[] = [
+    { topic: 'topic', partition: 0, key: Buffer.from('key'), value: Buffer.from('value'), timestamp: 1n }
+  ]
+  const encoded = createRecordsBatch(messages).buffer
+
+  // The record has no headers, so the count is its last byte: claim 63 of them
+  strictEqual(encoded[encoded.length - 1], 0)
+  encoded[encoded.length - 1] = 0x7e
+
+  throws(() => readRecordsBatch(Reader.from(encoded)), { code: 'OUT_OF_BOUNDS' })
+})
+
+test('readRecordsBatch tolerates a negative headers count', () => {
+  const messages: MessageRecord[] = [
+    { topic: 'topic', partition: 0, key: Buffer.from('key'), value: Buffer.from('value'), timestamp: 1n }
+  ]
+  const encoded = createRecordsBatch(messages).buffer
+
+  // -1 as a zigzag varint
+  encoded[encoded.length - 1] = 0x01
+
+  deepStrictEqual(readRecordsBatch(Reader.from(encoded)).records[0].headers, [])
+})
+
 test('createRecordsBatch returns the batch as a single buffer', () => {
   const messages: MessageRecord[] = []
   for (let i = 0; i < 100; i++) {

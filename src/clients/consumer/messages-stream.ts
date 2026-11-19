@@ -37,7 +37,7 @@ import {
   type DeserializerWithHeaders
 } from '../serde.ts'
 import type { Consumer } from './consumer.ts'
-import { defaultConsumerOptions } from './options.ts'
+import { defaultBatchSize, defaultConsumerOptions } from './options.ts'
 import {
   DeserializationErrorActions,
   MessagesStreamFallbackModes,
@@ -49,6 +49,8 @@ import {
   type DeserializationErrorHandler,
   type GroupAssignment,
   type MessageDeserializationError,
+  type MessagesBatch,
+  type MessagesBatchJSON,
   type Offsets
 } from './types.ts'
 import { partitionKey } from './utils.ts'
@@ -83,9 +85,28 @@ function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, V
   }
 }
 
+function messagesBatchToJSON<Key, Value, HeaderKey, HeaderValue> (
+  this: MessagesBatch<Key, Value, HeaderKey, HeaderValue>
+): MessagesBatchJSON<Key, Value, HeaderKey, HeaderValue> {
+  return {
+    topic: this.topic,
+    partition: this.partition,
+    messages: this.messages.map(message => message.toJSON()),
+    firstOffset: this.firstOffset.toString(),
+    lastOffset: this.lastOffset.toString(),
+    leaderEpoch: this.leaderEpoch
+  }
+}
+
 let currentInstance = 0
 
-export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable {
+export class MessagesStream<
+  Key,
+  Value,
+  HeaderKey,
+  HeaderValue,
+  Item = Message<Key, Value, HeaderKey, HeaderValue>
+> extends Readable {
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
   #fallbackMode: string
@@ -96,6 +117,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   #offsetsEpoch: number
   #fetches: number
   #maxFetches: number
+  #batchSize: number
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
   #offsetsToFetch: Map<string, bigint>
@@ -155,6 +177,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       mode,
       fallbackMode,
       maxFetches,
+      batch,
       offsets,
       context,
       deserializers,
@@ -181,11 +204,14 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       throw new UserError('Must specify offsets when the stream mode is MANUAL.')
     }
 
-    /* c8 ignore next 4 - Unless is initialized directly, highWaterMark is always defined */
-    super({
-      objectMode: true,
-      highWaterMark: maxFetches ?? options.highWaterMark ?? defaultConsumerOptions.highWaterMark
-    })
+    const batchSize = batch === true ? defaultBatchSize : batch || 0
+    /* c8 ignore next - Unless is initialized directly, highWaterMark is always defined */
+    const messagesHighWaterMark = options.highWaterMark ?? defaultConsumerOptions.highWaterMark
+    // maxFetches also sets the buffer threshold, measured in batches in batch mode.
+    const highWaterMark =
+      maxFetches ?? (batchSize ? Math.ceil(messagesHighWaterMark / batchSize) : messagesHighWaterMark)
+
+    super({ objectMode: true, highWaterMark })
     this[kInstance] = currentInstance++
     this[kConnections] = consumer[kCreateConnectionPool](context)
     this.#consumer = consumer
@@ -202,6 +228,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#offsetsEpoch = 0
     this.#fetches = 0
     this.#maxFetches = maxFetches ?? 0
+    this.#batchSize = batchSize
     this.#topics = structuredClone(options.topics)
     this.#inflightNodes = new Map()
     this.#keyDeserializer =
@@ -447,7 +474,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   addListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   addListener (event: 'fetch', listener: () => void): this
   addListener (event: 'offsets', listener: () => void): this
-  addListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
+  addListener (event: 'data', listener: (item: Item) => void): this
   addListener (event: 'close', listener: () => void): this
   addListener (event: 'end', listener: () => void): this
   addListener (event: 'error', listener: (err: Error) => void): this
@@ -462,7 +489,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   on (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   on (event: 'fetch', listener: () => void): this
   on (event: 'offsets', listener: () => void): this
-  on (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
+  on (event: 'data', listener: (item: Item) => void): this
   on (event: 'close', listener: () => void): this
   on (event: 'end', listener: () => void): this
   on (event: 'error', listener: (err: Error) => void): this
@@ -477,7 +504,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   once (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   once (event: 'fetch', listener: () => void): this
   once (event: 'offsets', listener: () => void): this
-  once (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
+  once (event: 'data', listener: (item: Item) => void): this
   once (event: 'close', listener: () => void): this
   once (event: 'end', listener: () => void): this
   once (event: 'error', listener: (err: Error) => void): this
@@ -492,7 +519,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependListener (event: 'fetch', listener: () => void): this
   prependListener (event: 'offsets', listener: () => void): this
-  prependListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
+  prependListener (event: 'data', listener: (item: Item) => void): this
   prependListener (event: 'close', listener: () => void): this
   prependListener (event: 'end', listener: () => void): this
   prependListener (event: 'error', listener: (err: Error) => void): this
@@ -507,7 +534,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
   prependOnceListener (event: 'autocommit', listener: (err: Error, offsets: CommitOptionsPartition[]) => void): this
   prependOnceListener (event: 'fetch', listener: () => void): this
   prependOnceListener (event: 'offsets', listener: () => void): this
-  prependOnceListener (event: 'data', listener: (message: Message<Key, Value, HeaderKey, HeaderValue>) => void): this
+  prependOnceListener (event: 'data', listener: (item: Item) => void): this
   prependOnceListener (event: 'close', listener: () => void): this
   prependOnceListener (event: 'end', listener: () => void): this
   prependOnceListener (event: 'error', listener: (err: Error) => void): this
@@ -519,7 +546,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     return super.prependOnceListener(event, listener)
   }
 
-  [Symbol.asyncIterator] (): NodeJS.AsyncIterator<Message<Key, Value, HeaderKey, HeaderValue>> {
+  [Symbol.asyncIterator] (): NodeJS.AsyncIterator<Item> {
     return super[Symbol.asyncIterator]()
   }
 
@@ -555,7 +582,15 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     this.#fetch()
   }
 
+  #maxFetchesReached (): boolean {
+    return this.#maxFetches > 0 && this.#fetches >= this.#maxFetches
+  }
+
   #fetch () {
+    if (this.#maxFetchesReached()) {
+      return
+    }
+
     /* c8 ignore next 4 - Hard to test */
     if (this.#closed || this.closed || this.destroyed) {
       this.push(null)
@@ -569,7 +604,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
     const offsetsEpoch = this.#offsetsEpoch
     this.#consumer.metadata({ topics: this.#consumer.topics.current }, (error, metadata) => {
-      if (offsetsEpoch !== this.#offsetsEpoch) {
+      if (offsetsEpoch !== this.#offsetsEpoch || this.#maxFetchesReached()) {
         return
       }
 
@@ -659,6 +694,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       }
 
       for (const [node, nodeRequests] of requests) {
+        if (this.#maxFetchesReached()) {
+          break
+        }
+
         const inflight = { startedAt: Date.now() }
         this.#inflightNodes.set(node, inflight)
         this.#consumer.fetch({ ...this.#options, node, topics: nodeRequests, connectionPool: this[kConnections] }, (
@@ -670,6 +709,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             this.#inflightNodes.delete(node)
           }
           this.emit('fetch')
+
+          if (this.#maxFetchesReached()) {
+            return
+          }
 
           // A refresh (including a rejoin) invalidates requests issued before it.
           // Never let an old response or error undo the restored offsets.
@@ -696,7 +739,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
 
             if (this.#fallbackMode !== MessagesStreamFallbackModes.FAIL) {
               this.#handleOffsetOutOfRange(error as GenericError, topicIds, (recoveryError, recovered) => {
-                if (this.#closed || this.closed || this.destroyed) {
+                if (this.#closed || this.closed || this.destroyed || this.#maxFetchesReached()) {
                   return
                 }
 
@@ -868,11 +911,12 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
     requestedOffsets: Map<string, bigint>,
     offsetsEpoch: number
   ) {
-    if (offsetsEpoch !== this.#offsetsEpoch) {
+    if (offsetsEpoch !== this.#offsetsEpoch || this.#maxFetchesReached()) {
       return
     }
 
     const autocommit = this.#autocommitEnabled
+    const batchSize = this.#batchSize
     const keyDeserializer = this.#keyDeserializer
     const valueDeserializer = this.#valueDeserializer
     const headerKeyDeserializer = this.#headerKeyDeserializer
@@ -913,6 +957,9 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
           continue
         }
 
+        let pending: Message<Key, Value, HeaderKey, HeaderValue>[] | undefined
+        let pendingContexts: DiagnosticContext<unknown>[] | undefined = batchSize && tracing ? [] : undefined
+
         for (const batch of recordsBatches) {
           const firstTimestamp = batch.firstTimestamp
           const firstOffset = batch.firstOffset
@@ -927,7 +974,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             this.#offsetsToFetch.set(key, lastOffset + 1n)
 
             // Autocommit if needed
-            if (autocommit) {
+            if (autocommit && !batchSize) {
               this.#offsetsToCommit.set(key, {
                 topic,
                 partition,
@@ -970,7 +1017,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
               consumerReceivesChannel.start.publish(diagnosticContext)
             }
 
-            const commit = autocommit
+            const commit = autocommit || batchSize
               ? noopCallback
               : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
 
@@ -1009,6 +1056,10 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 payloadType = 'value'
                 deserializedValue = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
               } catch (error) {
+                // The error handler can explicitly commit a failed record even in batch mode.
+                const commitFailedMessage = (batchSize && !autocommit
+                  ? this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
+                  : commit) as Message['commit']
                 const context: DeserializationErrorContext = {
                   error,
                   payloadType,
@@ -1017,7 +1068,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                   partition,
                   offset,
                   timestamp: firstTimestamp + record.timestampDelta,
-                  commit: commit as Message['commit']
+                  commit: commitFailedMessage
                 }
                 const action = this.#deserializationErrorHandler
                   ? this.#deserializationErrorHandler(context)
@@ -1027,28 +1078,26 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                     partition,
                     firstTimestamp,
                     firstOffset,
-                    commit as Message['commit'],
+                    commitFailedMessage,
                     error
                   )
                     ? DeserializationErrorActions.FAIL
                     : DeserializationErrorActions.SKIP
 
                 if (action === DeserializationErrorActions.CONTINUE) {
-                  /*
-                    Deliver the message in a degraded form, so that nothing is lost: whatever was
-                    already deserialized is kept, while the payload which failed and the ones which
-                    were never attempted, since deserialization goes headers, key and then value,
-                    are delivered as the original bytes.
-
-                    The error is reported on the message metadata and published on the diagnostic
-                    channel, which is where callers should react to it: logging here would be a log
-                    storm waiting to happen.
-                  */
                   if (diagnosticContext) {
                     diagnosticContext.error = error
                     consumerReceivesChannel.error.publish(diagnosticContext)
                   }
 
+                  if (batchSize) {
+                    continue
+                  }
+
+                  /*
+                    In per-message mode, keep the fields that were already deserialized and return
+                    the failed or unattempted fields as bytes. Record the error in message metadata.
+                  */
                   // A hook failure happens before anything is deserialized, so nothing can be kept
                   const headersFailed = hookFailed || payloadType === 'headerKey' || payloadType === 'headerValue'
 
@@ -1083,9 +1132,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                 }
               }
 
-              this.#metricsConsumedMessages?.inc()
-
-              const message: Message = {
+              const message = {
                 key: deserializedKey,
                 value: deserializedValue,
                 headers,
@@ -1105,14 +1152,37 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
                     ? { ...messageMetadata, ...messageToConsume.metadata }
                     : messageMetadata,
                 toJSON: messageToJSON
-              } as Message
+              } as Message<Key, Value, HeaderKey, HeaderValue>
 
-              if (diagnosticContext) {
+              if (batchSize) {
+                if (this.#closed || this.destroyed) {
+                  return
+                }
+
+                // The next deliverable record is the commit boundary, including any skipped offsets.
+                if (pending?.length === batchSize) {
+                  canPush = this.#pushBatch(topic, partition, leaderEpoch, pending, pendingContexts, offset)
+                  if (this.#closed || this.destroyed) {
+                    return
+                  }
+                  pending = []
+                  pendingContexts = tracing ? [] : undefined
+                }
+
+                pending ??= []
+                pending.push(message)
+                if (diagnosticContext) {
+                  diagnosticContext.result = message
+                  pendingContexts!.push(diagnosticContext)
+                }
+              } else if (diagnosticContext) {
+                this.#metricsConsumedMessages?.inc()
                 diagnosticContext.result = message
                 consumerReceivesChannel.asyncStart.publish(diagnosticContext)
                 canPush = this.push(message)
                 consumerReceivesChannel.asyncEnd.publish(diagnosticContext)
               } else {
+                this.#metricsConsumedMessages?.inc()
                 canPush = this.push(message)
               }
             } catch (error) {
@@ -1130,11 +1200,36 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
             }
           }
         }
+
+        if (batchSize && recordsBatches.length > 0) {
+          const leaderEpoch = this.#partitionsEpochs.get(key)!
+          const offset = this.#offsetsToFetch.get(key)!
+          if (this.#closed || this.destroyed) {
+            return
+          }
+
+          if (pending) {
+            canPush = this.#pushBatch(topic, partition, leaderEpoch, pending, pendingContexts, offset)
+            if (this.#closed || this.destroyed) {
+              return
+            }
+          }
+
+          // Do not autocommit records from a batch that was never pushed.
+          if (autocommit) {
+            this.#offsetsToCommit.set(key, { topic, partition, offset, leaderEpoch })
+          }
+        }
       }
     }
 
     if (this.#autocommitEnabled && !this.#autocommitInterval) {
       this[kAutocommit]()
+    }
+
+    if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
+      this.push(null)
+      return
     }
 
     // Schedule the next fetch only when the readable buffer still has room.
@@ -1158,9 +1253,53 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
         this.#fetch()
       })
     }
+  }
 
-    if (this.#maxFetches > 0 && ++this.#fetches >= this.#maxFetches) {
-      this.push(null)
+  #pushBatch (
+    topic: string,
+    partition: number,
+    leaderEpoch: number,
+    messages: Message<Key, Value, HeaderKey, HeaderValue>[],
+    diagnosticContexts: DiagnosticContext<unknown>[] | undefined,
+    commitOffset: bigint
+  ): boolean {
+    const last = messages[messages.length - 1]
+    const batch: MessagesBatch<Key, Value, HeaderKey, HeaderValue> = {
+      topic,
+      partition,
+      messages,
+      firstOffset: messages[0].offset,
+      lastOffset: last.offset,
+      leaderEpoch: last.leaderEpoch,
+      commit: (this.#autocommitEnabled
+        ? noopCallback
+        : this.#commit.bind(this, topic, partition, commitOffset, leaderEpoch)) as Message['commit'],
+      toJSON: messagesBatchToJSON
+    }
+
+    try {
+      this.#metricsConsumedMessages?.inc(messages.length)
+      if (diagnosticContexts) {
+        for (const context of diagnosticContexts) {
+          consumerReceivesChannel.asyncStart.publish(context)
+        }
+      }
+      const canPush = this.push(batch)
+      if (diagnosticContexts) {
+        for (const context of diagnosticContexts) {
+          consumerReceivesChannel.asyncEnd.publish(context)
+        }
+      }
+      return canPush
+    } catch (error) {
+      if (diagnosticContexts) {
+        for (const context of diagnosticContexts) {
+          context.error = error
+          consumerReceivesChannel.error.publish(context)
+        }
+      }
+      this.destroy(new UserError('Failed to process a message.', { cause: error }))
+      return false
     }
   }
 
@@ -1623,7 +1762,7 @@ export class MessagesStream<Key, Value, HeaderKey, HeaderValue> extends Readable
       requests,
       0,
       error => {
-        if (offsetsEpoch !== this.#offsetsEpoch) {
+        if (offsetsEpoch !== this.#offsetsEpoch || this.#maxFetchesReached()) {
           return
         }
 

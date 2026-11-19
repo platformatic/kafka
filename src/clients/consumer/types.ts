@@ -2,7 +2,7 @@ import { type FetchRequestTopic } from '../../apis/consumer/fetch-v17.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { type GroupProtocols } from '../../apis/enumerations.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
-import { type KafkaRecord, type Message } from '../../protocol/records.ts'
+import { type KafkaRecord, type Message, type MessageJSON } from '../../protocol/records.ts'
 import { type SchemaRegistry } from '../../registries/abstract.ts'
 import { type BaseOptions, type ClusterMetadata, type TopicWithPartitionAndOffset } from '../base/types.ts'
 import { type BeforeDeserializationHook, type BeforeHookPayloadType, type Deserializers } from '../serde.ts'
@@ -39,6 +39,29 @@ export interface ExtendedGroupProtocolSubscription extends Omit<GroupProtocolSub
 
 export type Offsets = Map<string, bigint[]>
 export type OffsetsWithTimestamps = Map<string, Map<number, { offset: bigint; timestamp: bigint }>>
+
+export interface MessagesBatch<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> {
+  topic: string
+  partition: number
+  messages: Message<Key, Value, HeaderKey, HeaderValue>[]
+  firstOffset: bigint
+  lastOffset: bigint
+  leaderEpoch: number
+  commit: Message['commit']
+  toJSON (): MessagesBatchJSON<Key, Value, HeaderKey, HeaderValue>
+}
+
+export interface MessagesBatchJSON<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> {
+  topic: string
+  partition: number
+  messages: MessageJSON<Key, Value, HeaderKey, HeaderValue>[]
+  firstOffset: string
+  lastOffset: string
+  leaderEpoch: number
+}
+
+export type MessagesStreamItem<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> =
+  Message<Key, Value, HeaderKey, HeaderValue> | MessagesBatch<Key, Value, HeaderKey, HeaderValue>
 
 export interface PreferredReadReplica {
   node: number
@@ -170,6 +193,7 @@ export interface StreamOptions {
   mode?: MessagesStreamModeValue
   fallbackMode?: MessagesStreamFallbackModeValue
   maxFetches?: number
+  batch?: boolean | number
   offsets?: TopicWithPartitionAndOffset[]
   onDeserializationError?: DeserializationErrorHandler
   /**
@@ -181,6 +205,15 @@ export interface StreamOptions {
 export type ConsumeOptions<Key, Value, HeaderKey, HeaderValue> = StreamOptions &
   ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> &
   GroupOptions
+
+export type ConsumeBatchOptions<Key, Value, HeaderKey, HeaderValue> = ConsumeOptions<
+  Key,
+  Value,
+  HeaderKey,
+  HeaderValue
+> & {
+  batch: true | number
+}
 
 export type ConsumerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions & {
   groupId: string

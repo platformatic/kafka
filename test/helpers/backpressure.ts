@@ -6,6 +6,7 @@ import {
   Admin,
   Consumer,
   type Message,
+  type MessagesBatch,
   type MessagesStream,
   MessagesStreamModes,
   Producer,
@@ -19,6 +20,7 @@ type CallbackFunction = (error?: Error | null) => void
 type MessageWithTopicAndPartition = { topic: string; partition: number }
 
 export type DeserializedMessage = Message<string, Record<string, unknown>, string, string>
+type DeserializedMessagesBatch = MessagesBatch<string, Record<string, unknown>, string, string>
 
 /**
  * Replicates MQT's KafkaMessageBatchStream: a Duplex stream that batches Kafka messages
@@ -155,6 +157,7 @@ export interface BackpressureTestSetupOptions {
   topicCount: number
   messagesPerTopic: number
   consumerHighWaterMark: number
+  batch?: number | false
   publishBatchSize?: number
   publishConcurrency?: number
   topicPrefix?: string
@@ -164,10 +167,10 @@ export interface BackpressureTestSetupOptions {
   replicas?: number
 }
 
-export interface BackpressureTestSetup {
+export interface BackpressureTestSetup<Item = DeserializedMessage> {
   topics: string[]
   totalMessages: number
-  consumerStream: MessagesStream<string, Record<string, unknown>, string, string>
+  consumerStream: MessagesStream<string, Record<string, unknown>, string, string, Item>
   consumer: Consumer<string, Record<string, unknown>, string, string>
   producer: Producer<string, object, string, string>
 }
@@ -179,14 +182,27 @@ export interface BackpressureTestSetup {
  * The consumer starts BEFORE publishing so that it fetches partial results as they
  * arrive, creating cross-topic batches that trigger backpressure.
  */
+export function setupBackpressureTest (
+  t: TestContext,
+  options: BackpressureTestSetupOptions & { batch?: false }
+): Promise<BackpressureTestSetup>
+export function setupBackpressureTest (
+  t: TestContext,
+  options: BackpressureTestSetupOptions & { batch: number }
+): Promise<BackpressureTestSetup<DeserializedMessagesBatch>>
+export function setupBackpressureTest (
+  t: TestContext,
+  options: BackpressureTestSetupOptions
+): Promise<BackpressureTestSetup<DeserializedMessage | DeserializedMessagesBatch>>
 export async function setupBackpressureTest (
   t: TestContext,
   options: BackpressureTestSetupOptions
-): Promise<BackpressureTestSetup> {
+): Promise<BackpressureTestSetup<DeserializedMessage | DeserializedMessagesBatch>> {
   const {
     topicCount,
     messagesPerTopic,
     consumerHighWaterMark,
+    batch: consumeBatchSize,
     publishBatchSize = 500,
     publishConcurrency = 4,
     topicPrefix = `bp-${randomUUID().slice(0, 8)}`,
@@ -284,13 +300,16 @@ export async function setupBackpressureTest (
   }
   await consumer.joinGroup()
 
-  const consumerStream = await consumer.consume({
+  const consumeOptions = {
     topics,
     mode: MessagesStreamModes.EARLIEST,
     maxWaitTime: 1000,
-    autocommit: true,
+    autocommit: !consumeBatchSize,
     highWaterMark: consumerHighWaterMark
-  })
+  }
+  const consumerStream = await (consumeBatchSize
+    ? consumer.consume({ ...consumeOptions, batch: consumeBatchSize })
+    : consumer.consume(consumeOptions))
 
   // Publish AFTER consumer is running with bounded concurrency so messages
   // arrive while the consumer is already fetching without overwhelming the

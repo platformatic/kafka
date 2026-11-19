@@ -336,7 +336,8 @@ test('should support diagnostic channels', async t => {
       ok(message.leaderEpoch >= 0, 'leaderEpoch should be non-negative')
       message.leaderEpoch = 0
 
-      deepStrictEqual(context.result, {
+      // The headers are an accessor of the message, so they are not among its own properties
+      deepStrictEqual({ ...message, headers: message.headers }, {
         key: 'key-0',
         value: 'value-0',
         headers: new Map([['headerKey', 'headerValue-0']]),
@@ -347,8 +348,7 @@ test('should support diagnostic channels', async t => {
         offset: 0n,
         leaderEpoch: 0,
         metadata: message.metadata,
-        commit: noopCallback,
-        toJSON: message.toJSON
+        commit: noopCallback
       })
     },
     error (context: ClientDiagnosticEvent) {
@@ -2507,4 +2507,73 @@ test('should destroy the stream with the original error when a hook failure is n
   strictEqual(error instanceof UserError, true)
   strictEqual(error.message, 'Hook failed.')
   strictEqual(error.cause, undefined)
+})
+
+test('should create the headers of a message without headers when they are read', async t => {
+  const topic = await createTopic(t, true)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0' },
+      { topic, key: 'key-1', value: 'value-1' },
+      { topic, key: 'key-2', value: 'value-2', headers: { name: 'value' } }
+    ]
+  })
+
+  const consumer = createConsumer(t)
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+  const [first, second, third] = await Array.fromAsync(stream)
+
+  // The same empty map is returned every time, and it belongs to its message only
+  ok(first.headers instanceof Map)
+  strictEqual(first.headers.size, 0)
+  strictEqual(first.headers, first.headers)
+  first.headers.set('added', 'later')
+  deepStrictEqual(first.headers, new Map([['added', 'later']]))
+  strictEqual(second.headers.size, 0)
+  deepStrictEqual(first.headerEntries, [])
+
+  // The headers can be replaced
+  const replacement = new Map([['other', 'headers']])
+  second.headers = replacement
+  strictEqual(second.headers, replacement)
+
+  deepStrictEqual(third.headers, new Map([['name', 'value']]))
+  deepStrictEqual(third.headerEntries, [['name', 'value']])
+
+  deepStrictEqual(first.toJSON().headers, [])
+  deepStrictEqual(third.toJSON().headers, [['name', 'value']])
+  deepStrictEqual(JSON.parse(JSON.stringify(third)).headers, [['name', 'value']])
+})
+
+test('should give the headers to custom deserializers when a message has no headers', async t => {
+  const topic = await createTopic(t, true)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  await producer.send({ messages: [{ topic, key: 'key-0', value: 'value-0' }] })
+
+  const received: unknown[] = []
+  const consumer = createConsumer<string, string, string, string>(t, undefined, {
+    deserializers: {
+      key (data, headers) {
+        received.push(headers)
+        return data?.toString()
+      },
+      value (data, headers) {
+        received.push(headers)
+        return data?.toString()
+      },
+      headerKey: stringDeserializers.headerKey,
+      headerValue: stringDeserializers.headerValue
+    }
+  })
+
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+  const [message] = await Array.fromAsync(stream)
+
+  strictEqual(received.length, 2)
+  ok(received[0] instanceof Map)
+  strictEqual(received[0], received[1])
+  // The deserializers are given the map of the message itself
+  strictEqual(message.headers, received[0])
+  strictEqual(message.value, 'value-0')
 })

@@ -82,8 +82,19 @@ type MessageToConsumeWithDeserializationError = MessageToConsume & {
   Most records have no headers, and a Map is by far the most expensive thing a message allocates. So the
   Map of a message without headers is only created if somebody asks for it.
 */
+// Commits the offset of a message. It is shared by all the messages of a stream.
+type MessageCommitter = (
+  topic: string,
+  partition: number,
+  offset: bigint,
+  leaderEpoch: number,
+  callback?: CallbackWithPromise<void>
+) => void | Promise<void>
+
 class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key, Value, HeaderKey, HeaderValue> {
   #headers: Map<HeaderKey, HeaderValue> | undefined
+  #committer: MessageCommitter | undefined
+  #committerLeaderEpoch: number
   key: Key
   value: Value
   headerEntries: Array<[HeaderKey, HeaderValue]>
@@ -92,7 +103,6 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
   timestamp: bigint
   offset: bigint
   leaderEpoch: number
-  commit: Message['commit']
   metadata: Record<string, unknown>
 
   constructor (
@@ -105,10 +115,13 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     timestamp: bigint,
     offset: bigint,
     leaderEpoch: number,
-    commit: Message['commit'],
+    committer: MessageCommitter | undefined,
+    committerLeaderEpoch: number,
     metadata: Record<string, unknown>
   ) {
     this.#headers = headers
+    this.#committer = committer
+    this.#committerLeaderEpoch = committerLeaderEpoch
     this.key = key
     this.value = value
     this.headerEntries = headerEntries
@@ -117,8 +130,28 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     this.timestamp = timestamp
     this.offset = offset
     this.leaderEpoch = leaderEpoch
-    this.commit = commit
     this.metadata = metadata
+  }
+
+  /*
+    This is a method rather than a function created for each message: with manual commits that
+    function would have to be bound to the offset of its message, whether or not it is ever called.
+  */
+  commit (callback?: (error?: Error) => void): void | Promise<void> {
+    const committer = this.#committer
+
+    // Offsets are committed by the stream
+    if (!committer) {
+      return noopCallback(null)
+    }
+
+    return committer(
+      this.topic,
+      this.partition,
+      this.offset + 1n,
+      this.#committerLeaderEpoch,
+      callback as CallbackWithPromise<void> | undefined
+    )
   }
 
   // The Map is built when it is first read, since headerEntries already holds the headers
@@ -215,6 +248,7 @@ export class MessagesStream<
   #context: unknown
   #onConsumerGroupJoin: () => void
   #onBrokerDisconnect: (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
+  #messageCommitter: MessageCommitter
   #pushRecordsOperation: (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
@@ -314,6 +348,7 @@ export class MessagesStream<
     this.#deserializersUseHeaders =
       !dataOnlyDeserializers.has(this.#keyDeserializer) || !dataOnlyDeserializers.has(this.#valueDeserializer)
     this.#autocommitEnabled = !!options.autocommit
+    this.#messageCommitter = this.#commit.bind(this)
     this.#autocommitInflight = false
     this.#closed = false
     this.#closeCallbacks = []
@@ -998,6 +1033,8 @@ export class MessagesStream<
     const headerKeyDeserializer = this.#headerKeyDeserializer
     const headerValueDeserializer = this.#headerValueDeserializer
     const deserializersUseHeaders = this.#deserializersUseHeaders
+    // In batch mode offsets are committed through the batch
+    const committer = autocommit || batchSize ? undefined : this.#messageCommitter
 
     /*
       Publishing on the diagnostic channel requires a context object and five publications for each message.
@@ -1094,10 +1131,6 @@ export class MessagesStream<
               consumerReceivesChannel.start.publish(diagnosticContext)
             }
 
-            const commit = autocommit || batchSize
-              ? noopCallback
-              : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
-
             try {
               // The Map is only needed here by the deserializers which read it, the message builds its own when asked
               let headers: Map<HeaderKey, HeaderValue> | undefined = deserializersUseHeaders
@@ -1140,10 +1173,11 @@ export class MessagesStream<
                 payloadType = 'value'
                 deserializedValue = valueDeserializer(record.value ?? undefined, headers!, messageToConsume)
               } catch (error) {
-                // The error handler can explicitly commit a failed record even in batch mode.
-                const commitFailedMessage = (batchSize && !autocommit
-                  ? this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
-                  : commit) as Message['commit']
+                // Handlers are given a function, which is only worth creating when deserialization fails.
+                // It can explicitly commit a failed record even in batch mode.
+                const commitFailedMessage = (
+                  autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
+                ) as Message['commit']
                 const context: DeserializationErrorContext = {
                   error,
                   payloadType,
@@ -1229,7 +1263,8 @@ export class MessagesStream<
                 // The batch header epoch is the epoch of the record itself, which is what
                 // OffsetCommit expects as committedLeaderEpoch (KIP-320).
                 batch.partitionLeaderEpoch,
-                commit as Message['commit'],
+                committer,
+                leaderEpoch,
                 // Deserializers and hooks can enrich the metadata of the message they processed
                 deserializationError
                   ? { ...messageMetadata, ...messageToConsume.metadata, deserializationError }

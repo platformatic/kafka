@@ -27,7 +27,6 @@ import {
   MessagesStreamFallbackModes,
   MessagesStreamModes,
   MultipleErrors,
-  noopCallback,
   parseBroker,
   ProduceAcks,
   Producer,
@@ -336,8 +335,8 @@ test('should support diagnostic channels', async t => {
       ok(message.leaderEpoch >= 0, 'leaderEpoch should be non-negative')
       message.leaderEpoch = 0
 
-      // The headers are an accessor of the message, so they are not among its own properties
-      deepStrictEqual({ ...message, headers: message.headers }, {
+      // The headers and commit are not among the own properties of the message
+      deepStrictEqual({ ...message, headers: message.headers, commit: message.commit }, {
         key: 'key-0',
         value: 'value-0',
         headers: new Map([['headerKey', 'headerValue-0']]),
@@ -348,7 +347,7 @@ test('should support diagnostic channels', async t => {
         offset: 0n,
         leaderEpoch: 0,
         metadata: message.metadata,
-        commit: noopCallback
+        commit: Object.getPrototypeOf(message).commit
       })
     },
     error (context: ClientDiagnosticEvent) {
@@ -590,6 +589,31 @@ test('should support manual commits', async t => {
   strictEqual(secondBatch.length, 2, 'Should consume 2 messages in second batch')
   deepStrictEqual(secondBatch[0].key, 'key-1', 'First message in second batch should be key-1')
   deepStrictEqual(secondBatch[1].key, 'key-2', 'Second message in second batch should be key-2')
+})
+
+test('should commit a message through a method shared by all the messages', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3)
+  strictEqual(messages[0].commit, messages[1].commit)
+  ok(!Object.hasOwn(messages[0], 'commit'))
+
+  // With a callback
+  const { promise, resolve, reject } = Promise.withResolvers<void>()
+  const returned = messages[1].commit(error => (error ? reject(error) : resolve()))
+  strictEqual(returned, undefined)
+  await promise
+
+  const offsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(offsets.get(topic), [2n])
 })
 
 test('manual commits for the same partition must not let a stale response regress the committed offset', async t => {

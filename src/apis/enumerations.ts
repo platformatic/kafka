@@ -62,6 +62,18 @@ export type ListOffsetTimestampValue = (typeof ListOffsetTimestamps)[ListOffsetT
 /** @deprecated Use ListOffsetTimestampLabel */
 export type ListOffsetTimestamp = ListOffsetTimestampLabel
 
+// ./consumer/share-fetch-*.ts and ./consumer/share-acknowledge-*.ts - See: https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka
+export const ShareAcknowledgeTypes = { GAP: 0, ACCEPT: 1, RELEASE: 2, REJECT: 3, RENEW: 4 } as const
+export const allowedShareAcknowledgeTypes = Object.values(ShareAcknowledgeTypes)
+export type ShareAcknowledgeTypeLabel = keyof typeof ShareAcknowledgeTypes
+export type ShareAcknowledgeTypeValue = (typeof ShareAcknowledgeTypes)[ShareAcknowledgeTypeLabel]
+
+// ./consumer/share-fetch-v2.ts - See KIP-1206
+export const ShareAcquireModes = { BATCH_OPTIMIZED: 0, RECORD_LIMIT: 1 } as const
+export const allowedShareAcquireModes = Object.values(ShareAcquireModes)
+export type ShareAcquireModeLabel = keyof typeof ShareAcquireModes
+export type ShareAcquireModeValue = (typeof ShareAcquireModes)[ShareAcquireModeLabel]
+
 // Admin API
 // ./admin/*-acls.ts - See: https://cwiki.apache.org/confluence/display/KAFKA/KIP-140%3A+Add+administrative+RPCs+for+adding%2C+deleting%2C+and+listing+ACLs
 export const ResourceTypes = {

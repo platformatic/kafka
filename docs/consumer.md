@@ -297,7 +297,7 @@ Closes the consumer and all its connections.
 
 If `force` is not `true`, then the method will throw an error if any `MessagesStream` created from this consumer is still active.
 
-If `force` is `true`, then the method will close all `MessagesStream` created from this consumer.
+If `force` is `true`, then the method will close all `MessagesStream` created from this consumer. If closing the streams or leaving the group fails, the connections are closed anyway and the error is returned afterwards: the consumer is closed and the broker expires the membership after the session timeout.
 
 The return value is `void`.
 

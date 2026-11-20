@@ -909,6 +909,58 @@ test('close should handle errors from leaveGroup', async t => {
     strictEqual(error instanceof MultipleErrors, true)
     strictEqual(error.message.includes(mockedErrorMessage), true)
   }
+
+  // Without force the consumer stays open, so that the close can be tried again
+  strictEqual(consumer.closed, false)
+  strictEqual(connection.isConnected(), true)
+})
+
+test('close with force=true should close the connections even if leaveGroup fails', async t => {
+  const consumer = createConsumer(t)
+  const stream = await consumer.consume({ topics: [] })
+
+  const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+  const connection = await consumer[kConnections].get(broker)
+  mockConnectionAPI(connection, leaveGroupV5.api.key)
+
+  let closeEvents = 0
+  consumer.on('client:close', () => {
+    closeEvents++
+  })
+
+  await rejects(consumer.close(true), (error: Error) => {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message.includes(mockedErrorMessage), true)
+    return true
+  })
+
+  strictEqual(consumer.closed, true)
+  strictEqual(stream.closed, true)
+  strictEqual(connection.isConnected(), false)
+  strictEqual(closeEvents, 1)
+
+  // The consumer is closed: another close is a no-op
+  await consumer.close(true)
+  strictEqual(closeEvents, 1)
+})
+
+test('close with force=true should report both errors if leaveGroup and Base.close fail', async t => {
+  const consumer = createConsumer(t)
+  await consumer.joinGroup()
+
+  const broker = consumer.currentMetadata!.brokers.get(consumer.coordinatorId!)!
+  const connection = await consumer[kConnections].get(broker)
+  mockConnectionAPI(connection, leaveGroupV5.api.key)
+  mockMethod(consumer[kConnections], 'close')
+
+  await rejects(consumer.close(true), (error: Error) => {
+    strictEqual(error instanceof MultipleErrors, true)
+    strictEqual(error.message, 'Closing the consumer failed.')
+    strictEqual((error as MultipleErrors).errors.length, 2)
+    return true
+  })
+
+  strictEqual(consumer.closed, false)
 })
 
 test('close should stop retrying leaveGroup when the broker is unavailable', async t => {

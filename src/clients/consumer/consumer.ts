@@ -358,18 +358,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
-    closer(force as boolean, error => {
-      if (error) {
+    closer(force as boolean, leaveError => {
+      // Without force the consumer stays open, so that the caller can close the streams and try again.
+      if (leaveError && !force) {
         this[kClosed] = false
         this.#membershipActive = membershipActive
-        callback(error)
+        callback(leaveError)
         return
       }
 
+      // With force the connections are closed even if the streams could not be closed or the group could not be
+      // left: there would be no other way to close them. The broker expires the membership after the session timeout.
       super.close(error => {
         if (error) {
           this[kClosed] = false
-          callback(error)
+          callback(leaveError ? new MultipleErrors('Closing the consumer failed.', [leaveError, error]) : error)
           return
         }
 
@@ -380,7 +383,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
         }
 
-        callback(null)
+        callback(leaveError ?? null)
       })
     })
 

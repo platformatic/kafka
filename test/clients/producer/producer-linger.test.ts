@@ -12,7 +12,14 @@ import {
   type TopicWithPartitionAndOffset,
   UserError
 } from '../../../src/index.ts'
-import { createConsumer, createProducer, createTestGroupId, createTopic, kafkaBootstrapServers } from '../../helpers.ts'
+import {
+  createConsumer,
+  createProducer,
+  createTestGroupId,
+  createTopic,
+  kafkaBootstrapServers,
+  misdirectPartitions
+} from '../../helpers.ts'
 
 const produceApiKey = 0
 
@@ -301,6 +308,52 @@ test('send should work with an idempotent producer when lingering', async t => {
   deepStrictEqual(
     offsets,
     Array.from({ length: 15 }, (_, i) => BigInt(i))
+  )
+})
+
+test('send should only retry the failed partitions of the calls merged by linger', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 50, metadataMaxAge: 600_000 })
+  const topic = await createTopic(t, true, 3)
+  const {
+    partitions: [first, moved],
+    assertPartiallyRejected
+  } = await misdirectPartitions(t, producer, topic)
+
+  // The merged request reaches the leader of the first partition, which appends it and rejects the moved one
+  const [a, b] = await Promise.all([
+    producer.send({
+      messages: [
+        { topic, partition: first, value: 'a1' },
+        { topic, partition: moved, value: 'a2' }
+      ]
+    }),
+    producer.send({ messages: [{ topic, partition: first, value: 'b1' }] })
+  ])
+
+  deepStrictEqual(
+    sortOffsets(a.offsets),
+    sortOffsets([
+      { topic, partition: first, offset: 0n },
+      { topic, partition: moved, offset: 0n }
+    ])
+  )
+  deepStrictEqual(b.offsets, [{ topic, partition: first, offset: 1n }])
+  assertPartiallyRejected()
+
+  // Nothing was appended twice
+  const next = await producer.send({
+    messages: [
+      { topic, partition: first, value: 'c1' },
+      { topic, partition: moved, value: 'c2' }
+    ]
+  })
+
+  deepStrictEqual(
+    sortOffsets(next.offsets),
+    sortOffsets([
+      { topic, partition: first, offset: 2n },
+      { topic, partition: moved, offset: 1n }
+    ])
   )
 })
 

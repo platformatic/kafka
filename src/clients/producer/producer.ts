@@ -5,6 +5,7 @@ import {
   kCallbackPromise,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { FindCoordinatorKeyTypes, ProduceAcks } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { type AddOffsetsToTxnRequest, type AddOffsetsToTxnResponse } from '../../apis/producer/add-offsets-to-txn-v4.ts'
@@ -14,7 +15,11 @@ import {
 } from '../../apis/producer/add-partitions-to-txn-v5.ts'
 import { type EndTxnRequest, type EndTxnResponse } from '../../apis/producer/end-txn-v4.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
-import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
+import {
+  type ProduceRequest,
+  type ProduceResponse,
+  type ProduceResponseTopic
+} from '../../apis/producer/produce-v11.ts'
 import { type TxnOffsetCommitRequest, type TxnOffsetCommitResponse } from '../../apis/producer/txn-offset-commit-v4.ts'
 import {
   createDiagnosticContext,
@@ -59,6 +64,7 @@ import {
   kPrometheus,
   kValidateOptions
 } from '../base/base.ts'
+import { type ClusterMetadata } from '../base/types.ts'
 import { type Counter, ensureMetric, type Gauge } from '../metrics.ts'
 import {
   type BeforeHookPayloadType,
@@ -106,6 +112,17 @@ interface PendingSends {
   sendOptions: Required<SendOptions<any, any, any, any>>
   produceOptions: Partial<CreateRecordsBatchOptions>
   timer: NodeJS.Timeout
+}
+
+/*
+  What the brokers accepted so far for one of the destinations of a send. It is kept across the retries,
+  so that it is reported even when the send eventually fails.
+*/
+interface DestinationProduced {
+  // The appended partitions, when acks is not NO_RESPONSE
+  acknowledged: ProduceResponseTopic[]
+  // The brokers which were written but are busy, when acks is NO_RESPONSE
+  unwritableNodes: number[]
 }
 
 export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderValue = Buffer> extends Base<
@@ -1376,6 +1393,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
       // Track nodes so that we can get their ID for delayed write reporting
       const nodes: number[] = []
+      // Track what each destination produced, which is reported even when the send fails
+      const produced: DestinationProduced[] = []
       if (messagesPerPartition) {
         const sequenceSnapshot = new NumericMap()
 
@@ -1393,7 +1412,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         'Producing messages failed.',
         messagesByDestination,
         ([destination, destinationMessages], concurrentCallback) => {
+          const destinationProduced: DestinationProduced = { acknowledged: [], unwritableNodes: [] }
           nodes.push(destination)
+          produced.push(destinationProduced)
 
           this.#performSingleDestinationSend(
             topics,
@@ -1404,6 +1425,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             sendOptions.repeatOnStaleMetadata,
             produceOptions,
             true,
+            destinationProduced,
             concurrentCallback
           )
         },
@@ -1412,20 +1434,25 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           const results: ProduceResult = {}
 
           if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
-            const unwritableNodes = []
+            const unwritableNodes = new Set<number>()
 
             for (let i = 0; i < apiResults!.length; i++) {
-              if (typeof apiResults![i] === 'undefined' || apiResults![i] === false) {
-                unwritableNodes.push(nodes[i])
+              // A destination which failed is reported as a whole, otherwise the brokers which were busy
+              if (typeof apiResults![i] === 'undefined') {
+                unwritableNodes.add(nodes[i])
+              } else {
+                for (const node of produced[i].unwritableNodes) {
+                  unwritableNodes.add(node)
+                }
               }
             }
 
-            results.unwritableNodes = unwritableNodes
+            results.unwritableNodes = Array.from(unwritableNodes)
           } else {
             const topics: ProduceResult['offsets'] = []
 
-            for (const result of apiResults!) {
-              for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
+            for (const { acknowledged } of produced) {
+              for (const { name, partitionResponses } of acknowledged) {
                 for (const partitionResponse of partitionResponses) {
                   topics.push({
                     topic: name,
@@ -1464,12 +1491,51 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     repeatOnStaleMetadata: boolean,
     produceOptions: Partial<CreateRecordsBatchOptions>,
     recoverOnProducerStateLoss: boolean,
-    callback: CallbackWithPromise<boolean | ProduceResponse>
+    produced: DestinationProduced,
+    callback: CallbackWithPromise<boolean>
   ): void {
-    const { topic, partition } = messages[0]
     let refreshMetadata = false
 
-    this[kPerformWithRetry]<boolean | ProduceResponse>(
+    const produce = (
+      broker: Broker,
+      leader: number,
+      leaderMessages: MessageRecord[],
+      produceCallback: Callback<void>
+    ): void => {
+      this[kGetConnection](broker, (error, connection) => {
+        if (error) {
+          produceCallback(error)
+          return
+        }
+
+        this[kGetApi]<ProduceRequest, ProduceResponse | boolean>('Produce', (error, api) => {
+          if (error) {
+            produceCallback(error)
+            return
+          }
+
+          api!(connection!, acks, timeout, leaderMessages, produceOptions, (error, response) => {
+            if (acks !== ProduceAcks.NO_RESPONSE) {
+              // When only some partitions fail, the response with the appended ones is attached to the error
+              const appended = error ? findErrorBy(error, 'code', 'PLT_KFK_RESPONSE')?.response : response
+              messages = this.#acknowledge(messages, appended, produced.acknowledged)
+            } else if (!error) {
+              // Nothing tells what the broker appended, so whatever was written is never written again
+              const written = new Set(leaderMessages)
+              messages = messages.filter(message => !written.has(message))
+
+              if (response === false) {
+                produced.unwritableNodes.push(leader)
+              }
+            }
+
+            produceCallback(error)
+          })
+        })
+      })
+    }
+
+    this[kPerformWithRetry]<boolean>(
       'produce',
       retryCallback => {
         this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata, retries: 0 }, (error, metadata) => {
@@ -1480,28 +1546,36 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           refreshMetadata = false
-          const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
 
-          this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
+          const onProduced = (error: Error | null) => {
+            refreshMetadata = NetworkError.isRetryable(error)
+
             if (error) {
-              refreshMetadata = NetworkError.isRetryable(error)
               retryCallback(error)
               return
             }
 
-            this[kGetApi]<ProduceRequest, ProduceResponse>('Produce', (error, api) => {
-              if (error) {
-                refreshMetadata = NetworkError.isRetryable(error)
-                retryCallback(error)
-                return
-              }
+            retryCallback(null, true)
+          }
 
-              api!(connection!, acks, timeout, messages, produceOptions, (error, response) => {
-                refreshMetadata = NetworkError.isRetryable(error)
-                retryCallback(error, response)
-              })
-            })
-          })
+          // After a metadata refresh the partitions left to send may be led by different brokers
+          const messagesByLeader = this.#groupByLeader(metadata!, messages)
+
+          // A single leader is produced to directly, so that its error is not wrapped
+          if (messagesByLeader.size === 1) {
+            const [[leader, leaderMessages]] = messagesByLeader
+            produce(metadata!.brokers.get(leader)!, leader, leaderMessages, onProduced)
+            return
+          }
+
+          runConcurrentCallbacks<void, [number, MessageRecord[]]>(
+            'Producing messages failed.',
+            messagesByLeader,
+            ([leader, leaderMessages], concurrentCallback) => {
+              produce(metadata!.brokers.get(leader)!, leader, leaderMessages, concurrentCallback)
+            },
+            onProduced
+          )
         })
       },
       (error, results) => {
@@ -1522,6 +1596,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               false,
               produceOptions,
               recoverOnProducerStateLoss,
+              produced,
               callback
             )
             return
@@ -1543,6 +1618,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 repeatOnStaleMetadata,
                 recoveredProduceOptions!,
                 false,
+                produced,
                 callback
               )
             })
@@ -1566,6 +1642,54 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         return !!findErrorBy(error, 'hasStaleMetadata', true)
       }
     )
+  }
+
+  #groupByLeader (metadata: ClusterMetadata, messages: MessageRecord[]): Map<number, MessageRecord[]> {
+    const messagesByLeader = new Map<number, MessageRecord[]>()
+
+    for (const message of messages) {
+      const leader = metadata.topics.get(message.topic)!.partitions[message.partition!].leader
+
+      let leaderMessages = messagesByLeader.get(leader)
+      if (!leaderMessages) {
+        leaderMessages = []
+        messagesByLeader.set(leader, leaderMessages)
+      }
+
+      leaderMessages.push(message)
+    }
+
+    return messagesByLeader
+  }
+
+  /*
+    When only some partitions of a request fail, the broker has already appended the others.
+    Those are added to the acknowledged ones and removed from the messages, so that only the failed ones are retried.
+  */
+  #acknowledge (
+    messages: MessageRecord[],
+    response: ProduceResponse | undefined,
+    acknowledged: ProduceResponseTopic[]
+  ): MessageRecord[] {
+    const appended = new Set<string>()
+
+    for (const { name, partitionResponses } of response?.responses ?? []) {
+      const succeeded = partitionResponses.filter(p => p.errorCode === 0)
+
+      if (succeeded.length > 0) {
+        acknowledged.push({ name, partitionResponses: succeeded })
+
+        for (const { index } of succeeded) {
+          appended.add(`${name}:${index}`)
+        }
+      }
+    }
+
+    if (appended.size === 0) {
+      return messages
+    }
+
+    return messages.filter(message => !appended.has(`${message.topic}:${message.partition}`))
   }
 
   #isProducerStateLost (error: Error): boolean {

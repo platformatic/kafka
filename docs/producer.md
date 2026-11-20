@@ -76,7 +76,11 @@ It also accepts all options of the constructor except `serializers`.
 
 #### Batching messages across calls
 
-By default each `send()` call is produced on its own: a hundred concurrent calls which send one message each result in a hundred requests.
+By default a `send()` call is produced right away, without waiting for other calls.
+
+The requests which write to the same partition are sent one at a time, in the order of the `send()` calls, so that a request which is sent again after an error cannot be overtaken by a later one. The calls made while a request for one of their partitions is in flight are produced together in the next request, as long as they were made with the same settings. Requests for different partitions are sent concurrently.
+
+This means that a hundred concurrent calls which send one message each to the same partition result in two requests: one for the first call, and one for the other ninety-nine. A request stops accepting other calls once 256 KiB of keys, values and headers are waiting in it. An application which awaits each `send()` before making the next one gets one request for each call.
 
 When the producer is created with `linger` greater than zero, the messages of a `send()` call wait for up to that many milliseconds, and are produced in the same request as the messages of the other calls made in the meantime. They are sent before that time once `batchMaxBytes` bytes are waiting, counting the keys, values and headers of all the messages regardless of their partition.
 
@@ -101,7 +105,7 @@ Things to know:
 
 - Each call still resolves with the offsets of its own messages: for each partition, the offset of the first message it sent there.
 - Only calls made with the same `acks`, `compression`, `idempotent`, `autocreateTopics` and `repeatOnStaleMetadata` share a request. When a call uses different settings, what is waiting is sent first, so that messages are produced in the order they were sent.
-- If the request fails, all the calls which were part of it fail with the same error.
+- If the request fails, all the calls which were part of it fail with the same error. This also applies to the calls which share a request without `linger`.
 - Calls made within a transaction, or which specify `producerId` or `producerEpoch`, are never delayed.
 - `close()` sends what is waiting before closing the producer.
 

@@ -85,7 +85,27 @@ test('linger and batchMaxBytes should be accepted', async t => {
   ok(producer instanceof Producer)
 })
 
-test('send should produce on its own when linger is not set', async t => {
+test('send should not wait for other calls when linger is not set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  const results = [
+    await producer.send({ messages: [{ topic, value: 'a' }] }),
+    await producer.send({ messages: [{ topic, value: 'b' }] }),
+    await producer.send({ messages: [{ topic, value: 'c' }] })
+  ]
+
+  strictEqual(produceRequests(), 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n]
+  )
+})
+
+test('send should only share a request between the calls made while another is in flight when linger is not set', async t => {
   const producer = createProducer(t, { serializers: stringSerializers })
   const topic = await createTopic(t, true)
   await producer.metadata({ topics: [topic] })
@@ -98,8 +118,12 @@ test('send should produce on its own when linger is not set', async t => {
     producer.send({ messages: [{ topic, value: 'c' }] })
   ])
 
-  strictEqual(produceRequests(), 3)
-  deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n, 2n])
+  // The first is sent right away, the other two together once it has completed
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n]
+  )
 })
 
 test('send should merge the calls made within the linger time in a single request', async t => {
@@ -283,12 +307,12 @@ test('send should limit what waits for a request in flight', async t => {
   await sleep(10)
   strictEqual(requests.length, 1)
 
-  // The fourth would take what is waiting over 256 KiB, so the second and the third are sent
+  // The fourth would take what is waiting over 256 KiB, so it does not share a request with the other two
   sends.push(send('d', 100_000))
   await sleep(10)
-  strictEqual(requests.length, 2)
+  strictEqual(requests.length, 1)
 
-  // The fourth is only sent once nothing is in flight anymore
+  // The second and the third are for the same partition as the first, so they are sent when it completes
   respond(0)
   await sleep(10)
   strictEqual(requests.length, 2)

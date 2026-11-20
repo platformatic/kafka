@@ -15,6 +15,7 @@ import {
   MessagesStream,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
+  kNoopCallbackReturnValue,
   noopCallback,
   UserError,
   type CommitOptions,
@@ -210,7 +211,7 @@ for (const batch of [100, true] as const) {
       strictEqual(batch.topic, topic)
       for (const message of batch.messages) {
         strictEqual(message.partition, batch.partition)
-        strictEqual(message.commit, noopCallback)
+        strictEqual(await message.commit(), kNoopCallbackReturnValue)
       }
     }
     strictEqual(fake.fetches.length, 1)
@@ -258,7 +259,7 @@ test('batch autocommit advances past control records and batch.commit is a no-op
   const batches = await Array.fromAsync(stream)
   strictEqual(batches.length, 1)
   strictEqual(batches[0].commit, noopCallback)
-  strictEqual(batches[0].messages[0].commit, noopCallback)
+  strictEqual(await batches[0].messages[0].commit(), kNoopCallbackReturnValue)
   deepStrictEqual(
     fake.commits.map(commit => [commit.partition, commit.offset]),
     [[0, 3n], [1, 1n]]

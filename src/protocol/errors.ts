@@ -136,6 +136,7 @@ export const protocolErrorsCodesById: Record<number, string> = {
   125: 'INVALID_VOTER_KEY',
   126: 'DUPLICATE_VOTER',
   127: 'VOTER_NOT_FOUND',
+  133: 'SHARE_SESSION_LIMIT_REACHED',
   '-1': 'UNKNOWN_SERVER_ERROR'
 }
 
@@ -933,5 +934,11 @@ export const protocolErrors: Record<string, ProtocolErrorDefinition> = {
     code: 127,
     canRetry: false,
     message: 'The voter is not part of the set of voters.'
+  },
+  SHARE_SESSION_LIMIT_REACHED: {
+    id: 'SHARE_SESSION_LIMIT_REACHED',
+    code: 133,
+    canRetry: true,
+    message: 'The limit of share sessions has been reached.'
   }
 }

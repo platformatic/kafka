@@ -616,6 +616,30 @@ test('should commit a message through a method shared by all the messages', asyn
   deepStrictEqual(offsets.get(topic), [2n])
 })
 
+test('should commit the offset a message was consumed at when the message is changed', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+  const otherTopic = await createTopic(t, true)
+
+  await produceTestMessages(t, topic)
+
+  const { consumer, messages } = await consumeMessages(t, groupId, topic, {
+    mode: MessagesStreamModes.EARLIEST,
+    autocommit: false
+  })
+
+  strictEqual(messages.length, 3)
+
+  const message = messages[1]
+  message.topic = otherTopic
+  message.partition = 5
+  message.offset = 100n
+  await message.commit()
+
+  const offsets = await consumer.listCommittedOffsets({ topics: [{ topic, partitions: [0] }] })
+  deepStrictEqual(offsets.get(topic), [2n])
+})
+
 test('manual commits for the same partition must not let a stale response regress the committed offset', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)

@@ -94,6 +94,10 @@ type MessageCommitter = (
 class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key, Value, HeaderKey, HeaderValue> {
   #headers: Map<HeaderKey, HeaderValue> | undefined
   #committer: MessageCommitter | undefined
+  // What commit() uses, so that changing the public properties of a message does not change what it commits
+  #committerTopic: string
+  #committerPartition: number
+  #committerOffset: bigint
   #committerLeaderEpoch: number
   key: Key
   value: Value
@@ -121,6 +125,9 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
   ) {
     this.#headers = headers
     this.#committer = committer
+    this.#committerTopic = topic
+    this.#committerPartition = partition
+    this.#committerOffset = offset
     this.#committerLeaderEpoch = committerLeaderEpoch
     this.key = key
     this.value = value
@@ -146,9 +153,9 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     }
 
     return committer(
-      this.topic,
-      this.partition,
-      this.offset + 1n,
+      this.#committerTopic,
+      this.#committerPartition,
+      this.#committerOffset + 1n,
       this.#committerLeaderEpoch,
       callback as CallbackWithPromise<void> | undefined
     )

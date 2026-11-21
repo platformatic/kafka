@@ -22,7 +22,7 @@ import {
   producerSendsChannel,
   producerTransactionsChannel
 } from '../../diagnostic.ts'
-import { findErrorBy, type GenericError, NetworkError, type ProtocolError, UserError } from '../../errors.ts'
+import { findErrorBy, type GenericError, NetworkError, type ProtocolError, TimeoutError, UserError } from '../../errors.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   type CreateRecordsBatchOptions,
@@ -127,6 +127,8 @@ interface PendingSends {
   bytes: number
   sendOptions: Required<SendOptions<any, any, any, any>>
   produceOptions: Partial<CreateRecordsBatchOptions>
+  // The earliest delivery deadline of the sends above, if any has one
+  deadline: number | undefined
   timer: NodeJS.Timeout
 }
 
@@ -1033,7 +1035,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void {
+  #send (
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<ProduceResult>,
+    deadline: number | undefined = this.#deliveryDeadline(options)
+  ): void {
     options.idempotent ??= this[kOptions].idempotent
     options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata
     options.partitioner ??= this[kOptions].partitioner
@@ -1058,7 +1064,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          this.#send(options, callback)
+          this.#send(options, callback, deadline)
         })
 
         return
@@ -1163,7 +1169,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           messages,
           options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
           produceOptions,
-          callback
+          callback,
+          deadline
         )
 
         return
@@ -1172,7 +1179,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (this.#transaction) {
       // Get the metadata for topics, we need to normalize the partitions
-      this[kMetadata]({ topics: topicsArray, autocreateTopics: options.autocreateTopics }, (error, metadata) => {
+      this[kMetadata]({ topics: topicsArray, autocreateTopics: options.autocreateTopics, deadline }, (error, metadata) => {
         if (error) {
           callback(error)
           return
@@ -1189,7 +1196,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             messages,
             options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
             produceOptions,
-            callback
+            callback,
+            deadline
           )
         })
       })
@@ -1199,9 +1207,16 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         messages,
         options as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
         produceOptions,
-        callback
+        callback,
+        deadline
       )
     }
+  }
+
+  // When the messages of a send() must be produced by, as a Date.now() timestamp
+  #deliveryDeadline (options: SendOptions<Key, Value, HeaderKey, HeaderValue>): number | undefined {
+    const deliveryTimeout = options.deliveryTimeout ?? this[kOptions].deliveryTimeout
+    return typeof deliveryTimeout === 'number' ? Date.now() + deliveryTimeout : undefined
   }
 
   /*
@@ -1221,7 +1236,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     messages: MessageRecord[],
     sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
     produceOptions: Partial<CreateRecordsBatchOptions>,
-    callback: CallbackWithPromise<ProduceResult>
+    callback: CallbackWithPromise<ProduceResult>,
+    deadline: number | undefined
   ): void {
     const key = `${sendOptions.acks}:${produceOptions.compression}:${sendOptions.idempotent}:${sendOptions.autocreateTopics}:${sendOptions.repeatOnStaleMetadata}`
 
@@ -1256,8 +1272,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         bytes: 0,
         sendOptions,
         produceOptions,
+        deadline,
         timer: setTimeout(() => this.#flushPendingSends(), this.#linger)
       }
+    } else if (typeof deadline === 'number') {
+      pending.deadline = typeof pending.deadline === 'number' ? Math.min(pending.deadline, deadline) : deadline
     }
 
     for (const topic of topics) {
@@ -1392,7 +1411,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         onComplete?.()
-      }
+      },
+      pending.deadline
     )
   }
 
@@ -1401,10 +1421,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     messages: MessageRecord[],
     sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
     produceOptions: Partial<CreateRecordsBatchOptions>,
-    callback: CallbackWithPromise<ProduceResult>
+    callback: CallbackWithPromise<ProduceResult>,
+    deadline: number | undefined
   ): void {
     // Get the metadata with the topic/partitions informations
-    this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics }, (error, metadata) => {
+    this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics, deadline }, (error, metadata) => {
       if (error) {
         callback(error)
         return
@@ -1475,7 +1496,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             sendOptions.repeatOnStaleMetadata,
             produceOptions,
             true,
-            concurrentCallback
+            concurrentCallback,
+            deadline
           )
         },
         (error, apiResults) => {
@@ -1535,7 +1557,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     repeatOnStaleMetadata: boolean,
     produceOptions: Partial<CreateRecordsBatchOptions>,
     recoverOnProducerStateLoss: boolean,
-    callback: CallbackWithPromise<boolean | ProduceResponse>
+    callback: CallbackWithPromise<boolean | ProduceResponse>,
+    deadline: number | undefined
   ): void {
     const { topic, partition } = messages[0]
     let refreshMetadata = false
@@ -1543,7 +1566,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kPerformWithRetry]<boolean | ProduceResponse>(
       'produce',
       retryCallback => {
-        this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata, retries: 0 }, (error, metadata) => {
+        this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata, retries: 0, deadline }, (error, metadata) => {
           if (error) {
             refreshMetadata = NetworkError.isRetryable(error)
             retryCallback(error)
@@ -1564,6 +1587,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               if (error) {
                 refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error)
+                return
+              }
+
+              // Nothing is written once the deadline has passed, whatever the time it took to get here
+              if (typeof deadline === 'number' && Date.now() >= deadline) {
+                retryCallback(new TimeoutError('The delivery timeout expired before the messages could be produced.'))
                 return
               }
 
@@ -1593,7 +1622,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               false,
               produceOptions,
               recoverOnProducerStateLoss,
-              callback
+              callback,
+              deadline
             )
             return
           }
@@ -1614,7 +1644,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 repeatOnStaleMetadata,
                 recoveredProduceOptions!,
                 false,
-                callback
+                callback,
+                deadline
               )
             })
             return
@@ -1635,7 +1666,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         }
 
         return !!findErrorBy(error, 'hasStaleMetadata', true)
-      }
+      },
+      undefined,
+      undefined,
+      deadline
     )
   }
 

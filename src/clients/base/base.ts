@@ -23,7 +23,7 @@ import {
   notifyCreation,
   type ClientType
 } from '../../diagnostic.ts'
-import { findErrorBy, MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
+import { findErrorBy, MultipleErrors, NetworkError, TimeoutError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
 import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
@@ -82,6 +82,11 @@ export interface BaseEvents extends TypedEvents {
   ) => void
   'client:metadata': (metadata: ClusterMetadata) => void
   'client:close': () => void
+}
+
+// Internal: a deadline (a Date.now() timestamp) stops the retries of the lookup once it has passed
+export interface InternalMetadataOptions extends MetadataOptions {
+  deadline?: number
 }
 
 export class Base<
@@ -212,9 +217,10 @@ export class Base<
 
     baseApisChannel.traceCallback(
       this[kListApis],
-      0,
+      1,
       createDiagnosticContext({ client: this, operation: 'listApis' }),
       this,
+      undefined,
       callback
     )
 
@@ -333,9 +339,18 @@ export class Base<
     return pool
   }
 
-  [kListApis] (callback: CallbackWithPromise<ApiVersionsResponseApi[]>): void {
+  // A deadline (a Date.now() timestamp) stops the retries once it has passed. The callback stays last.
+  [kListApis] (callback: CallbackWithPromise<ApiVersionsResponseApi[]>): void
+  [kListApis] (deadline: number | undefined, callback: CallbackWithPromise<ApiVersionsResponseApi[]>): void
+  [kListApis] (
+    deadlineOrCallback: number | undefined | CallbackWithPromise<ApiVersionsResponseApi[]>,
+    maybeCallback?: CallbackWithPromise<ApiVersionsResponseApi[]>
+  ): void {
+    const callback = typeof deadlineOrCallback === 'function' ? deadlineOrCallback : maybeCallback!
+    const deadline = typeof deadlineOrCallback === 'function' ? undefined : deadlineOrCallback
+
     this[kPerformDeduplicated](
-      'listApis',
+      typeof deadline === 'number' ? `listApis-${deadline}` : 'listApis',
       deduplicateCallback => {
         this[kPerformWithRetry]<ApiVersionsResponse>(
           'listApis',
@@ -384,14 +399,19 @@ export class Base<
 
             deduplicateCallback(null, metadata!.apiKeys)
           },
-          0
+          0,
+          [],
+          undefined,
+          undefined,
+          undefined,
+          deadline
         )
       },
       callback
     )
   }
 
-  [kMetadata] (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
+  [kMetadata] (options: InternalMetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
     baseMetadataChannel.traceCallback(
       this.#performMetadata,
       1,
@@ -429,10 +449,21 @@ export class Base<
     errors: Error[] = [],
     shouldSkipRetry?: (e: Error) => boolean,
     retryLimit?: number,
-    maxRetryErrors?: number
+    maxRetryErrors?: number,
+    deadline?: number
   ): void | Promise<ReturnType> {
     const retries = retryLimit ?? (this[kOptions].retries! as number)
     const maxErrors = maxRetryErrors ?? this[kOptions].maxRetryErrors!
+
+    // No attempt starts once the deadline has passed
+    if (typeof deadline === 'number' && Date.now() >= deadline) {
+      const error = new TimeoutError(`${operationId} reached its deadline.`)
+      callback(
+        errors.length > 0 ? new MultipleErrors(`${operationId} failed ${attempt} times.`, [...errors, error]) : error
+      )
+      return callback[kCallbackPromise]
+    }
+
     this.emitWithDebug('client', 'performWithRetry', operationId, attempt, retries)
 
     operation((error, result) => {
@@ -459,6 +490,11 @@ export class Base<
             delay = delay(this, operationId, attempt + 1, retries, error)
           }
 
+          // Do not wait past the deadline: the next attempt then fails at once
+          if (typeof deadline === 'number') {
+            delay = Math.max(0, Math.min(delay ?? 0, deadline - Date.now()))
+          }
+
           this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
@@ -471,7 +507,8 @@ export class Base<
                 errors,
                 shouldSkipRetry,
                 retries,
-                maxErrors
+                maxErrors,
+                deadline
               )
             } catch (error) {
               errors.push(error)
@@ -537,10 +574,23 @@ export class Base<
   [kGetApi]<RequestArguments extends Array<unknown>, ResponseType> (
     name: string,
     callback: Callback<API<RequestArguments, ResponseType>>
-  ) {
+  ): void
+  [kGetApi]<RequestArguments extends Array<unknown>, ResponseType> (
+    name: string,
+    deadline: number | undefined,
+    callback: Callback<API<RequestArguments, ResponseType>>
+  ): void
+  [kGetApi]<RequestArguments extends Array<unknown>, ResponseType> (
+    name: string,
+    deadlineOrCallback: number | undefined | Callback<API<RequestArguments, ResponseType>>,
+    maybeCallback?: Callback<API<RequestArguments, ResponseType>>
+  ): void {
+    const callback = typeof deadlineOrCallback === 'function' ? deadlineOrCallback : maybeCallback!
+    const deadline = typeof deadlineOrCallback === 'function' ? undefined : deadlineOrCallback
+
     // Make sure we have APIs informations
     if (!this[kApis].length) {
-      this[kListApis]((error, apis) => {
+      this[kListApis](deadline, (error, apis) => {
         if (error) {
           callback(error)
           return
@@ -666,7 +716,8 @@ export class Base<
     notifyCreation(type, this)
   }
 
-  #performMetadata (options: MetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
+  #performMetadata (options: InternalMetadataOptions, callback: CallbackWithPromise<ClusterMetadata>): void {
+    const deadline = options.deadline
     const expiralDate = Date.now() - (options.metadataMaxAge ?? this[kOptions].metadataMaxAge!)
     let topicsToFetch: string[] = []
 
@@ -698,7 +749,7 @@ export class Base<
 
     this[kPerformDeduplicated](
       // Unique key to avoid mixing callbacks
-      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}-${options.retries ?? 'default'}-${options.maxRetryErrors ?? 'default'}`,
+      `metadata-${topics.sort().join(',')}-${autocreateTopics}-${options.forceUpdate}-${options.retries ?? 'default'}-${options.maxRetryErrors ?? 'default'}-${deadline ?? 'none'}`,
       deduplicateCallback => {
         this[kPerformWithRetry]<MetadataResponse>(
           'metadata',
@@ -709,7 +760,7 @@ export class Base<
                 return
               }
 
-              this[kGetApi]<MetadataRequest, MetadataResponse>('Metadata', (error, api) => {
+              const onApi: Callback<API<MetadataRequest, MetadataResponse>> = (error, api) => {
                 if (error) {
                   retryCallback(error)
                   return
@@ -732,7 +783,14 @@ export class Base<
 
                   retryCallback(error, response)
                 })
-              })
+              }
+
+              // The usual call shape unless there is a deadline for the API versions lookup
+              if (typeof deadline === 'number') {
+                this[kGetApi]('Metadata', deadline, onApi)
+              } else {
+                this[kGetApi]('Metadata', onApi)
+              }
             }, attempt)
           },
           (error, metadata) => {
@@ -822,7 +880,8 @@ export class Base<
           [],
           undefined,
           options.retries,
-          options.maxRetryErrors
+          options.maxRetryErrors,
+          deadline
         )
       },
       callback

@@ -12,6 +12,7 @@ import {
   defaultBatchSize,
   DeserializationErrorActions,
   IS_CONTROL,
+  IS_LOG_APPEND_TIME,
   MessagesStream,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
@@ -23,8 +24,10 @@ import {
   type FetchOptions,
   type GroupAssignment,
   type KafkaRecord,
+  type Message,
   type MessagesBatch,
-  type RecordsBatch
+  type RecordsBatch,
+  TimestampTypes
 } from '../../../src/index.ts'
 import { kGetFetchNode } from '../../../src/symbols.ts'
 import { createConsumer, createProducer, createTopic } from '../../helpers.ts'
@@ -306,6 +309,79 @@ for (const action of [DeserializationErrorActions.SKIP, DeserializationErrorActi
     await committed.promise
   })
 }
+
+// Consumes a stream in either mode and returns its messages
+async function consumeMessages (stream: BatchStream): Promise<Message[]> {
+  const items: Array<Message | MessagesBatch> = await Array.fromAsync(stream as AsyncIterable<Message | MessagesBatch>)
+  return items.flatMap(item => ('messages' in item ? item.messages : [item]))
+}
+
+// A batch whose records were produced at 10, 11 and 12 and appended by the broker at 99
+function timestampedBatch (attributes: number): RecordsBatch {
+  const batch = recordBatch(0, 3, attributes)
+  batch.maxTimestamp = 99n
+  batch.records.forEach((record, i) => {
+    record.timestampDelta = BigInt(i)
+  })
+  return batch
+}
+
+for (const batch of [false, 3] as const) {
+  test(`batch: ${batch} uses MaxTimestamp for every record of a LogAppendTime batch`, async t => {
+    const fake = new FakeConsumer()
+    fake.responses.push([partitionResponse(0, timestampedBatch(IS_LOG_APPEND_TIME))])
+    const messages = await consumeMessages(createStream(t, fake, { batch, maxFetches: 1 }))
+    deepStrictEqual(
+      messages.map(m => [m.timestamp, m.timestampType]),
+      [
+        [99n, TimestampTypes.LOG_APPEND_TIME],
+        [99n, TimestampTypes.LOG_APPEND_TIME],
+        [99n, TimestampTypes.LOG_APPEND_TIME]
+      ]
+    )
+    const json = messages[0].toJSON()
+    strictEqual(json.timestamp, '99')
+    strictEqual(json.timestampType, 'LogAppendTime')
+  })
+
+  test(`batch: ${batch} keeps the producer timestamps of a CreateTime batch`, async t => {
+    const fake = new FakeConsumer()
+    fake.responses.push([partitionResponse(0, timestampedBatch(0))])
+    const messages = await consumeMessages(createStream(t, fake, { batch, maxFetches: 1 }))
+    deepStrictEqual(
+      messages.map(m => [m.timestamp, m.timestampType]),
+      [
+        [10n, TimestampTypes.CREATE_TIME],
+        [11n, TimestampTypes.CREATE_TIME],
+        [12n, TimestampTypes.CREATE_TIME]
+      ]
+    )
+    strictEqual(messages[0].toJSON().timestampType, 'CreateTime')
+  })
+}
+
+test('the deserialization error context reports the LogAppendTime timestamp', async t => {
+  const fake = new FakeConsumer()
+  fake.responses.push([partitionResponse(0, timestampedBatch(IS_LOG_APPEND_TIME))])
+  const timestamps: bigint[] = []
+  const stream = createStream(t, fake, {
+    maxFetches: 1,
+    deserializers: {
+      value (value) {
+        if (value?.toString() === '1') {
+          throw Error('Invalid test record')
+        }
+        return value
+      }
+    },
+    onDeserializationError (context) {
+      timestamps.push(context.timestamp)
+      return DeserializationErrorActions.SKIP
+    }
+  })
+  await Array.fromAsync(stream)
+  deepStrictEqual(timestamps, [99n])
+})
 
 test('diagnostics wrap the batch push and the metrics count individual records', async t => {
   const fake = new FakeConsumer()

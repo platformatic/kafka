@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
 import type { Callback } from '../../../src/apis/definitions.ts'
@@ -30,6 +31,7 @@ import {
   producerInitIdempotentChannel,
   producerSendsChannel,
   ProtocolError,
+  ResponseError,
   stringDeserializers,
   stringSerializer,
   stringSerializers,
@@ -1663,6 +1665,296 @@ test('send should return produced messages when another destination fails', asyn
   )
 })
 
+test('orderedSends should be validated', () => {
+  try {
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test',
+      bootstrapBrokers: kafkaBootstrapServers,
+      strict: true,
+      orderedSends: 'yes' as unknown as boolean
+    })
+    throw new Error('Expected the constructor to throw.')
+  } catch (error) {
+    ok(error instanceof UserError)
+  }
+})
+
+test('send should keep the order of concurrent calls when a request is sent again', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  // Produce once so that the leader of the partition is settled and only the mocked failure happens
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+
+    if (calls === 1) {
+      // The broker rejects the first request once the second one could already be on the wire
+      const callback = args.at(-1) as (error: Error) => void
+      setImmediate(() => {
+        callback(new ResponseError(produceV11.api.key, 11, { '/responses/0/partition_responses/0': [6, null] }, {}))
+      })
+    } else {
+      originalSend(...args)
+    }
+
+    return true
+  })
+
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('first') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('second') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('third') }] })
+  ])
+
+  // The rejected request, its repetition, and one for the two calls which waited
+  strictEqual(calls, 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [1n, 2n, 3n]
+  )
+})
+
+test('send should not wait for the calls which write to other partitions', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true, 2)
+
+  await producer.send({
+    messages: [
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 0 },
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 1 }
+    ]
+  })
+
+  const started: number[] = []
+  const held: (() => void)[] = []
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    started.push(started.length)
+    held.push(() => originalSend(...args))
+    return true
+  })
+
+  const sends = Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b'), partition: 1 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c'), partition: 0 }] }),
+    // This one writes to both partitions, so it waits for all the previous ones, together with the third
+    producer.send({
+      messages: [
+        { topic: testTopic, value: Buffer.from('d'), partition: 1 },
+        { topic: testTopic, value: Buffer.from('e'), partition: 0 }
+      ]
+    })
+  ])
+
+  await sleep(100)
+
+  // Only the first call of each partition was sent
+  strictEqual(started.length, 2)
+
+  // Release the requests as they come, until all the calls have completed
+  const state = { completed: false }
+  sends.then(
+    () => {
+      state.completed = true
+    },
+    () => {
+      state.completed = true
+    }
+  )
+
+  while (!state.completed) {
+    held.shift()?.()
+    await sleep(10)
+  }
+
+  const results = await sends
+
+  deepStrictEqual(
+    results.map(result => result.offsets!.map(({ partition, offset }) => [partition, offset]).sort()),
+    [[[0, 1n]], [[1, 1n]], [[0, 2n]], [[0, 3n], [1, 2n]]]
+  )
+})
+
+test('send should produce the calls which wait for the same partition in a single request', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+    originalSend(...args)
+    return true
+  })
+
+  const sends: Promise<ProduceResult>[] = []
+  for (let i = 0; i < 10; i++) {
+    sends.push(
+      producer.send({
+        messages: [
+          { topic: testTopic, value: Buffer.from(`a-${i}`) },
+          { topic: testTopic, value: Buffer.from(`b-${i}`) }
+        ]
+      })
+    )
+  }
+
+  const results = await Promise.all(sends)
+
+  // The first call is sent right away, the others while it is in flight
+  strictEqual(calls, 2)
+  deepStrictEqual(
+    results.map(result => result.offsets),
+    Array.from({ length: 10 }, (_, i) => [{ topic: testTopic, partition: 0, offset: BigInt(1 + i * 2) }])
+  )
+})
+
+test('send should not share a request between calls with different settings', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+    originalSend(...args)
+    return true
+  })
+
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b') }], acks: ProduceAcks.ALL }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c') }], acks: ProduceAcks.ALL }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d') }] })
+  ])
+
+  strictEqual(calls, 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [1n, 2n, 3n, 4n]
+  )
+})
+
+test('send should not make two waiting requests wait for each other', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true, 2)
+
+  await producer.send({
+    messages: [
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 0 },
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 1 }
+    ]
+  })
+
+  const held: (() => void)[] = []
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    held.push(() => originalSend(...args))
+    return true
+  })
+
+  const both = (first: number, second: number) => {
+    return producer.send({
+      messages: [
+        { topic: testTopic, value: Buffer.from('x'), partition: first },
+        { topic: testTopic, value: Buffer.from('y'), partition: second }
+      ]
+    })
+  }
+
+  const sends = Promise.all([
+    // These two are sent right away
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b'), partition: 1 }] }),
+    // These two wait, each for its own partition
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d'), partition: 1 }] }),
+    // These write to both partitions, so they cannot be added to either of the two above
+    both(0, 1),
+    both(1, 0)
+  ])
+
+  const state = { completed: false }
+  sends.then(
+    () => {
+      state.completed = true
+    },
+    () => {
+      state.completed = true
+    }
+  )
+
+  while (!state.completed) {
+    held.shift()?.()
+    await sleep(10)
+  }
+
+  const results = await sends
+
+  deepStrictEqual(
+    results.map(result => result.offsets!.map(({ partition, offset }) => [partition, offset]).sort()),
+    [
+      [[0, 1n]],
+      [[1, 1n]],
+      [[0, 2n]],
+      [[1, 2n]],
+      [
+        [0, 3n],
+        [1, 3n]
+      ],
+      [
+        [0, 4n],
+        [1, 4n]
+      ]
+    ]
+  )
+})
+
+test('send should fail all the calls which shared a request', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+
+    if (calls === 2) {
+      const callback = args.at(-1) as (error: Error) => void
+      setImmediate(() => {
+        callback(new ResponseError(produceV11.api.key, 11, { '/responses/0/partition_responses/0': [10, null] }, {}))
+      })
+    } else {
+      originalSend(...args)
+    }
+
+    return true
+  })
+
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d') }] })
+  ])
+
+  strictEqual(results[0].status, 'fulfilled')
+  strictEqual(results[1].status, 'rejected')
+  strictEqual(results[2].status, 'rejected')
+  strictEqual(results[3].status, 'rejected')
+  strictEqual((results[1] as PromiseRejectedResult).reason, (results[2] as PromiseRejectedResult).reason)
+
+  // The next calls are not affected
+  const { offsets } = await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('e') }] })
+  strictEqual(offsets![0].offset, 2n)
+})
+
 test('send should handle errors from ConnectionPool.get', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
@@ -1869,6 +2161,99 @@ test('send should eagerly assign idempotent sequences for concurrent sends to th
 
   deepStrictEqual(firstSequences, [0, 1])
   strictEqual(initCalls, 1)
+})
+
+test('send should assign idempotent sequences in order for concurrent sends to the same partition', async t => {
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
+  const testTopic = await createTopic(t)
+  const firstSequences: number[] = []
+  let inflight = 0
+  let maxInflight = 0
+  let produced = 0
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+
+      firstSequences.push(produceOptions!.sequences!.get(`${topic}:${partition}`)!)
+      maxInflight = Math.max(maxInflight, ++inflight)
+
+      // The requests for a partition are sent one at a time, so that a repeated one cannot be overtaken
+      setImmediate(() => {
+        inflight--
+        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(produced++)))
+      })
+    }
+  )
+
+  await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(firstSequences, [0, 1])
+  strictEqual(maxInflight, 1)
+  strictEqual(initCalls, 1)
+})
+
+test('send should use the new idempotent producer for the calls which waited for a failed request', async t => {
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
+  const testTopic = await createTopic(t)
+  const requests: [bigint, number, number][] = []
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+      const first = requests.length === 0
+
+      requests.push([
+        produceOptions!.producerId!,
+        produceOptions!.sequences!.get(`${topic}:${partition}`)!,
+        messages.length
+      ])
+
+      // The first request fails once the other calls are waiting for it
+      setImmediate(() => {
+        if (first) {
+          apiCallback!(new ProtocolError('MESSAGE_TOO_LARGE'))
+        } else {
+          apiCallback!(null, createProduceResponse(topic, partition!))
+        }
+      })
+    }
+  )
+
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-3'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['rejected', 'fulfilled', 'fulfilled']
+  )
+
+  // The calls which waited are sent with the new producer ID, and its sequences start from zero
+  deepStrictEqual(requests, [
+    [1n, 0, 1],
+    [2n, 0, 2]
+  ])
+  strictEqual(initCalls, 2)
 })
 
 test('send should invalidate idempotent producer after permanent produce failure', async t => {

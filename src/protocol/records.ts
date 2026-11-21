@@ -423,6 +423,24 @@ interface PreparedRecordsBatch {
   maxTimestamp: bigint
 }
 
+/*
+  The headers of a record are a map, and iterating one with for...of allocates an array for each entry.
+  forEach() does not, and these functions are defined once so that no closure is created for each record.
+  Encoding is synchronous, which is what makes sharing this state possible.
+*/
+let headersSize = 0
+let headersBuffer: Buffer
+let headersPosition = 0
+
+function addHeaderSize (value: Buffer, key: Buffer): void {
+  headersSize += sizeOfVarIntBytes(key) + sizeOfVarIntBytes(value)
+}
+
+function writeHeader (value: Buffer, key: Buffer): void {
+  headersPosition = writeVarIntBytes(headersBuffer, key, headersPosition)
+  headersPosition = writeVarIntBytes(headersBuffer, value, headersPosition)
+}
+
 function prepareRecordsBatch (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions>,
@@ -476,9 +494,9 @@ function prepareRecordsBatch (
     } else {
       recordSize += sizeOfVarInt(headers.size)
 
-      for (const [key, value] of headers) {
-        recordSize += sizeOfVarIntBytes(key) + sizeOfVarIntBytes(value)
-      }
+      headersSize = 0
+      headers.forEach(addHeaderSize)
+      recordSize += headersSize
     }
 
     sizes[i] = recordSize
@@ -516,10 +534,10 @@ function prepareRecordsBatch (
     } else {
       position = writeVarInt(buffer, headers.size, position)
 
-      for (const [key, value] of headers) {
-        position = writeVarIntBytes(buffer, key, position)
-        position = writeVarIntBytes(buffer, value, position)
-      }
+      headersBuffer = buffer
+      headersPosition = position
+      headers.forEach(writeHeader)
+      position = headersPosition
     }
   }
 

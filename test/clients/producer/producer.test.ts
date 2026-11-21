@@ -1665,8 +1665,23 @@ test('send should return produced messages when another destination fails', asyn
   )
 })
 
+test('orderedSends should be validated', () => {
+  try {
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test',
+      bootstrapBrokers: kafkaBootstrapServers,
+      strict: true,
+      orderedSends: 'yes' as unknown as boolean
+    })
+    throw new Error('Expected the constructor to throw.')
+  } catch (error) {
+    ok(error instanceof UserError)
+  }
+})
+
 test('send should keep the order of concurrent calls when a request is sent again', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true)
 
   // Produce once so that the leader of the partition is settled and only the mocked failure happens
@@ -1704,7 +1719,7 @@ test('send should keep the order of concurrent calls when a request is sent agai
 })
 
 test('send should not wait for the calls which write to other partitions', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true, 2)
 
   await producer.send({
@@ -1765,7 +1780,7 @@ test('send should not wait for the calls which write to other partitions', async
 })
 
 test('send should produce the calls which wait for the same partition in a single request', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true)
 
   await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
@@ -1800,7 +1815,7 @@ test('send should produce the calls which wait for the same partition in a singl
 })
 
 test('send should not share a request between calls with different settings', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true)
 
   await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
@@ -1827,7 +1842,7 @@ test('send should not share a request between calls with different settings', as
 })
 
 test('send should not make two waiting requests wait for each other', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true, 2)
 
   await producer.send({
@@ -1901,7 +1916,7 @@ test('send should not make two waiting requests wait for each other', async t =>
 })
 
 test('send should fail all the calls which shared a request', async t => {
-  const producer = createProducer(t)
+  const producer = createProducer(t, { orderedSends: true })
   const testTopic = await createTopic(t, true)
 
   await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
@@ -2110,8 +2125,46 @@ test('send should recover idempotent producer after OUT_OF_ORDER_SEQUENCE_NUMBER
   strictEqual(initCalls, 2)
 })
 
-test('send should assign idempotent sequences in order for concurrent sends to the same partition', async t => {
+test('send should eagerly assign idempotent sequences for concurrent sends to the same partition', async t => {
   const producer = createProducer(t, { idempotent: true })
+  const testTopic = await createTopic(t)
+  const firstSequences: number[] = []
+  const callbacks: (() => void)[] = []
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+
+      firstSequences.push(produceOptions!.sequences!.get(`${topic}:${partition}`)!)
+      callbacks.push(() => {
+        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(callbacks.length)))
+      })
+
+      if (callbacks.length === 2) {
+        callbacks[1]()
+        callbacks[0]()
+      }
+    }
+  )
+
+  await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(firstSequences, [0, 1])
+  strictEqual(initCalls, 1)
+})
+
+test('send should assign idempotent sequences in order for concurrent sends to the same partition', async t => {
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
   const testTopic = await createTopic(t)
   const firstSequences: number[] = []
   let inflight = 0
@@ -2151,7 +2204,7 @@ test('send should assign idempotent sequences in order for concurrent sends to t
 })
 
 test('send should use the new idempotent producer for the calls which waited for a failed request', async t => {
-  const producer = createProducer(t, { idempotent: true })
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
   const testTopic = await createTopic(t)
   const requests: [bigint, number, number][] = []
   let initCalls = 0

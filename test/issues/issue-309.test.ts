@@ -151,7 +151,7 @@ test('issue-309: concurrent idempotent sends claim distinct partition sequences'
   const producer = createProducer(t, { idempotent: true })
   const topic = await createTopic(t)
   const firstSequences: number[] = []
-  let produced = 0
+  const callbacks: (() => void)[] = []
   let initCalls = 0
 
   mockProducerNetwork(producer, topic)
@@ -165,11 +165,14 @@ test('issue-309: concurrent idempotent sends claim distinct partition sequences'
       const { partition } = messages[0]
 
       firstSequences.push(produceOptions!.sequences!.get(`${topic}:${partition}`)!)
-
-      // The requests for a partition are sent one at a time, so the second one is only seen after this
-      setImmediate(() => {
-        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(produced++)))
+      callbacks.push(() => {
+        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(callbacks.length)))
       })
+
+      if (callbacks.length === 2) {
+        callbacks[1]()
+        callbacks[0]()
+      }
     }
   )
 

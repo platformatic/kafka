@@ -44,6 +44,7 @@ export const producerOptionsSchema = {
     ...produceOptionsProperties,
     linger: { type: 'number', minimum: 0 },
     batchMaxBytes: { type: 'integer', minimum: 1 },
+    orderedSends: { type: 'boolean' },
     serializers: serdeProperties,
     beforeSerialization: { function: true },
     registry: { type: 'object' }

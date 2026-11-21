@@ -139,7 +139,7 @@ interface PendingSends {
 /*
   A produce operation, which sends the messages of one or more send() calls in a single request per broker.
 
-  The operations which write to the same partition are sent one at a time, see #performSend. pending is the
+  The operations which write to the same partition are sent one at a time, see #performOrderedSend. pending is the
   number of partitions where an earlier operation has not completed yet: the operation starts when it is zero.
 */
 interface OrderedSend {
@@ -163,8 +163,9 @@ interface OrderedSend {
 /*
   How many bytes of keys, values and headers can be added to an operation which is waiting for its turn.
   This keeps the batch of each partition well within the default limit of the brokers (message.max.bytes).
+  A producer whose batchMaxBytes is larger uses that instead, as it does when lingering.
 */
-const maxWaitingBytes = 262_144
+const maxWaitingBytes = lingerInflightMaxBytes
 
 function messagesBytes (messages: MessageRecord[]): number {
   let bytes = 0
@@ -206,6 +207,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #lingerInflight: number
   // For each partition with operations which have not completed, the last of them
   #partitionTails: Map<string, Map<number, OrderedSend>>
+  #orderedSends: boolean
   #sendOperation: (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProduceResult>
@@ -260,6 +262,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#streams = new Set()
     this.#linger = options.linger ?? 0
     this.#partitionTails = new Map()
+    this.#orderedSends = options.orderedSends ?? false
     this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
     this.#lingerInflight = 0
     this[kOptions].transactionalId ??= randomUUID()
@@ -1448,7 +1451,144 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
   }
 
+  #performSend (
+    topics: string[],
+    messages: MessageRecord[],
+    sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+    produceOptions: Partial<CreateRecordsBatchOptions>,
+    callback: CallbackWithPromise<ProduceResult>
+  ): void {
+    if (this.#orderedSends) {
+      this.#performOrderedSend(topics, messages, sendOptions, produceOptions, callback)
+      return
+    }
+
+    // Get the metadata with the topic/partitions informations
+    this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics }, (error, metadata) => {
+      if (error) {
+        callback(error)
+        return
+      }
+
+      const messagesByDestination = new Map<number, MessageRecord[]>()
+
+      /*
+        Track the number of messages per partition so we can update the sequence number.
+        Sequences only exist for idempotent producers, so nothing is tracked otherwise. The count is
+        kept by topic and then by partition so that no key has to be built for each message.
+      */
+      const messagesPerPartition = produceOptions.sequences ? new Map<string, Map<number, number>>() : undefined
+
+      // Normalize the partition of all messages, then enqueue them to their destination
+      for (const message of messages) {
+        message.partition! %= metadata!.topics.get(message.topic)!.partitionsCount
+
+        const { topic, partition } = message
+        const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
+
+        let destination = messagesByDestination.get(leader)
+        if (!destination) {
+          destination = []
+          messagesByDestination.set(leader, destination)
+        }
+
+        if (messagesPerPartition) {
+          let topicMessages = messagesPerPartition.get(topic)
+          if (!topicMessages) {
+            topicMessages = new Map()
+            messagesPerPartition.set(topic, topicMessages)
+          }
+
+          topicMessages.set(partition!, (topicMessages.get(partition!) ?? 0) + 1)
+        }
+
+        destination.push(message)
+      }
+
+      // Track nodes so that we can get their ID for delayed write reporting
+      const nodes: number[] = []
+      if (messagesPerPartition) {
+        const sequenceSnapshot = new NumericMap()
+
+        for (const [topic, topicMessages] of messagesPerPartition) {
+          for (const [partition, messagesCount] of topicMessages) {
+            const partitionKey = `${topic}:${partition}`
+            sequenceSnapshot.set(partitionKey, this.#sequences.postIncrement(partitionKey, messagesCount, 0))
+          }
+        }
+
+        produceOptions = { ...produceOptions, sequences: sequenceSnapshot }
+      }
+
+      runConcurrentCallbacks(
+        'Producing messages failed.',
+        messagesByDestination,
+        ([destination, destinationMessages], concurrentCallback) => {
+          nodes.push(destination)
+
+          this.#performSingleDestinationSend(
+            topics,
+            destinationMessages,
+            this[kOptions].timeout!,
+            sendOptions.acks,
+            sendOptions.autocreateTopics,
+            sendOptions.repeatOnStaleMetadata,
+            produceOptions,
+            true,
+            concurrentCallback
+          )
+        },
+        (error, apiResults) => {
+          this.#metricsProducedMessages?.inc(messages.length)
+          const results: ProduceResult = {}
+
+          if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
+            const unwritableNodes = []
+
+            for (let i = 0; i < apiResults!.length; i++) {
+              if (typeof apiResults![i] === 'undefined' || apiResults![i] === false) {
+                unwritableNodes.push(nodes[i])
+              }
+            }
+
+            results.unwritableNodes = unwritableNodes
+          } else {
+            const topics: ProduceResult['offsets'] = []
+
+            for (const result of apiResults!) {
+              for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
+                for (const partitionResponse of partitionResponses) {
+                  topics.push({
+                    topic: name,
+                    partition: partitionResponse.index,
+                    offset: partitionResponse.baseOffset
+                  })
+                }
+              }
+
+              results.offsets = topics
+            }
+          }
+
+          if (error) {
+            if (sendOptions.idempotent && !this.#transaction) {
+              this.#producerInfo = undefined
+              this.#sequences.clear()
+            }
+
+            ;(error as GenericError).produced = results
+            callback(error)
+          } else {
+            callback(null, results)
+          }
+        }
+      )
+    })
+  }
+
   /*
+    What send() does when orderedSends is enabled.
+
     A request which fails can be sent again, and by then a later request for the same partition might
     have been written already: it was on the wire before the failure was known. To keep the messages of a
     partition in the order they were sent, an operation only starts once the earlier ones which write to
@@ -1458,7 +1598,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this does not change the order of any partition. They are then produced in the same request, so a
     partition which receives many concurrent calls needs few requests rather than one for each call.
   */
-  #performSend (
+  #performOrderedSend (
     topics: string[],
     messages: MessageRecord[],
     sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
@@ -1523,7 +1663,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         if (joinable) {
           bytes = messagesBytes(messages)
-          joinable = waiting.bytes + bytes <= maxWaitingBytes
+          joinable = waiting.bytes + bytes <= Math.max(this.#batchMaxBytes, maxWaitingBytes)
         }
       }
 

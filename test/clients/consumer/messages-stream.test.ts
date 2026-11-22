@@ -2364,6 +2364,55 @@ test('should deliver the whole message raw when a key deserialization error is c
   )
 })
 
+test('should deliver all the headers raw when a header deserialization error is continued', async t => {
+  const groupId = createTestGroupId()
+  const topic = await createTopic(t, true)
+
+  const producer = createProducer(t, { serializers: stringSerializers })
+  await producer.send({
+    messages: [{ topic, key: 'key-0', value: 'value-0', headers: { first: 'one', second: 'two', third: 'three' } }],
+    acks: ProduceAcks.LEADER
+  })
+
+  const consumer = createConsumer(t, groupId, {
+    deserializers: {
+      ...stringDeserializers,
+      headerValue (data?: Buffer) {
+        if (data?.toString() === 'two') {
+          throw new Error('Cannot deserialize the header value.')
+        }
+
+        return data?.toString()
+      }
+    } as unknown as Deserializers<string, string, string, string>
+  })
+
+  const stream = await consumer.consume({
+    topics: [topic],
+    mode: MessagesStreamModes.EARLIEST,
+    maxFetches: 1,
+    onDeserializationError () {
+      return DeserializationErrorActions.CONTINUE
+    }
+  })
+
+  const messages = await Array.fromAsync(stream)
+  const expected = [
+    [Buffer.from('first'), Buffer.from('one')],
+    [Buffer.from('second'), Buffer.from('two')],
+    [Buffer.from('third'), Buffer.from('three')]
+  ]
+
+  strictEqual(messages.length, 1)
+  strictEqual((messages[0].metadata.deserializationError as { payloadType: string }).payloadType, 'headerValue')
+
+  // The header which was deserialized before the failure and the one which was never attempted are raw as well
+  deepStrictEqual(messages[0].headerEntries, expected)
+  deepStrictEqual(Array.from(messages[0].headers.entries()), expected)
+  deepStrictEqual(messages[0].key, Buffer.from('key-0'))
+  deepStrictEqual(messages[0].value, Buffer.from('value-0'))
+})
+
 test('should continue past a failing beforeDeserialization hook when errors are continued', async t => {
   const groupId = createTestGroupId()
   const topic = await createTopic(t, true)

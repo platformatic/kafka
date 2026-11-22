@@ -27,6 +27,7 @@ Options:
 | `repeatOnStaleMetadata` | `boolean`                                                                                                                           | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                                                                                                                                                                                                     |
 | `linger`                | `number`                                                                                                                            | Time in milliseconds to wait for other `send()` calls so that their messages are produced in the same request. Default is `0`, which disables it. See [Batching messages across calls](#batching-messages-across-calls).                                                                                                                           |
 | `batchMaxBytes`         | `number`                                                                                                                            | When `linger` is set, how many bytes of keys, values and headers can be waiting before they are sent without waiting further. Default is `16384`.                                                                                                                                                                                                  |
+| `orderedSends`          | `boolean`                                                                                                                           | When `true`, the requests which write to the same partition are sent one at a time, so that concurrent `send()` calls keep their order when a request is sent again. Default is `false`. See [Keeping the order of concurrent calls](#keeping-the-order-of-concurrent-calls). |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                                                                                   | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                            |
 | `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`                                                                       | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                            |
 | `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`                                                                        | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
@@ -73,6 +74,31 @@ Options:
 | `messages` | `MessageToProduce<Key, Value, HeaderKey, HeaderValue>[]` | The messages to send. |
 
 It also accepts all options of the constructor except `serializers`.
+
+#### Keeping the order of concurrent calls
+
+By default the requests of concurrent `send()` calls are in flight at the same time, even when they write to the same partition. When one of them fails with an error which can be retried, for instance because the leader of the partition has changed, it is sent again. By then a later request might have been written already, so the messages of the two calls end up in the partition in a different order than the calls were made, while both calls succeed.
+
+When the producer is created with `orderedSends: true`, the requests which write to the same partition are sent one at a time, in the order of the `send()` calls. Requests for different partitions are still sent concurrently.
+
+```typescript
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  orderedSends: true
+})
+```
+
+The calls made while a request for one of their partitions is in flight do not get a request each: they are produced together in the next one, as long as they were made with the same settings. A hundred concurrent calls which send one message each to the same partition result in two requests: one for the first call, and one for the other ninety-nine. An application which awaits each `send()` before making the next one gets one request for each call, as it does without the option.
+
+Things to know:
+
+- Each call still resolves with the offsets of its own messages.
+- If a shared request fails, all the calls which were part of it fail with the same error, and its `produced` property covers the whole request.
+- A request stops accepting other calls once 256 KiB of keys, values and headers are waiting in it, or `batchMaxBytes` when that is larger.
+- A call which writes to several partitions waits for all of them, and the calls after it on any of those partitions wait for it.
+- The order is only kept between calls which write to the same topics: the metadata of topics the producer has not seen yet is fetched first, and a later call for known topics does not wait for that.
+- It can be combined with `linger`: what was lingering is then sent in order as well.
 
 #### Batching messages across calls
 

@@ -55,6 +55,7 @@ export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
     transactionalId?: string
     linger?: number
     batchMaxBytes?: number
+    orderedSends?: boolean
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
     beforeSerialization?: BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>
     registry?: SchemaRegistry<unknown, unknown, Key, Value, HeaderKey, HeaderValue>

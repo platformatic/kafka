@@ -17,7 +17,7 @@ import {
 import type { GenericError } from '../../errors.ts'
 import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool, ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
-import { IS_CONTROL, type Message, type MessageToConsume } from '../../protocol/records.ts'
+import { IS_CONTROL, type Message, type MessageJSON, type MessageToConsume } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
   kAutocommit,
@@ -32,6 +32,8 @@ import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../b
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
 import {
+  jsonDeserializer,
+  stringDeserializer,
   type BeforeDeserializationHook,
   type BeforeHookPayloadType,
   type Deserializer,
@@ -63,6 +65,9 @@ export function noopDeserializer (data?: Buffer): Buffer | undefined {
   return data
 }
 
+// The deserializers of this package which do not read the headers of the message they are given
+const dataOnlyDeserializers = new Set<unknown>([noopDeserializer, stringDeserializer, jsonDeserializer])
+
 export function defaultCorruptedMessageHandler (): boolean {
   return true
 }
@@ -72,17 +77,71 @@ type MessageToConsumeWithDeserializationError = MessageToConsume & {
   [kDeserializationError]?: MessageDeserializationError
 }
 
-function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, Value, HeaderKey, HeaderValue>) {
-  return {
-    key: this.key,
-    value: this.value,
-    headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
-    topic: this.topic,
-    partition: this.partition,
-    timestamp: this.timestamp.toString(),
-    offset: this.offset.toString(),
-    leaderEpoch: this.leaderEpoch,
-    metadata: this.metadata
+/*
+  The messages which are pushed to the stream.
+
+  Most records have no headers, and a Map is by far the most expensive thing a message allocates. So the
+  Map of a message without headers is only created if somebody asks for it.
+*/
+class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key, Value, HeaderKey, HeaderValue> {
+  #headers: Map<HeaderKey, HeaderValue> | undefined
+  key: Key
+  value: Value
+  headerEntries: Array<[HeaderKey, HeaderValue]>
+  topic: string
+  partition: number
+  timestamp: bigint
+  offset: bigint
+  leaderEpoch: number
+  commit: Message['commit']
+  metadata: Record<string, unknown>
+
+  constructor (
+    key: Key,
+    value: Value,
+    headers: Map<HeaderKey, HeaderValue> | undefined,
+    headerEntries: Array<[HeaderKey, HeaderValue]>,
+    topic: string,
+    partition: number,
+    timestamp: bigint,
+    offset: bigint,
+    leaderEpoch: number,
+    commit: Message['commit'],
+    metadata: Record<string, unknown>
+  ) {
+    this.#headers = headers
+    this.key = key
+    this.value = value
+    this.headerEntries = headerEntries
+    this.topic = topic
+    this.partition = partition
+    this.timestamp = timestamp
+    this.offset = offset
+    this.leaderEpoch = leaderEpoch
+    this.commit = commit
+    this.metadata = metadata
+  }
+
+  get headers (): Map<HeaderKey, HeaderValue> {
+    return (this.#headers ??= new Map())
+  }
+
+  set headers (headers: Map<HeaderKey, HeaderValue>) {
+    this.#headers = headers
+  }
+
+  toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue> {
+    return {
+      key: this.key,
+      value: this.value,
+      headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
+      topic: this.topic,
+      partition: this.partition,
+      timestamp: this.timestamp.toString(),
+      offset: this.offset.toString(),
+      leaderEpoch: this.leaderEpoch,
+      metadata: this.metadata
+    }
   }
 }
 
@@ -132,6 +191,7 @@ export class MessagesStream<
   #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeyDeserializer: Deserializer<HeaderKey>
   #headerValueDeserializer: Deserializer<HeaderValue>
+  #deserializersUseHeaders: boolean
   #autocommitEnabled: boolean
   #autocommitInterval: NodeJS.Timeout | null
   #autocommitInflight: boolean
@@ -239,6 +299,8 @@ export class MessagesStream<
       deserializers?.value ?? (noopDeserializer as DeserializerWithHeaders<Value, HeaderKey, HeaderValue>)
     this.#headerKeyDeserializer = deserializers?.headerKey ?? (noopDeserializer as Deserializer<HeaderKey>)
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
+    this.#deserializersUseHeaders =
+      !dataOnlyDeserializers.has(this.#keyDeserializer) || !dataOnlyDeserializers.has(this.#valueDeserializer)
     this.#autocommitEnabled = !!options.autocommit
     this.#autocommitInflight = false
     this.#closed = false
@@ -924,6 +986,7 @@ export class MessagesStream<
     const valueDeserializer = this.#valueDeserializer
     const headerKeyDeserializer = this.#headerKeyDeserializer
     const headerValueDeserializer = this.#headerValueDeserializer
+    const deserializersUseHeaders = this.#deserializersUseHeaders
 
     /*
       Publishing on the diagnostic channel requires a context object and five publications for each message.
@@ -1025,7 +1088,9 @@ export class MessagesStream<
               : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
 
             try {
-              const headers = new Map<HeaderKey, HeaderValue>()
+              // Without headers, the Map is only needed by the deserializers which read it
+              let headers: Map<HeaderKey, HeaderValue> | undefined =
+                deserializersUseHeaders || record.headers.length > 0 ? new Map<HeaderKey, HeaderValue>() : undefined
               // Allocated at its final length, as a push on an empty array reserves room for 17 elements
               const recordHeaders = record.headers
               const headersCount = recordHeaders.length
@@ -1053,15 +1118,15 @@ export class MessagesStream<
                   payloadType = 'headerValue'
                   /* c8 ignore next - Hard to test */
                   const deserializedHeaderValue = headerValueDeserializer(header[1] ?? undefined, messageToConsume)
-                  headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                  headers!.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
                   headerEntries[i] = [deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue]
                 }
 
                 payloadType = 'key'
                 /* c8 ignore next - Hard to test */
-                deserializedKey = keyDeserializer(record.key ?? undefined, headers, messageToConsume)
+                deserializedKey = keyDeserializer(record.key ?? undefined, headers!, messageToConsume)
                 payloadType = 'value'
-                deserializedValue = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
+                deserializedValue = valueDeserializer(record.value ?? undefined, headers!, messageToConsume)
               } catch (error) {
                 // The error handler can explicitly commit a failed record even in batch mode.
                 const commitFailedMessage = (batchSize && !autocommit
@@ -1109,12 +1174,12 @@ export class MessagesStream<
                   const headersFailed = hookFailed || payloadType === 'headerKey' || payloadType === 'headerValue'
 
                   if (headersFailed) {
-                    headers.clear()
+                    headers = record.headers.length > 0 ? new Map<HeaderKey, HeaderValue>() : undefined
 
                     // Every entry is overwritten, including the ones which were never deserialized
                     for (let i = 0; i < headersCount; i++) {
                       const header = recordHeaders[i]
-                      headers.set(header[0] as HeaderKey, header[1] as HeaderValue)
+                      headers!.set(header[0] as HeaderKey, header[1] as HeaderValue)
                       headerEntries[i] = [header[0] as HeaderKey, header[1] as HeaderValue]
                     }
                   }
@@ -1140,27 +1205,26 @@ export class MessagesStream<
                 }
               }
 
-              const message = {
-                key: deserializedKey,
-                value: deserializedValue,
+              const message = new ConsumedMessage<Key, Value, HeaderKey, HeaderValue>(
+                deserializedKey as Key,
+                deserializedValue as Value,
                 headers,
                 headerEntries,
                 topic,
                 partition,
-                timestamp: firstTimestamp + record.timestampDelta,
+                firstTimestamp + record.timestampDelta,
                 offset,
                 // The batch header epoch is the epoch of the record itself, which is what
                 // OffsetCommit expects as committedLeaderEpoch (KIP-320).
-                leaderEpoch: batch.partitionLeaderEpoch,
-                commit,
+                batch.partitionLeaderEpoch,
+                commit as Message['commit'],
                 // Deserializers and hooks can enrich the metadata of the message they processed
-                metadata: deserializationError
+                deserializationError
                   ? { ...messageMetadata, ...messageToConsume.metadata, deserializationError }
                   : messageToConsume.metadata
                     ? { ...messageMetadata, ...messageToConsume.metadata }
-                    : messageMetadata,
-                toJSON: messageToJSON
-              } as Message<Key, Value, HeaderKey, HeaderValue>
+                    : messageMetadata
+              )
 
               if (batchSize) {
                 if (this.#closed || this.destroyed) {

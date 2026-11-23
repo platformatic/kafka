@@ -14,7 +14,11 @@ import {
 } from '../../apis/producer/add-partitions-to-txn-v5.ts'
 import { type EndTxnRequest, type EndTxnResponse } from '../../apis/producer/end-txn-v4.ts'
 import { type InitProducerIdRequest, type InitProducerIdResponse } from '../../apis/producer/init-producer-id-v5.ts'
-import { type ProduceRequest, type ProduceResponse } from '../../apis/producer/produce-v11.ts'
+import {
+  type ProduceRequest,
+  type ProduceResponse,
+  type ProduceResponseTopic
+} from '../../apis/producer/produce-v11.ts'
 import { type TxnOffsetCommitRequest, type TxnOffsetCommitResponse } from '../../apis/producer/txn-offset-commit-v4.ts'
 import {
   createDiagnosticContext,
@@ -166,6 +170,16 @@ interface OrderedSend {
   A producer whose batchMaxBytes is larger uses that instead, as it does when lingering.
 */
 const maxWaitingBytes = lingerInflightMaxBytes
+
+/*
+  The messages of a send which go to the same broker. When only some of its partitions fail, the broker has
+  appended the others: their response is moved to produced and their messages are removed, see #acknowledge.
+*/
+interface DestinationSend {
+  node: number
+  messages: MessageRecord[]
+  produced: ProduceResponse[]
+}
 
 function messagesBytes (messages: MessageRecord[]): number {
   let bytes = 0
@@ -1505,8 +1519,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         destination.push(message)
       }
 
-      // Track nodes so that we can get their ID for delayed write reporting
-      const nodes: number[] = []
       if (messagesPerPartition) {
         const sequenceSnapshot = new NumericMap()
 
@@ -1520,55 +1532,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         produceOptions = { ...produceOptions, sequences: sequenceSnapshot }
       }
 
-      runConcurrentCallbacks(
-        'Producing messages failed.',
+      this.#produceToDestinations(
+        topics,
         messagesByDestination,
-        ([destination, destinationMessages], concurrentCallback) => {
-          nodes.push(destination)
-
-          this.#performSingleDestinationSend(
-            topics,
-            destinationMessages,
-            this[kOptions].timeout!,
-            sendOptions.acks,
-            sendOptions.autocreateTopics,
-            sendOptions.repeatOnStaleMetadata,
-            produceOptions,
-            true,
-            concurrentCallback
-          )
-        },
-        (error, apiResults) => {
+        sendOptions,
+        produceOptions,
+        sendOptions.repeatOnStaleMetadata,
+        {},
+        (error, results) => {
           this.#metricsProducedMessages?.inc(messages.length)
-          const results: ProduceResult = {}
-
-          if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
-            const unwritableNodes = []
-
-            for (let i = 0; i < apiResults!.length; i++) {
-              if (typeof apiResults![i] === 'undefined' || apiResults![i] === false) {
-                unwritableNodes.push(nodes[i])
-              }
-            }
-
-            results.unwritableNodes = unwritableNodes
-          } else {
-            const topics: ProduceResult['offsets'] = []
-
-            for (const result of apiResults!) {
-              for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
-                for (const partitionResponse of partitionResponses) {
-                  topics.push({
-                    topic: name,
-                    partition: partitionResponse.index,
-                    offset: partitionResponse.baseOffset
-                  })
-                }
-              }
-
-              results.offsets = topics
-            }
-          }
 
           if (error) {
             if (sendOptions.idempotent && !this.#transaction) {
@@ -1878,8 +1850,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       destination.push(message)
     }
 
-    // Track nodes so that we can get their ID for delayed write reporting
-    const nodes: number[] = []
     if (messagesPerPartition) {
       const sequenceSnapshot = new NumericMap()
 
@@ -1893,55 +1863,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       produceOptions = { ...produceOptions, sequences: sequenceSnapshot }
     }
 
-    runConcurrentCallbacks(
-      'Producing messages failed.',
+    this.#produceToDestinations(
+      topics,
       messagesByDestination,
-      ([destination, destinationMessages], concurrentCallback) => {
-        nodes.push(destination)
-
-        this.#performSingleDestinationSend(
-          topics,
-          destinationMessages,
-          this[kOptions].timeout!,
-          sendOptions.acks,
-          sendOptions.autocreateTopics,
-          sendOptions.repeatOnStaleMetadata,
-          produceOptions,
-          true,
-          concurrentCallback
-        )
-      },
-      (error, apiResults) => {
+      sendOptions,
+      produceOptions,
+      sendOptions.repeatOnStaleMetadata,
+      {},
+      (error, results) => {
         this.#metricsProducedMessages?.inc(messages.length)
-        const results: ProduceResult = {}
-
-        if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
-          const unwritableNodes = []
-
-          for (let i = 0; i < apiResults!.length; i++) {
-            if (typeof apiResults![i] === 'undefined' || apiResults![i] === false) {
-              unwritableNodes.push(nodes[i])
-            }
-          }
-
-          results.unwritableNodes = unwritableNodes
-        } else {
-          const topics: ProduceResult['offsets'] = []
-
-          for (const result of apiResults!) {
-            for (const { name, partitionResponses } of (result as ProduceResponse)?.responses ?? []) {
-              for (const partitionResponse of partitionResponses) {
-                topics.push({
-                  topic: name,
-                  partition: partitionResponse.index,
-                  offset: partitionResponse.baseOffset
-                })
-              }
-            }
-
-            results.offsets = topics
-          }
-        }
 
         if (error) {
           if (sendOptions.idempotent && !this.#transaction) {
@@ -1986,9 +1916,142 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#notifySends(operation.messages, operation.sends, error, result)
   }
 
+  /*
+    Produces the messages of each broker at the same time.
+
+    When a partition failed because its leader has moved, the messages which were not appended are grouped again by
+    their current leader once every broker has answered, and produced again. This is done once, when
+    repeatOnStaleMetadata is enabled.
+  */
+  #produceToDestinations (
+    topics: string[],
+    messagesByDestination: Map<number, MessageRecord[]>,
+    sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
+    produceOptions: Partial<CreateRecordsBatchOptions>,
+    repeatOnStaleMetadata: boolean,
+    results: ProduceResult,
+    callback: (error: Error | null, results: ProduceResult) => void
+  ): void {
+    const destinations: DestinationSend[] = []
+
+    runConcurrentCallbacks(
+      'Producing messages failed.',
+      messagesByDestination,
+      ([node, messages], concurrentCallback) => {
+        const destination: DestinationSend = { node, messages, produced: [] }
+        destinations.push(destination)
+
+        this.#performSingleDestinationSend(
+          topics,
+          destination,
+          this[kOptions].timeout!,
+          sendOptions.acks,
+          sendOptions.autocreateTopics,
+          repeatOnStaleMetadata,
+          produceOptions,
+          true,
+          concurrentCallback
+        )
+      },
+      (error, apiResults) => {
+        const repeat = repeatOnStaleMetadata && !!findErrorBy(error, 'hasStaleMetadata', true)
+        const remaining: MessageRecord[] = []
+
+        for (let i = 0; i < destinations.length; i++) {
+          const { node, messages, produced } = destinations[i]
+          const failed = typeof apiResults![i] === 'undefined'
+
+          if (sendOptions.acks === ProduceAcks.NO_RESPONSE) {
+            results.unwritableNodes ??= []
+
+            if ((failed && !repeat) || apiResults![i] === false) {
+              results.unwritableNodes.push(node)
+            }
+          } else {
+            results.offsets ??= []
+
+            for (const { responses } of produced) {
+              for (const { name, partitionResponses } of responses) {
+                for (const partitionResponse of partitionResponses) {
+                  results.offsets.push({
+                    topic: name,
+                    partition: partitionResponse.index,
+                    offset: partitionResponse.baseOffset
+                  })
+                }
+              }
+            }
+          }
+
+          if (failed && repeat) {
+            for (const message of messages) {
+              remaining.push(message)
+            }
+          }
+        }
+
+        if (!repeat) {
+          callback(error, results)
+          return
+        }
+
+        this.clearMetadata()
+        this[kMetadata]({ topics, autocreateTopics: sendOptions.autocreateTopics }, (error, metadata) => {
+          if (error) {
+            callback(error, results)
+            return
+          }
+
+          const messagesByLeader = new Map<number, MessageRecord[]>()
+
+          for (const message of remaining) {
+            const leader = metadata!.topics.get(message.topic)!.partitions[message.partition!].leader
+
+            let leaderMessages = messagesByLeader.get(leader)
+            if (!leaderMessages) {
+              leaderMessages = []
+              messagesByLeader.set(leader, leaderMessages)
+            }
+
+            leaderMessages.push(message)
+          }
+
+          this.#produceToDestinations(
+            topics,
+            messagesByLeader,
+            sendOptions,
+            produceOptions,
+            false,
+            results,
+            (error, results) => {
+              // Report the partitions in the order they were first sent in, as when no leader moved
+              const positions = new Map<string, number>()
+
+              for (const messages of messagesByDestination.values()) {
+                for (const { topic, partition } of messages) {
+                  const key = `${topic}:${partition}`
+
+                  if (!positions.has(key)) {
+                    positions.set(key, positions.size)
+                  }
+                }
+              }
+
+              results.offsets?.sort(
+                (a, b) => positions.get(`${a.topic}:${a.partition}`)! - positions.get(`${b.topic}:${b.partition}`)!
+              )
+
+              callback(error, results)
+            }
+          )
+        })
+      }
+    )
+  }
+
   #performSingleDestinationSend (
     topics: string[],
-    messages: MessageRecord[],
+    destination: DestinationSend,
     timeout: number,
     acks: number,
     autocreateTopics: boolean,
@@ -1997,7 +2060,6 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     recoverOnProducerStateLoss: boolean,
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
-    const { topic, partition } = messages[0]
     let refreshMetadata = false
 
     this[kPerformWithRetry]<boolean | ProduceResponse>(
@@ -2011,6 +2073,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           }
 
           refreshMetadata = false
+          const { topic, partition } = destination.messages[0]
           const leader = metadata!.topics.get(topic)!.partitions[partition!].leader
 
           this[kGetConnection](metadata!.brokers.get(leader)!, (error, connection) => {
@@ -2027,7 +2090,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 return
               }
 
-              api!(connection!, acks, timeout, messages, produceOptions, (error, response) => {
+              api!(connection!, acks, timeout, destination.messages, produceOptions, (error, response) => {
+                if (acks !== ProduceAcks.NO_RESPONSE) {
+                  this.#acknowledge(destination, error, response as ProduceResponse)
+                }
+
                 refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error, response)
               })
@@ -2037,29 +2104,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, results) => {
         if (error) {
-          // If the last error was due to stale metadata, we retry the operation with this set of messages
-          // since the partition is already set, it should attempt on the new destination
-          /* c8 ignore next - Hard to test */
-          const hasStaleMetadata = findErrorBy(error, 'hasStaleMetadata', true)
-
-          if (hasStaleMetadata && repeatOnStaleMetadata) {
-            this.clearMetadata()
-            this.#performSingleDestinationSend(
-              topics,
-              messages,
-              timeout,
-              acks,
-              autocreateTopics,
-              false,
-              produceOptions,
-              recoverOnProducerStateLoss,
-              callback
-            )
-            return
-          }
-
           if (recoverOnProducerStateLoss && !this.#transaction && this.#isProducerStateLost(error)) {
-            this.#recoverIdempotentProducer(messages, produceOptions, (error, recoveredProduceOptions) => {
+            this.#recoverIdempotentProducer(destination.messages, produceOptions, (error, recoveredProduceOptions) => {
               if (error) {
                 callback(error)
                 return
@@ -2067,7 +2113,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
               this.#performSingleDestinationSend(
                 topics,
-                messages,
+                destination,
                 timeout,
                 acks,
                 autocreateTopics,
@@ -2096,6 +2142,43 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         return !!findErrorBy(error, 'hasStaleMetadata', true)
       }
+    )
+  }
+
+  /*
+    When only some partitions of a request fail, the broker has appended the others, and the ResponseError carries the
+    response which says so. Those partitions are recorded and removed from the messages, so a retry does not write
+    them again.
+  */
+  #acknowledge (destination: DestinationSend, error: Error | null, response: ProduceResponse | undefined): void {
+    if (!error) {
+      destination.produced.push(response!)
+      return
+    }
+
+    const failedResponse: ProduceResponse | undefined = findErrorBy(error, 'code', 'PLT_KFK_RESPONSE')?.response
+    const responses: ProduceResponseTopic[] = []
+    const appended = new Set<string>()
+
+    for (const { name, partitionResponses } of failedResponse?.responses ?? []) {
+      const succeeded = partitionResponses.filter(partitionResponse => partitionResponse.errorCode === 0)
+
+      if (succeeded.length > 0) {
+        responses.push({ name, partitionResponses: succeeded })
+
+        for (const { index } of succeeded) {
+          appended.add(`${name}:${index}`)
+        }
+      }
+    }
+
+    if (responses.length === 0) {
+      return
+    }
+
+    destination.produced.push({ ...failedResponse!, responses })
+    destination.messages = destination.messages.filter(
+      message => !appended.has(`${message.topic}:${message.partition}`)
     )
   }
 

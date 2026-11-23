@@ -71,7 +71,13 @@ import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { IS_CONTROL, IS_TRANSACTIONAL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch, kUpdateCommittedOffset } from '../../symbols.ts'
+import {
+  kAutocommit,
+  kForgetRevokedPartitions,
+  kGetFetchNode,
+  kRefreshOffsetsAndFetch,
+  kUpdateCommittedOffset
+} from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
@@ -104,21 +110,11 @@ import {
 } from './consumer-protocol.ts'
 import { MessagesStream } from './messages-stream.ts'
 import { defaultConsumerOptions, defaultMaxBytesPerPartition } from './options.ts'
-import {
-  commitOptionsValidator,
-  consumeOptionsValidator,
-  consumerOptionsValidator,
-  fetchOptionsValidator,
-  getLagOptionsValidator,
-  groupIdAndOptionsValidator,
-  groupOptionsValidator,
-  listCommitsOptionsValidator,
-  listOffsetsOptionsValidator
-} from './validators.ts'
 import { COOPERATIVE_STICKY_ASSIGNOR, cooperativeStickyAssigner, roundRobinAssigner } from './partitions-assigners.ts'
 import { TopicsMap } from './topics-map.ts'
 import {
   type CommitOptions,
+  type ConsumeBatchOptions,
   type ConsumeOptions,
   type ConsumerGroupAutocommitErrorPayload,
   type ConsumerGroupJoinPayload,
@@ -141,11 +137,24 @@ import {
   type GroupProtocolSubscription,
   type ListCommitsOptions,
   type ListOffsetsOptions,
+  type MessagesBatch,
+  type MessagesStreamItem,
   type Offsets,
   type OffsetsWithTimestamps,
   type PreferredReadReplica
 } from './types.ts'
 import { nextFetchEpoch, partitionKey } from './utils.ts'
+import {
+  commitOptionsValidator,
+  consumeOptionsValidator,
+  consumerOptionsValidator,
+  fetchOptionsValidator,
+  getLagOptionsValidator,
+  groupIdAndOptionsValidator,
+  groupOptionsValidator,
+  listCommitsOptionsValidator,
+  listOffsetsOptionsValidator
+} from './validators.ts'
 
 interface TopicPartition {
   topicId: string
@@ -209,7 +218,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #clientRack: string
   #fetchSessions: Map<number, FetchSession>
   #preferredReadReplicas: Map<string, PreferredReadReplica>
-  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+  #streams: Set<MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>>
   #lagMonitoring: NodeJS.Timeout | null
   #streamContext: unknown
 
@@ -349,18 +358,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
-    closer(force as boolean, error => {
-      if (error) {
+    closer(force as boolean, leaveError => {
+      // Without force the consumer stays open, so that the caller can close the streams and try again.
+      if (leaveError && !force) {
         this[kClosed] = false
         this.#membershipActive = membershipActive
-        callback(error)
+        callback(leaveError)
         return
       }
 
+      // With force the connections are closed even if the streams could not be closed or the group could not be
+      // left: there would be no other way to close them. The broker expires the membership after the session timeout.
       super.close(error => {
         if (error) {
           this[kClosed] = false
-          callback(error)
+          callback(leaveError ? new MultipleErrors('Closing the consumer failed.', [leaveError, error]) : error)
           return
         }
 
@@ -371,7 +383,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
         }
 
-        callback(null)
+        callback(leaveError ?? null)
       })
     })
 
@@ -392,6 +404,15 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   consume (
+    options: ConsumeBatchOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>
+    >
+  ): void
+  consume (
+    options: ConsumeBatchOptions<Key, Value, HeaderKey, HeaderValue>
+  ): Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>>
+  consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   ): void
@@ -400,11 +421,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ): Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
   consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback?: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
-  ): void | Promise<MessagesStream<Key, Value, HeaderKey, HeaderValue>> {
-    if (!callback) {
-      callback = createPromisifiedCallback<MessagesStream<Key, Value, HeaderKey, HeaderValue>>()
-    }
+    streamCallback?:
+      | CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+      | CallbackWithPromise<
+          MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesBatch<Key, Value, HeaderKey, HeaderValue>>
+        >
+  ): void | Promise<
+    MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+  > {
+    const callback =
+      (streamCallback as CallbackWithPromise<
+        MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+      > | undefined) ??
+      createPromisifiedCallback<
+        MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+      >()
 
     if (this[kCheckNotClosed](callback)) {
       return callback[kCallbackPromise]
@@ -839,7 +870,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
   #consume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+    >
   ): void {
     consumerConsumesChannel.traceCallback(
       this.#performConsume,
@@ -1817,8 +1850,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           const fenced = (error as any).response?.errorCode === protocolErrors.FENCED_MEMBER_EPOCH.code
           if (fenced) {
             this.#assignments = []
-            this.assignments = []
-            this.#syncPreferredReadReplicas()
+            this.#setAssignments([])
             this.#memberEpoch = 0
             // Retry after a delay, not immediately: if many members get fenced around the same
             // rebalance, resending ConsumerGroupHeartbeat with no delay at all can flood the
@@ -1940,7 +1972,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       // An explicit empty initial assignment confirms an idle member, even though
       // there are no partitions to add. An omitted assignment must remain unknown.
       if (this.assignments === null && newAssignment.length === 0) {
-        this.assignments = []
+        this.#setAssignments([])
         for (const stream of this.#streams) {
           stream[kRefreshOffsetsAndFetch]()
         }
@@ -1980,8 +2012,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         partitions: tp.partitions
       }))
       this.#assignments = newAssignments
-      this.assignments = assignments
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments(assignments)
       callback(null)
     })
   }
@@ -2042,8 +2073,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.memberId = null
       this.#memberEpoch = -1
       this.#assignments = []
-      this.assignments = []
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments([])
       callback(null)
     }
 
@@ -2105,7 +2135,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   #performConsume (
     options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>,
     trackTopics: boolean,
-    callback: CallbackWithPromise<MessagesStream<Key, Value, HeaderKey, HeaderValue>>
+    callback: CallbackWithPromise<
+      MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>
+    >
   ): void {
     // Subscribe all topics
     let joinNeeded = this.memberId === null
@@ -2145,10 +2177,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     // Create the stream and start consuming
-    const stream = new MessagesStream<Key, Value, HeaderKey, HeaderValue>(
-      this,
-      options as ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
-    )
+    const stream = new MessagesStream<
+      Key,
+      Value,
+      HeaderKey,
+      HeaderValue,
+      MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>
+    >(this, options)
     this.#streams.add(stream)
 
     this.#metricActiveStreams?.inc()
@@ -2413,8 +2448,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               })
             }
 
-            this.assignments = assignments
-            this.#syncPreferredReadReplicas()
+            this.#setAssignments(assignments)
 
             for (const stream of this.#streams) {
               stream.resume()
@@ -2435,8 +2469,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const added = this.#diffGroupAssignments(assignments, this.assignments ?? [])
-    this.assignments = assignments
-    this.#syncPreferredReadReplicas()
+    this.#setAssignments(assignments)
 
     this.#cancelHeartbeat()
     this.#heartbeatInterval = setTimeout(() => {
@@ -2508,8 +2541,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       })
       this.memberId = null
       this.generationId = 0
-      this.assignments = null
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments(null)
       callback(null)
     }
 
@@ -3000,8 +3032,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // clear the assignments so the next JoinGroup advertises an empty ownedPartitions set
     // instead of re-claiming partitions the group has already reassigned elsewhere.
     if (this.#isCooperativeProtocol() && ['UNKNOWN_MEMBER_ID', 'ILLEGAL_GENERATION'].includes(protocolError.apiId)) {
-      this.assignments = []
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments([])
     }
 
     if (protocolError.unknownMemberId || protocolError.fencedInstanceId) {
@@ -3080,6 +3111,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   // Drops cached preferred replicas for partitions that are no longer assigned.
   // Called whenever `this.assignments` changes so the cache does not retain
   // entries for partitions the consumer has lost during a rebalance.
+  // Every change of the assignments must go through here: streams need to know about revoked
+  // partitions as soon as they are revoked, even when no new partition is assigned and
+  // therefore their offsets are not refreshed.
+  #setAssignments (assignments: GroupAssignment[] | null): void {
+    this.assignments = assignments
+    this.#syncPreferredReadReplicas()
+
+    for (const stream of this.#streams) {
+      stream[kForgetRevokedPartitions]()
+    }
+  }
+
   #syncPreferredReadReplicas (): void {
     if (this.#preferredReadReplicas.size === 0) {
       return

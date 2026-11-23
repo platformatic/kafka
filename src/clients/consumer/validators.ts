@@ -1017,7 +1017,7 @@ return errors === 0;
 validate27.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const consumeOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate28, () => consumeOptionsSchema);
-const schema39 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"}},"context":true,"mode":{"type":"string","enum":["latest","earliest","committed","manual"]},"fallbackMode":{"type":"string","enum":["latest","earliest","fail"]},"maxFetches":{"type":"number","minimum":0,"default":0},"offsets":{"type":"array","items":{"type":"object","properties":{"topic":{"type":"string","pattern":"^\\S+$"},"partition":{"type":"number","minimum":0},"offset":{"bigint":true}},"required":["topic","partition","offset"],"additionalProperties":false}},"onCorruptedMessage":{"function":true},"onDeserializationError":{"function":true},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"}},"required":["topics"],"additionalProperties":false};
+const schema39 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"}},"context":true,"mode":{"type":"string","enum":["latest","earliest","committed","manual"]},"fallbackMode":{"type":"string","enum":["latest","earliest","fail"]},"maxFetches":{"type":"number","minimum":0,"default":0},"offsets":{"type":"array","items":{"type":"object","properties":{"topic":{"type":"string","pattern":"^\\S+$"},"partition":{"type":"number","minimum":0},"offset":{"bigint":true}},"required":["topic","partition","offset"],"additionalProperties":false}},"onCorruptedMessage":{"function":true},"onDeserializationError":{"function":true},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"},"batch":{"oneOf":[{"type":"boolean"},{"type":"integer","minimum":1}]}},"required":["topics"],"additionalProperties":false};
 const func1 = Object.prototype.hasOwnProperty;
 
 function validate28(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2019,14 +2019,91 @@ vErrors.push(err74);
 errors++;
 }
 }
-}
-else {
-const err75 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.batch !== undefined){
+let data43 = data.batch;
+const _errs87 = errors;
+let valid14 = false;
+let passing2 = null;
+const _errs88 = errors;
+if(typeof data43 !== "boolean"){
+const err75 = {instancePath:instancePath+"/batch",schemaPath:"#/properties/batch/oneOf/0/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
 if(vErrors === null){
 vErrors = [err75];
 }
 else {
 vErrors.push(err75);
+}
+errors++;
+}
+var _valid2 = _errs88 === errors;
+if(_valid2){
+valid14 = true;
+passing2 = 0;
+}
+const _errs90 = errors;
+if(!(((typeof data43 == "number") && (!(data43 % 1) && !isNaN(data43))) && (isFinite(data43)))){
+const err76 = {instancePath:instancePath+"/batch",schemaPath:"#/properties/batch/oneOf/1/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err76];
+}
+else {
+vErrors.push(err76);
+}
+errors++;
+}
+if((typeof data43 == "number") && (isFinite(data43))){
+if(data43 < 1 || isNaN(data43)){
+const err77 = {instancePath:instancePath+"/batch",schemaPath:"#/properties/batch/oneOf/1/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err77];
+}
+else {
+vErrors.push(err77);
+}
+errors++;
+}
+}
+var _valid2 = _errs90 === errors;
+if(_valid2 && valid14){
+valid14 = false;
+passing2 = [passing2, 1];
+}
+else {
+if(_valid2){
+valid14 = true;
+passing2 = 1;
+}
+}
+if(!valid14){
+const err78 = {instancePath:instancePath+"/batch",schemaPath:"#/properties/batch/oneOf",keyword:"oneOf",params:{passingSchemas: passing2},message:"must match exactly one schema in oneOf"};
+if(vErrors === null){
+vErrors = [err78];
+}
+else {
+vErrors.push(err78);
+}
+errors++;
+}
+else {
+errors = _errs87;
+if(vErrors !== null){
+if(_errs87){
+vErrors.length = _errs87;
+}
+else {
+vErrors = null;
+}
+}
+}
+}
+}
+else {
+const err79 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err79];
+}
+else {
+vErrors.push(err79);
 }
 errors++;
 }

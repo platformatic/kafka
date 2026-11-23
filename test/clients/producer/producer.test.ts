@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { test } from 'node:test'
 import * as Prometheus from 'prom-client'
 import type { Callback } from '../../../src/apis/definitions.ts'
@@ -19,7 +20,6 @@ import {
   compressionsAlgorithms,
   ConfluentSchemaRegistry,
   Connection,
-  findErrorBy,
   GenericError,
   instancesChannel,
   MessagesStreamModes,
@@ -31,14 +31,13 @@ import {
   producerInitIdempotentChannel,
   producerSendsChannel,
   ProtocolError,
-  Reader,
+  ResponseError,
   stringDeserializers,
   stringSerializer,
   stringSerializers,
   type TopicWithPartitionAndOffset,
   UnsupportedApiError,
-  UserError,
-  Writer
+  UserError
 } from '../../../src/index.ts'
 import type { CreateRecordsBatchOptions, MessageRecord } from '../../../src/protocol/records.ts'
 import {
@@ -184,114 +183,6 @@ function mockProducerApis (producer: Producer, getProducerId: () => bigint, prod
       return true
     }
   )
-}
-
-// Mocks the brokers 0 to 2 and a topic whose partitions are led by the brokers returned by getLeaders
-function mockLeaders (producer: Producer, topic: string, getLeaders: () => number[]): void {
-  mockMethod(
-    producer,
-    kMetadata,
-    () => true,
-    null,
-    undefined,
-    (_original, _options, callback) => {
-      const metadata = createProducerMetadata(topic)
-      const [partition] = metadata.topics.get(topic)!.partitions
-      const leaders = getLeaders()
-
-      metadata.brokers = new Map([0, 1, 2].map(id => [id, { host: `broker-${id}`, port: 9092, rack: null }]))
-      metadata.topics.get(topic)!.partitions = leaders.map(leader => ({ ...partition, leader }))
-      metadata.topics.get(topic)!.partitionsCount = leaders.length
-      callback(null, metadata)
-      return true
-    }
-  )
-
-  mockMethod(
-    producer,
-    kGetConnection,
-    () => true,
-    null,
-    undefined,
-    (_original, broker, callback) => {
-      callback(null, { host: broker.host } as unknown as Connection)
-      return true
-    }
-  )
-}
-
-function describeRequest (connection: Connection, messages: MessageRecord[]): string {
-  return `${connection.host}:${[...new Set(messages.map(m => m.partition!))].sort().join(',')}`
-}
-
-function createPartitionsResponse (
-  topic: string,
-  partitions: { index: number; errorCode?: number; offset?: bigint }[]
-): ProduceResponse {
-  const response = createProduceResponse(topic, 0)
-  const [template] = response.responses[0].partitionResponses
-
-  response.responses[0].partitionResponses = partitions.map(({ index, errorCode = 0, offset = -1n }) => {
-    return { ...template, index, errorCode, baseOffset: offset }
-  })
-
-  return response
-}
-
-// Like a real broker, it appends the partitions it leads and rejects the others with NOT_LEADER_OR_FOLLOWER
-function createBrokerResponse (
-  topic: string,
-  connection: Connection,
-  messages: MessageRecord[],
-  leaders: number[],
-  errorCodes: Record<string, number> = {}
-): ProduceResponse {
-  const partitions = [...new Set(messages.map(m => m.partition!))].sort()
-
-  return createPartitionsResponse(
-    topic,
-    partitions.map(index => {
-      if (`broker-${leaders[index]}` !== connection.host) {
-        return { index, errorCode: 6 }
-      }
-
-      const errorCode = errorCodes[connection.host!]
-      return errorCode ? { index, errorCode } : { index, offset: BigInt((index + 1) * 10) }
-    })
-  )
-}
-
-// Goes through the real parser, so that failed partitions raise the same ResponseError a broker response does
-function respond (apiCallback: ProduceApiCallback, response: ProduceResponse): void {
-  const writer = Writer.create()
-    .appendArray(response.responses, (w, topic) => {
-      w.appendString(topic.name).appendArray(topic.partitionResponses, (w, partition) => {
-        w.appendInt32(partition.index)
-          .appendInt16(partition.errorCode)
-          .appendInt64(partition.baseOffset)
-          .appendInt64(partition.logAppendTimeMs)
-          .appendInt64(partition.logStartOffset)
-          .appendArray(partition.recordErrors, () => {})
-          .appendString(partition.errorMessage)
-      })
-    })
-    .appendInt32(response.throttleTimeMs)
-    .appendInt8(0)
-
-  let parsed: ProduceResponse
-
-  try {
-    parsed = produceV11.parseResponse(0, produceV11.api.key, 11, Reader.from(writer))
-  } catch (error) {
-    apiCallback(error as Error)
-    return
-  }
-
-  apiCallback(null, parsed)
-}
-
-function sortOffsets (offsets: TopicWithPartitionAndOffset[] | undefined): TopicWithPartitionAndOffset[] {
-  return [...(offsets ?? [])].sort((a, b) => a.partition - b.partition)
 }
 
 test('constructor should initialize properly', t => {
@@ -1030,6 +921,202 @@ test('send should support messages with headers', async t => {
   strictEqual(result2.offsets?.length, 1)
 })
 
+test('send should produce the same headers for every message when the string serializer is used', async t => {
+  const topic = await createTopic(t)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+
+  // The same keys are used by several messages, across two calls, both as an object and as a map
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { first: 'a', second: 'b' } },
+      { topic, key: 'key-1', value: 'value-1', headers: { second: 'c', first: 'd' } },
+      { topic, key: 'key-2', value: 'value-2' },
+      { topic, key: 'key-3', value: 'value-3', headers: {} }
+    ]
+  })
+
+  await producer.send({
+    messages: [
+      {
+        topic,
+        key: 'key-4',
+        value: 'value-4',
+        headers: new Map([
+          ['first', 'e'],
+          ['third', 'f']
+        ])
+      }
+    ]
+  })
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push([message.key, Array.from(message.headers)])
+  }
+
+  deepStrictEqual(headers, [
+    [
+      'key-0',
+      [
+        ['first', 'a'],
+        ['second', 'b']
+      ]
+    ],
+    [
+      'key-1',
+      [
+        ['second', 'c'],
+        ['first', 'd']
+      ]
+    ],
+    ['key-2', []],
+    ['key-3', []],
+    [
+      'key-4',
+      [
+        ['first', 'e'],
+        ['third', 'f']
+      ]
+    ]
+  ])
+})
+
+test('send should keep producing headers after many different keys have been used', async t => {
+  const topic = await createTopic(t)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+
+  // More keys than the producer keeps
+  const count = 300
+  const messages = []
+  for (let i = 0; i < count; i++) {
+    messages.push({ topic, key: `key-${i}`, value: `value-${i}`, headers: { [`header-${i}`]: `${i}` } })
+  }
+
+  await producer.send({ messages })
+  await producer.send({ messages })
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push(Array.from(message.headers))
+  }
+
+  const expected = messages.map((_, i) => [[`header-${i}`, `${i}`]])
+  deepStrictEqual(headers, [...expected, ...expected])
+})
+
+test('send should call custom header serializers for every header of every message', async t => {
+  const topic = await createTopic(t)
+  const headerKeys: [string, unknown][] = []
+  const headerValues: [string, unknown][] = []
+  const received: Map<string, string>[] = []
+
+  const producer = createProducer<string, string, string, string>(t, {
+    serializers: {
+      key (data, headers) {
+        received.push(headers!)
+        return stringSerializer(data)
+      },
+      value (data, headers) {
+        received.push(headers!)
+        return stringSerializer(data)
+      },
+      headerKey (data, metadata) {
+        headerKeys.push([data!, metadata])
+        return Buffer.from(data!.toUpperCase())
+      },
+      headerValue (data, metadata) {
+        headerValues.push([data!, metadata])
+        return Buffer.from(data!)
+      }
+    }
+  })
+
+  const map = new Map([['first', 'c']])
+
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { first: 'a', second: 'b' }, metadata: 'metadata-0' },
+      { topic, key: 'key-1', value: 'value-1', headers: map, metadata: 'metadata-1' },
+      { topic, key: 'key-2', value: 'value-2' }
+    ]
+  })
+
+  deepStrictEqual(headerKeys, [
+    ['first', 'metadata-0'],
+    ['second', 'metadata-0'],
+    ['first', 'metadata-1']
+  ])
+  deepStrictEqual(headerValues, [
+    ['a', 'metadata-0'],
+    ['b', 'metadata-0'],
+    ['c', 'metadata-1']
+  ])
+
+  // The serializers of the key and the value always receive a map, which is the one of the message when it has one
+  strictEqual(received.length, 6)
+  deepStrictEqual(Array.from(received[0]), [
+    ['first', 'a'],
+    ['second', 'b']
+  ])
+  strictEqual(received[1], received[0])
+  strictEqual(received[2], map)
+  strictEqual(received[3], map)
+  deepStrictEqual(Array.from(received[4]), [])
+  strictEqual(received[5], received[4])
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const headers = []
+  for await (const message of stream) {
+    headers.push(Array.from(message.headers))
+  }
+
+  deepStrictEqual(headers, [
+    [
+      ['FIRST', 'a'],
+      ['SECOND', 'b']
+    ],
+    [['FIRST', 'c']],
+    []
+  ])
+})
+
+test('send should only produce the own properties of an object of headers', async t => {
+  const topic = await createTopic(t)
+
+  for (const serializers of [
+    stringSerializers,
+    // With serializers which are not the ones of this package the headers are also given to them as a map
+    { ...stringSerializers, value: (data?: string, headers?: Map<string, string>) => Buffer.from(`${data}:${headers!.size}`) }
+  ]) {
+    const producer = createProducer<string, string, string, string>(t, { serializers })
+    const headers = Object.create({ inherited: 'no' }) as Record<string, string>
+    headers.own = 'yes'
+
+    await producer.send({ messages: [{ topic, key: 'key', value: 'value', headers }] })
+  }
+
+  const consumer = createConsumer(t, { groupId: createTestGroupId(), deserializers: stringDeserializers })
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+
+  const messages = []
+  for await (const message of stream) {
+    messages.push([message.value, Array.from(message.headers)])
+  }
+
+  deepStrictEqual(messages, [
+    ['value', [['own', 'yes']]],
+    ['value:1', [['own', 'yes']]]
+  ])
+})
+
 test('send should support messages with no key and no partition', async t => {
   const topic = await createTopic(t, true, 4)
   const producer = createProducer(t)
@@ -1578,6 +1665,296 @@ test('send should return produced messages when another destination fails', asyn
   )
 })
 
+test('orderedSends should be validated', () => {
+  try {
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test',
+      bootstrapBrokers: kafkaBootstrapServers,
+      strict: true,
+      orderedSends: 'yes' as unknown as boolean
+    })
+    throw new Error('Expected the constructor to throw.')
+  } catch (error) {
+    ok(error instanceof UserError)
+  }
+})
+
+test('send should keep the order of concurrent calls when a request is sent again', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  // Produce once so that the leader of the partition is settled and only the mocked failure happens
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+
+    if (calls === 1) {
+      // The broker rejects the first request once the second one could already be on the wire
+      const callback = args.at(-1) as (error: Error) => void
+      setImmediate(() => {
+        callback(new ResponseError(produceV11.api.key, 11, { '/responses/0/partition_responses/0': [6, null] }, {}))
+      })
+    } else {
+      originalSend(...args)
+    }
+
+    return true
+  })
+
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('first') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('second') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('third') }] })
+  ])
+
+  // The rejected request, its repetition, and one for the two calls which waited
+  strictEqual(calls, 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [1n, 2n, 3n]
+  )
+})
+
+test('send should not wait for the calls which write to other partitions', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true, 2)
+
+  await producer.send({
+    messages: [
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 0 },
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 1 }
+    ]
+  })
+
+  const started: number[] = []
+  const held: (() => void)[] = []
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    started.push(started.length)
+    held.push(() => originalSend(...args))
+    return true
+  })
+
+  const sends = Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b'), partition: 1 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c'), partition: 0 }] }),
+    // This one writes to both partitions, so it waits for all the previous ones, together with the third
+    producer.send({
+      messages: [
+        { topic: testTopic, value: Buffer.from('d'), partition: 1 },
+        { topic: testTopic, value: Buffer.from('e'), partition: 0 }
+      ]
+    })
+  ])
+
+  await sleep(100)
+
+  // Only the first call of each partition was sent
+  strictEqual(started.length, 2)
+
+  // Release the requests as they come, until all the calls have completed
+  const state = { completed: false }
+  sends.then(
+    () => {
+      state.completed = true
+    },
+    () => {
+      state.completed = true
+    }
+  )
+
+  while (!state.completed) {
+    held.shift()?.()
+    await sleep(10)
+  }
+
+  const results = await sends
+
+  deepStrictEqual(
+    results.map(result => result.offsets!.map(({ partition, offset }) => [partition, offset]).sort()),
+    [[[0, 1n]], [[1, 1n]], [[0, 2n]], [[0, 3n], [1, 2n]]]
+  )
+})
+
+test('send should produce the calls which wait for the same partition in a single request', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+    originalSend(...args)
+    return true
+  })
+
+  const sends: Promise<ProduceResult>[] = []
+  for (let i = 0; i < 10; i++) {
+    sends.push(
+      producer.send({
+        messages: [
+          { topic: testTopic, value: Buffer.from(`a-${i}`) },
+          { topic: testTopic, value: Buffer.from(`b-${i}`) }
+        ]
+      })
+    )
+  }
+
+  const results = await Promise.all(sends)
+
+  // The first call is sent right away, the others while it is in flight
+  strictEqual(calls, 2)
+  deepStrictEqual(
+    results.map(result => result.offsets),
+    Array.from({ length: 10 }, (_, i) => [{ topic: testTopic, partition: 0, offset: BigInt(1 + i * 2) }])
+  )
+})
+
+test('send should not share a request between calls with different settings', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+    originalSend(...args)
+    return true
+  })
+
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b') }], acks: ProduceAcks.ALL }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c') }], acks: ProduceAcks.ALL }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d') }] })
+  ])
+
+  strictEqual(calls, 3)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [1n, 2n, 3n, 4n]
+  )
+})
+
+test('send should not make two waiting requests wait for each other', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true, 2)
+
+  await producer.send({
+    messages: [
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 0 },
+      { topic: testTopic, value: Buffer.from('warmup'), partition: 1 }
+    ]
+  })
+
+  const held: (() => void)[] = []
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    held.push(() => originalSend(...args))
+    return true
+  })
+
+  const both = (first: number, second: number) => {
+    return producer.send({
+      messages: [
+        { topic: testTopic, value: Buffer.from('x'), partition: first },
+        { topic: testTopic, value: Buffer.from('y'), partition: second }
+      ]
+    })
+  }
+
+  const sends = Promise.all([
+    // These two are sent right away
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b'), partition: 1 }] }),
+    // These two wait, each for its own partition
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d'), partition: 1 }] }),
+    // These write to both partitions, so they cannot be added to either of the two above
+    both(0, 1),
+    both(1, 0)
+  ])
+
+  const state = { completed: false }
+  sends.then(
+    () => {
+      state.completed = true
+    },
+    () => {
+      state.completed = true
+    }
+  )
+
+  while (!state.completed) {
+    held.shift()?.()
+    await sleep(10)
+  }
+
+  const results = await sends
+
+  deepStrictEqual(
+    results.map(result => result.offsets!.map(({ partition, offset }) => [partition, offset]).sort()),
+    [
+      [[0, 1n]],
+      [[1, 1n]],
+      [[0, 2n]],
+      [[1, 2n]],
+      [
+        [0, 3n],
+        [1, 3n]
+      ],
+      [
+        [0, 4n],
+        [1, 4n]
+      ]
+    ]
+  )
+})
+
+test('send should fail all the calls which shared a request', async t => {
+  const producer = createProducer(t, { orderedSends: true })
+  const testTopic = await createTopic(t, true)
+
+  await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('warmup') }] })
+
+  let calls = 0
+  mockAPI(producer[kConnections], produceV11.api.key, null, null, (originalSend, ...args) => {
+    calls++
+
+    if (calls === 2) {
+      const callback = args.at(-1) as (error: Error) => void
+      setImmediate(() => {
+        callback(new ResponseError(produceV11.api.key, 11, { '/responses/0/partition_responses/0': [10, null] }, {}))
+      })
+    } else {
+      originalSend(...args)
+    }
+
+    return true
+  })
+
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('a') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('b') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('c') }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('d') }] })
+  ])
+
+  strictEqual(results[0].status, 'fulfilled')
+  strictEqual(results[1].status, 'rejected')
+  strictEqual(results[2].status, 'rejected')
+  strictEqual(results[3].status, 'rejected')
+  strictEqual((results[1] as PromiseRejectedResult).reason, (results[2] as PromiseRejectedResult).reason)
+
+  // The next calls are not affected
+  const { offsets } = await producer.send({ messages: [{ topic: testTopic, value: Buffer.from('e') }] })
+  strictEqual(offsets![0].offset, 2n)
+})
+
 test('send should handle errors from ConnectionPool.get', async t => {
   const producer = createProducer(t)
   const testTopic = await createTopic(t)
@@ -1784,6 +2161,99 @@ test('send should eagerly assign idempotent sequences for concurrent sends to th
 
   deepStrictEqual(firstSequences, [0, 1])
   strictEqual(initCalls, 1)
+})
+
+test('send should assign idempotent sequences in order for concurrent sends to the same partition', async t => {
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
+  const testTopic = await createTopic(t)
+  const firstSequences: number[] = []
+  let inflight = 0
+  let maxInflight = 0
+  let produced = 0
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+
+      firstSequences.push(produceOptions!.sequences!.get(`${topic}:${partition}`)!)
+      maxInflight = Math.max(maxInflight, ++inflight)
+
+      // The requests for a partition are sent one at a time, so that a repeated one cannot be overtaken
+      setImmediate(() => {
+        inflight--
+        apiCallback!(null, createProduceResponse(topic, partition!, BigInt(produced++)))
+      })
+    }
+  )
+
+  await Promise.all([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(firstSequences, [0, 1])
+  strictEqual(maxInflight, 1)
+  strictEqual(initCalls, 1)
+})
+
+test('send should use the new idempotent producer for the calls which waited for a failed request', async t => {
+  const producer = createProducer(t, { idempotent: true, orderedSends: true })
+  const testTopic = await createTopic(t)
+  const requests: [bigint, number, number][] = []
+  let initCalls = 0
+
+  mockProducerNetwork(producer, testTopic)
+  mockProducerApis(
+    producer,
+    () => {
+      initCalls++
+      return BigInt(initCalls)
+    },
+    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
+      const { topic, partition } = messages[0]
+      const first = requests.length === 0
+
+      requests.push([
+        produceOptions!.producerId!,
+        produceOptions!.sequences!.get(`${topic}:${partition}`)!,
+        messages.length
+      ])
+
+      // The first request fails once the other calls are waiting for it
+      setImmediate(() => {
+        if (first) {
+          apiCallback!(new ProtocolError('MESSAGE_TOO_LARGE'))
+        } else {
+          apiCallback!(null, createProduceResponse(topic, partition!))
+        }
+      })
+    }
+  )
+
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] }),
+    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-3'), partition: 0 }] })
+  ])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['rejected', 'fulfilled', 'fulfilled']
+  )
+
+  // The calls which waited are sent with the new producer ID, and its sequences start from zero
+  deepStrictEqual(requests, [
+    [1n, 0, 1],
+    [2n, 0, 2]
+  ])
+  strictEqual(initCalls, 2)
 })
 
 test('send should invalidate idempotent producer after permanent produce failure', async t => {
@@ -2486,320 +2956,4 @@ test('getSendConnections should handle errors from ConnectionPool.get', async t 
       return true
     }
   )
-})
-
-test('send should only retry the partitions which failed in a partially failed produce request', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => [0, 0])
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // NOT_ENOUGH_REPLICAS, which is retried
-      const partitions =
-        requests.length === 1
-          ? [
-              { index: 0, offset: 10n },
-              { index: 1, errorCode: 19 }
-            ]
-          : [{ index: 1, offset: 20n }]
-
-      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-  })
-
-  deepStrictEqual(requests, ['broker-0:0,1', 'broker-0:1'])
-  deepStrictEqual(sortOffsets(result.offsets), [
-    { topic: testTopic, partition: 0, offset: 10n },
-    { topic: testTopic, partition: 1, offset: 20n }
-  ])
-})
-
-test('send should retry each failed partition on its own leader after the leaders moved', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let leaders = [0, 0]
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => leaders)
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // Both partitions move away from broker 0, to different brokers, before the first request lands
-      leaders = [1, 2]
-      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, leaders))
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-  })
-
-  deepStrictEqual(requests.slice(0, 1), ['broker-0:0,1'])
-  deepStrictEqual(requests.slice(1).sort(), ['broker-1:0', 'broker-2:1'])
-  deepStrictEqual(sortOffsets(result.offsets), [
-    { topic: testTopic, partition: 0, offset: 10n },
-    { topic: testTopic, partition: 1, offset: 20n }
-  ])
-})
-
-test('send should not resend appended partitions when recovering the idempotent producer', async t => {
-  const producer = createProducer(t, { idempotent: true, retries: 3, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  const sent: Array<{ producerId: bigint; partitions: number[] }> = []
-  let initCalls = 0
-
-  mockLeaders(producer, testTopic, () => [0, 0])
-  mockProducerApis(
-    producer,
-    () => BigInt(++initCalls),
-    (_connection, _acks, _timeout, messages, produceOptions, apiCallback) => {
-      sent.push({ producerId: produceOptions!.producerId!, partitions: [...new Set(messages.map(m => m.partition!))] })
-
-      // OUT_OF_ORDER_SEQUENCE_NUMBER, which makes the producer get a new producer ID
-      const partitions =
-        sent.length === 1
-          ? [
-              { index: 0, offset: 10n },
-              { index: 1, errorCode: 45 }
-            ]
-          : [{ index: 1, offset: 20n }]
-
-      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-  })
-
-  deepStrictEqual(sent, [
-    { producerId: 1n, partitions: [0, 1] },
-    { producerId: 2n, partitions: [1] }
-  ])
-  deepStrictEqual(sortOffsets(result.offsets), [
-    { topic: testTopic, partition: 0, offset: 10n },
-    { topic: testTopic, partition: 1, offset: 20n }
-  ])
-})
-
-test('send should keep the appended partitions when repeating the send after stale metadata', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let leaders = [0, 0]
-  let metadataClears = 0
-  const requests: string[] = []
-
-  const clearMetadata = producer.clearMetadata.bind(producer)
-  producer.clearMetadata = () => {
-    metadataClears++
-    clearMetadata()
-  }
-
-  mockLeaders(producer, testTopic, () => leaders)
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // Only partition 1 moves, so broker 0 still appends partition 0
-      leaders = [0, 1]
-      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, leaders))
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-  })
-
-  strictEqual(metadataClears, 1)
-  deepStrictEqual(requests, ['broker-0:0,1', 'broker-1:1'])
-  deepStrictEqual(sortOffsets(result.offsets), [
-    { topic: testTopic, partition: 0, offset: 10n },
-    { topic: testTopic, partition: 1, offset: 20n }
-  ])
-})
-
-test('send should produce to every leader in the same attempt when the leaders moved', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let metadataCalls = 0
-  const requests: string[] = []
-
-  // Both partitions were led by broker 0 when the send started, then they moved to brokers 1 and 2
-  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, [1, 2]))
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-  })
-
-  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
-  deepStrictEqual(sortOffsets(result.offsets), [
-    { topic: testTopic, partition: 0, offset: 10n },
-    { topic: testTopic, partition: 1, offset: 20n }
-  ])
-})
-
-test('send should report the partitions appended by a leader when another leader fails', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let metadataCalls = 0
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // MESSAGE_TOO_LARGE on broker 1, which is not retried
-      respond(apiCallback!, createBrokerResponse(testTopic, connection, messages, [1, 2], { 'broker-1': 10 }))
-    }
-  )
-
-  await rejects(
-    () =>
-      producer.send({
-        messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-      }),
-    error => {
-      ok(findErrorBy(error as Error, 'apiId', 'MESSAGE_TOO_LARGE'))
-      deepStrictEqual((error as GenericError).produced, { offsets: [{ topic: testTopic, partition: 1, offset: 20n }] })
-      return true
-    }
-  )
-
-  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
-})
-
-test('send should report the partitions appended before the retries ran out', async t => {
-  const producer = createProducer(t, { idempotent: false, retries: 2, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => [0, 0])
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // Partition 1 never gets enough replicas
-      const partitions =
-        requests.length === 1
-          ? [
-              { index: 0, offset: 10n },
-              { index: 1, errorCode: 19 }
-            ]
-          : [{ index: 1, errorCode: 19 }]
-
-      respond(apiCallback!, createPartitionsResponse(testTopic, partitions))
-    }
-  )
-
-  await rejects(
-    () =>
-      producer.send({
-        messages: [0, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') }))
-      }),
-    error => {
-      deepStrictEqual((error as GenericError).produced, { offsets: [{ topic: testTopic, partition: 0, offset: 10n }] })
-      return true
-    }
-  )
-
-  deepStrictEqual(requests, ['broker-0:0,1', 'broker-0:1', 'broker-0:1'])
-})
-
-test('send should report the busy brokers when no response is requested and the leaders moved', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let metadataCalls = 0
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-
-      // The socket of broker 2 is full
-      apiCallback!(null, connection.host !== 'broker-2')
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') })),
-    acks: ProduceAcks.NO_RESPONSE
-  })
-
-  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
-  deepStrictEqual(result, { unwritableNodes: [2] })
-})
-
-test('send should not write again what was written when no response is requested and another leader fails', async t => {
-  const producer = createProducer(t, { idempotent: false, retryDelay: 0 })
-  const testTopic = await createTopic(t)
-  let metadataCalls = 0
-  let connectionFailed = false
-  const requests: string[] = []
-
-  mockLeaders(producer, testTopic, () => (++metadataCalls === 1 ? [0, 0] : [1, 2]))
-  mockMethod(
-    producer,
-    kGetConnection,
-    () => true,
-    null,
-    undefined,
-    (original, broker, callback) => {
-      if (broker.host === 'broker-2' && !connectionFailed) {
-        connectionFailed = true
-        callback(new NetworkError('Connection failed.'))
-        return true
-      }
-
-      original(broker, callback)
-      return true
-    }
-  )
-  mockProducerApis(
-    producer,
-    () => 1n,
-    (connection, _acks, _timeout, messages, _produceOptions, apiCallback) => {
-      requests.push(describeRequest(connection, messages))
-      apiCallback!(null, true)
-    }
-  )
-
-  const result = await producer.send({
-    messages: [0, 0, 1, 1].map(partition => ({ topic: testTopic, partition, value: Buffer.from('message') })),
-    acks: ProduceAcks.NO_RESPONSE
-  })
-
-  deepStrictEqual(requests.sort(), ['broker-1:0', 'broker-2:1'])
-  deepStrictEqual(result, { unwritableNodes: [] })
-  ok(connectionFailed)
 })

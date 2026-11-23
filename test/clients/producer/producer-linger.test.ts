@@ -1,5 +1,9 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { test, type TestContext } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
+import type { Callback } from '../../../src/apis/definitions.ts'
+import type { ProduceResponse } from '../../../src/apis/producer/produce-v11.ts'
+import { kConnections } from '../../../src/clients/base/base.ts'
 import {
   type ConnectionDiagnosticEvent,
   connectionsApiChannel,
@@ -18,7 +22,7 @@ import {
   createTestGroupId,
   createTopic,
   kafkaBootstrapServers,
-  misdirectPartitions
+  mockAPI
 } from '../../helpers.ts'
 
 const produceApiKey = 0
@@ -218,6 +222,106 @@ test('send should send what is waiting before a call which would exceed batchMax
   )
 })
 
+test('send should let the calls made while a request is in flight wait for it', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The first call reaches the limit on its own and is sent. Each of the others reaches it too, but they
+  // are made while the first request is in flight: they are all sent together once it completes.
+  const results = await Promise.all(
+    ['a', 'b', 'c', 'd', 'e', 'f'].map(letter => producer.send({ messages: [{ topic, value: letter.repeat(100) }] }))
+  )
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n, 3n, 4n, 5n]
+  )
+})
+
+test('send should limit what waits for a request in flight', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  /*
+    The Produce requests are answered by the test, which decides when each of them completes.
+    Nothing is sent to the brokers: other tests set quotas on them while this one runs, and producing this
+    many bytes for real would get the connection throttled.
+  */
+  const requests: Callback<ProduceResponse>[] = []
+  mockAPI(producer[kConnections], produceApiKey, null, null, (_original: unknown, ...args: unknown[]) => {
+    requests.push(args.at(-1) as Callback<ProduceResponse>)
+    return true
+  })
+
+  function respond (index: number): void {
+    requests[index](null, {
+      responses: [
+        { name: topic, partitionResponses: [{ index: 0, errorCode: 0, baseOffset: BigInt(index) }] }
+      ]
+    } as unknown as ProduceResponse)
+  }
+
+  const completed: string[] = []
+  function send (letter: string, length: number): Promise<void> {
+    return producer.send({ messages: [{ topic, value: letter.repeat(length) }] }).then(() => {
+      completed.push(letter)
+    })
+  }
+
+  // The first call reaches batchMaxBytes on its own and is sent at once
+  const sends = [send('a', 100)]
+  await sleep(10)
+  strictEqual(requests.length, 1)
+
+  // The second and the third wait for it, as together they are below 256 KiB
+  sends.push(send('b', 100_000), send('c', 100_000))
+  await sleep(10)
+  strictEqual(requests.length, 1)
+
+  // The fourth would take what is waiting over 256 KiB, so the second and the third are sent
+  sends.push(send('d', 100_000))
+  await sleep(10)
+  strictEqual(requests.length, 2)
+
+  // The fourth is only sent once nothing is in flight anymore
+  respond(0)
+  await sleep(10)
+  strictEqual(requests.length, 2)
+  deepStrictEqual(completed, ['a'])
+
+  respond(1)
+  await sleep(10)
+  strictEqual(requests.length, 3)
+  deepStrictEqual(completed, ['a', 'b', 'c'])
+
+  respond(2)
+  await Promise.all(sends)
+  deepStrictEqual(completed, ['a', 'b', 'c', 'd'])
+})
+
+test('send should fail the calls which were waiting for a request in flight on their own', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, linger: 60_000, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  // The second request is for a topic which does not exist and cannot be created
+  const results = await Promise.allSettled([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(100) }] }),
+    producer.send({ messages: [{ topic: 'invalid topic name', value: 'b'.repeat(100) }], autocreateTopics: false }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(100) }] })
+  ])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['fulfilled', 'rejected', 'fulfilled']
+  )
+})
+
 test('send should accept null values and null header values when lingering', async t => {
   const producer = createProducer(t, { linger: 10 })
   const topic = await createTopic(t, true)
@@ -308,52 +412,6 @@ test('send should work with an idempotent producer when lingering', async t => {
   deepStrictEqual(
     offsets,
     Array.from({ length: 15 }, (_, i) => BigInt(i))
-  )
-})
-
-test('send should only retry the failed partitions of the calls merged by linger', async t => {
-  const producer = createProducer(t, { serializers: stringSerializers, linger: 50, metadataMaxAge: 600_000 })
-  const topic = await createTopic(t, true, 3)
-  const {
-    partitions: [first, moved],
-    assertPartiallyRejected
-  } = await misdirectPartitions(t, producer, topic)
-
-  // The merged request reaches the leader of the first partition, which appends it and rejects the moved one
-  const [a, b] = await Promise.all([
-    producer.send({
-      messages: [
-        { topic, partition: first, value: 'a1' },
-        { topic, partition: moved, value: 'a2' }
-      ]
-    }),
-    producer.send({ messages: [{ topic, partition: first, value: 'b1' }] })
-  ])
-
-  deepStrictEqual(
-    sortOffsets(a.offsets),
-    sortOffsets([
-      { topic, partition: first, offset: 0n },
-      { topic, partition: moved, offset: 0n }
-    ])
-  )
-  deepStrictEqual(b.offsets, [{ topic, partition: first, offset: 1n }])
-  assertPartiallyRejected()
-
-  // Nothing was appended twice
-  const next = await producer.send({
-    messages: [
-      { topic, partition: first, value: 'c1' },
-      { topic, partition: moved, value: 'c2' }
-    ]
-  })
-
-  deepStrictEqual(
-    sortOffsets(next.offsets),
-    sortOffsets([
-      { topic, partition: first, offset: 2n },
-      { topic, partition: moved, offset: 1n }
-    ])
   )
 })
 

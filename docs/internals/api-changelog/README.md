@@ -24,6 +24,9 @@ The implemented API versions are listed in the [API status](../apis-status.md).
 - [OffsetCommit](offset-commit.md)
 - [OffsetFetch](offset-fetch.md)
 - [OffsetForLeaderEpoch](offset-for-leader-epoch.md)
+- [ShareAcknowledge](share-acknowledge.md)
+- [ShareFetch](share-fetch.md)
+- [ShareGroupHeartbeat](share-group-heartbeat.md)
 - [SyncGroup](sync-group.md)
 
 ## Metadata And Security
@@ -71,6 +74,7 @@ The implemented API versions are listed in the [API status](../apis-status.md).
 - [ListTransactions](list-transactions.md)
 - [OffsetDelete](offset-delete.md)
 - [RenewDelegationToken](renew-delegation-token.md)
+- [ShareGroupDescribe](share-group-describe.md)
 - [UnregisterBroker](unregister-broker.md)
 - [UpdateFeatures](update-features.md)
 

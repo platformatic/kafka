@@ -1,6 +1,6 @@
 import { ok } from 'node:assert'
 import { pipeline } from 'node:stream/promises'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { type DeserializedMessage, MessageBatchStream, setupBackpressureTest } from '../helpers/backpressure.ts'
 import { kafkaBootstrapServers } from '../helpers.ts'
@@ -41,7 +41,11 @@ function forceGC (): void {
   global.gc!()
 }
 
-test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, async t => {
+test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, t => testBackpressure(t, false))
+test('batch stream heap must stabilize under sustained backpressure', { timeout: 180_000 }, t =>
+  testBackpressure(t, true))
+
+async function testBackpressure (t: TestContext, nativeBatch: boolean) {
   const batchSize = 500
   const handlerDelayMs = 200
 
@@ -49,6 +53,7 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
     topicCount: 15,
     messagesPerTopic: 100,
     consumerHighWaterMark: 1024,
+    batch: nativeBatch ? batchSize : false,
     publishBatchSize: 2_000,
     publishConcurrency: 1,
     messageValueFactory: id => ({ id, padding: PADDING }),
@@ -57,30 +62,35 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
     replicas: 3
   })
 
-  const batchStream = new MessageBatchStream<DeserializedMessage>({
-    batchSize,
-    timeoutMilliseconds: 2000,
-    readableHighWaterMark: 32
-  })
+  let batchStream: MessageBatchStream<DeserializedMessage> | undefined
+  if (!nativeBatch) {
+    batchStream = new MessageBatchStream<DeserializedMessage>({
+      batchSize,
+      timeoutMilliseconds: 2000,
+      readableHighWaterMark: 32
+    })
+  }
 
-  const pipelinePromise = pipeline(consumerStream, batchStream).catch(() => {})
+  const pipelinePromise = batchStream && pipeline(consumerStream, batchStream).catch(() => {})
 
   // Consume with slow async handler to sustain backpressure
   let consumed = 0
   const consumePromise = (async () => {
-    for await (const messageBatch of batchStream) {
-      const batch = messageBatch as DeserializedMessage[]
-
-      for (const message of batch) {
-        consumed++
-        // eslint-disable-next-line no-void
-        void message.value
+    if (batchStream) {
+      for await (const messageBatch of batchStream) {
+        const batch = messageBatch as DeserializedMessage[]
+        consumed += batch.length
+        await sleep(handlerDelayMs)
+        await batch[batch.length - 1].commit()
       }
-
-      await sleep(handlerDelayMs)
-
-      const lastMessage = batch[batch.length - 1]!
-      await lastMessage.commit()
+    } else {
+      for await (const batch of consumerStream) {
+        if ('messages' in batch) {
+          consumed += batch.messages.length
+          await sleep(handlerDelayMs)
+          await batch.commit()
+        }
+      }
     }
   })()
 
@@ -151,7 +161,7 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
   // Without this, pipeline may not propagate the close signal reliably,
   // leaving the test hanging.
   await consumerStream.close()
-  batchStream.destroy()
+  batchStream?.destroy()
   await Promise.all([pipelinePromise, consumePromise]).catch(() => {})
 
   // Two complementary checks:
@@ -186,4 +196,4 @@ test('heap must stabilize under sustained backpressure', { timeout: 180_000 }, a
       `Samples (MB): [${heapSamples.map(s => (s / (1024 * 1024)).toFixed(1)).join(', ')}]. ` +
       `Consumed ${consumed}/${totalMessages}+ messages during monitoring.`
   )
-})
+}

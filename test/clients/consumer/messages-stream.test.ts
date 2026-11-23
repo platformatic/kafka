@@ -2546,6 +2546,72 @@ test('should create the headers of a message without headers when they are read'
   deepStrictEqual(JSON.parse(JSON.stringify(third)).headers, [['name', 'value']])
 })
 
+test('should build the headers of a message with headers when they are read', async t => {
+  const topic = await createTopic(t, true)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  await producer.send({
+    messages: [
+      { topic, key: 'key-0', value: 'value-0', headers: { first: 'one', second: 'two' } },
+      { topic, key: 'key-1', value: 'value-1', headers: { first: 'three' } }
+    ]
+  })
+
+  const consumer = createConsumer(t)
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+  const [first, second] = await Array.fromAsync(stream)
+
+  deepStrictEqual(first.headerEntries, [
+    ['first', 'one'],
+    ['second', 'two']
+  ])
+  deepStrictEqual(
+    first.headers,
+    new Map([
+      ['first', 'one'],
+      ['second', 'two']
+    ])
+  )
+
+  // The same map is returned every time, and it belongs to its message only
+  strictEqual(first.headers, first.headers)
+  first.headers.set('added', 'later')
+  strictEqual(first.headers.get('added'), 'later')
+  deepStrictEqual(second.headers, new Map([['first', 'three']]))
+})
+
+test('should give the headers to custom deserializers when a message has headers', async t => {
+  const topic = await createTopic(t, true)
+  const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })
+  await producer.send({ messages: [{ topic, key: 'key-0', value: 'value-0', headers: { first: 'one', second: 'two' } }] })
+
+  const received: unknown[] = []
+  const consumer = createConsumer<string, string, string, string>(t, undefined, {
+    deserializers: {
+      key (data, headers) {
+        received.push(new Map(headers))
+        return data?.toString()
+      },
+      value (data, headers) {
+        received.push(headers)
+        return data?.toString()
+      },
+      headerKey: stringDeserializers.headerKey,
+      headerValue: stringDeserializers.headerValue
+    }
+  })
+
+  const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxFetches: 1 })
+  const [message] = await Array.fromAsync(stream)
+  const expected = new Map([
+    ['first', 'one'],
+    ['second', 'two']
+  ])
+
+  deepStrictEqual(received, [expected, expected])
+  // The deserializers are given the map of the message itself
+  strictEqual(message.headers, received[1])
+})
+
 test('should give the headers to custom deserializers when a message has no headers', async t => {
   const topic = await createTopic(t, true)
   const producer = createProducer<string, string, string, string>(t, { serializers: stringSerializers })

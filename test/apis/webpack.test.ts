@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import webpack from 'webpack'
+import type * as CodecLoader from '../../src/apis/lazy.ts'
 
 test('webpack loads codecs from the bundle when the original files still exist', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'kafka-webpack-'))
@@ -33,8 +34,8 @@ test('webpack loads codecs from the bundle when the original files still exist',
   })
 
   const require = createRequire(import.meta.url)
-  const unbundled: typeof import('../../src/apis/lazy.ts') = require(entry)
-  const bundled: typeof import('../../src/apis/lazy.ts') = require(join(directory, filename))
+  const unbundled: typeof CodecLoader = require(entry)
+  const bundled: typeof CodecLoader = require(join(directory, filename))
   const name = 'produceV11'
 
   // A synchronous disk load would return the unbundled codec and cache it in the bundle.

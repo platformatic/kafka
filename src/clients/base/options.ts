@@ -35,6 +35,13 @@ export const baseOptionsSchema = {
     connectTimeout: { type: 'number', minimum: 0 },
     retries: { oneOf: [{ type: 'number', minimum: 0 }, { type: 'boolean' }] },
     retryDelay: { oneOf: [{ type: 'number', minimum: 0 }, { function: true }] },
+    apiVersions: {
+      type: 'object',
+      patternProperties: {
+        '^(0|[1-9][0-9]*)$': { oneOf: [{ type: 'integer', minimum: 0, maximum: 32767 }, { function: true }] }
+      },
+      additionalProperties: false
+    },
     maxRetryErrors: { type: 'integer', minimum: 1 },
     maxInflights: { type: 'number', minimum: 0 },
     keepAlive: {

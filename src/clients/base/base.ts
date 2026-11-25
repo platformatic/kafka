@@ -8,7 +8,6 @@ import {
 } from '../../apis/callbacks.ts'
 import { type API, type Callback } from '../../apis/definitions.ts'
 import { getApi, loadApi } from '../../apis/lazy.ts'
-import { apiLoaders } from '../../apis/loaders.ts'
 import {
   api as apiVersionsV1,
   type ApiVersionsResponse,
@@ -28,18 +27,20 @@ import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
 import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import { parseBroker } from '../../network/utils.ts'
+import { protocolAPIsByName, supportedApis } from '../../protocol/apis.ts'
 import { kInstance } from '../../symbols.ts'
 import { debugDump, loggers } from '../../utils.ts'
 import { type Metrics } from '../metrics.ts'
 import { clientSoftwareName, clientSoftwareVersion, defaultBaseOptions, defaultPort } from './options.ts'
-import { baseOptionsValidator, metadataOptionsValidator } from './validators.ts'
 import {
+  type ApiVersionContext,
   type BaseOptions,
   type BrokerWithRack,
   type ClusterMetadata,
   type ClusterTopicMetadata,
   type MetadataOptions
 } from './types.ts'
+import { baseOptionsValidator, metadataOptionsValidator } from './validators.ts'
 
 export const kClientId = Symbol('plt.kafka.base.clientId')
 export const kBootstrapBrokers = Symbol('plt.kafka.base.bootstrapBrokers')
@@ -538,6 +539,14 @@ export class Base<
     name: string,
     callback: Callback<API<RequestArguments, ResponseType>>
   ) {
+    const id = protocolAPIsByName[name]
+    const supported = supportedApis[id]
+
+    if (!supported?.supported) {
+      callback(new UnsupportedApiError(`API ${name} is not supported.`))
+      return
+    }
+
     // Make sure we have APIs informations
     if (!this[kApis].length) {
       this[kListApis]((error, apis) => {
@@ -553,37 +562,76 @@ export class Base<
       return
     }
 
-    const api = this[kApis].find(api => api.name === name)
-
-    if (!api) {
-      callback(new UnsupportedApiError(`Unsupported API ${name}.`))
+    const broker = this[kApis].find(api => api.name === name)
+    if (!broker) {
+      callback(new UnsupportedApiError(`Broker does not support API ${name}.`))
       return
     }
 
-    const { minVersion, maxVersion } = api
+    let candidateVersion = Math.min(broker.maxVersion, supported.maxVersion)
+    let overriden = false
 
-    // Starting from the highest version, we need to find the first one that is supported
-    for (let i = maxVersion; i >= minVersion; i--) {
-      const apiName = name.slice(0, 1).toLowerCase() + name.slice(1) + 'V' + i
-      const loaded = getApi(apiName)
+    const context: ApiVersionContext = {
+      name,
+      id,
+      candidateVersion,
+      client: {
+        minVersion: supported.minVersion,
+        maxVersion: supported.maxVersion
+      },
+      broker: {
+        minVersion: broker.minVersion,
+        maxVersion: broker.maxVersion
+      },
+      metadata: this.#metadata!
+    }
 
-      if (loaded) {
-        callback(null, loaded)
-        return
-      }
+    const override = this[kOptions].apiVersions?.[id]
+    if (typeof override !== 'undefined') {
+      try {
+        const overridenVersion = typeof override === 'number' ? override : override(context)
 
-      /* c8 ignore next 8 - Only reachable when the package is bundled */
-      if (apiLoaders[apiName]) {
-        loadApi(apiName).then(
-          api => callback(null, api),
-          error => callback(error)
-        )
-
+        if (typeof overridenVersion === 'number') {
+          candidateVersion = context.candidateVersion = overridenVersion
+          overriden = true
+        }
+      } catch (error) {
+        callback(new UserError('API override callback threw an error.', { cause: error }))
         return
       }
     }
 
-    callback(new UnsupportedApiError(`No usable implementation found for API ${name}.`, { minVersion, maxVersion }))
+    if (
+      !Number.isInteger(candidateVersion) ||
+      candidateVersion > supported.maxVersion ||
+      candidateVersion > broker.maxVersion ||
+      candidateVersion < supported.minVersion ||
+      candidateVersion < broker.minVersion
+    ) {
+      callback(
+        new UnsupportedApiError(
+          overriden
+            ? `Overriden version for API ${name} is not supported.`
+            : `No usable implementation found for API ${name}.`,
+          context
+        )
+      )
+      return
+    }
+
+    // The local range is contiguous, so only the highest common version needs to be loaded.
+    const apiName = supported.name.slice(0, 1).toLowerCase() + supported.name.slice(1) + 'V' + candidateVersion
+    const loaded = getApi(apiName)
+    if (loaded) {
+      callback(null, loaded)
+      return
+    }
+
+    /* c8 ignore next 5 - Only reachable when the package is bundled */
+    loadApi(apiName).then(
+      api => callback(null, api),
+      error => callback(error)
+    )
   }
 
   [kGetConnection] (broker: Broker, callback: Callback<Connection>): void {

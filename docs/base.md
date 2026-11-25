@@ -30,6 +30,7 @@ Creates a new base client.
 | `timeout`               | `number`               | 5 seconds | Timeout in milliseconds for Kafka requests that support the parameter.                                                                                             |
 | `retries`               | `number` \| `boolean`  | `3`       | Number of times to retry an operation before failing. `true` means "infinity", while `false` means 0                                                               |
 | `retryDelay`            | `number` \| `function` | `1000`    | Amount of time in milliseconds to wait between retries, or a function to calculate custom delays. See section below.                                               |
+| `apiVersions`           | `Record`               |           | Fixed versions or synchronous version selectors, keyed by numeric Kafka API ID. See below.                                                                        |
 | `maxRetryErrors`        | `number`               | `10`      | Maximum number of errors kept while retrying an operation. The first error and the most recent ones are kept.                                                      |
 | `metadataMaxAge`        | `number`               | 5 seconds | Maximum lifetime of cluster metadata.                                                                                                                              |
 | `knownBrokersMaxAge`    | `number`               | 1 hour    | How long a broker missing from metadata responses is kept as a connection fallback. `0` drops it at the next metadata update.                                      |
@@ -54,6 +55,45 @@ IPv6 bootstrap hosts must be wrapped in brackets, e.g. `[::1]:9092` or `[2001:db
 The readonly `context` getter exposes the same opaque value on the client instance.
 
 The readonly `currentMetadata` getter exposes the currently cached [`ClusterMetadata`](./other.md#clustermetadata), or `undefined` if metadata has not been loaded yet. It does not fetch or refresh metadata.
+
+### API version overrides
+
+`apiVersions` is available on all clients. Use an exported API ID constant as a computed key:
+
+```ts
+import { FetchId } from '@platformatic/kafka'
+
+const apiVersions = { [FetchId]: 11 }
+```
+
+A number pins the API to that exact version. A synchronous selector can instead choose a version each time the client resolves the API. It receives:
+
+- `name` and `id`: the Kafka API name and numeric ID.
+- `client` and `broker`: the respective version ranges, each with `minVersion` and `maxVersion`.
+- `candidateVersion`: the lower of the client and broker maximum versions. It is the highest common version when the ranges overlap.
+- `metadata`: the cached cluster metadata, or `undefined` if none is cached. Selection does not trigger a metadata refresh.
+
+Return `undefined` to keep the default. For example, select Fetch v11 when the broker reports a zero UUID and the default Fetch version requires IDs:
+
+```ts
+import { FetchId, type BaseOptions } from '@platformatic/kafka'
+
+const apiVersions: BaseOptions['apiVersions'] = {
+  [FetchId]: ({ candidateVersion, client, broker, metadata }) => {
+    if (candidateVersion > 12 && Math.max(client.minVersion, broker.minVersion) <= 11 && metadata) {
+      for (const { id } of metadata.topics.values()) {
+        if (id === '00000000-0000-0000-0000-000000000000') {
+          return 11
+        }
+      }
+    }
+
+    return undefined
+  }
+}
+```
+
+The selected version must be an integer within both ranges; otherwise the client returns `PLT_KFK_UNSUPPORTED_API`. The selector must return a number or `undefined` synchronously. If it throws, the client returns `PLT_KFK_USER` with the original error as its cause. Overrides apply to negotiated requests and do not change the initial `ApiVersions` handshake.
 
 ## Methods
 

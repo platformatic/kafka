@@ -35,6 +35,23 @@ export interface ClusterMetadata {
   lastUpdate: number
 }
 
+export interface ApiVersionContext {
+  name: string
+  id: number
+  candidateVersion: number
+  client: {
+    minVersion: number
+    maxVersion: number
+  }
+  broker: {
+    minVersion: number
+    maxVersion: number
+  }
+  metadata: ClusterMetadata | undefined
+}
+
+export type ApiVersionSelector = (context: ApiVersionContext) => number | undefined
+
 export type RetryDelayGetter<Owner = object> = (
   client: Owner,
   operationId: string,
@@ -51,6 +68,7 @@ export interface BaseOptions extends ConnectionOptions {
   timeout?: number
   retries?: number | boolean
   retryDelay?: number | RetryDelayGetter
+  apiVersions?: Record<number, number | ApiVersionSelector>
   maxRetryErrors?: number
   metadataMaxAge?: number
   knownBrokersMaxAge?: number

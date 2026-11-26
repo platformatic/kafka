@@ -162,6 +162,8 @@ interface TopicPartition {
   partitions: number[]
 }
 
+type MembershipSnapshot = Pick<Consumer, 'memberId' | 'generationId'>
+
 interface FetchSession {
   id: number
   epoch: number
@@ -1249,6 +1251,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #commit (options: CommitOptions, callback: CallbackWithPromise<void>, rejoinAttempts: number = 0): void {
+    let sent: MembershipSnapshot | undefined
+
     this.#performGroupOperation<OffsetCommitResponse>(
       'commit',
       (connection, groupCallback) => {
@@ -1275,11 +1279,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          sent = { memberId: this.memberId, generationId: this.generationId }
           api!(
             connection,
             this.groupId,
-            this.#useConsumerGroupProtocol ? this.#memberEpoch : this.generationId,
-            this.memberId!,
+            this.#useConsumerGroupProtocol ? this.#memberEpoch : sent.generationId,
+            sent.memberId!,
             null,
             Array.from(topics.values()),
             groupCallback
@@ -1287,7 +1292,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         })
       },
       error => {
-        if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error)) {
+        if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error, sent)) {
           this.joinGroup({ ...this.#groupOptions }, joinError => {
             if (joinError) {
               callback(joinError)
@@ -1488,6 +1493,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<Offsets>,
     membershipRetries = 0
   ): void {
+    let sent: MembershipSnapshot | undefined
     const topics: OffsetFetchRequestTopic[] = []
 
     for (const { topic: name, partitions } of options.topics) {
@@ -1503,12 +1509,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
+          sent = { memberId: this.memberId, generationId: this.generationId }
           api!(
             connection,
             [
               {
                 groupId: this.groupId,
-                memberId: this.memberId!,
+                memberId: sent.memberId!,
                 memberEpoch: this.#useConsumerGroupProtocol ? this.#memberEpoch : -1,
                 topics
               }
@@ -1534,7 +1541,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           if (
             !this.#useConsumerGroupProtocol &&
             membershipRetries < (this[kOptions].retries as number) &&
-            this.#getRejoinError(error)
+            this.#getRejoinError(error, sent)
           ) {
             this.joinGroup({ ...this.#groupOptions }, joinError => {
               if (joinError) {
@@ -1641,6 +1648,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   #heartbeat (options: Required<GroupOptions>): void {
+    let sent: MembershipSnapshot | undefined
     const eventPayload = { groupId: this.groupId, memberId: this.memberId, generationId: this.generationId }
 
     consumerHeartbeatChannel.traceCallback(
@@ -1665,7 +1673,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             return
           }
 
-          api!(connection, this.groupId, this.generationId, this.memberId!, this.groupInstanceId, groupCallback)
+          sent = { memberId: this.memberId, generationId: this.generationId }
+          api!(connection, this.groupId, sent.generationId, sent.memberId!, this.groupInstanceId, groupCallback)
         })
       },
       error => {
@@ -1678,7 +1687,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         if (error) {
           this.#cancelHeartbeat()
 
-          if (this.#getRejoinError(error)) {
+          if (this.#getRejoinError(error, sent)) {
             // A rejoin can legitimately block up to rebalanceTimeout:
             // - extend the stall window by that bound rather than pausing it
             // - a rejoin that never completes still surfaces as a stall
@@ -3042,11 +3051,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
   }
 
-  #getRejoinError (error: Error): ProtocolError | null {
+  #getRejoinError (error: Error, sent?: MembershipSnapshot): ProtocolError | null {
     const protocolError = findErrorBy<ProtocolError>(error, 'needsRejoin', true)
 
     if (!protocolError) {
       return null
+    }
+
+    // A late response belongs to the previous membership, including its cooperative assignments.
+    if (sent && (this.memberId !== sent.memberId || this.generationId !== sent.generationId)) {
+      this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
+      return protocolError
     }
 
     if (protocolError.rebalanceInProgress) {
@@ -3061,7 +3076,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     if (protocolError.unknownMemberId || protocolError.fencedInstanceId) {
-      this.memberId = null
+      // KIP-848 uses a client-generated member ID managed by ConsumerGroupHeartbeat.
+      if (!this.#useConsumerGroupProtocol) {
+        this.memberId = null
+      }
     } else if (protocolError.memberId! && !this.memberId) {
       this.memberId = protocolError.memberId!
     }

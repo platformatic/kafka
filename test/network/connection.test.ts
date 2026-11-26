@@ -31,6 +31,7 @@ import {
   type SASLOptions,
   saslPlain,
   saslScramSha,
+  TimeoutError,
   UnexpectedCorrelationIdError,
   UserError,
   Writer
@@ -220,7 +221,8 @@ test('Connection.connect should handle connection timeout', async t => {
   // This IP is not routable due to RFC 5737
   await rejects(() => connection.connect('192.0.2.1', 9092) as Promise<unknown>, {
     code: 'PLT_KFK_NETWORK',
-    message: 'Connection to 192.0.2.1:9092 timed out.'
+    message: 'Connection to 192.0.2.1:9092 timed out.',
+    broker: { host: '192.0.2.1', port: 9092 }
   })
 })
 
@@ -230,7 +232,8 @@ test('Connection.connect should handle connection error', async t => {
 
   await rejects(() => connection.connect('localhost', 100) as Promise<unknown>, {
     code: 'PLT_KFK_NETWORK',
-    message: 'Connection to localhost:100 failed.'
+    message: 'Connection to localhost:100 failed.',
+    broker: { host: 'localhost', port: 100 }
   })
 })
 
@@ -302,8 +305,11 @@ test('Connection.ready should reject with TimeoutError when connection does not 
   const connection = new Connection('test-client', { connectTimeout: 100 })
   t.after(() => connection.close())
 
-  await rejects(() => connection.ready() as Promise<unknown>, {
-    message: 'Connection ready timed out after 100ms.'
+  await rejects(connection.ready(), (error: unknown) => {
+    ok(error instanceof TimeoutError)
+    strictEqual(error.message, 'Connection ready timed out after 100ms.')
+    strictEqual(Object.hasOwn(error, 'broker'), false)
+    return true
   })
 })
 
@@ -851,7 +857,7 @@ test('Connection.send should destroy the socket and close the connection when a 
             }
           )
         }),
-      { message: 'Request timed out' }
+      { code: 'PLT_KFK_NETWORK', message: 'Request timed out', broker: { host: 'localhost', port }, correlationId: 1 }
     )
 
     // The status flip happens synchronously inside #onRequestTimeout, before the async socket
@@ -1238,6 +1244,7 @@ test('Connection should handle socket errors', async t => {
   const error = await errorPromise
   ok(error instanceof NetworkError)
   strictEqual(error.message, 'Connection error')
+  deepStrictEqual(error.broker, { host: 'localhost', port })
   ok(error.cause instanceof Error)
   strictEqual(error.cause.message, 'Socket error')
 })
@@ -1322,12 +1329,14 @@ test('Connection should handle close with in-flight and after-drain requests', a
 
   await rejects(() => requestPromise1, {
     code: 'PLT_KFK_NETWORK',
-    message: 'Connection closed'
+    message: 'Connection closed',
+    broker: { host: 'localhost', port }
   })
 
   await rejects(() => requestPromise2, {
     code: 'PLT_KFK_NETWORK',
-    message: 'Connection closed'
+    message: 'Connection closed',
+    broker: { host: 'localhost', port }
   })
 })
 

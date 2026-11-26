@@ -22,7 +22,7 @@ import {
   notifyCreation,
   type ClientType
 } from '../../diagnostic.ts'
-import { findErrorBy, MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
+import { findErrorBy, GenericError, MultipleErrors, NetworkError, UnsupportedApiError, UserError } from '../../errors.ts'
 import { TypedEventEmitter, type TypedEvents } from '../../events.ts'
 import { ConnectionPool, type ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
@@ -82,6 +82,13 @@ export interface BaseEvents extends TypedEvents {
     payload: ConnectionPoolEventPayload & { authentication: Buffer }
   ) => void
   'client:metadata': (metadata: ClusterMetadata) => void
+  'client:performWithRetry:retry': (
+    operationId: string,
+    attempt: number,
+    retries: number,
+    delay: number,
+    broker?: Broker
+  ) => void
   'client:close': () => void
 }
 
@@ -460,7 +467,16 @@ export class Base<
             delay = delay(this, operationId, attempt + 1, retries, error)
           }
 
-          this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
+          // Only attribute the retry to a broker identified by the direct error.
+          const broker = GenericError.isGenericError(error) && Object.hasOwn(error, 'broker') ? error.broker : undefined
+          if (typeof broker?.host === 'string' && typeof broker.port === 'number') {
+            this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay, {
+              host: broker.host,
+              port: broker.port
+            })
+          } else {
+            this.emitWithDebug('client', 'performWithRetry:retry', operationId, attempt, retries, delay)
+          }
           const timeout = setTimeout(() => {
             this.removeListener('client:close', onClose)
             try {

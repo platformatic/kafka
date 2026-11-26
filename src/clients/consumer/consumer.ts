@@ -2068,16 +2068,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    // A static member closing temporarily releases its instance ID but keeps its assignment.
+    const leaveEpoch = this[kClosed] && this.groupInstanceId !== null ? -2 : -1
     const finish = () => {
       this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
       this.memberId = null
-      this.#memberEpoch = -1
+      this.#memberEpoch = leaveEpoch
       this.#assignments = []
       this.#setAssignments([])
       callback(null)
     }
 
-    // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
     const operation = (connection: Connection, groupCallback: CallbackWithPromise<ConsumerGroupHeartbeatResponse>) => {
       this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
@@ -2095,7 +2096,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           connection,
           this.groupId,
           memberId,
-          -1, // memberEpoch = -1 signals leave
+          leaveEpoch,
           this.groupInstanceId,
           this.#clientRack || null,
           0, // rebalanceTimeout
@@ -2546,6 +2547,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#cancelHeartbeat()
+    // Classic static members keep their assignment until the session expires.
+    if (this[kClosed] && this.groupInstanceId !== null) {
+      finish()
+      return
+    }
+
     const operation = (connection: Connection, groupCallback: CallbackWithPromise<LeaveGroupResponse>) => {
       this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
         if (error) {

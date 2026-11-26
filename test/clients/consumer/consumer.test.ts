@@ -1127,6 +1127,49 @@ test('constructor should validate leaveGroupTimeout', async t => {
 for (const groupProtocol of ['classic', 'consumer'] as const) {
   const options = groupProtocol === 'consumer' ? skipConsumerGroupProtocol : {}
 
+  for (const membership of ['static', 'dynamic'] as const) {
+    test(`close should preserve ${groupProtocol} ${membership} membership semantics`, { ...options, timeout: 30_000 }, async t => {
+      const topic = await createTopic(t, true, 2)
+      const groupId = createGroupId()
+      const start = async (id: string) => {
+        const consumer = createConsumer(t, {
+          groupId,
+          groupProtocol,
+          groupInstanceId: membership === 'static' ? id : undefined,
+          sessionTimeout: 30_000,
+          rebalanceTimeout: 30_000,
+          heartbeatInterval: 300
+        })
+        await consumer.consume({ topics: [topic] })
+        return consumer
+      }
+
+      const peer = await start('peer')
+      const member = await start('member')
+      await waitFor(() => {
+        strictEqual(peer.assignments?.[0]?.partitions.length, 1)
+        strictEqual(member.assignments?.[0]?.partitions.length, 1)
+      }, { timeout: 10_000 })
+
+      const peerAssignment = peer.assignments
+      const memberAssignment = member.assignments
+      await member.close(true)
+
+      if (membership === 'dynamic') {
+        // The peer takes over before the session could expire.
+        await waitFor(() => strictEqual(peer.assignments?.[0]?.partitions.length, 2), { timeout: 10_000 })
+        return
+      }
+
+      // Let the peer heartbeat while the static member is offline and again after it rejoins.
+      await once(peer, 'consumer:heartbeat:end')
+      const restarted = await start('member')
+      await waitFor(() => deepStrictEqual(restarted.assignments, memberAssignment), { timeout: 10_000 })
+      await once(peer, 'consumer:heartbeat:end')
+      strictEqual(peer.assignments, peerAssignment)
+    })
+  }
+
   test(`close should bound a hung ${groupProtocol} group leave`, options, async t => {
     for (const leaveGroupTimeout of [0, 20]) {
       for (const force of [false, true]) {

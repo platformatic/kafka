@@ -2220,8 +2220,8 @@ test('send should recover idempotent producer after OUT_OF_ORDER_SEQUENCE_NUMBER
   strictEqual(initCalls, 2)
 })
 
-test('send should eagerly assign idempotent sequences for concurrent sends to the same partition', async t => {
-  const producer = createProducer(t, { idempotent: true })
+test('send should serialize concurrent per-call idempotent sends to the same partition', async t => {
+  const producer = createProducer(t, { orderedSends: false })
   const testTopic = await createTopic(t)
   const firstSequences: number[] = []
   const callbacks: (() => void)[] = []
@@ -2241,20 +2241,19 @@ test('send should eagerly assign idempotent sequences for concurrent sends to th
       callbacks.push(() => {
         apiCallback!(null, createProduceResponse(topic, partition!, BigInt(callbacks.length)))
       })
-
-      if (callbacks.length === 2) {
-        callbacks[1]()
-        callbacks[0]()
-      }
     }
   )
 
-  await Promise.all([
-    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
-    producer.send({ messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
+  const sends = Promise.all([
+    producer.send({ idempotent: true, messages: [{ topic: testTopic, value: Buffer.from('message-1'), partition: 0 }] }),
+    producer.send({ idempotent: true, messages: [{ topic: testTopic, value: Buffer.from('message-2'), partition: 0 }] })
   ])
 
+  deepStrictEqual(firstSequences, [0])
+  callbacks[0]()
   deepStrictEqual(firstSequences, [0, 1])
+  callbacks[1]()
+  await sends
   strictEqual(initCalls, 1)
 })
 

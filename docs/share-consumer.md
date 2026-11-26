@@ -1,6 +1,6 @@
 # Share Consumer
 
-Client for share groups ([KIP-932](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)), which need Apache Kafka 4.2 or later.
+Client for share groups ([KIP-932](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)), which need Apache Kafka 4.2 or later. On brokers which do not support share groups, or have them disabled, `joinGroup` fails with an `UnsupportedApiError` or with an `UNSUPPORTED_VERSION` error.
 
 The members of a share group read the same partitions together: the coordinator can assign a partition to more than one member, and each record is acknowledged on its own instead of committing an offset. A share group gives no ordering guarantees.
 
@@ -42,13 +42,13 @@ The member ID is generated when the share consumer is created and does not chang
 
 ## Properties
 
-| Name            | Type                        | Description                                                                                        |
-| --------------- | --------------------------- | -------------------------------------------------------------------------------------------------- |
-| `groupId`       | `string`                    | Share group ID.                                                                                    |
-| `memberId`      | `string`                    | Member ID of this share consumer.                                                                  |
-| `memberEpoch`   | `number`                    | Member epoch sent by the coordinator, or `0` when the share consumer is not a member of the group. |
+| Name            | Type                        | Description                                                                                                                                                 |
+| --------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `groupId`       | `string`                    | Share group ID.                                                                                                                                             |
+| `memberId`      | `string`                    | Member ID of this share consumer.                                                                                                                           |
+| `memberEpoch`   | `number`                    | Member epoch sent by the coordinator, or `0` when the share consumer is not a member of the group.                                                          |
 | `assignments`   | `GroupAssignment[] \| null` | Partitions assigned to this member, or `null` when it is not a member of the group or the assignment is not known yet. No event is emitted when it changes. |
-| `coordinatorId` | `number \| null`            | Node ID of the group coordinator, once found.                                                      |
+| `coordinatorId` | `number \| null`            | Node ID of the group coordinator, once found.                                                                                                               |
 
 ## Basic Methods
 
@@ -62,6 +62,8 @@ It returns the member ID for this share consumer.
 
 It fails if the share consumer has already joined the group or is leaving it.
 
+The topics do not need to exist: the coordinator assigns their partitions once they are created, and removes the partitions of a deleted topic from the assignment.
+
 If the topics of the assignment cannot be resolved because the metadata cannot be loaded, the join still succeeds: the error is emitted with `share-consumer:heartbeat:error` and the assignment is resolved again after the next heartbeat.
 
 Options:
@@ -72,7 +74,7 @@ Options:
 
 ### `leaveGroup([callback])`
 
-Leaves the share group. If leaving fails, the share consumer is still a member of the group and keeps sending heartbeats.
+Leaves the share group. If leaving fails the error is returned, but the share consumer stops sending heartbeats anyway and the coordinator removes the member when its session times out.
 
 Concurrent calls wait for the same request. Calling `joinGroup` while leaving fails.
 

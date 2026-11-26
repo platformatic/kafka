@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { type CallbackWithPromise, createPromisifiedCallback, kCallbackPromise } from '../../apis/callbacks.ts'
+import {
+  type CallbackWithPromise,
+  createPromisifiedCallback,
+  kCallbackPromise,
+  runConcurrentCallbacks
+} from '../../apis/callbacks.ts'
 import {
   type ShareGroupHeartbeatRequest,
   type ShareGroupHeartbeatResponse,
@@ -10,7 +15,7 @@ import { FindCoordinatorKeyTypes } from '../../apis/enumerations.ts'
 import { type FindCoordinatorRequest, type FindCoordinatorResponse } from '../../apis/metadata/find-coordinator-v6.ts'
 import { createDiagnosticContext, shareConsumerGroupChannel, shareConsumerHeartbeatChannel } from '../../diagnostic.ts'
 import { findErrorBy, UserError } from '../../errors.ts'
-import { type Connection } from '../../network/connection.ts'
+import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   Base,
   type BaseEvents,
@@ -48,6 +53,10 @@ interface ResolvedAssignment {
   complete: boolean
 }
 
+interface GroupCoordinator extends Broker {
+  nodeId: number
+}
+
 export interface ShareConsumerEvents extends BaseEvents {
   'share-consumer:group:join': (payload: ShareConsumerGroupPayload) => void
   'share-consumer:group:leave': (payload: ShareConsumerGroupPayload) => void
@@ -68,7 +77,7 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
   // Incremented when a membership starts or ends, so that the responses of an older one are ignored
   #generation: number
   #memberEpoch: number
-  #coordinatorId: number | null
+  #coordinator: GroupCoordinator | null
   #heartbeatTimeout: NodeJS.Timeout | null
   #heartbeatInterval: number
   // An assignment received from the coordinator whose topic ids are not all resolved to names yet
@@ -86,7 +95,7 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     this.#state = 'idle'
     this.#generation = 0
     this.#memberEpoch = 0
-    this.#coordinatorId = null
+    this.#coordinator = null
     this.#heartbeatTimeout = null
     this.#heartbeatInterval = defaultShareHeartbeatInterval
     this.#pendingAssignment = null
@@ -108,7 +117,7 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
   }
 
   get coordinatorId (): number | null {
-    return this.#coordinatorId
+    return this.#coordinator?.nodeId ?? null
   }
 
   isActive (): boolean {
@@ -210,16 +219,10 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
               return
             }
 
-            if (error) {
-              // The coordinator still considers this a member, so keep the membership alive and let the caller retry
-              this.#state = 'joined'
-              this.#scheduleHeartbeat()
-              deduplicateCallback(error)
-              return
-            }
-
+            // The membership ends even if leaving fails, and the coordinator removes the member when its session
+            // times out. Heartbeating again would join the group again when only the response was lost.
             this.#leftGroup()
-            deduplicateCallback(null)
+            deduplicateCallback(error)
           }
         )
       },
@@ -393,7 +396,7 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     ) {
       this.#memberEpoch = 0
       this.#pendingAssignment = null
-      this.assignments = []
+      this.assignments = null
       this.emitWithDebug('share-consumer', 'group:rejoin', payload)
     }
   }
@@ -405,35 +408,47 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     forceUpdate: boolean,
     callback: Callback<ResolvedAssignment>
   ): void {
-    this[kMetadata]({ topics: this.#topics, forceUpdate }, (error, metadata) => {
-      if (error) {
-        callback(error)
-        return
-      }
+    // Each topic is looked up on its own, so that a deleted one does not prevent resolving the others
+    runConcurrentCallbacks<[string, string] | null, string>(
+      'Resolving the assignment failed.',
+      this.#topics,
+      (topic, concurrentCallback) => {
+        this[kMetadata]({ topics: [topic], forceUpdate }, (error, metadata) => {
+          // Loading the metadata fails with a UserError when the topic does not exist
+          if (error instanceof UserError) {
+            concurrentCallback(null, null)
+            return
+          }
 
-      const topicsById = new Map<string, string>()
-      for (const [topic, topicMetadata] of metadata!.topics) {
-        topicsById.set(topicMetadata.id, topic)
-      }
-
-      const assignments: GroupAssignment[] = []
-      for (const assigned of topicPartitions) {
-        const topic = topicsById.get(assigned.topicId)
-
-        if (topic) {
-          assignments.push({ topic, partitions: assigned.partitions })
+          concurrentCallback(error, error ? null : [metadata!.topics.get(topic)!.id, topic])
+        })
+      },
+      (error, topics) => {
+        if (error) {
+          callback(error)
+          return
         }
+
+        const topicsById = new Map(topics!.filter(topic => topic !== null))
+        const assignments: GroupAssignment[] = []
+        for (const assigned of topicPartitions) {
+          const topic = topicsById.get(assigned.topicId)
+
+          if (topic) {
+            assignments.push({ topic, partitions: assigned.partitions })
+          }
+        }
+
+        const complete = assignments.length === topicPartitions.length
+
+        if (!complete && !forceUpdate) {
+          this.#resolveAssignment(topicPartitions, true, callback)
+          return
+        }
+
+        callback(null, { assignments, complete })
       }
-
-      const complete = assignments.length === topicPartitions.length
-
-      if (!complete && !forceUpdate) {
-        this.#resolveAssignment(topicPartitions, true, callback)
-        return
-      }
-
-      callback(null, { assignments, complete })
-    })
+    )
   }
 
   #scheduleHeartbeat (): void {
@@ -531,9 +546,9 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     return { groupId: this.groupId, memberId: this.memberId, memberEpoch: this.#memberEpoch }
   }
 
-  #findGroupCoordinator (callback: CallbackWithPromise<number>): void {
-    if (this.#coordinatorId !== null) {
-      callback(null, this.#coordinatorId)
+  #findGroupCoordinator (callback: CallbackWithPromise<GroupCoordinator>): void {
+    if (this.#coordinator) {
+      callback(null, this.#coordinator)
       return
     }
 
@@ -546,7 +561,7 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     )
   }
 
-  #performFindGroupCoordinator (callback: CallbackWithPromise<number>): void {
+  #performFindGroupCoordinator (callback: CallbackWithPromise<GroupCoordinator>): void {
     this[kPerformDeduplicated](
       'findGroupCoordinator',
       deduplicateCallback => {
@@ -575,9 +590,9 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
               return
             }
 
-            const groupInfo = response!.coordinators.find(coordinator => coordinator.key === this.groupId)!
-            this.#coordinatorId = groupInfo.nodeId
-            deduplicateCallback(null, this.#coordinatorId)
+            const { nodeId, host, port } = response!.coordinators.find(coordinator => coordinator.key === this.groupId)!
+            this.#coordinator = { nodeId, host, port }
+            deduplicateCallback(null, this.#coordinator)
           },
           0
         )
@@ -595,27 +610,21 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
     this[kPerformWithRetry]<ReturnType>(
       operationId,
       retryCallback => {
-        this.#findGroupCoordinator((error, coordinatorId) => {
+        this.#findGroupCoordinator((error, coordinator) => {
           if (error) {
             retryCallback(error)
             return
           }
 
-          this[kMetadata]({ topics: this.#topics }, (error, metadata) => {
+          // The address comes from FindCoordinator, so a missing subscribed topic cannot block the request
+          this[kGetConnection](coordinator!, (error, connection) => {
             if (error) {
               retryCallback(this.#handleError(error))
               return
             }
 
-            this[kGetConnection](metadata!.brokers.get(coordinatorId!)!, (error, connection) => {
-              if (error) {
-                retryCallback(this.#handleError(error))
-                return
-              }
-
-              operation(connection!, (error, result) => {
-                retryCallback(this.#handleError(error), result)
-              })
+            operation(connection!, (error, result) => {
+              retryCallback(this.#handleError(error), result)
             })
           })
         })
@@ -638,19 +647,18 @@ export class ShareConsumer extends Base<ShareConsumerOptions, ShareConsumerEvent
       findErrorBy(error, 'apiId', 'COORDINATOR_NOT_AVAILABLE') ||
       findErrorBy(error, 'apiId', 'NOT_COORDINATOR')
     ) {
-      this.#coordinatorId = null
+      this.#coordinator = null
     }
 
     return error
   }
 
   #getGroupCoordinatorConnection (): Connection | null {
-    if (this.#coordinatorId === null) {
+    if (!this.#coordinator) {
       return null
     }
 
-    const broker = this.currentMetadata?.brokers.get(this.#coordinatorId)
-    const connection = broker ? this[kConnections].getEstablishedConnection(broker) : undefined
+    const connection = this[kConnections].getEstablishedConnection(this.#coordinator)
     return connection?.isConnected() === true ? connection : null
   }
 

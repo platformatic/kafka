@@ -17,6 +17,7 @@ import {
   type ClientDiagnosticEvent,
   type Connection,
   instancesChannel,
+  NetworkError,
   protocolErrors,
   ResponseError,
   ShareConsumer,
@@ -26,7 +27,7 @@ import {
   UnsupportedApiError,
   UserError
 } from '../../../src/index.ts'
-import { usableVersions } from '../../helpers/api-versions.ts'
+import { isUnsupportedVersion, usableVersions } from '../../helpers/api-versions.ts'
 import {
   createAdmin,
   createCreationChannelVerifier,
@@ -137,10 +138,16 @@ function mockShareGroup (
 
       if (topics instanceof Error) {
         callback(topics)
-      } else {
-        callback(null, createMetadata(topics))
+        return true
       }
 
+      const unknown = options.topics?.find((topic: string) => !(topic in topics))
+      if (unknown) {
+        callback(new UserError(`Unknown topic ${unknown}.`))
+        return true
+      }
+
+      callback(null, createMetadata(topics))
       return true
     }
   )
@@ -359,14 +366,15 @@ test('joinGroup should keep the membership when the assignment cannot be resolve
   const consumer = createShareConsumer(t, { retries: 0 })
   let metadataCalls = 0
   mockShareGroup(consumer, acceptAll(assignment('topic-id', [0])), () => {
-    // The first call locates the coordinator, the second one resolves the assignment
-    return ++metadataCalls === 2 ? new Error('Metadata failed.') : { topic: 'topic-id' }
+    return ++metadataCalls === 1 ? new Error('Metadata failed.') : { topic: 'topic-id' }
   })
 
   const failed = once(consumer, 'share-consumer:heartbeat:error')
   await consumer.joinGroup({ topics: ['topic'] })
 
-  strictEqual((await failed)[0].error.message, 'Metadata failed.')
+  const [{ error }] = await failed
+  strictEqual(error.message, 'Resolving the assignment failed.')
+  strictEqual(error.errors[0].message, 'Metadata failed.')
   strictEqual(consumer.isActive(), true)
   strictEqual(consumer.assignments, null)
 
@@ -469,7 +477,6 @@ test('joinGroup should find the coordinator again when it moves', async t => {
 for (const [step, method] of [
   ['connecting to the bootstrap broker', kGetBootstrapConnection],
   ['loading the FindCoordinator API', kGetApi],
-  ['loading the metadata', kMetadata],
   ['connecting to the coordinator', kGetConnection]
 ] as const) {
   test(`joinGroup should fail when ${step} fails`, async t => {
@@ -494,7 +501,7 @@ test('leaveGroup should fail when the ShareGroupHeartbeat API cannot be loaded',
   mockUnavailableAPI(consumer, 'ShareGroupHeartbeat')
 
   await rejects(consumer.leaveGroup())
-  strictEqual(consumer.isActive(), true)
+  strictEqual(consumer.isActive(), false)
 })
 
 test('joinGroup should fail when the group is left while joining', async t => {
@@ -539,7 +546,7 @@ for (const error of ['UNKNOWN_MEMBER_ID', 'FENCED_MEMBER_EPOCH'] as const) {
     strictEqual(payload.memberEpoch, 1)
     ok(payload.error instanceof ResponseError)
     strictEqual(consumer.memberEpoch, 0)
-    deepStrictEqual(consumer.assignments, [])
+    strictEqual(consumer.assignments, null)
     strictEqual(consumer.isActive(), false)
 
     await once(consumer, 'share-consumer:heartbeat:end')
@@ -697,27 +704,67 @@ test('leaveGroup should succeed when the coordinator does not know the member an
   strictEqual(consumer.isActive(), false)
 })
 
-test('leaveGroup should keep the membership when leaving fails', async t => {
+test('leaveGroup should end the membership even when leaving fails', async t => {
   const consumer = createShareConsumer(t, { retries: 0 })
-  let fail = true
-  mockShareGroup(consumer, (request, callback) => {
-    if (request.memberEpoch === -1 && fail) {
-      fail = false
-      callback(heartbeatError(protocolErrors.GROUP_AUTHORIZATION_FAILED.code))
+  // The coordinator removed the member, but the response to the leave was lost
+  let removed = false
+  const { requests } = mockShareGroup(consumer, (request, callback) => {
+    if (request.memberEpoch === -1) {
+      removed = true
+      callback(new NetworkError('Connection closed.'))
       return
     }
 
-    acceptAll()(request, callback)
+    if (removed) {
+      callback(heartbeatError(protocolErrors.UNKNOWN_MEMBER_ID.code))
+      return
+    }
+
+    acceptAll(assignment('topic-id', [0]))(request, callback)
   })
 
   await consumer.joinGroup({ topics: ['topic'] })
-  await rejects(consumer.leaveGroup(), (error: Error) => error instanceof ResponseError)
+  let left = false
+  consumer.once('share-consumer:group:leave', () => {
+    left = true
+  })
+  await rejects(consumer.leaveGroup(), (error: Error) => error instanceof NetworkError)
 
-  strictEqual(consumer.isActive(), true)
+  ok(left)
+  strictEqual(consumer.isActive(), false)
+  strictEqual(consumer.memberEpoch, 0)
+  strictEqual(consumer.assignments, null)
+
+  // No heartbeat is sent, so the consumer does not join the group again
+  const sent = requests.length
+  await new Promise(resolve => setTimeout(resolve, heartbeatInterval * 3))
+  strictEqual(requests.length, sent)
+})
+
+test('heartbeats should not depend on the metadata of the subscribed topics', async t => {
+  const consumer = createShareConsumer(t)
+  // The topic deleted is not assigned anymore
+  const { requests, metadataRequests } = mockShareGroup(consumer, acceptAll(assignment('topic-id', [0])), () => ({
+    topic: 'topic-id'
+  }))
+
+  await consumer.joinGroup({ topics: ['topic', 'deleted'] })
+  deepStrictEqual(consumer.assignments, [{ topic: 'topic', partitions: [0] }])
+  const metadataCalls = metadataRequests.length
+
+  await once(consumer, 'share-consumer:heartbeat:end')
   await once(consumer, 'share-consumer:heartbeat:end')
 
+  deepStrictEqual(
+    requests.map(request => request.memberEpoch),
+    [0, 1, 2]
+  )
+  // Unchanged assignments are not resolved again
+  strictEqual(metadataRequests.length, metadataCalls)
+  strictEqual(consumer.isActive(), true)
+
   await consumer.leaveGroup()
-  strictEqual(consumer.isActive(), false)
+  strictEqual(requests.at(-1)!.memberEpoch, -1)
 })
 
 test('heartbeat responses received after leaving the group should be ignored', async t => {
@@ -750,7 +797,6 @@ test('heartbeat responses received after leaving the group should be ignored', a
 
 function mockCoordinatorConnection (consumer: ShareConsumer): Connection {
   const connection = { isConnected: () => true } as unknown as Connection
-  Object.defineProperty(consumer, 'currentMetadata', { get: () => createMetadata({ topic: 'topic-id' }) })
   consumer[kConnections].getEstablishedConnection = () => connection
   return connection
 }
@@ -834,7 +880,18 @@ test('a share consumer should join a share group on the broker', async t => {
   const topic = await createTopic(t, true, 3, kafkaSingleBootstrapServers)
   const consumer = createShareConsumer(t, { bootstrapBrokers: kafkaSingleBootstrapServers })
 
-  await consumer.joinGroup({ topics: [topic] })
+  try {
+    await consumer.joinGroup({ topics: [topic] })
+  } catch (error) {
+    // Some brokers advertise the API but ship with share groups disabled
+    if (isUnsupportedVersion(error)) {
+      t.skip('share groups are not enabled on the broker')
+      return
+    }
+
+    throw error
+  }
+
   ok(consumer.memberEpoch > 0)
   strictEqual(consumer.isActive(), true)
 

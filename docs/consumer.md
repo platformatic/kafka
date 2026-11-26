@@ -51,7 +51,7 @@ Options:
 | ------------------------------- | ------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | groupId                         | `string`                                                     |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
 | groupInstanceId                 | `string`                                                     |                           | Consumer group instance ID.                                                                                                                                                                                                                                                                                                                                                                          |
-| autocommit                      | `boolean \| number`                                          | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, offsets are committed after each fetch. If it is a number, it specifies how often offsets are committed. Only the last offset for a topic-partition is committed.<br/><br/> If it is `false`, call `message.commit()` or, in batch mode, `batch.commit()` to commit offsets manually. |
+| autocommit                      | `boolean \| number`                                          | `true`                    | Commits offsets based on fetch progress, not stream reads. `true` triggers a commit after each fetch; a number sets the commit interval in milliseconds; `false` enables manual commits. See [Autocommit and processing guarantees](#autocommit-and-processing-guarantees). |
 | minBytes                        | `number`                                                     | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytes                        | `number`                                                     | 50MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytesPerPartition            | `number`                                                     | 1MB                       | Maximum amount of data the broker should return for each partition in a stream fetch request. If not set, it defaults to 1MB or to `maxBytes`, whichever is lower. The value might not be respected by Kafka.                                                                                                                                                                                                                      |
@@ -194,6 +194,37 @@ It also accepts all options of the constructor except `deserializers` and `group
 For `consume()`, `maxBytesPerPartition` controls the per-partition fetch limit used by the created `MessagesStream`. If omitted, it uses the consumer constructor `maxBytesPerPartition`; if that is also omitted, it uses 1MB or the effective `maxBytes` value for the `consume()` call, whichever is lower.
 
 Larger values reduce the number of fetch round trips and can increase throughput when records are small, at the cost of higher memory usage and longer pauses of the event loop while each response is decoded.
+
+### Autocommit and processing guarantees
+
+With `autocommit: true` (the default), `@platformatic/kafka` commits offsets based on fetch progress. Unlike a client
+that tracks records returned by `poll()`, it can commit offsets for messages that are still buffered in the stream
+and have not reached the application. A numeric `autocommit` value changes when commits run, not which offsets are eligible.
+
+If the process crashes or the stream is closed after the commit succeeds, a consumer that resumes from the group's
+committed offsets skips those messages, even if they were never read or their handler did not finish. To commit only
+after successful processing, disable autocommit and await the commit after your handler succeeds:
+
+```typescript
+import { MessagesStreamFallbackModes, MessagesStreamModes } from '@platformatic/kafka'
+
+const stream = await consumer.consume({
+  topics: ['events'],
+  mode: MessagesStreamModes.COMMITTED,
+  fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+  autocommit: false
+})
+
+for await (const message of stream) {
+  await processMessage(message)
+  await message.commit()
+}
+```
+
+In [batch mode](#batch-consumption), call `batch.commit()` after the whole batch succeeds. If you process messages
+concurrently, commit only through the last consecutively processed message in each partition: committing a later
+offset also acknowledges earlier offsets in that partition. If the process fails before a commit succeeds, already
+processed messages can be delivered again.
 
 ### Handling deserialization errors
 

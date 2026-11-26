@@ -365,6 +365,22 @@ When using a schema registry:
 
 For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
+### Partition watermarks and lag
+
+`message.metadata.partition` contains three `bigint` offsets from the Fetch response:
+`highWatermark` (the end of replicated data), `lastStableOffset` (the end visible to
+read-committed consumers), and `logStartOffset` (the earliest retained offset, or `-1n`
+when the Fetch version does not report it).
+
+To compute lag in offsets after this message, use the boundary for the stream's isolation level:
+
+- `read_committed` (default): `message.metadata.partition.lastStableOffset - (message.offset + 1n)`
+- `read_uncommitted`: `message.metadata.partition.highWatermark - (message.offset + 1n)`
+
+This is lag at fetch time. Messages from the same partition in one Fetch response share
+the snapshot, including across record batches. Treat it as read-only. `toJSON()` serializes
+the three offsets as decimal strings.
+
 ### Adding custom message metadata
 
 Deserializers and `beforeDeserialization` hooks receive the message being processed and can assign a
@@ -390,8 +406,8 @@ for await (const message of stream) {
 }
 ```
 
-Each message gets its own metadata object, so mutating it never affects the other messages of the
-same batch.
+Messages with custom metadata get their own outer metadata object. The `partition` field is
+reserved for the shared Fetch snapshot.
 
 ## Batch consumption
 

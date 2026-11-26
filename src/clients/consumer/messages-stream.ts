@@ -17,7 +17,13 @@ import {
 import type { GenericError } from '../../errors.ts'
 import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool, ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
-import { IS_CONTROL, type Message, type MessageJSON, type MessageToConsume } from '../../protocol/records.ts'
+import {
+  IS_CONTROL,
+  type Message,
+  type MessageJSON,
+  type MessageMetadata,
+  type MessageToConsume
+} from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
   kAutocommit,
@@ -108,7 +114,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
   timestamp: bigint
   offset: bigint
   leaderEpoch: number
-  metadata: Record<string, unknown>
+  metadata: MessageMetadata
 
   constructor (
     key: Key,
@@ -122,7 +128,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     leaderEpoch: number,
     committer: MessageCommitter | undefined,
     committerLeaderEpoch: number,
-    metadata: Record<string, unknown>
+    metadata: MessageMetadata
   ) {
     this.#headers = headers
     this.#committer = committer
@@ -185,6 +191,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
   }
 
   toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue> {
+    const { highWatermark, lastStableOffset, logStartOffset } = this.metadata.partition
     return {
       key: this.key,
       value: this.value,
@@ -194,7 +201,14 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
       timestamp: this.timestamp.toString(),
       offset: this.offset.toString(),
       leaderEpoch: this.leaderEpoch,
-      metadata: this.metadata
+      metadata: {
+        ...this.metadata,
+        partition: {
+          highWatermark: highWatermark.toString(),
+          lastStableOffset: lastStableOffset.toString(),
+          logStartOffset: logStartOffset.toString()
+        }
+      }
     }
   }
 }
@@ -1055,20 +1069,19 @@ export class MessagesStream<
 
     let canPush = true
 
-    const messageMetadata = {
-      consumer: {
-        groupId: this.#consumer.groupId,
-        memberId: this.#consumer.memberId,
-        generationId: this.#consumer.generationId,
-        coordinatorId: this.#consumer.coordinatorId
-      }
+    const consumer = {
+      groupId: this.#consumer.groupId,
+      memberId: this.#consumer.memberId,
+      generationId: this.#consumer.generationId,
+      coordinatorId: this.#consumer.coordinatorId
     }
 
     // Parse results
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)!
 
-      for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+      for (const partitionResponse of topicResponse.partitions) {
+        const { records: recordsBatches, partitionIndex: partition } = partitionResponse
         const key = partitionKey(topic, partition)
 
         // The broker can return partitions which were not requested when they linger
@@ -1081,6 +1094,10 @@ export class MessagesStream<
           continue
         }
 
+        // All record batches for this partition share the same Fetch snapshot.
+        const { highWatermark, lastStableOffset, logStartOffset } = partitionResponse
+        const watermarks = { highWatermark, lastStableOffset, logStartOffset }
+        const messageMetadata = { consumer, partition: watermarks }
         let pending: Message<Key, Value, HeaderKey, HeaderValue>[] | undefined
         let pendingContexts: DiagnosticContext<unknown>[] | undefined = batchSize && tracing ? [] : undefined
 
@@ -1277,9 +1294,9 @@ export class MessagesStream<
                 leaderEpoch,
                 // Deserializers and hooks can enrich the metadata of the message they processed
                 deserializationError
-                  ? { ...messageMetadata, ...messageToConsume.metadata, deserializationError }
+                  ? { consumer, ...messageToConsume.metadata, partition: watermarks, deserializationError }
                   : messageToConsume.metadata
-                    ? { ...messageMetadata, ...messageToConsume.metadata }
+                    ? { consumer, ...messageToConsume.metadata, partition: watermarks }
                     : messageMetadata
               )
 

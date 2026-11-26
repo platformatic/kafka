@@ -15,6 +15,7 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:group:rejoin`           | (none)                                | Emitted when re-joining a group after a rebalance.                                                                                                                                           |
 | `consumer:group:rebalance`        | `ConsumerGroupRebalancePayload`       | Emitted when group rebalancing occurs.                                                                                                                                                       |
 | `consumer:group:autocommit:error` | `ConsumerGroupAutocommitErrorPayload` | Emitted when autocommit fails during a cooperative rebalance. The rebalance still proceeds.                                                                                                  |
+| `consumer:group:commit:skipped`   | `ConsumerGroupCommitSkippedPayload`   | Emitted when the offset of a partition which is no longer assigned is not committed. The commit still resolves.                                                                              |
 | `consumer:heartbeat:start`        | `ConsumerHeartbeatPayload?`           | Emitted when starting new heartbeats.                                                                                                                                                        |
 | `consumer:heartbeat:cancel`       | `ConsumerHeartbeatPayload`            | Emitted if a scheduled heartbeat has been canceled.                                                                                                                                          |
 | `consumer:heartbeat:end`          | `ConsumerHeartbeatPayload?`           | Emitted during successful heartbeats.                                                                                                                                                        |
@@ -23,6 +24,11 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:group:lost`             | `ConsumerGroupLostPayload`            | Emitted when classic group membership recovery fails with no further retry scheduled, including rejoins triggered by heartbeats, commits, or offset fetches, and synchronization failures. |
 | `consumer:lag`                    | `Offsets`                             | Emitted during periodic lag monitoring with calculated lag data for topics and partitions.                                                                                                   |
 | `consumer:lag:error`              | `Error`                               | Emitted when lag calculation fails during monitoring operations.                                                                                                                             |
+
+The `consumer:group:commit:skipped` payload contains `groupId`, `generationId`, `topic`, `partition` and the
+`offset` which was not committed. After a rebalance, the messages still buffered for a revoked partition can be
+delivered and committed, but the partition now belongs to another member and the commit would overwrite its
+position. The commit is skipped instead, so the new owner consumes those messages again.
 
 The `consumer:group:lost` payload contains `groupId`, `memberId`, `generationId`, `error`, and `operation`.
 The operation is `joinGroup` or `syncGroup`, identifying the step that exhausted recovery, even when a heartbeat,

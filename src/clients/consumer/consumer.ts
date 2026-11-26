@@ -117,6 +117,7 @@ import {
   type ConsumeBatchOptions,
   type ConsumeOptions,
   type ConsumerGroupAutocommitErrorPayload,
+  type ConsumerGroupCommitSkippedPayload,
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
   type ConsumerGroupLostPayload,
@@ -177,6 +178,7 @@ export interface ConsumerEvents extends BaseEvents {
   'consumer:group:rejoin': () => void
   'consumer:group:rebalance': (payload: ConsumerGroupRebalancePayload) => void
   'consumer:group:autocommit:error': (payload: ConsumerGroupAutocommitErrorPayload) => void
+  'consumer:group:commit:skipped': (payload: ConsumerGroupCommitSkippedPayload) => void
   'consumer:heartbeat:start': (payload?: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
@@ -1948,13 +1950,27 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
 
-    for (const stream of this.#streams) {
+    // The revoked partitions are identified by topic id. #updateAssignments keeps the named assignments
+    // in the same order as the ones by id, so the names come from the same position.
+    const revokedTopicIds = new Set(toRevoke.map(({ topicId }) => topicId))
+    const revokedTopics = new Set<string>()
+    for (let i = 0; i < this.#assignments.length; i++) {
+      if (revokedTopicIds.has(this.#assignments[i].topicId)) {
+        revokedTopics.add(this.assignments![i].topic)
+      }
+    }
+
+    const affectedStreams = this.#streamsConsuming(revokedTopics)
+    for (const stream of affectedStreams) {
       stream.pause()
+    }
+
+    for (const stream of this.#streams) {
       stream[kAutocommit]()
     }
 
     this.#updateAssignments(newAssignment, error => {
-      for (const stream of this.#streams) {
+      for (const stream of affectedStreams) {
         stream.resume()
       }
       /* c8 ignore next 3 - Hard to test */
@@ -1964,6 +1980,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.#cancelHeartbeat()
       this.#consumerGroupHeartbeat(this[kOptions] as Required<GroupOptions>, () => {})
     })
+  }
+
+  // Only the streams consuming a revoked topic are paused, the others keep fetching during the rebalance
+  #streamsConsuming (
+    topics: Set<string>
+  ): MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>[] {
+    return [...this.#streams].filter(stream => stream.topics.some(topic => topics.has(topic)))
   }
 
   #assignPartitions (newAssignment: TopicPartition[]): void {
@@ -2418,8 +2441,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const addedOnRevokeRound = this.#diffGroupAssignments(assignments, previousAssignments)
 
       if (revoked.length > 0) {
-        const revokedTopics = new Set(revoked.map(a => a.topic))
-        const affectedStreams = [...this.#streams].filter(s => s.topics.some(t => revokedTopics.has(t)))
+        const affectedStreams = this.#streamsConsuming(new Set(revoked.map(a => a.topic)))
 
         for (const stream of affectedStreams) {
           stream.pause()

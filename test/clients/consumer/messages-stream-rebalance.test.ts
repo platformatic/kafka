@@ -1516,6 +1516,9 @@ test('should not commit queued offsets for revoked partitions during rebalance a
   strictEqual(stream.offsetsToCommit.get(`${topic}:0`)?.offset, 5n)
   strictEqual(committedPartitions.length, 0)
 
+  const skipped: unknown[] = []
+  consumer.on('consumer:group:commit:skipped', payload => skipped.push(payload))
+
   consumer.assignments = []
   consumer.generationId = 2
   const offsetsRestored = new Promise<void>(resolve => stream.once('offsets', resolve))
@@ -1523,6 +1526,7 @@ test('should not commit queued offsets for revoked partitions during rebalance a
   await offsetsRestored
 
   strictEqual(committedPartitions.includes(0), false)
+  deepStrictEqual(skipped, [{ groupId: consumer.groupId, generationId: 2, topic, partition: 0, offset: 5n }])
 })
 
 test('manual message.commit() on a stale buffered message from a revoked partition should not advance the committed offset', { timeout: 5_000 }, async t => {
@@ -1572,6 +1576,10 @@ test('manual message.commit() on a stale buffered message from a revoked partiti
   consumer.emit('consumer:group:join')
   await offsetsRestored
 
+  const skipped: unknown[] = []
+  consumer.on('consumer:group:commit:skipped', payload => skipped.push(payload))
+
   await received[4].commit()
   strictEqual(committedPartitions.includes(0), false)
+  deepStrictEqual(skipped, [{ groupId: consumer.groupId, generationId: 2, topic, partition: 0, offset: 5n }])
 })

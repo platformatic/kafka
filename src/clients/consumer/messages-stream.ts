@@ -375,9 +375,10 @@ export class MessagesStream<
       // so #assignmentsForTopic reflects the new state here. Committing a revoked partition
       // with the new generationId is accepted by Kafka and moves its committed offset forward,
       // causing the new owner to start past messages still sitting in our Readable buffer.
-      for (const [key, { topic, partition }] of this.#offsetsToCommit) {
+      for (const [key, { topic, partition, offset }] of this.#offsetsToCommit) {
         if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
           this.#offsetsToCommit.delete(key)
+          this.#commitSkipped(topic, partition, offset)
           const waiters = this.#commitWaiters.get(key)
           if (waiters) {
             for (const { callback } of waiters) {
@@ -1486,6 +1487,7 @@ export class MessagesStream<
     // generationId is accepted by Kafka and would advance the committed offset, causing the
     // new owner to skip those messages permanently.
     if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+      this.#commitSkipped(topic, partition, offset)
       callback(null)
       return callback[kCallbackPromise]!
     }
@@ -1654,6 +1656,17 @@ export class MessagesStream<
       if (this.#commitWaiters.size > 0) {
         this[kAutocommit]()
       }
+    })
+  }
+
+  // A skipped commit is not an error, but it explains why the new owner of the partition consumes the messages again
+  #commitSkipped (topic: string, partition: number, offset: bigint): void {
+    this.#consumer.emitWithDebug('consumer', 'group:commit:skipped', {
+      groupId: this.#consumer.groupId,
+      generationId: this.#consumer.generationId,
+      topic,
+      partition,
+      offset
     })
   }
 

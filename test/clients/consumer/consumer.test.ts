@@ -8180,9 +8180,19 @@ test('cooperative sticky rebalance should only pause streams subscribed to revok
 
   await waitFor(() => strictEqual(streamBMessages.length >= 4, true), { timeout: 15_000 })
 
-  // Intercept pause and kAutocommit on streamB before triggering the cooperative rebalance
-  const streamBPauseMock = t.mock.method(streamB, 'pause')
-  const streamBAutocommitMock = t.mock.method(streamB, kAutocommit)
+  // Count the pauses and the flushes of streamB before triggering the cooperative rebalance
+  let streamBPauses = 0
+  let streamBFlushes = 0
+  mockMethod(streamB, 'pause', () => true, null, null, original => {
+    streamBPauses++
+    original()
+    return true
+  })
+  mockMethod(streamB, kAutocommit, () => true, null, null, (original, ...args) => {
+    streamBFlushes++
+    original(...args)
+    return true
+  })
 
   // consumer2 joins for topicA only — triggers a cooperative revoke of topicA partitions on consumer1.
   // topicB partitions are not revoked, so streamB must not be paused.
@@ -8210,12 +8220,81 @@ test('cooperative sticky rebalance should only pause streams subscribed to revok
   }, { timeout: 15_000 })
 
   // streamB was never paused — only streamA's topic was revoked
-  strictEqual(streamBPauseMock.mock.callCount(), 0)
+  strictEqual(streamBPauses, 0)
   // streamB's offsets were still flushed — generationId changes on rejoin and pending offsets
   // for non-revoked partitions must be committed before that happens to avoid ILLEGAL_GENERATION
-  strictEqual(streamBAutocommitMock.mock.callCount() >= 1, true)
+  strictEqual(streamBFlushes >= 1, true)
 
   await streamA.close()
   await streamB.close()
   await streamC.close()
 })
+
+test(
+  'consumer group protocol rebalance should only pause streams subscribed to revoked topics',
+  skipConsumerGroupProtocol,
+  async t => {
+    const topicA = await createTopic(t, true, 4)
+    const topicB = await createTopic(t, true, 4)
+    const groupId = createGroupId()
+
+    await produceTestMessages({
+      t,
+      messages: Array.from({ length: 16 }, (_, i) => ({
+        topic: topicB,
+        key: `key-${i}`,
+        value: `value-${i}`,
+        partition: i % 4
+      }))
+    })
+
+    const consumer1 = createConsumer(t, { groupId, groupProtocol: 'consumer' })
+    await consumer1.topics.trackAll(topicA)
+    await consumer1.topics.trackAll(topicB)
+    await consumer1.joinGroup()
+
+    const streamA = await consumer1.consume({ topics: [topicA], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 2000 })
+    const streamB = await consumer1.consume({ topics: [topicB], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 2000 })
+
+    let streamBMessages = 0
+    streamB.on('data', () => {
+      streamBMessages++
+    })
+
+    await waitFor(() => strictEqual(streamBMessages >= 4, true), { timeout: 15_000 })
+
+    let streamBPauses = 0
+    let streamBFlushes = 0
+    mockMethod(streamB, 'pause', () => true, null, null, original => {
+      streamBPauses++
+      original()
+      return true
+    })
+    mockMethod(streamB, kAutocommit, () => true, null, null, (original, ...args) => {
+      streamBFlushes++
+      original(...args)
+      return true
+    })
+
+    // The coordinator moves partitions of topicA to consumer2, while topicB stays with consumer1
+    const consumer2 = createConsumer(t, { groupId, groupProtocol: 'consumer' })
+    await consumer2.topics.trackAll(topicA)
+    await consumer2.joinGroup()
+    const streamC = await consumer2.consume({ topics: [topicA], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 2000 })
+
+    await waitFor(
+      () => {
+        ok((consumer2.assignments?.find(a => a.topic === topicA)?.partitions.length ?? 0) > 0)
+        strictEqual(consumer1.assignments?.find(a => a.topic === topicB)?.partitions.length, 4)
+      },
+      { timeout: 15_000 }
+    )
+
+    strictEqual(streamBPauses, 0)
+    ok(streamBFlushes >= 1)
+
+    await streamA.close()
+    await streamB.close()
+    await streamC.close()
+  }
+)

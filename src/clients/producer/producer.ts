@@ -1065,8 +1065,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                   connection!,
                   transactionalId,
                   this[kOptions].timeout!,
-                  options.producerId ?? this[kOptions].producerId ?? 0n,
-                  options.producerEpoch ?? this[kOptions].producerEpoch ?? 0,
+                  api!.version >= 3 ? (options.producerId ?? this[kOptions].producerId ?? -1n) : undefined,
+                  api!.version >= 3 ? (options.producerEpoch ?? this[kOptions].producerEpoch ?? -1) : undefined,
                   (error, response) => {
                     retryCallback(this.#handleError(error), response)
                   }
@@ -1472,7 +1472,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     produceOptions: Partial<CreateRecordsBatchOptions>,
     callback: CallbackWithPromise<ProduceResult>
   ): void {
-    if (this.#orderedSends) {
+    if (this.#orderedSends || sendOptions.idempotent) {
       this.#performOrderedSend(topics, messages, sendOptions, produceOptions, callback)
       return
     }
@@ -1559,7 +1559,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   }
 
   /*
-    What send() does when orderedSends is enabled.
+    Idempotent sends always use this queue, even when orderedSends is disabled.
 
     A request which fails can be sent again, and by then a later request for the same partition might
     have been written already: it was on the wire before the failure was known. To keep the messages of a
@@ -1874,9 +1874,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         this.#metricsProducedMessages?.inc(messages.length)
 
         if (error) {
-          if (sendOptions.idempotent && !this.#transaction) {
-            this.#producerInfo = undefined
-            this.#sequences.clear()
+          if (sendOptions.idempotent) {
+            this.#invalidateProducer(produceOptions)
           }
 
           ;(error as GenericError).produced = results
@@ -2104,7 +2103,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       (error, results) => {
         if (error) {
-          if (recoverOnProducerStateLoss && !this.#transaction && this.#isProducerStateLost(error)) {
+          // Only the head of a partition's queue can reach the broker, so a sequence refusal is a real gap.
+          if (
+            recoverOnProducerStateLoss &&
+            produceOptions.sequences &&
+            !this.#transaction &&
+            this.#isProducerStateLost(error)
+          ) {
             this.#recoverIdempotentProducer(destination.messages, produceOptions, (error, recoveredProduceOptions) => {
               if (error) {
                 callback(error)
@@ -2120,7 +2125,13 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 repeatOnStaleMetadata,
                 recoveredProduceOptions!,
                 false,
-                callback
+                (error, results) => {
+                  if (error) {
+                    this.#invalidateProducer(recoveredProduceOptions!)
+                  }
+
+                  callback(error, results)
+                }
               )
             })
             return
@@ -2188,15 +2199,26 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
+  #invalidateProducer (options: Partial<CreateRecordsBatchOptions>): void {
+    // A late failure from another partition must not invalidate the recovered session.
+    const current = this.#producerInfo
+    if (
+      !this.#transaction &&
+      current &&
+      current.producerId === options.producerId &&
+      current.producerEpoch === options.producerEpoch
+    ) {
+      this.#producerInfo = undefined
+      this.#sequences.clear()
+    }
+  }
+
   #recoverIdempotentProducer (
     messages: MessageRecord[],
     produceOptions: Partial<CreateRecordsBatchOptions>,
     callback: CallbackWithPromise<Partial<CreateRecordsBatchOptions>>
   ): void {
-    this.#producerInfo = undefined
-    this.#sequences.clear()
-
-    this.initIdempotentProducer({}, (error, producerInfo) => {
+    const resend: CallbackWithPromise<ProducerInfo> = (error, producerInfo) => {
       if (error) {
         callback(error)
         return
@@ -2219,7 +2241,23 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         producerEpoch: producerInfo!.producerEpoch,
         sequences
       })
-    })
+    }
+
+    // Another partition may already have recovered from the same loss of producer state.
+    const current = this.#producerInfo
+    if (
+      current &&
+      (current.producerId !== produceOptions.producerId || current.producerEpoch !== produceOptions.producerEpoch)
+    ) {
+      resend(null, current)
+      return
+    }
+
+    this.#producerInfo = undefined
+    this.initIdempotentProducer(
+      { producerId: produceOptions.producerId, producerEpoch: produceOptions.producerEpoch },
+      resend
+    )
   }
 
   #getCoordinatorConnection (callback: CallbackWithPromise<Connection>): void {

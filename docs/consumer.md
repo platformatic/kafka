@@ -195,9 +195,9 @@ With `autocommit: true` (the default), `@platformatic/kafka` commits offsets bas
 that tracks records returned by `poll()`, it can commit offsets for messages that are still buffered in the stream
 and have not reached the application. A numeric `autocommit` value changes when commits run, not which offsets are eligible.
 
-If the process crashes after the commit succeeds, a consumer that resumes from the group's committed offsets skips
-those messages, even if they were never read or their handler did not finish. To commit only after successful
-processing, disable autocommit and await the commit after your handler succeeds:
+If the process crashes or the stream is closed after the commit succeeds, a consumer that resumes from the group's
+committed offsets skips those messages, even if they were never read or their handler did not finish. To commit only
+after successful processing, disable autocommit and await the commit after your handler succeeds:
 
 ```typescript
 import { MessagesStreamFallbackModes, MessagesStreamModes } from '@platformatic/kafka'

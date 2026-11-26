@@ -13,7 +13,8 @@ import {
   kGetBootstrapConnection,
   kMetadata,
   kOptions,
-  kPerformWithRetry
+  kPerformWithRetry,
+  type BaseEvents
 } from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
@@ -1174,6 +1175,30 @@ test('kPerformWithRetry should accept a custom function', async t => {
 
   deepStrictEqual(first, 1000)
   deepStrictEqual(second, 2000)
+})
+
+test('kPerformWithRetry should report the broker only from the direct error', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0 })
+  const first = { host: 'broker-a', port: 9092 }
+  const second = { host: 'broker-b', port: 9093 }
+  const networkError = new NetworkError('Connection closed.', { broker: { ...first, rack: 'rack-a' } })
+  const responseError = new ResponseError(18, 1, { '/': [7, null] }, {}, { broker: second })
+  const aggregateError = new MultipleErrors('Cannot connect to any broker.', [networkError, responseError])
+  const errors = [networkError, responseError, aggregateError, new Error('Operation failed.')]
+  const callback = createPromisifiedCallback<void>()
+  const retries: Parameters<BaseEvents['client:performWithRetry:retry']>[] = []
+
+  client.on('client:performWithRetry:retry', (...args) => retries.push(args))
+  const failed = once(client, 'client:performWithRetry:failed')
+  const result = client[kPerformWithRetry]('testOperation', (done, attempt) => done(errors[attempt]), callback)
+
+  await rejects(result!, MultipleErrors)
+  deepStrictEqual(retries, [
+    ['testOperation', 0, 3, 0, first],
+    ['testOperation', 1, 3, 0, second],
+    ['testOperation', 2, 3, 0]
+  ])
+  deepStrictEqual(await failed, ['testOperation', 3, errors])
 })
 
 test('kPerformWithRetry should route synchronous exceptions thrown on retry to callback', async t => {

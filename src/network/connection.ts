@@ -29,6 +29,7 @@ import {
   type MultipleErrors,
   NetworkError,
   type ProtocolError,
+  ResponseError,
   TimeoutError,
   UnexpectedCorrelationIdError,
   UserError
@@ -228,6 +229,14 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     return this.#status === ConnectionStatuses.CONNECTING || ConnectionStatuses.CONNECTED ? this.#port : undefined
   }
 
+  get #brokerProperties (): Pick<NetworkError, 'broker'> {
+    if (this.#host === undefined || this.#port === undefined) {
+      return {}
+    }
+
+    return { broker: { host: this.#host, port: this.#port } }
+  }
+
   get instanceId (): number {
     return this.#instanceId
   }
@@ -290,7 +299,10 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       /* c8 ignore next 13 - Hard to test */
       const connectingSocketTimeoutHandler = () => {
-        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`, { canRetry: true })
+        const error = new TimeoutError(`Connection to ${host}:${port} timed out.`, {
+          canRetry: true,
+          broker: { host, port }
+        })
         diagnosticContext.error = error
         this.#socket.destroy()
 
@@ -395,7 +407,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
     const onClose = () => {
       cleanup()
-      callback!(new NetworkError('Connection closed while waiting for ready.'))
+      callback!(new NetworkError('Connection closed while waiting for ready.', this.#brokerProperties))
     }
 
     const timeout = setTimeout(() => {
@@ -406,13 +418,14 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         return
       }
 
+      const brokerProperties = this.#brokerProperties
       this.#socket?.destroy()
       callback!(
         new TimeoutError(
           this.#host
             ? `Connection to ${this.#host}:${this.#port} timed out.`
             : `Connection ready timed out after ${this.#options.connectTimeout}ms.`,
-          { canRetry: true }
+          { canRetry: true, ...brokerProperties }
         )
       )
     }, this.#options.connectTimeout)
@@ -637,10 +650,16 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.#inflightRequests.delete(request.correlationId)
     this.#afterDrainRequests = this.#afterDrainRequests.filter(r => r !== request)
 
+    const error = new TimeoutError('Request timed out', {
+      canRetry: true,
+      correlationId: request.correlationId,
+      ...this.#brokerProperties
+    })
+
     this.#status = ConnectionStatuses.CLOSING
     this.emit('closing')
 
-    request.callback(new TimeoutError('Request timed out', { canRetry: true }), null)
+    request.callback(error, null)
 
     this.#socket?.destroy()
   }
@@ -766,7 +785,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         this.#status !== ConnectionStatuses.AUTHENTICATING &&
         this.#status !== ConnectionStatuses.REAUTHENTICATING
       ) {
-        request.callback(new NetworkError('Connection closed'), undefined)
+        request.callback(new NetworkError('Connection closed', this.#brokerProperties), undefined)
         return false
       }
 
@@ -819,7 +838,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   #onConnectionError (host: string, port: number, diagnosticContext: DiagnosticContext, cause: Error): void {
-    const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause })
+    const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause, broker: { host, port } })
     this.#status = ConnectionStatuses.ERROR
     clearTimeout(this.#reauthenticationTimeout)
 
@@ -1012,6 +1031,13 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       loggers.protocol('Received response.', { apiKey: protocolAPIsById[apiKey], correlationId, request, deserialized })
 
       if (responseError) {
+        if (responseError instanceof ResponseError) {
+          const { broker } = this.#brokerProperties
+          if (broker) {
+            Reflect.defineProperty(responseError, 'broker', { value: broker, enumerable: true })
+          }
+        }
+
         request.diagnostic.error = responseError
         connectionsApiChannel.error.publish(request.diagnostic)
       } else {
@@ -1067,12 +1093,13 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   #onClose (): void {
+    const brokerProperties = this.#brokerProperties
     this.#status = ConnectionStatuses.CLOSED
     // A socket closed by the broker never goes through close(), so the reauthentication timer must be cleared here
     clearTimeout(this.#reauthenticationTimeout)
     this.emit('close')
 
-    this.#failPendingRequests(new NetworkError('Connection closed'))
+    this.#failPendingRequests(new NetworkError('Connection closed', brokerProperties))
   }
 
   #failPendingRequests (error: Error): void {
@@ -1105,6 +1132,6 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
   #onError (error: Error): void {
     clearTimeout(this.#reauthenticationTimeout)
-    this.emit('error', new NetworkError('Connection error', { cause: error }))
+    this.emit('error', new NetworkError('Connection error', { cause: error, ...this.#brokerProperties }))
   }
 }

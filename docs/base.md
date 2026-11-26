@@ -16,7 +16,20 @@ Unless you only care about cluster metadata, it is unlikely that you would ever 
 | `client:broker:sasl:authentication`          | Emitted when SASL authentication to a broker is completed.                                   |
 | `client:broker:sasl:authentication:extended` | Emitted when SASL authentication to a broker is extended by performing a new authentication. |
 | `client:metadata`                            | Emitted when metadata is retrieved.                                                          |
+| `client:performWithRetry:retry`              | Emitted before a retry with `(operationId, attempt, retries, delay, broker?)`.                |
 | `client:close`                               | Emitted when client is closed.                                                               |
+
+The retry event includes `broker` only when the direct error identifies a broker. It does not look inside aggregates
+of failures from multiple brokers. The address belongs to the failed attempt, not the next one.
+
+## Connection errors
+
+`NetworkError` and `TimeoutError` from a connection include `broker: { host, port }` when the endpoint is known.
+Request timeouts also include the request's `correlationId`. When several errors are grouped in `MultipleErrors`,
+look for `broker` on the individual errors, not on the aggregate.
+
+A `ResponseError` decoded from a Kafka response includes the address of the broker that sent the response, even if
+the response contains errors for several partitions.
 
 ## Constructor
 

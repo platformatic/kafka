@@ -81,7 +81,7 @@ import {
   UserError,
   type Writer
 } from '../../../src/index.ts'
-import { kAutocommit, kGetFetchNode } from '../../../src/symbols.ts'
+import { kAutocommit, kGetFetchNode, kRevokingPartitions } from '../../../src/symbols.ts'
 import {
   createConsumer,
   createCreationChannelVerifier,
@@ -6129,6 +6129,46 @@ test('cooperative sticky rebalance should keep consuming after a second member j
   await stream1.close()
   await stream2.close()
 })
+
+for (const cooperative of [false, true]) {
+  test(`manual commits during ${cooperative ? 'cooperative' : 'eager'} revocation`, async t => {
+    const topic = await createTopic(t, true, 2)
+    const options = {
+      groupId: createGroupId(),
+      heartbeatInterval: 200,
+      rebalanceTimeout: 20000,
+      ...(cooperative && { protocols: [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }] })
+    }
+    const first = createConsumer(t, options)
+    const second = createConsumer(t, options)
+    await produceTestMessages({ t, messages: [0, 1].map(partition => ({ topic, partition, value: 'value' })) })
+    const stream = await first.consume({
+      topics: [topic],
+      mode: MessagesStreamModes.EARLIEST,
+      batch: true,
+      autocommit: false,
+      waitForPendingCommitsOnRebalance: true
+    })
+    const commits: (() => Promise<void> | void)[] = []
+    stream.on('data', batch => commits.push(() => batch.commit()))
+    await waitFor(() => strictEqual(commits.length, 2))
+
+    await second.topics.trackAll(topic)
+    const join = second.joinGroup()
+    await waitFor(() => strictEqual(first[kRevokingPartitions]?.size, cooperative ? 1 : 2))
+    const generation = first.generationId
+    if (cooperative) {
+      // Hold the commit beyond the 6s session timeout, but within the rebalance deadline.
+      await sleep(7000)
+      strictEqual(first.generationId, generation)
+      strictEqual(first[kRevokingPartitions]?.size, 1)
+    }
+    await Promise.all(commits.map(commit => commit()))
+    await join
+    await waitFor(() => strictEqual(second.assignments?.[0]?.partitions.length, 1))
+    await stream.close()
+  })
+}
 
 test('cooperative sticky rebalance should autocommit revoked partition offsets before rejoin', async t => {
   const topic = await createTopic(t, true, 4)

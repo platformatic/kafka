@@ -176,6 +176,7 @@ export interface ConsumerGroupOptions {
 
 export interface ConsumeBaseOptions<Key, Value, HeaderKey, HeaderValue> {
   autocommit?: boolean | number
+  waitForPendingCommitsOnRebalance?: boolean
   minBytes?: number
   maxBytes?: number
   maxBytesPerPartition?: number

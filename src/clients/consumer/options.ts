@@ -99,7 +99,8 @@ export const consumeOptionsSchema = {
     onDeserializationError: { function: true },
     ...groupOptionsProperties,
     ...consumeOptionsProperties,
-    batch: { oneOf: [{ type: 'boolean' }, { type: 'integer', minimum: 1 }] }
+    batch: { oneOf: [{ type: 'boolean' }, { type: 'integer', minimum: 1 }] },
+    waitForPendingCommitsOnRebalance: { type: 'boolean' }
   },
   required: ['topics'],
   additionalProperties: false
@@ -113,7 +114,8 @@ export const consumerOptionsSchema = {
     streamContext: true,
     leaveGroupTimeout: { type: 'number', minimum: 0 },
     ...groupOptionsProperties,
-    ...consumeOptionsProperties
+    ...consumeOptionsProperties,
+    waitForPendingCommitsOnRebalance: { type: 'boolean' }
   },
   required: ['groupId'],
   additionalProperties: true

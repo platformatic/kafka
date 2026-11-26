@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert'
+import { deepStrictEqual, rejects, strictEqual } from 'node:assert'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import type { CallbackWithPromise } from '../../../src/apis/callbacks.ts'
@@ -74,14 +74,21 @@ function createFetchResponse (partitions: Map<number, bigint>, records: Map<numb
   }
 }
 
-function createGroup (t: TestContext) {
-  const consumer = createConsumer(t, { groupProtocol: 'consumer', retryDelay: 0, maxWaitTime: 10 })
+function createGroup (t: TestContext, rebalanceTimeout: number = 6000) {
+  const timers = { heartbeatInterval: heartbeatIntervalMs, sessionTimeout: rebalanceTimeout, rebalanceTimeout }
+  const consumer = createConsumer(t, {
+    ...timers,
+    groupProtocol: 'consumer',
+    retryDelay: 0,
+    maxWaitTime: 10
+  })
 
   // What the coordinator assigns to the member on the next heartbeat, and errors to return instead
   const group = {
     consumer,
     assignment: [0, 1] as number[] | null,
     heartbeatErrors: [] as Error[],
+    commitError: null as Error | null,
     fetches: [] as FetchRequest[],
     onFetch: (_request: FetchRequest): boolean => false
   }
@@ -185,7 +192,7 @@ function createGroup (t: TestContext) {
             fetchCallback: CallbackWithPromise<FetchResponse>
           ) => {
             const partitions = new Map<number, bigint>()
-            for (const requested of topics[0]?.partitions ?? []) {
+            for (const requested of topics.flatMap(topic => topic.partitions)) {
               partitions.set(requested.partition, requested.fetchOffset)
             }
 
@@ -202,6 +209,9 @@ function createGroup (t: TestContext) {
           }
         )
         break
+      case 'OffsetCommit':
+        callback(null, (...args: unknown[]) => (args.at(-1) as CallbackWithPromise<unknown>)(group.commitError, {}))
+        break
       default:
         callback(new Error(`Unexpected API ${name}`))
     }
@@ -212,12 +222,13 @@ function createGroup (t: TestContext) {
   return group
 }
 
-async function startConsuming (group: ReturnType<typeof createGroup>) {
+async function startConsuming (group: ReturnType<typeof createGroup>, waitForPendingCommitsOnRebalance: boolean = false) {
   const stream = (await group.consumer.consume({
     topics: [topic],
     mode: 'committed',
     fallbackMode: 'earliest',
-    autocommit: false
+    autocommit: false,
+    waitForPendingCommitsOnRebalance
   })) as MessagesStream<Buffer, Buffer, Buffer, Buffer>
 
   mockConnectionPoolGet(stream[kConnections], () => true, null, null, (_original, _broker, callback) => {
@@ -279,6 +290,72 @@ async function nextFetchOffsetOfPartition0 (group: ReturnType<typeof createGroup
 
   return offset
 }
+
+for (const outcome of ['commit', 'timeout', 'rejoin error']) {
+  test(`revocation drains the readable buffer until ${outcome}`, t => testRevocationDrain(t, outcome))
+}
+
+async function testRevocationDrain (t: TestContext, outcome: string) {
+  const group = createGroup(t, outcome === 'timeout' ? 250 : 6000)
+  const { stream } = await startConsuming(group, true)
+  t.after(() => stream.close())
+  stream.pause()
+  group.onFetch = request => {
+    if (request.partitions.get(0) !== 0n) {
+      return false
+    }
+    request.respond(new Map([[0, createRecordsBatch(0n, 2)]]))
+    return true
+  }
+  stream.once('data', () => stream.pause())
+  stream.resume()
+  await waitFor(() => strictEqual(stream.readableLength, 1))
+
+  // Two coordinator replies allow the client to see the revocation and heartbeat while draining.
+  group.assignment = [1]
+  await once(group.consumer, 'consumer:heartbeat:end')
+  await once(group.consumer, 'consumer:heartbeat:end')
+  deepStrictEqual(group.consumer.assignments, [{ topic, partitions: [0, 1] }])
+  const last = stream.read()
+  strictEqual(last.offset, 1n)
+  if (outcome === 'commit') {
+    await last.commit()
+  } else if (outcome === 'rejoin error') {
+    const error = new ResponseError(8, 9, { 'topics.0.partitions.0': [27, null] }, {})
+    group.commitError = error
+    await rejects(last.commit(), { code: error.code })
+  }
+  await waitForAssignment(group.consumer, [1])
+  strictEqual(stream.destroyed, false)
+}
+
+test('a superseding heartbeat restarts fetches for a retained partition during the drain', async t => {
+  const group = createGroup(t)
+  group.onFetch = request => {
+    if (request.partitions.get(0) === 0n) {
+      request.respond(new Map([[0, createRecordsBatch(0n, 1)], [1, createRecordsBatch(0n, 1)]]))
+      return true
+    }
+    return false
+  }
+  const { stream, received } = await startConsuming(group, true)
+  t.after(() => stream.close())
+  await waitFor(() => strictEqual(received.length, 2))
+  group.assignment = [1]
+  await waitFor(() => deepStrictEqual([...group.fetches.at(-1)!.partitions.keys()], [1]))
+
+  group.assignment = [0]
+  group.onFetch = request => {
+    if (request.partitions.get(0) === 1n) {
+      request.respond(new Map([[0, createRecordsBatch(1n, 1)]]))
+      return true
+    }
+    return false
+  }
+  await group.consumer.commit({ offsets: [{ topic, partition: 1, offset: 1n, leaderEpoch: 0 }] })
+  await waitForAssignment(group.consumer, [0])
+  await waitFor(() => strictEqual(received.includes('p0:1'), true))
+})
 
 test('should fetch a partition without committed offsets from the fallback offset when it is revoked and assigned back (consumer protocol)', async t => {
   const group = createGroup(t)

@@ -46,6 +46,16 @@ export interface MessageConsumerMetadata {
   memberId: string
 }
 
+export interface PartitionWatermarks<Offset = bigint> {
+  readonly highWatermark: Offset
+  readonly lastStableOffset: Offset
+  readonly logStartOffset: Offset
+}
+
+export interface MessageMetadata<Offset = bigint> extends Record<string, unknown> {
+  readonly partition: PartitionWatermarks<Offset>
+}
+
 export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown, HeaderValue = unknown> {
   key: Key
   value: Value
@@ -55,7 +65,7 @@ export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown
   timestamp: string
   offset: string
   leaderEpoch: number
-  metadata: Record<string, unknown>
+  metadata: MessageMetadata<string>
 }
 
 // This is used in consume
@@ -66,7 +76,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   headerEntries: Array<[HeaderKey, HeaderValue]>
   offset: bigint
   leaderEpoch: number
-  metadata: Record<string, unknown>
+  metadata: MessageMetadata
   commit (callback?: (error?: Error) => void): void | Promise<void>
   toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue>
 }

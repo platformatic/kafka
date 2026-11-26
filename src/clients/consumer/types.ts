@@ -277,6 +277,14 @@ export interface ConsumerGroupAutocommitErrorPayload {
   error: Error
 }
 
+export interface ConsumerGroupCommitSkippedPayload {
+  groupId: string
+  generationId: number
+  topic: string
+  partition: number
+  offset: bigint
+}
+
 export interface ConsumerGroupLostPayload {
   groupId: string
   memberId: string | null

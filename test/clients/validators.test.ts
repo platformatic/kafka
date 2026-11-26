@@ -125,7 +125,7 @@ test('the generated validators should expose what the ones compiled by ajv expos
     }
   }
 
-  strictEqual(count, 38)
+  strictEqual(count, 40)
 })
 
 test('ajv should behave as an instance of Ajv2020', () => {

@@ -15,6 +15,7 @@ If you provide both the `metrics.client` and `metrics.registry` (an instance of 
 | `kafka_consumers_topics`  | `Gauge`     | Number of topics being consumed.          |
 | `kafka_consumers_lags`    | `Histogram` | Lag of active Kafka consumers             |
 | `kafka_consumed_messages` | `Counter`   | Number of consumed Kafka messages.        |
+| `kafka_share_consumers`   | `Gauge`     | Number of active Kafka share consumers.   |
 
 Optionally, you can provide labels with the `metrics.label` option.
 

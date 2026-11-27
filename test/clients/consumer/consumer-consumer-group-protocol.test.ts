@@ -247,6 +247,9 @@ test('OffsetCommit UNKNOWN_MEMBER_ID should preserve the member ID', skipConsume
   const memberId = consumer.memberId
   ok(memberId)
 
+  // The retry after the rejoin only commits partitions which are still assigned
+  await waitFor(() => deepStrictEqual(consumer.assignments, [{ topic, partitions: [0] }]))
+
   mockAPI(consumer[kConnections], offsetCommitV9.api.key, new ProtocolError('UNKNOWN_MEMBER_ID'))
   await consumer.commit({ offsets: [{ topic, partition: 0, offset: 1n, leaderEpoch: -1 }] })
   strictEqual(consumer.memberId, memberId)

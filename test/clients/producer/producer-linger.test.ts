@@ -597,3 +597,43 @@ test('send should send what is waiting before a call which would exceed batchMax
   strictEqual(produceRequests(), 2)
   deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n, 2n])
 })
+
+test('send should merge the calls made in different ticks while a request is in flight when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // Once the tick ends the first call is in flight
+  const first = producer.send({ messages: [{ topic, value: 'a' }] })
+  await new Promise<void>(resolve => process.nextTick(resolve))
+
+  // These two are made in different ticks of the same iteration of the event loop
+  const second = producer.send({ messages: [{ topic, value: 'b' }] })
+  await new Promise<void>(resolve => process.nextTick(resolve))
+  const third = producer.send({ messages: [{ topic, value: 'c' }] })
+
+  const results = await Promise.all([first, second, third])
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n, 2n]
+  )
+})
+
+test('close should send the messages which are waiting for a request in flight when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const first = producer.send({ messages: [{ topic, value: 'a' }] })
+  await new Promise<void>(resolve => process.nextTick(resolve))
+  const second = producer.send({ messages: [{ topic, value: 'b' }] })
+
+  await producer.close()
+
+  const results = await Promise.all([first, second])
+  deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n])
+})

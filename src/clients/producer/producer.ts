@@ -140,8 +140,8 @@ interface PendingSends {
   bytes: number
   sendOptions: Required<SendOptions<any, any, any, any>>
   produceOptions: Partial<CreateRecordsBatchOptions>
-  // Not set when the calls are only waiting for process.nextTick()
-  timer: NodeJS.Timeout | undefined
+  // Not set when the calls are only waiting for process.nextTick(), see #scheduleAutoBatch
+  timer: NodeJS.Timeout | NodeJS.Immediate | undefined
 }
 
 /*
@@ -1300,10 +1300,8 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     time expires. A producer which is faster than the broker therefore sends requests which
     are larger, not more numerous, and the cost of making a request is paid less often.
 
-    With autoBatching and no linger time, the calls only wait for process.nextTick(): the ones made one after
-    the other, or from promise callbacks which are already due, share a request and no time is spent waiting
-    for others. setImmediate() would also merge the calls made from different I/O callbacks, but it makes an
-    application which awaits each send() measurably slower, while process.nextTick() does not.
+    With autoBatching and no linger time, the calls only wait for the end of the current tick, or of the
+    current iteration of the event loop when a request is in flight, see #scheduleAutoBatch.
 
     Only calls made with the same settings can share a produce request. When the settings change, what is
     waiting is sent first.
@@ -1336,7 +1334,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           timer: undefined
         }
 
-        process.nextTick(this.#flushPendingSendsTick, this.#pendingSends)
+        this.#scheduleAutoBatch(this.#pendingSends)
 
         return
       }
@@ -1372,7 +1370,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
 
       if (this.#linger === 0) {
-        process.nextTick(this.#flushPendingSendsTick, pending)
+        this.#scheduleAutoBatch(pending)
       }
     }
 
@@ -1395,6 +1393,25 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
   }
 
+  /*
+    Decides when the calls which are waiting because of autoBatching are sent.
+
+    When no request is in flight they are sent with process.nextTick(), which merges the calls made one after
+    the other and the ones made from promise callbacks which are already due. It costs nothing measurable, so
+    an application which awaits each send() is not slowed down.
+
+    When a request is in flight the producer is busy, and they wait for the end of the current iteration of
+    the event loop with setImmediate(), which also merges the calls made from different I/O callbacks. That is
+    measurably slower for a call which ends up alone, which is why it is not used all the time.
+  */
+  #scheduleAutoBatch (pending: PendingSends): void {
+    if (this.#lingerInflight > 0) {
+      pending.timer = setImmediate(this.#flushPendingSendsNow)
+    } else {
+      process.nextTick(this.#flushPendingSendsTick, pending)
+    }
+  }
+
   #flushPendingSends (onComplete?: () => void): void {
     const pending = this.#pendingSends
 
@@ -1405,7 +1422,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#pendingSends = undefined
 
-    clearTimeout(pending.timer)
+    if (this.#linger > 0) {
+      clearTimeout(pending.timer as NodeJS.Timeout)
+    } else if (pending.timer) {
+      clearImmediate(pending.timer as NodeJS.Immediate)
+    }
 
     const { messages, sends } = pending
 

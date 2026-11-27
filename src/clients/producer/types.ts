@@ -48,6 +48,7 @@ export interface ProduceOptions<Key, Value, HeaderKey, HeaderValue> {
   partitioner?: Partitioner<Key, Value, HeaderKey, HeaderValue>
   autocreateTopics?: boolean
   repeatOnStaleMetadata?: boolean
+  sendTimeout?: number
 }
 
 export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &

@@ -26,7 +26,9 @@ export const produceOptionsProperties = {
   },
   partitioner: { function: true },
   autocreateTopics: { type: 'boolean' },
-  repeatOnStaleMetadata: { type: 'boolean' }
+  repeatOnStaleMetadata: { type: 'boolean' },
+  // The maximum is the longest delay of setTimeout(), which fires the ones above it at once
+  sendTimeout: { type: 'number', exclusiveMinimum: 0, maximum: 2_147_483_647 }
 }
 
 export const produceOptionsSchema = {

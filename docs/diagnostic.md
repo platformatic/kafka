@@ -86,3 +86,5 @@ Each tracing channel publishes events with the following common properties:
 | `plt:kafka:consumer:consumes`          | `Consumer`       | Traces a `Consumer.consume` request.                                                                                         |
 | `plt:kafka:consumer:commits`           | `Consumer`       | Traces a `Consumer.commit` request.                                                                                          |
 | `plt:kafka:consumer:offsets`           | `Consumer`       | Traces a `Consumer.listOffsets` or `Consumer.listCommittedOffsets` request.                                                  |
+| `plt:kafka:share-consumer:group`       | `ShareConsumer`  | Traces a `ShareConsumer.joinGroup` or `ShareConsumer.leaveGroup` request, or the search of the group coordinator.            |
+| `plt:kafka:share-consumer:heartbeat`   | `ShareConsumer`  | Traces the `ShareConsumer` heartbeat requests.                                                                               |

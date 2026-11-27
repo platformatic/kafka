@@ -353,6 +353,7 @@ Many of the methods accept the same options as the client's constructors. The co
 
 - [Producer API](./docs/producer.md)
 - [Consumer API](./docs/consumer.md)
+- [Share Consumer API](./docs/share-consumer.md)
 - [Admin API](./docs/admin.md)
 - [Base Client](./docs/base.md)
 - [Metrics](./docs/metrics.md)

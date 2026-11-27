@@ -19,10 +19,12 @@ import { findErrorBy, protocolErrors, UserError } from '../../errors.ts'
 import type { ConnectionPool, ConnectionPoolEventPayload } from '../../network/connection-pool.ts'
 import {
   IS_CONTROL,
+  IS_LOG_APPEND_TIME,
   type Message,
   type MessageJSON,
   type MessageMetadata,
-  type MessageToConsume
+  type MessageToConsume,
+  TimestampTypes
 } from '../../protocol/records.ts'
 import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
@@ -115,6 +117,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
   topic: string
   partition: number
   timestamp: bigint
+  timestampType?: Message['timestampType']
   offset: bigint
   leaderEpoch: number
   metadata: MessageMetadata
@@ -127,6 +130,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     topic: string,
     partition: number,
     timestamp: bigint,
+    timestampType: Message['timestampType'],
     offset: bigint,
     leaderEpoch: number,
     committer: MessageCommitter | undefined,
@@ -145,6 +149,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
     this.topic = topic
     this.partition = partition
     this.timestamp = timestamp
+    this.timestampType = timestampType
     this.offset = offset
     this.leaderEpoch = leaderEpoch
     this.metadata = metadata
@@ -202,6 +207,7 @@ class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key
       topic: this.topic,
       partition: this.partition,
       timestamp: this.timestamp.toString(),
+      timestampType: this.timestampType,
       offset: this.offset.toString(),
       leaderEpoch: this.leaderEpoch,
       metadata: {
@@ -1142,6 +1148,12 @@ export class MessagesStream<
         for (const batch of recordsBatches) {
           const firstTimestamp = batch.firstTimestamp
           const firstOffset = batch.firstOffset
+          /*
+            With LogAppendTime the broker writes its append time into MaxTimestamp and leaves the record deltas
+            untouched, so every record of the batch takes MaxTimestamp, as the Java client does.
+          */
+          const logAppendTime = (batch.attributes & IS_LOG_APPEND_TIME) !== 0
+          const timestampType = logAppendTime ? TimestampTypes.LOG_APPEND_TIME : TimestampTypes.CREATE_TIME
           const leaderEpoch = metadata.topics.get(topic)!.partitions[partition].leaderEpoch
 
           this.#partitionsEpochs.set(key, leaderEpoch)
@@ -1250,7 +1262,7 @@ export class MessagesStream<
                   topic,
                   partition,
                   offset,
-                  timestamp: firstTimestamp + record.timestampDelta,
+                  timestamp: logAppendTime ? batch.maxTimestamp : firstTimestamp + record.timestampDelta,
                   commit: commitFailedMessage
                 }
                 const action = this.#deserializationErrorHandler
@@ -1323,7 +1335,8 @@ export class MessagesStream<
                 headerEntries,
                 topic,
                 partition,
-                firstTimestamp + record.timestampDelta,
+                logAppendTime ? batch.maxTimestamp : firstTimestamp + record.timestampDelta,
+                timestampType,
                 offset,
                 // The batch header epoch is the epoch of the record itself, which is what
                 // OffsetCommit expects as committedLeaderEpoch (KIP-320).

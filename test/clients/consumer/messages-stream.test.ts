@@ -37,6 +37,7 @@ import {
   type StreamOptions,
   stringDeserializers,
   stringSerializers,
+  TimestampTypes,
   UserError
 } from '../../../src/index.ts'
 import {
@@ -344,6 +345,7 @@ test('should support diagnostic channels', async t => {
         topic,
         partition: 0,
         timestamp: 0n,
+        timestampType: TimestampTypes.CREATE_TIME,
         offset: 0n,
         leaderEpoch: 0,
         metadata: message.metadata,

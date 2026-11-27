@@ -165,6 +165,7 @@ The types of the `key`, `value` and `headers` fields are determined by the curre
 | `key`       | `Key`                         | The key of the message.                                                                             |
 | `value`     | `Value`                       | The value of the message.                                                                           |
 | `timestamp` | `bigint`                      | The timestamp of the message. When producing, it defaults to the current timestamp.                 |
+| `timestampType` | `'CreateTime' \| 'LogAppendTime'` (optional) | Always set on messages returned by the consumer and in their `toJSON()` output. Indicates whether `timestamp` comes from the producer (`TimestampTypes.CREATE_TIME`) or the broker (`TimestampTypes.LOG_APPEND_TIME`). |
 | `headers`   | `Map<HeaderKey, HeaderValue>` | A map with the message headers.                                                                     |
 | `headerEntries` | `Array<[HeaderKey, HeaderValue]>` | Ordered header entries preserving duplicate keys according to [KIP-82](https://cwiki.apache.org/confluence/spaces/KAFKA/pages/65871723/KIP-82+-+Add+Record+Headers#KIP82AddRecordHeaders-Keyduplicationandordering). |
 | `offset`    | `bigint`                      | The message offset                                                                                  |

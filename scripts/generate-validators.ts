@@ -74,7 +74,8 @@ export const sources: Record<string, Record<string, string>> = {
   },
   'share-consumer': {
     shareConsumerOptionsValidator: 'shareConsumerOptionsSchema',
-    shareGroupOptionsValidator: 'shareGroupOptionsSchema'
+    shareGroupOptionsValidator: 'shareGroupOptionsSchema',
+    shareConsumeOptionsValidator: 'shareConsumeOptionsSchema'
   }
 }
 

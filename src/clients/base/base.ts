@@ -806,9 +806,12 @@ export class Base<
                 const topicIndexMatch = unknownTopicError.path?.match(/\/topics\/(\d+)/)
                 /* c8 ignore next 3 - Hard to test  */
                 const topicIndex = topicIndexMatch ? parseInt(topicIndexMatch[1]) : -1
-                const topicName =
-                  topicIndex >= 0 && topicIndex < topicsToFetch.length ? topicsToFetch[topicIndex] : 'unknown'
-                deduplicateCallback(new UserError(`Unknown topic ${topicName}.`))
+                const topic =
+                  topicIndex >= 0 && topicIndex < topicsToFetch.length ? topicsToFetch[topicIndex] : undefined
+                // The cause and the topic let callers tell a missing topic from other errors
+                deduplicateCallback(
+                  new UserError(`Unknown topic ${topic ?? 'unknown'}.`, { cause: unknownTopicError, topic })
+                )
                 return
               }
 

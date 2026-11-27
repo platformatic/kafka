@@ -1,3 +1,4 @@
+export * from './messages-stream.ts'
 export * from './options.ts'
 export * from './share-consumer.ts'
 export * from './types.ts'

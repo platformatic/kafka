@@ -2,10 +2,10 @@
 // @ts-nocheck
 /* eslint-disable */
 import { defineValidator, type OptionsValidator } from '../../ajv.ts'
-import { shareConsumerOptionsSchema, shareGroupOptionsSchema } from './options.ts'
+import { shareConsumerOptionsSchema, shareGroupOptionsSchema, shareConsumeOptionsSchema } from './options.ts'
 
 export const shareConsumerOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate58, () => shareConsumerOptionsSchema);
-const schema69 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"leaveGroupTimeout":{"type":"number","minimum":0}},"required":["groupId"],"additionalProperties":true};
+const schema69 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"leaveGroupTimeout":{"type":"number","minimum":0},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":0},"maxWaitTime":{"type":"integer","minimum":0},"maxRecords":{"type":"integer","minimum":1},"highWaterMark":{"type":"integer","minimum":1}},"required":["groupId"],"additionalProperties":true};
 const pattern4 = new RegExp("^\\S+$", "u");
 
 function validate58(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -79,14 +79,214 @@ vErrors.push(err4);
 errors++;
 }
 }
-}
-else {
-const err5 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.deserializers !== undefined){
+let data2 = data.deserializers;
+if(data2 && typeof data2 == "object" && !Array.isArray(data2)){
+for(const key0 in data2){
+if(!((((key0 === "key") || (key0 === "value")) || (key0 === "headerKey")) || (key0 === "headerValue"))){
+const err5 = {instancePath:instancePath+"/deserializers",schemaPath:"#/properties/deserializers/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err5];
 }
 else {
 vErrors.push(err5);
+}
+errors++;
+}
+}
+if(data2.key !== undefined){
+if(typeof data2.key !== "function"){
+const err6 = {instancePath:instancePath+"/deserializers/key",schemaPath:"#/properties/deserializers/properties/key/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+if(data2.value !== undefined){
+if(typeof data2.value !== "function"){
+const err7 = {instancePath:instancePath+"/deserializers/value",schemaPath:"#/properties/deserializers/properties/value/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+if(data2.headerKey !== undefined){
+if(typeof data2.headerKey !== "function"){
+const err8 = {instancePath:instancePath+"/deserializers/headerKey",schemaPath:"#/properties/deserializers/properties/headerKey/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+if(data2.headerValue !== undefined){
+if(typeof data2.headerValue !== "function"){
+const err9 = {instancePath:instancePath+"/deserializers/headerValue",schemaPath:"#/properties/deserializers/properties/headerValue/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+}
+else {
+const err10 = {instancePath:instancePath+"/deserializers",schemaPath:"#/properties/deserializers/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+if(data.minBytes !== undefined){
+let data7 = data.minBytes;
+if(!(((typeof data7 == "number") && (!(data7 % 1) && !isNaN(data7))) && (isFinite(data7)))){
+const err11 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 < 0 || isNaN(data7)){
+const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+}
+}
+if(data.maxBytes !== undefined){
+let data8 = data.maxBytes;
+if(!(((typeof data8 == "number") && (!(data8 % 1) && !isNaN(data8))) && (isFinite(data8)))){
+const err13 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 < 0 || isNaN(data8)){
+const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+}
+}
+if(data.maxWaitTime !== undefined){
+let data9 = data.maxWaitTime;
+if(!(((typeof data9 == "number") && (!(data9 % 1) && !isNaN(data9))) && (isFinite(data9)))){
+const err15 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 < 0 || isNaN(data9)){
+const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+}
+}
+if(data.maxRecords !== undefined){
+let data10 = data.maxRecords;
+if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
+const err17 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+if((typeof data10 == "number") && (isFinite(data10))){
+if(data10 < 1 || isNaN(data10)){
+const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+}
+}
+if(data.highWaterMark !== undefined){
+let data11 = data.highWaterMark;
+if(!(((typeof data11 == "number") && (!(data11 % 1) && !isNaN(data11))) && (isFinite(data11)))){
+const err19 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+if((typeof data11 == "number") && (isFinite(data11))){
+if(data11 < 1 || isNaN(data11)){
+const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+}
+}
+}
+else {
+const err21 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
 }
 errors++;
 }
@@ -197,3 +397,306 @@ validate59.errors = vErrors;
 return errors === 0;
 }
 validate59.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+export const shareConsumeOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate60, () => shareConsumeOptionsSchema);
+const schema71 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"},"minItems":1},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":0},"maxWaitTime":{"type":"integer","minimum":0},"maxRecords":{"type":"integer","minimum":1},"highWaterMark":{"type":"integer","minimum":1}},"required":["topics"],"additionalProperties":false};
+
+function validate60(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate60.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.topics === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "topics"},message:"must have required property '"+"topics"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+for(const key0 in data){
+if(!(((((((key0 === "topics") || (key0 === "deserializers")) || (key0 === "minBytes")) || (key0 === "maxBytes")) || (key0 === "maxWaitTime")) || (key0 === "maxRecords")) || (key0 === "highWaterMark"))){
+const err1 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+}
+if(data.topics !== undefined){
+let data0 = data.topics;
+if(Array.isArray(data0)){
+if(data0.length < 1){
+const err2 = {instancePath:instancePath+"/topics",schemaPath:"#/properties/topics/minItems",keyword:"minItems",params:{limit: 1},message:"must NOT have fewer than 1 items"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+const len0 = data0.length;
+for(let i0=0; i0<len0; i0++){
+let data1 = data0[i0];
+if(typeof data1 === "string"){
+if(!pattern4.test(data1)){
+const err3 = {instancePath:instancePath+"/topics/" + i0,schemaPath:"#/properties/topics/items/pattern",keyword:"pattern",params:{pattern: "^\\S+$"},message:"must match pattern \""+"^\\S+$"+"\""};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+}
+else {
+const err4 = {instancePath:instancePath+"/topics/" + i0,schemaPath:"#/properties/topics/items/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+}
+}
+else {
+const err5 = {instancePath:instancePath+"/topics",schemaPath:"#/properties/topics/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+if(data.deserializers !== undefined){
+let data2 = data.deserializers;
+if(data2 && typeof data2 == "object" && !Array.isArray(data2)){
+for(const key1 in data2){
+if(!((((key1 === "key") || (key1 === "value")) || (key1 === "headerKey")) || (key1 === "headerValue"))){
+const err6 = {instancePath:instancePath+"/deserializers",schemaPath:"#/properties/deserializers/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+if(data2.key !== undefined){
+if(typeof data2.key !== "function"){
+const err7 = {instancePath:instancePath+"/deserializers/key",schemaPath:"#/properties/deserializers/properties/key/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+if(data2.value !== undefined){
+if(typeof data2.value !== "function"){
+const err8 = {instancePath:instancePath+"/deserializers/value",schemaPath:"#/properties/deserializers/properties/value/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+if(data2.headerKey !== undefined){
+if(typeof data2.headerKey !== "function"){
+const err9 = {instancePath:instancePath+"/deserializers/headerKey",schemaPath:"#/properties/deserializers/properties/headerKey/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+if(data2.headerValue !== undefined){
+if(typeof data2.headerValue !== "function"){
+const err10 = {instancePath:instancePath+"/deserializers/headerValue",schemaPath:"#/properties/deserializers/properties/headerValue/function",keyword:"function",params:{},message:"must be function"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+}
+else {
+const err11 = {instancePath:instancePath+"/deserializers",schemaPath:"#/properties/deserializers/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+if(data.minBytes !== undefined){
+let data7 = data.minBytes;
+if(!(((typeof data7 == "number") && (!(data7 % 1) && !isNaN(data7))) && (isFinite(data7)))){
+const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 < 0 || isNaN(data7)){
+const err13 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+}
+}
+if(data.maxBytes !== undefined){
+let data8 = data.maxBytes;
+if(!(((typeof data8 == "number") && (!(data8 % 1) && !isNaN(data8))) && (isFinite(data8)))){
+const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 < 0 || isNaN(data8)){
+const err15 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+}
+}
+if(data.maxWaitTime !== undefined){
+let data9 = data.maxWaitTime;
+if(!(((typeof data9 == "number") && (!(data9 % 1) && !isNaN(data9))) && (isFinite(data9)))){
+const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 < 0 || isNaN(data9)){
+const err17 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+}
+}
+if(data.maxRecords !== undefined){
+let data10 = data.maxRecords;
+if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
+const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+if((typeof data10 == "number") && (isFinite(data10))){
+if(data10 < 1 || isNaN(data10)){
+const err19 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+}
+}
+if(data.highWaterMark !== undefined){
+let data11 = data.highWaterMark;
+if(!(((typeof data11 == "number") && (!(data11 % 1) && !isNaN(data11))) && (isFinite(data11)))){
+const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+if((typeof data11 == "number") && (isFinite(data11))){
+if(data11 < 1 || isNaN(data11)){
+const err21 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
+}
+errors++;
+}
+}
+}
+}
+else {
+const err22 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err22];
+}
+else {
+vErrors.push(err22);
+}
+errors++;
+}
+validate60.errors = vErrors;
+return errors === 0;
+}
+validate60.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};

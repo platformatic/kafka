@@ -26,6 +26,8 @@ export const loggers: Record<string, debug.Debugger> = {
   producer: debug('plt:kafka:producer'),
   consumer: debug('plt:kafka:consumer'),
   'consumer:heartbeat': debug('plt:kafka:consumer:heartbeat'),
+  'share-consumer': debug('plt:kafka:share-consumer'),
+  'share-consumer:heartbeat': debug('plt:kafka:share-consumer:heartbeat'),
   admin: debug('plt:kafka:admin')
 }
 

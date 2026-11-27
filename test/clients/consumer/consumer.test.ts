@@ -7612,6 +7612,34 @@ test('group loss should not report an initial join failure or voluntary leave', 
   strictEqual(losses.length, 0)
 })
 
+test('a late UNKNOWN_MEMBER_ID from OffsetCommit should preserve the rejoined membership', async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t, { protocols: [{ name: COOPERATIVE_STICKY_ASSIGNOR, version: 3 }] })
+  consumer.topics.track(topic)
+  const firstMember = await consumer.joinGroup()
+
+  const request = Promise.withResolvers<() => void>()
+  mockAPI(consumer[kConnections], offsetCommitV9.api.key, null, null, (_original, ...args) => {
+    request.resolve(() => args.at(-1)(new ProtocolError('UNKNOWN_MEMBER_ID')))
+  })
+  const commit = consumer.commit({ offsets: [{ topic, partition: 0, offset: 1n, leaderEpoch: -1 }] })
+  const reply = await request.promise
+
+  await consumer.leaveGroup()
+  const rejoinedMember = await consumer.joinGroup()
+  ok(rejoinedMember && rejoinedMember !== firstMember)
+
+  // Inspect the membership before the recovery JoinGroup can replace it or restore assignments.
+  mockAPI(consumer[kConnections], joinGroupV9.api.key, null, null, (original, ...args) => {
+    strictEqual(consumer.memberId, rejoinedMember)
+    deepStrictEqual(consumer.assignments, [{ topic, partitions: [0] }])
+    original(...args)
+  })
+  reply()
+  await commit
+  strictEqual(consumer.memberId, rejoinedMember)
+})
+
 test('group loss should report a failed commit-triggered rejoin', async t => {
   const consumer = createConsumer(t, { autocommit: false, retries: 1 })
   const topic = await createTopic(t, true)

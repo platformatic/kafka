@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import { kClosed, kConnections, kMetadata } from '../../../src/clients/base/base.ts'
-import { consumerGroupHeartbeatV0 } from '../../../src/apis/index.ts'
+import { consumerGroupHeartbeatV0, offsetCommitV9 } from '../../../src/apis/index.ts'
 import {
   MultipleErrors,
   ProduceAcks,
+  ProtocolError,
   ResponseError,
   sleep,
   TimeoutError,
@@ -236,6 +237,19 @@ test('consumer.close should close active streams with new consumer protocol', sk
     [],
     'closing the consumer must not emit any error on its streams'
   )
+})
+
+test('OffsetCommit UNKNOWN_MEMBER_ID should preserve the member ID', skipConsumerGroupProtocol, async t => {
+  const topic = await createTopic(t, true)
+  const consumer = createConsumer(t, { groupProtocol: 'consumer', autocommit: false })
+  const stream = await consumer.consume({ topics: [topic] })
+  t.after(() => stream.close())
+  const memberId = consumer.memberId
+  ok(memberId)
+
+  mockAPI(consumer[kConnections], offsetCommitV9.api.key, new ProtocolError('UNKNOWN_MEMBER_ID'))
+  await consumer.commit({ offsets: [{ topic, partition: 0, offset: 1n, leaderEpoch: -1 }] })
+  strictEqual(consumer.memberId, memberId)
 })
 
 test('consumer should handle fenced member epoch error', skipConsumerGroupProtocol, async t => {

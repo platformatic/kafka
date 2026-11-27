@@ -277,8 +277,9 @@ export class ShareConsumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Hea
       return callback[kCallbackPromise]
     }
 
-    // As in the Consumer, only force closes the stream, which releases its buffered records
-    if (this.#stream && !force) {
+    // As in the Consumer, only force closes the stream, which releases its buffered records.
+    // A call made while a forced leave is closing the stream waits for that leave.
+    if (this.#stream && !force && this.#state !== 'leaving') {
       callback(new UserError('Cannot leave group while consuming messages.'))
       return callback[kCallbackPromise]
     }

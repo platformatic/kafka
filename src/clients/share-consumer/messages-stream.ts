@@ -3,6 +3,7 @@ import {
   type CallbackWithPromise,
   createPromisifiedCallback,
   kCallbackPromise,
+  noopCallback,
   runConcurrentCallbacks
 } from '../../apis/callbacks.ts'
 import { type ShareAcknowledgeResponse } from '../../apis/consumer/share-acknowledge-v2.ts'
@@ -15,7 +16,7 @@ import {
   type ShareFetchResponsePartition
 } from '../../apis/consumer/share-fetch-v2.ts'
 import { ShareAcknowledgeTypes, ShareAcquireModes } from '../../apis/enumerations.ts'
-import { findErrorBy, type GenericError, ProtocolError, UserError } from '../../errors.ts'
+import { findErrorBy, type GenericError, MultipleErrors, ProtocolError, UserError } from '../../errors.ts'
 import { type Callback } from '../../apis/definitions.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker } from '../../network/connection.ts'
@@ -71,6 +72,8 @@ interface ShareSession {
   acknowledgements: Map<string, PendingAcknowledgements>
   failures: number
   retryTimeout: NodeJS.Timeout | null
+  // Closing the stream waits for the request inflight, so that the acknowledgements of a failed one are not lost
+  onSettled: (() => void) | null
 }
 
 // A record which was pushed to the stream, but not handed to the application yet
@@ -172,7 +175,14 @@ export class ShareMessagesStream<
   #deserializersUseHeaders: boolean
   #sessions: Map<number, ShareSession>
   #buffered: Map<ShareMessage<Key, Value, HeaderKey, HeaderValue>, BufferedRecord>
+  // A session is only closed once none of its records is buffered, since closing it releases them
+  #bufferedPerNode: Map<number, number>
+  // Topics of the assignment which do not exist anymore, until the heartbeats bring a new assignment
+  #missingTopics: Set<string>
+  #missingTopicsAssignment: GroupAssignment[] | null
   #closing: boolean
+  // Records are only fetched once the stream has been read
+  #readRequested: boolean
   // The buffer is full, so the loop waits for _read
   #waitingForRead: boolean
   #onHeartbeat: () => void;
@@ -203,13 +213,19 @@ export class ShareMessagesStream<
       !dataOnlyDeserializers.has(this.#keyDeserializer) || !dataOnlyDeserializers.has(this.#valueDeserializer)
     this.#sessions = new Map()
     this.#buffered = new Map()
+    this.#bufferedPerNode = new Map()
+    this.#missingTopics = new Set()
+    this.#missingTopicsAssignment = null
     this.#closing = false
+    this.#readRequested = false
     this.#waitingForRead = false
     this[kConnections] = consumer[kCreateConnectionPool]()
 
-    // The assignment arrives with the heartbeats, so they restart a fetch loop waiting for one
+    // The assignment arrives with the heartbeats, so they restart a fetch loop waiting for one. They also send the
+    // acknowledgements of a loop which is stopped, for instance by a full buffer, before the acquisition locks expire.
     this.#onHeartbeat = () => {
       this.#fetch()
+      this.#flushAcknowledgements()
     }
 
     consumer.on('share-consumer:heartbeat:end', this.#onHeartbeat)
@@ -269,8 +285,8 @@ export class ShareMessagesStream<
 
   // Every record reaches the application through a data event, whether the stream is read with an async iterator,
   // a data listener or a pipe. That is when it is acknowledged.
-  emit (event: string | symbol, ...args: any[]): boolean {
-    if (event === 'data') {
+  emit (event: string | symbol, ...args: unknown[]): boolean {
+    if (event === 'data' && args[0] instanceof ShareConsumedMessage) {
       this.#delivered(args[0])
     }
 
@@ -278,6 +294,7 @@ export class ShareMessagesStream<
   }
 
   _read (): void {
+    this.#readRequested = true
     this.#waitingForRead = false
     this.#fetch()
   }
@@ -306,7 +323,7 @@ export class ShareMessagesStream<
 
   #fetch (): void {
     // Nobody is reading or the buffer is full: _read restarts the loop
-    if (this.#closing || this.destroyed || this.readableFlowing === null || this.#waitingForRead) {
+    if (this.#closing || this.destroyed || !this.#readRequested || this.#waitingForRead) {
       return
     }
 
@@ -317,19 +334,34 @@ export class ShareMessagesStream<
 
     const assignments = this.#consumer.assignments ?? []
 
-    if (!assignments.length) {
+    if (assignments !== this.#missingTopicsAssignment) {
+      this.#missingTopics.clear()
+      this.#missingTopicsAssignment = assignments
+    }
+
+    const existing = assignments.filter(assignment => !this.#missingTopics.has(assignment.topic))
+
+    if (!existing.length) {
       this.#sendRequests(new Map())
       return
     }
 
-    this.#consumer[kMetadata]({ topics: assignments.map(assignment => assignment.topic) }, (error, metadata) => {
+    this.#consumer[kMetadata]({ topics: existing.map(assignment => assignment.topic) }, (error, metadata) => {
       if (this.#closing || this.destroyed) {
         return
       }
 
-      // A topic of the assignment was deleted: the next heartbeat removes it from the assignment
-      if (error instanceof UserError) {
-        this.#fetchExistingTopics(assignments)
+      // A topic of the assignment was deleted: it is left out until the heartbeats bring a new assignment
+      if (error instanceof UserError && findErrorBy(error, 'apiId', 'UNKNOWN_TOPIC_OR_PARTITION')) {
+        const missing = (error as UserError & { topic?: string }).topic
+
+        if (missing && assignments === this.#missingTopicsAssignment) {
+          this.#missingTopics.add(missing)
+          process.nextTick(() => {
+            this.#fetch()
+          })
+        }
+
         return
       }
 
@@ -338,55 +370,18 @@ export class ShareMessagesStream<
         return
       }
 
-      this.#sendRequests(this.#partitionsByLeader(assignments.map(assignment => [assignment, metadata!])))
+      this.#sendRequests(this.#partitionsByLeader(metadata!, existing))
     })
   }
 
-  // Each topic is looked up on its own, so that the others are still fetched and acknowledged
-  #fetchExistingTopics (assignments: GroupAssignment[]): void {
-    runConcurrentCallbacks<ClusterMetadata | null, GroupAssignment>(
-      'Loading the metadata failed.',
-      assignments,
-      (assignment, concurrentCallback) => {
-        this.#consumer[kMetadata]({ topics: [assignment.topic] }, (error, metadata) => {
-          // Loading the metadata fails with a UserError when the topic does not exist
-          if (error instanceof UserError) {
-            concurrentCallback(null, null)
-            return
-          }
-
-          concurrentCallback(error, metadata)
-        })
-      },
-      (error, metadata) => {
-        if (this.#closing || this.destroyed) {
-          return
-        }
-
-        if (error) {
-          this.destroy(error)
-          return
-        }
-
-        const existing: Array<[GroupAssignment, ClusterMetadata]> = []
-        for (let i = 0; i < assignments.length; i++) {
-          if (metadata![i]) {
-            existing.push([assignments[i], metadata![i]!])
-          }
-        }
-
-        this.#sendRequests(this.#partitionsByLeader(existing))
-      }
-    )
-  }
-
   #partitionsByLeader (
-    assignments: Array<[GroupAssignment, ClusterMetadata]>
+    metadata: ClusterMetadata,
+    assignments: GroupAssignment[]
   ): Map<number, Map<string, SharePartition>> {
     const partitionsByLeader = new Map<number, Map<string, SharePartition>>()
     const brokers = new Map<number, Broker>()
 
-    for (const [{ topic, partitions }, metadata] of assignments) {
+    for (const { topic, partitions } of assignments) {
       const { id: topicId, partitions: topicPartitions } = metadata.topics.get(topic)!
 
       for (const partition of partitions) {
@@ -423,12 +418,103 @@ export class ShareMessagesStream<
   }
 
   #sendRequests (partitionsByLeader: Map<number, Map<string, SharePartition>>): void {
-    // Sessions on brokers which no longer lead any assigned partition still send their acknowledgements
+    for (const session of Array.from(this.#sessions.values())) {
+      if (session.inflight || session.retryTimeout) {
+        continue
+      }
+
+      const wanted = partitionsByLeader.get(session.nodeId)
+
+      // The broker leads no assigned partition anymore, and no record of the session is left to acknowledge.
+      // The session is closed so that it does not keep a slot in the share session cache of the broker.
+      if (
+        !wanted &&
+        !session.partitions.size &&
+        !session.acknowledgements.size &&
+        !this.#bufferedPerNode.get(session.nodeId)
+      ) {
+        this.#sessions.delete(session.nodeId)
+
+        if (session.epoch > 0) {
+          this.#closeSession(session, noopCallback)
+        }
+
+        continue
+      }
+
+      // Sessions on brokers which no longer lead any assigned partition still send their acknowledgements
+      this.#shareFetch(session, wanted ?? new Map())
+    }
+  }
+
+  // Sends the acknowledgements of the sessions which are not sending anything else
+  #flushAcknowledgements (): void {
+    if (this.#closing || this.destroyed || !this.#consumer.isActive()) {
+      return
+    }
+
     for (const session of this.#sessions.values()) {
-      if (!session.inflight && !session.retryTimeout) {
-        this.#shareFetch(session, partitionsByLeader.get(session.nodeId) ?? new Map())
+      if (!session.inflight && !session.retryTimeout && session.acknowledgements.size) {
+        this.#sendAcknowledgements(session)
       }
     }
+  }
+
+  #sendAcknowledgements (session: ShareSession): void {
+    session.inflight = true
+
+    // Acknowledgements cannot be sent with the request which opens a session
+    if (session.epoch === 0) {
+      this.#sendShareFetch(session, 0, [], [], (error, response) => {
+        this.#handleShareFetch(session, [], [], new Map(), error, response, () => {
+          this.#sendAcknowledgements(session)
+        })
+      })
+      return
+    }
+
+    const acknowledgements = session.acknowledgements
+    session.acknowledgements = new Map()
+
+    this.#sendShareAcknowledge(session, session.epoch, acknowledgements, (error, response) => {
+      session.inflight = false
+
+      // The acknowledgement errors of the partitions come with the response
+      const errorResponse = (error as GenericError | null)?.response as ShareAcknowledgeResponse | undefined
+      if (errorResponse?.errorCode === 0) {
+        error = null
+        response = errorResponse
+      }
+
+      if (!error) {
+        session.epoch = nextSessionEpoch(session.epoch)
+        this.#reportAcknowledgementErrors(acknowledgements, response!)
+      }
+
+      // Closing the stream sends the acknowledgements of a failed request again
+      if (this.#closing || this.destroyed) {
+        if (error) {
+          this.#requeue(session, acknowledgements)
+
+          if (isSessionLost(error)) {
+            session.epoch = 0
+          }
+        }
+
+        this.#settle(session)
+        return
+      }
+
+      if (error) {
+        this.#handleShareFetchError(session, acknowledgements, error)
+        return
+      }
+
+      session.failures = 0
+      process.nextTick(() => {
+        this.#fetch()
+      })
+    })
   }
 
   #shareFetch (session: ShareSession, wanted: Map<string, SharePartition>): void {
@@ -554,14 +640,10 @@ export class ShareMessagesStream<
     removed: SharePartition[],
     acknowledgements: Map<string, PendingAcknowledgements>,
     error: Error | null,
-    response?: ShareFetchResponse
+    response?: ShareFetchResponse,
+    onOpened?: () => void
   ): void {
     session.inflight = false
-
-    // The records acquired by this request are released when the session is closed
-    if (this.#closing || this.destroyed) {
-      return
-    }
 
     // The response of a failed partition or acknowledgement still holds the records acquired for the other partitions
     const errorResponse = (error as GenericError | null)?.response as ShareFetchResponse | undefined
@@ -570,12 +652,34 @@ export class ShareMessagesStream<
       response = errorResponse
     }
 
+    // The records acquired by this request are released when the session is closed, which also sends the
+    // acknowledgements of a failed request
+    if (this.#closing || this.destroyed) {
+      if (error) {
+        this.#requeue(session, acknowledgements)
+
+        if (isSessionLost(error)) {
+          session.epoch = 0
+        }
+      } else {
+        session.epoch = nextSessionEpoch(session.epoch)
+      }
+
+      this.#settle(session)
+      return
+    }
+
     if (error) {
       this.#handleShareFetchError(session, acknowledgements, error)
       return
     }
 
-    session.epoch = session.epoch === maxSessionEpoch ? 1 : session.epoch + 1
+    session.epoch = nextSessionEpoch(session.epoch)
+
+    if (onOpened) {
+      onOpened()
+      return
+    }
 
     const partitions = new Map<string, SharePartition>()
     for (const partition of sent) {
@@ -588,7 +692,7 @@ export class ShareMessagesStream<
     }
 
     let canPush = true
-    let partitionError: Error | null = null
+    const partitionErrors: Error[] = []
 
     for (const { topicId, partitions: partitionResponses } of response!.responses) {
       for (const partitionResponse of partitionResponses) {
@@ -609,7 +713,7 @@ export class ShareMessagesStream<
         }
 
         if (partitionResponse.errorCode !== 0) {
-          partitionError ??= new ProtocolError(partitionResponse.errorCode, partitionResponse.errorMessage)
+          partitionErrors.push(new ProtocolError(partitionResponse.errorCode, partitionResponse.errorMessage))
           continue
         }
 
@@ -625,11 +729,17 @@ export class ShareMessagesStream<
       this.#waitingForRead = true
     }
 
-    // The other partitions of the session wait too, so that a failing partition does not make the loop spin
-    if (partitionError) {
+    // The other partitions of the session wait too, so that a failing partition does not make the loop spin.
+    // All the errors are kept, so that one which cannot be retried is not hidden by one which can.
+    if (partitionErrors.length) {
       // The leader moved, or the topic was deleted or recreated
       this.#consumer.clearMetadata()
-      this.#retryLater(session, partitionError)
+      this.#retryLater(
+        session,
+        partitionErrors.length === 1
+          ? partitionErrors[0]
+          : new MultipleErrors('Fetching some partitions failed.', partitionErrors)
+      )
       return
     }
 
@@ -648,23 +758,15 @@ export class ShareMessagesStream<
     error: Error
   ): void {
     // The records stay locked for the member, so the acknowledgements of the failed request are sent again
-    for (const { partition, ranges } of acknowledgements.values()) {
-      for (const { firstOffset, lastOffset, type } of ranges) {
-        this.#acknowledge(session, partition, firstOffset, lastOffset, type)
-      }
-    }
+    this.#requeue(session, acknowledgements)
 
     if (findErrorBy(error, 'hasStaleMetadata', true)) {
       this.#consumer.clearMetadata()
     }
 
-    const sessionLost =
-      findErrorBy(error, 'apiId', 'SHARE_SESSION_NOT_FOUND') ||
-      findErrorBy(error, 'apiId', 'INVALID_SHARE_SESSION_EPOCH')
-
     // The broker might not know the session anymore, or the request might have changed its epoch: a new one is opened.
     // The session is only replaced when retrying, so that closing the stream still closes it on the broker.
-    if (this.#retryLater(session, error, !!sessionLost)) {
+    if (this.#retryLater(session, error, isSessionLost(error))) {
       const replacement = this.#createSession(session.nodeId, session.broker)
       replacement.failures = session.failures
       replacement.acknowledgements = session.acknowledgements
@@ -758,6 +860,7 @@ export class ShareMessagesStream<
 
         // Tracked before pushing, as push can emit the data event synchronously
         this.#buffered.set(message, { nodeId: session.nodeId, partition, offset })
+        this.#bufferedPerNode.set(session.nodeId, (this.#bufferedPerNode.get(session.nodeId) ?? 0) + 1)
         canPush = this.push(message)
       }
     }
@@ -842,6 +945,7 @@ export class ShareMessagesStream<
 
     this.#buffered.delete(message)
     const { nodeId, partition, offset } = buffered
+    this.#bufferedPerNode.set(nodeId, this.#bufferedPerNode.get(nodeId)! - 1)
     this.#acknowledge(this.#sessions.get(nodeId)!, partition, offset, offset, ShareAcknowledgeTypes.ACCEPT)
   }
 
@@ -851,6 +955,21 @@ export class ShareMessagesStream<
     }
 
     this.#buffered.clear()
+    this.#bufferedPerNode.clear()
+  }
+
+  #requeue (session: ShareSession, acknowledgements: Map<string, PendingAcknowledgements>): void {
+    for (const { partition, ranges } of acknowledgements.values()) {
+      for (const { firstOffset, lastOffset, type } of ranges) {
+        this.#acknowledge(session, partition, firstOffset, lastOffset, type)
+      }
+    }
+  }
+
+  #settle (session: ShareSession): void {
+    const onSettled = session.onSettled
+    session.onSettled = null
+    onSettled?.()
   }
 
   #acknowledge (
@@ -872,9 +991,17 @@ export class ShareMessagesStream<
 
   #closeSession (session: ShareSession, callback: CallbackWithPromise<void>): void {
     clearTimeout(session.retryTimeout!)
+    session.retryTimeout = null
 
-    // A session being opened by a request still inflight is closed too, as the broker handles the requests in order
-    if (session.epoch === 0 && !session.inflight) {
+    // The request inflight is awaited, so that the acknowledgements of a failed one are sent with the closing request
+    if (session.inflight) {
+      session.onSettled = () => {
+        this.#closeSession(session, callback)
+      }
+      return
+    }
+
+    if (session.epoch === 0) {
       if (!session.acknowledgements.size) {
         callback(null)
         return
@@ -893,8 +1020,30 @@ export class ShareMessagesStream<
       return
     }
 
+    const acknowledgements = session.acknowledgements
+    session.acknowledgements = new Map()
+
+    // A session epoch of -1 closes the session after the acknowledgements. Errors are ignored: if the session is not
+    // closed, the broker releases the records when their lock expires.
+    this.#sendShareAcknowledge(session, -1, acknowledgements, (error, response) => {
+      response ??= (error as GenericError | null)?.response as ShareAcknowledgeResponse | undefined
+
+      if (response) {
+        this.#reportAcknowledgementErrors(acknowledgements, response)
+      }
+
+      callback(null)
+    })
+  }
+
+  #sendShareAcknowledge (
+    session: ShareSession,
+    epoch: number,
+    acknowledgements: Map<string, PendingAcknowledgements>,
+    callback: Callback<ShareAcknowledgeResponse>
+  ): void {
     const topics = new Map<string, ShareFetchRequestTopic>()
-    for (const { partition, ranges } of session.acknowledgements.values()) {
+    for (const { partition, ranges } of acknowledgements.values()) {
       let topic = topics.get(partition.topicId)
       if (!topic) {
         topic = { topicId: partition.topicId, partitions: [] }
@@ -907,32 +1056,9 @@ export class ShareMessagesStream<
       })
     }
 
-    const partitions = new Map([
-      ...session.partitions,
-      ...Array.from(session.acknowledgements, ([key, { partition }]) => [key, partition] as const)
-    ])
-    session.acknowledgements = new Map()
-
-    // Errors are ignored: if the session is not closed, the broker releases the records when their lock expires
-    const finish = (error: Error | null, response?: ShareAcknowledgeResponse) => {
-      response ??= (error as GenericError | null)?.response as ShareAcknowledgeResponse | undefined
-
-      for (const { topicId, partitions: partitionResponses } of response?.responses ?? []) {
-        for (const { partitionIndex, errorCode, errorMessage } of partitionResponses) {
-          const partition = partitions.get(`${topicId}:${partitionIndex}`)
-
-          if (errorCode !== 0 && partition) {
-            this.#acknowledgementFailed(partition, errorCode, errorMessage)
-          }
-        }
-      }
-
-      callback(null)
-    }
-
     this[kConnections].get(session.broker, (error, connection) => {
       if (error) {
-        finish(error)
+        callback(error)
         return
       }
 
@@ -941,19 +1067,33 @@ export class ShareMessagesStream<
         api
       ) => {
         if (error) {
-          finish(error)
+          callback(error)
           return
         }
 
-        // A session epoch of -1 closes the session after the acknowledgements
-        const request: ShareAcknowledgeRequestArguments = [this.#consumer.groupId, this.#consumer.memberId, -1]
+        const request: ShareAcknowledgeRequestArguments = [this.#consumer.groupId, this.#consumer.memberId, epoch]
         if (api!.version >= 2) {
           request.push(false)
         }
 
-        api!(connection!, ...request, Array.from(topics.values()), finish)
+        api!(connection!, ...request, Array.from(topics.values()), callback)
       })
     })
+  }
+
+  #reportAcknowledgementErrors (
+    acknowledgements: Map<string, PendingAcknowledgements>,
+    response: ShareAcknowledgeResponse
+  ): void {
+    for (const { topicId, partitions: partitionResponses } of response.responses) {
+      for (const { partitionIndex, errorCode, errorMessage } of partitionResponses) {
+        const pending = acknowledgements.get(`${topicId}:${partitionIndex}`)
+
+        if (errorCode !== 0 && pending) {
+          this.#acknowledgementFailed(pending.partition, errorCode, errorMessage)
+        }
+      }
+    }
   }
 
   #acknowledgementFailed (partition: SharePartition, errorCode: number, errorMessage: NullableString): void {
@@ -976,9 +1116,21 @@ export class ShareMessagesStream<
       partitions: new Map(),
       acknowledgements: new Map(),
       failures: 0,
-      retryTimeout: null
+      retryTimeout: null,
+      onSettled: null
     }
   }
+}
+
+function nextSessionEpoch (epoch: number): number {
+  return epoch === maxSessionEpoch ? 1 : epoch + 1
+}
+
+function isSessionLost (error: Error): boolean {
+  return (
+    !!findErrorBy(error, 'apiId', 'SHARE_SESSION_NOT_FOUND') ||
+    !!findErrorBy(error, 'apiId', 'INVALID_SHARE_SESSION_EPOCH')
+  )
 }
 
 // Adjacent offsets with the same type are acknowledged with a single batch

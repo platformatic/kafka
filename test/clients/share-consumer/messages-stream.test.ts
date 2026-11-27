@@ -27,6 +27,7 @@ import {
   type Connection,
   type ConnectionPool,
   IncrementalAlterConfigOperationTypes,
+  MultipleErrors,
   NetworkError,
   ProtocolError,
   protocolErrors,
@@ -34,6 +35,7 @@ import {
   ShareAcknowledgeTypes,
   ShareConsumer,
   type ShareConsumerAcknowledgementErrorPayload,
+  type ShareConsumeOptions,
   type ShareConsumerOptions,
   type ShareMessage,
   type ShareMessagesStream,
@@ -234,8 +236,9 @@ function scriptedFetch (...replies: Array<FetchReply | ((request: FetchRequest) 
     const next = replies.shift()
     const reply = typeof next === 'function' ? next(request) : next
 
-    // A null reply is never answered, like a fetch waiting on the broker
+    // A null reply is a fetch which waits on the broker and gets no records
     if (reply === null) {
+      setTimeout(() => callback(null, emptyFetch()), 100)
       return
     }
 
@@ -261,7 +264,10 @@ function acknowledgeResponse (): ShareAcknowledgeResponse {
   }
 }
 
-function mockShareNetwork (consumer: ShareConsumer<any, any, any, any>, options: NetworkOptions = {}): MockedNetwork {
+function mockShareNetwork (
+  consumer: ShareConsumer<string, string, string, string>,
+  options: NetworkOptions = {}
+): MockedNetwork {
   const topics = options.topics ?? { topic: { id: 'topic-id', leaders: [0] } }
   const fetchHandler = options.fetch ?? scriptedFetch()
   const acknowledgeHandler: AcknowledgeHandler =
@@ -460,7 +466,7 @@ function acknowledgedOffsets (requests: Array<FetchRequest | AcknowledgeRequest>
 }
 
 // Breaking out of a for await loop destroys the stream with an AbortError, which once() would reject with
-function closed (stream: ShareMessagesStream<any, any, any, any>): Promise<void> {
+function closed (stream: ShareMessagesStream<string, string, string, string>): Promise<void> {
   return new Promise(resolve => {
     if (stream.closed) {
       resolve()
@@ -579,8 +585,8 @@ test('records should only be accepted once the stream hands them to the applicat
       [13n, [RELEASE]]
     ])
   )
-  strictEqual(network.acknowledgements[0].epoch, -1)
-  deepStrictEqual(network.acknowledgements[0].extra, [false])
+  strictEqual(network.acknowledgements.at(-1)!.epoch, -1)
+  deepStrictEqual(network.acknowledgements.at(-1)!.extra, [false])
 })
 
 test('offsets of the acquired ranges without a record should be acknowledged as gaps', async t => {
@@ -645,7 +651,7 @@ test('the stream should fail when the broker does not support ShareFetch', async
       return
     }
 
-    getApi(name, callback as Callback<any>)
+    getApi(name, callback as Parameters<typeof getApi>[1])
   }
 
   stream.resume()
@@ -899,6 +905,30 @@ test('partition errors which can be retried should delay the session and fail th
   ok(Date.now() - started >= 80)
 })
 
+test('a partition error which cannot be retried should not be hidden by one which can', async t => {
+  const consumer = createShareConsumer(t)
+  const network = mockShareNetwork(consumer, {
+    topics: { topic: { id: 'topic-id', leaders: [0, 0] } },
+    fetch: scriptedFetch(
+      fetchResponse('topic-id', [
+        partitionResponse(0, [], [], { errorCode: protocolErrors.NOT_LEADER_OR_FOLLOWER.code }),
+        partitionResponse(1, [], [], { errorCode: protocolErrors.TOPIC_AUTHORIZATION_FAILED.code })
+      ])
+    )
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  stream.resume()
+
+  const [error] = await once(stream, 'error')
+  ok(error instanceof MultipleErrors)
+  deepStrictEqual(
+    error.errors.map((error: ProtocolError) => error.apiId),
+    ['NOT_LEADER_OR_FOLLOWER', 'TOPIC_AUTHORIZATION_FAILED']
+  )
+  strictEqual(network.fetches.length, 1)
+})
+
 test('partition errors which cannot be retried should fail the stream', async t => {
   const consumer = createShareConsumer(t)
   mockShareNetwork(consumer, {
@@ -1114,7 +1144,11 @@ test('the acknowledgement errors of closing a session should be emitted', async 
   consumer.on('share-consumer:acknowledgement:error', payload => errors.push(payload))
 
   const stream = await consumer.consume({ topics: ['topic'] })
-  await read(stream, 1)
+  strictEqual(stream.read(), null)
+  await waitFor(() => strictEqual(stream.readableLength, 1))
+
+  // The record is read while the next fetch waits on the broker, so the closing request acknowledges it
+  strictEqual(stream.read()!.value, 'a')
   await stream.close()
 
   strictEqual(errors.length, 1)
@@ -1154,10 +1188,9 @@ test('each leader should have its own session', async t => {
   const network = mockShareNetwork(consumer, {
     topics: { topic: { id: 'topic-id', leaders: [0, 1, 0] } },
     fetch (request, callback) {
-      // Only the first request to each broker is answered
-      if (network.fetches.filter(fetch => fetch.broker.host === request.broker.host).length === 1) {
-        setTimeout(() => callback(null, emptyFetch()), 2)
-      }
+      // The first request to each broker is answered right away, the others wait on the broker
+      const first = network.fetches.filter(fetch => fetch.broker.host === request.broker.host).length === 1
+      setTimeout(() => callback(null, emptyFetch()), first ? 2 : 100)
     }
   })
 
@@ -1165,7 +1198,7 @@ test('each leader should have its own session', async t => {
   stream.resume()
   await waitFor(() => ok(network.fetches.length === 4))
 
-  const byBroker = (host: string) => network.fetches.filter(request => request.broker.host === host)
+  const byBroker = (host: string) => network.fetches.filter(request => request.broker.host === host).slice(0, 2)
   deepStrictEqual(
     byBroker('broker-0').map(request => [request.epoch, partitionsOf(request)]),
     [
@@ -1237,7 +1270,7 @@ test('a revoked partition should be acknowledged and removed from the session wi
   })
 
   const stream = await consumer.consume({ topics: ['topic'], highWaterMark: 1 })
-  stream.pause()
+  strictEqual(stream.read(), null)
   await waitFor(() => strictEqual(stream.readableLength, 1))
 
   // Partition 0 is revoked while its record is in the buffer
@@ -1270,10 +1303,12 @@ test('the stream should not fetch while nobody is reading or the buffer is full'
   })
 
   const stream = await consumer.consume({ topics: ['topic'], highWaterMark: 2 })
+  stream.pause()
   await sleep(100)
   strictEqual(network.fetches.length, 0)
 
-  stream.pause()
+  // Reading starts fetching, even without a data or readable listener
+  strictEqual(stream.read(), null)
   await waitFor(() => ok(network.fetches.length === 1))
 
   // The buffer is above the high water mark: the heartbeats do not restart the loop
@@ -1313,7 +1348,12 @@ test('a topic of the assignment which was just deleted should not stop the other
   const network = mockShareNetwork(consumer, {
     topics: { topic: { id: 'topic-id', leaders: [0] }, other: { id: 'other-id', leaders: [0] } },
     metadata: options =>
-      deleted && options.topics!.includes('other') ? new UserError('Unknown topic other.') : undefined,
+      deleted && options.topics!.includes('other')
+        ? new UserError('Unknown topic other.', {
+          cause: new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION'),
+          topic: 'other'
+        })
+        : undefined,
     fetch: scriptedFetch(fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a'])], [[0n, 0n, 1]])]))
   })
 
@@ -1335,36 +1375,55 @@ test('a topic of the assignment which was just deleted should not stop the other
   )
   deepStrictEqual(acknowledgementsOf(network.fetches[1]), [[0, 0n, 0n, ACCEPT]])
   strictEqual(stream.destroyed, false)
+
+  // The missing topic is only looked up once until the assignment changes
+  await waitFor(() => ok(network.fetches.length >= 4))
+  strictEqual(
+    network.metadataRequests.filter(request => request.topics!.includes('other') && request.topics!.length > 1).length,
+    1
+  )
 })
 
-test('the stream should fail when the metadata of a single topic cannot be loaded', async t => {
+test('a missing topic without a name should wait for the next assignment', async t => {
   const consumer = createShareConsumer(t)
-  const failure = new NetworkError('Metadata failed.')
-  let fail = false
+  let deleted = false
   const network = mockShareNetwork(consumer, {
     topics: { topic: { id: 'topic-id', leaders: [0] }, other: { id: 'other-id', leaders: [0] } },
-    metadata (options) {
-      if (!fail) {
-        return undefined
-      }
-
-      return options.topics!.length > 1
-        ? new UserError('Unknown topic other.')
-        : options.topics![0] === 'other'
-          ? failure
-          : undefined
-    }
+    metadata: options =>
+      deleted && options.topics!.length > 1
+        ? new UserError('Unknown topic unknown.', { cause: new ProtocolError('UNKNOWN_TOPIC_OR_PARTITION') })
+        : undefined
   })
 
   const stream = await consumer.consume({ topics: ['topic', 'other'] })
   await waitFor(() => strictEqual(consumer.assignments?.length, 2))
   network.assignment = null
+  deleted = true
+  stream.resume()
+
+  await sleep(100)
+  strictEqual(network.fetches.length, 0)
+  strictEqual(stream.destroyed, false)
+
+  // The next assignment leaves the deleted topic out
+  network.assignment = [{ topicId: 'topic-id', partitions: [0] }]
+  await waitFor(() => ok(network.fetches.length >= 1))
+})
+
+test('other user errors of the metadata should fail the stream', async t => {
+  const consumer = createShareConsumer(t)
+  const failure = new UserError('Something else.')
+  let fail = false
+  const network = mockShareNetwork(consumer, { metadata: () => (fail ? failure : undefined) })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  await waitFor(() => strictEqual(consumer.assignments?.length, 1))
+  network.assignment = null
   fail = true
   stream.resume()
 
   const [error] = await once(stream, 'error')
-  strictEqual(error.errors[0], failure)
-  strictEqual(network.fetches.length, 0)
+  strictEqual(error, failure)
 })
 
 test('the stream should fail when the metadata cannot be loaded', async t => {
@@ -1443,7 +1502,13 @@ test('consume should validate the options', async t => {
     ok(error.message.includes('/options/maxWaitTime must be integer'))
     return true
   })
-  await rejects(consumer.consume({ topics: ['topic'], unknown: true } as any), (error: Error) => {
+  const unknownOption = { topics: ['topic'], unknown: true } as unknown as ShareConsumeOptions<
+    string,
+    string,
+    string,
+    string
+  >
+  await rejects(consumer.consume(unknownOption), (error: Error) => {
     ok(error.message.includes('must NOT have additional properties'))
     return true
   })
@@ -1691,6 +1756,275 @@ test('closing the stream should not fail when a replaced session cannot be opene
   await stream.close()
   strictEqual(network.fetches.length, 2)
   strictEqual(network.acknowledgements.length, 0)
+})
+
+test('acknowledgements should be sent with the heartbeats while the buffer is full', async t => {
+  const consumer = createShareConsumer(t)
+  const network = mockShareNetwork(consumer, {
+    fetch: scriptedFetch(
+      fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a', 'b', 'c'])], [[0n, 2n, 1]])])
+    )
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'], highWaterMark: 1 })
+  const iterator = stream[Symbol.asyncIterator]()
+  strictEqual((await iterator.next()).value!.value, 'a')
+
+  // The buffer is still full, so no fetch is sent, but the next heartbeat sends the acknowledgement
+  await waitFor(() => ok(network.acknowledgements.length === 1))
+  strictEqual(network.fetches.length, 1)
+  strictEqual(network.acknowledgements[0].epoch, 1)
+  deepStrictEqual(acknowledgementsOf(network.acknowledgements[0]), [[0, 0n, 0n, ACCEPT]])
+
+  strictEqual((await iterator.next()).value!.value, 'b')
+  await waitFor(() => ok(network.acknowledgements.length === 2))
+  strictEqual(network.acknowledgements[1].epoch, 2)
+  deepStrictEqual(acknowledgementsOf(network.acknowledgements[1]), [[0, 1n, 1n, ACCEPT]])
+
+  await iterator.return!()
+  await closed(stream)
+})
+
+test('acknowledgements sent with the heartbeats should be retried in a new session after an error', async t => {
+  const consumer = createShareConsumer(t)
+  let failures = 1
+  const network = mockShareNetwork(consumer, {
+    fetch: scriptedFetch(
+      fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a', 'b', 'c'])], [[0n, 2n, 1]])])
+    ),
+    acknowledge (request, callback) {
+      if (request.epoch !== -1 && failures-- > 0) {
+        callback(new NetworkError('Connection lost.'))
+        return
+      }
+
+      callback(null, acknowledgeResponse())
+    }
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'], highWaterMark: 1 })
+  const iterator = stream[Symbol.asyncIterator]()
+  strictEqual((await iterator.next()).value!.value, 'a')
+
+  // The replacement is opened without partitions, then sends the acknowledgement again
+  await waitFor(() => ok(network.acknowledgements.length === 2))
+  deepStrictEqual(
+    network.acknowledgements.map(request => [request.epoch, acknowledgementsOf(request)]),
+    [
+      [1, [[0, 0n, 0n, ACCEPT]]],
+      [1, [[0, 0n, 0n, ACCEPT]]]
+    ]
+  )
+  deepStrictEqual(
+    network.fetches.map(request => [request.epoch, request.topics.length, request.maxWaitMs]),
+    [
+      [0, 1, 10],
+      [0, 0, 0]
+    ]
+  )
+
+  await iterator.return!()
+  await closed(stream)
+})
+
+test('closing the stream should wait for the request inflight and keep the acknowledgements of a failed one', async t => {
+  const consumer = createShareConsumer(t)
+  let fail: (error: Error) => void
+  const network = mockShareNetwork(consumer, {
+    fetch (request, callback) {
+      if (request.epoch === 0 && network.fetches.length === 1) {
+        setTimeout(() => {
+          callback(
+            null,
+            fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a', 'b'])], [[0n, 1n, 1]])])
+          )
+        }, 2)
+        return
+      }
+
+      if (request.epoch === 0) {
+        setTimeout(() => callback(null, emptyFetch()), 2)
+        return
+      }
+
+      fail = callback
+    }
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  stream.on('data', () => {})
+
+  // The request with the acknowledgements is inflight when the stream is closed
+  await waitFor(() => ok(network.fetches.length === 2))
+  deepStrictEqual(acknowledgementsOf(network.fetches[1]), [[0, 0n, 1n, ACCEPT]])
+  const closing = stream.close()
+
+  await sleep(20)
+  strictEqual(network.acknowledgements.length, 0)
+
+  // The broker lost the session: a new one is opened to send the acknowledgements and close it
+  fail!(
+    new ResponseError(
+      78,
+      2,
+      { '/': [protocolErrors.INVALID_SHARE_SESSION_EPOCH.code, null] },
+      {
+        ...emptyFetch(),
+        errorCode: protocolErrors.INVALID_SHARE_SESSION_EPOCH.code
+      }
+    )
+  )
+  await closing
+
+  deepStrictEqual(
+    network.fetches.slice(2).map(request => [request.epoch, request.topics]),
+    [[0, []]]
+  )
+  deepStrictEqual(
+    network.acknowledgements.map(request => [request.epoch, acknowledgementsOf(request)]),
+    [[-1, [[0, 0n, 1n, ACCEPT]]]]
+  )
+})
+
+test('closing the stream should keep the acknowledgements of a failed request sent with the heartbeats', async t => {
+  const consumer = createShareConsumer(t)
+  let fail: (error: Error) => void
+  const network = mockShareNetwork(consumer, {
+    fetch: scriptedFetch(
+      fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a', 'b', 'c'])], [[0n, 2n, 1]])])
+    ),
+    acknowledge (request, callback) {
+      if (request.epoch !== -1) {
+        fail = callback
+        return
+      }
+
+      callback(null, acknowledgeResponse())
+    }
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'], highWaterMark: 1 })
+  const iterator = stream[Symbol.asyncIterator]()
+  strictEqual((await iterator.next()).value!.value, 'a')
+
+  // The acknowledgement sent with the heartbeats is inflight when the stream is closed
+  await waitFor(() => ok(network.acknowledgements.length === 1))
+  const closing = iterator.return!()
+  await sleep(20)
+  strictEqual(network.acknowledgements.length, 1)
+
+  fail!(new NetworkError('Connection lost.'))
+  await closing
+  await closed(stream)
+
+  deepStrictEqual(
+    network.acknowledgements.map(request => [request.epoch, acknowledgementsOf(request)]),
+    [
+      [1, [[0, 0n, 0n, ACCEPT]]],
+      [
+        -1,
+        [
+          [0, 0n, 0n, ACCEPT],
+          [0, 1n, 2n, RELEASE]
+        ]
+      ]
+    ]
+  )
+})
+
+test('closing the stream should send the acknowledgements of a request which failed for another reason', async t => {
+  const consumer = createShareConsumer(t)
+  let fail: (error: Error) => void
+  const network = mockShareNetwork(consumer, {
+    fetch (request, callback) {
+      if (request.epoch === 0) {
+        setTimeout(() => {
+          callback(null, fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a'])], [[0n, 0n, 1]])]))
+        }, 2)
+        return
+      }
+
+      fail = callback
+    }
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  stream.on('data', () => {})
+  await waitFor(() => ok(network.fetches.length === 2))
+
+  const closing = stream.close()
+  await sleep(20)
+  fail!(new NetworkError('Request timed out.'))
+  await closing
+
+  strictEqual(network.fetches.length, 2)
+  deepStrictEqual(
+    network.acknowledgements.map(request => [request.epoch, acknowledgementsOf(request)]),
+    [[-1, [[0, 0n, 0n, ACCEPT]]]]
+  )
+})
+
+test('a session should be closed once its broker leads no assigned partition and nothing is left to acknowledge', async t => {
+  const consumer = createShareConsumer(t)
+  const network = mockShareNetwork(consumer, {
+    topics: { topic: { id: 'topic-id', leaders: [0, 1] } },
+    fetch (request, callback) {
+      const first = network.fetches.filter(fetch => fetch.broker.host === request.broker.host).length === 1
+      const response =
+        first && request.broker.host === 'broker-1'
+          ? fetchResponse('topic-id', [partitionResponse(1, [recordsBatch(0n, ['x'])], [[0n, 0n, 1]])])
+          : emptyFetch()
+
+      setTimeout(() => callback(null, response), 2)
+    }
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  strictEqual(stream.read(), null)
+  await waitFor(() => strictEqual(stream.readableLength, 1))
+
+  // Partition 1 is revoked while its record is still in the buffer
+  network.assignment = [{ topicId: 'topic-id', partitions: [0] }]
+  await waitFor(() => {
+    ok(
+      network.fetches.some(
+        request => request.broker.host === 'broker-1' && request.forgotten.length && !acknowledgementsOf(request).length
+      )
+    )
+  })
+
+  // The session is kept until the record is read and acknowledged
+  await sleep(50)
+  strictEqual(network.acknowledgements.length, 0)
+
+  strictEqual(stream.read()!.value, 'x')
+  await waitFor(() => ok(network.acknowledgements.length === 1))
+  const acknowledged = network.fetches.find(
+    request => request.broker.host === 'broker-1' && acknowledgementsOf(request).length
+  )
+  deepStrictEqual(acknowledgementsOf(acknowledged!), [[1, 0n, 0n, ACCEPT]])
+  deepStrictEqual(
+    [network.acknowledgements[0].broker.host, network.acknowledgements[0].epoch, network.acknowledgements[0].topics],
+    ['broker-1', -1, []]
+  )
+
+  // Nothing else is sent to that broker
+  const sent = network.fetches.filter(request => request.broker.host === 'broker-1').length
+  await sleep(50)
+  strictEqual(network.fetches.filter(request => request.broker.host === 'broker-1').length, sent)
+})
+
+test('leaveGroup without force should wait for a forced leave in progress', async t => {
+  const consumer = createShareConsumer(t)
+  const network = mockShareNetwork(consumer)
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  stream.resume()
+  await waitFor(() => ok(network.fetches.length >= 1))
+
+  await Promise.all([consumer.leaveGroup(true), consumer.leaveGroup()])
+  strictEqual(stream.closed, true)
+  strictEqual(consumer.isActive(), false)
 })
 
 test('messages should deserialize headers and convert to JSON', async t => {

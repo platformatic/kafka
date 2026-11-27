@@ -101,7 +101,7 @@ for await (const message of stream) {
 
 #### Acknowledgements
 
-The records are acknowledged implicitly. A record is accepted once the stream hands it to the application, whether the stream is read with `for await`, a `data` listener or a pipe. The acknowledgement is sent with the next fetch to the same broker, or when the stream is closed. A fetch can wait up to `maxWaitTime` on the broker, so an acknowledgement can wait as long, and so can `close()`.
+The records are acknowledged implicitly. A record is accepted once the stream hands it to the application, whether the stream is read with `for await`, a `data` listener or a pipe. The acknowledgement is sent with the next fetch to the same broker, or when the stream is closed. A fetch can wait up to `maxWaitTime` on the broker, so an acknowledgement can wait as long, and so can `close()`. When the buffer is full and the stream stops fetching, the acknowledgements are sent with each heartbeat instead.
 
 An accepted record is never delivered again to any member of the group. So if the processing of a record fails, or the process crashes while handling it, the record is lost.
 

@@ -72,7 +72,7 @@ Options:
 | partitionAssigner               | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Built-in assigners are `roundRobinAssigner` and `cooperativeStickyAssigner`. Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                     |
 | partitionAssignerTopicsSelector | `GroupPartitionsAssignerTopicsSelector`                      |                           | Selects the topic metadata required by a custom `partitionAssigner`. By default, metadata for every member's subscribed topics is required. Return `[]` to request no topic metadata for assignment. Not supported for `groupProtocol=consumer`.                                                                                                                                                     |
 | streamContext                   | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
-| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds for the group leave step during `close()`, for either group protocol. Set to `0` to skip the leave request. When omitted, the existing `requestTimeout` applies. |
+| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds to wait for a leave request during [`close()`](#closeforce-callback). `0` skips the request, including the temporary leave heartbeat for static members. Defaults to `requestTimeout`. |
 
 It also supports all the constructor options of `Base`.
 
@@ -338,9 +338,11 @@ If `force` is `true`, then the method will close all `MessagesStream` created fr
 
 The return value is `void`.
 
-The `leaveGroupTimeout` constructor option bounds only the group leave step, after active streams have been closed. It accepts a non-negative number of milliseconds and applies to both group protocols. When omitted, the existing `requestTimeout` applies.
+A dynamic member leaves the group on close so its partitions can be reassigned immediately. For a static member (`groupInstanceId` set), the broker keeps its assignment until the session timeout. With `groupProtocol: 'classic'`, the consumer stops heartbeating without sending `LeaveGroup`. With `groupProtocol: 'consumer'`, it sends a temporary leave heartbeat (member epoch `-2`) so a restarted consumer can reclaim the assignment with the same instance ID.
 
-On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the leave request entirely. The broker will expire the membership according to its session timeout if it does not receive the leave request. This option does not change other request timeouts or explicit `leaveGroup()` calls.
+The `leaveGroupTimeout` constructor option bounds only the leave request, after active streams have been closed. It has no effect on classic static members. When omitted, the existing `requestTimeout` applies.
+
+On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the request entirely. Without the temporary leave heartbeat, a KIP-848 broker can reject a restart with the same instance ID (`UNRELEASED_INSTANCE_ID`) until the session expires. This option does not change other request timeouts or explicit `leaveGroup()` calls.
 
 ## Using Schema Registries
 

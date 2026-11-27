@@ -21,6 +21,8 @@ import {
   IS_CONTROL,
   IS_LOG_APPEND_TIME,
   type Message,
+  type MessageJSON,
+  type MessageMetadata,
   type MessageToConsume,
   TimestampTypes
 } from '../../protocol/records.ts'
@@ -29,6 +31,7 @@ import {
   kAutocommit,
   kDeserializationError,
   kGetFetchNode,
+  kForgetRevokedPartitions,
   kInstance,
   kRefreshOffsetsAndFetch,
   kUpdateCommittedOffset
@@ -37,6 +40,8 @@ import { kConnections, kCreateConnectionPool, kInspect, kPrometheus } from '../b
 import type { ClusterMetadata } from '../base/types.ts'
 import { ensureMetric, type Counter } from '../metrics.ts'
 import {
+  jsonDeserializer,
+  stringDeserializer,
   type BeforeDeserializationHook,
   type BeforeHookPayloadType,
   type Deserializer,
@@ -68,6 +73,9 @@ export function noopDeserializer (data?: Buffer): Buffer | undefined {
   return data
 }
 
+// The deserializers of this package which do not read the headers of the message they are given
+const dataOnlyDeserializers = new Set<unknown>([noopDeserializer, stringDeserializer, jsonDeserializer])
+
 export function defaultCorruptedMessageHandler (): boolean {
   return true
 }
@@ -77,18 +85,137 @@ type MessageToConsumeWithDeserializationError = MessageToConsume & {
   [kDeserializationError]?: MessageDeserializationError
 }
 
-function messageToJSON<Key, Value, HeaderKey, HeaderValue> (this: Message<Key, Value, HeaderKey, HeaderValue>) {
-  return {
-    key: this.key,
-    value: this.value,
-    headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
-    topic: this.topic,
-    partition: this.partition,
-    timestamp: this.timestamp.toString(),
-    timestampType: this.timestampType,
-    offset: this.offset.toString(),
-    leaderEpoch: this.leaderEpoch,
-    metadata: this.metadata
+/*
+  The messages which are pushed to the stream.
+
+  Most records have no headers, and a Map is by far the most expensive thing a message allocates. So the
+  Map of a message without headers is only created if somebody asks for it.
+*/
+// Commits the offset of a message. It is shared by all the messages of a stream.
+type MessageCommitter = (
+  topic: string,
+  partition: number,
+  offset: bigint,
+  leaderEpoch: number,
+  callback?: CallbackWithPromise<void>
+) => void | Promise<void>
+
+class ConsumedMessage<Key, Value, HeaderKey, HeaderValue> implements Message<Key, Value, HeaderKey, HeaderValue> {
+  #headers: Map<HeaderKey, HeaderValue> | undefined
+  #committer: MessageCommitter | undefined
+  // What commit() uses, so that changing the public properties of a message does not change what it commits
+  #committerTopic: string
+  #committerPartition: number
+  #committerOffset: bigint
+  #committerLeaderEpoch: number
+  key: Key
+  value: Value
+  headerEntries: Array<[HeaderKey, HeaderValue]>
+  topic: string
+  partition: number
+  timestamp: bigint
+  timestampType?: Message['timestampType']
+  offset: bigint
+  leaderEpoch: number
+  metadata: MessageMetadata
+
+  constructor (
+    key: Key,
+    value: Value,
+    headers: Map<HeaderKey, HeaderValue> | undefined,
+    headerEntries: Array<[HeaderKey, HeaderValue]>,
+    topic: string,
+    partition: number,
+    timestamp: bigint,
+    timestampType: Message['timestampType'],
+    offset: bigint,
+    leaderEpoch: number,
+    committer: MessageCommitter | undefined,
+    committerLeaderEpoch: number,
+    metadata: MessageMetadata
+  ) {
+    this.#headers = headers
+    this.#committer = committer
+    this.#committerTopic = topic
+    this.#committerPartition = partition
+    this.#committerOffset = offset
+    this.#committerLeaderEpoch = committerLeaderEpoch
+    this.key = key
+    this.value = value
+    this.headerEntries = headerEntries
+    this.topic = topic
+    this.partition = partition
+    this.timestamp = timestamp
+    this.timestampType = timestampType
+    this.offset = offset
+    this.leaderEpoch = leaderEpoch
+    this.metadata = metadata
+  }
+
+  /*
+    This is a method rather than a function created for each message: with manual commits that
+    function would have to be bound to the offset of its message, whether or not it is ever called.
+  */
+  commit (callback?: (error?: Error) => void): void | Promise<void> {
+    const committer = this.#committer
+
+    // Offsets are committed by the stream
+    if (!committer) {
+      return noopCallback(null)
+    }
+
+    return committer(
+      this.#committerTopic,
+      this.#committerPartition,
+      this.#committerOffset + 1n,
+      this.#committerLeaderEpoch,
+      callback as CallbackWithPromise<void> | undefined
+    )
+  }
+
+  // The Map is built when it is first read, since headerEntries already holds the headers
+  get headers (): Map<HeaderKey, HeaderValue> {
+    let headers = this.#headers
+
+    if (!headers) {
+      const entries = this.headerEntries
+      headers = new Map()
+
+      for (let i = 0; i < entries.length; i++) {
+        headers.set(entries[i][0], entries[i][1])
+      }
+
+      this.#headers = headers
+    }
+
+    return headers
+  }
+
+  set headers (headers: Map<HeaderKey, HeaderValue>) {
+    this.#headers = headers
+  }
+
+  toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue> {
+    const { highWatermark, lastStableOffset, logStartOffset } = this.metadata.partition
+    return {
+      key: this.key,
+      value: this.value,
+      headers: this.headerEntries.map(([key, value]): [HeaderKey, HeaderValue] => [key, value]),
+      topic: this.topic,
+      partition: this.partition,
+      timestamp: this.timestamp.toString(),
+      timestampType: this.timestampType,
+      offset: this.offset.toString(),
+      leaderEpoch: this.leaderEpoch,
+      metadata: {
+        ...this.metadata,
+        partition: {
+          highWatermark: highWatermark.toString(),
+          lastStableOffset: lastStableOffset.toString(),
+          logStartOffset: logStartOffset.toString()
+        }
+      }
+    }
   }
 }
 
@@ -128,6 +255,7 @@ export class MessagesStream<
   #options: ConsumeOptions<Key, Value, HeaderKey, HeaderValue>
   #topics: string[]
   #offsetsToFetch: Map<string, bigint>
+  #assignedPartitions: Set<string>
   #offsetsToCommit: Map<string, CommitOptionsPartition>
   #offsetsCommitted: Map<string, bigint>
   #commitWaiters: Map<string, Array<{ offset: bigint; callback: Callback<void> }>>
@@ -137,6 +265,7 @@ export class MessagesStream<
   #valueDeserializer: DeserializerWithHeaders<Value, HeaderKey, HeaderValue>
   #headerKeyDeserializer: Deserializer<HeaderKey>
   #headerValueDeserializer: Deserializer<HeaderValue>
+  #deserializersUseHeaders: boolean
   #autocommitEnabled: boolean
   #autocommitInterval: NodeJS.Timeout | null
   #autocommitInflight: boolean
@@ -148,6 +277,7 @@ export class MessagesStream<
   #context: unknown
   #onConsumerGroupJoin: () => void
   #onBrokerDisconnect: (payload: ConnectionPoolEventPayload & { reason?: 'idle' }) => void
+  #messageCommitter: MessageCommitter
   #pushRecordsOperation: (
     metadata: ClusterMetadata,
     topicIds: Map<string, string>,
@@ -244,7 +374,10 @@ export class MessagesStream<
       deserializers?.value ?? (noopDeserializer as DeserializerWithHeaders<Value, HeaderKey, HeaderValue>)
     this.#headerKeyDeserializer = deserializers?.headerKey ?? (noopDeserializer as Deserializer<HeaderKey>)
     this.#headerValueDeserializer = deserializers?.headerValue ?? (noopDeserializer as Deserializer<HeaderValue>)
+    this.#deserializersUseHeaders =
+      !dataOnlyDeserializers.has(this.#keyDeserializer) || !dataOnlyDeserializers.has(this.#valueDeserializer)
     this.#autocommitEnabled = !!options.autocommit
+    this.#messageCommitter = this.#commit.bind(this)
     this.#autocommitInflight = false
     this.#closed = false
     this.#closeCallbacks = []
@@ -256,6 +389,25 @@ export class MessagesStream<
       this.#offsetsCommitted.clear()
       this.#partitionsEpochs.clear()
       this.#scheduleRefreshOffsetsAndFetch()
+
+      // Drop any queued commit (and its waiters) for partitions that are no longer assigned
+      // after this rebalance. consumer.assignments is updated before consumer:group:join fires,
+      // so #assignmentsForTopic reflects the new state here. Committing a revoked partition
+      // with the new generationId is accepted by Kafka and moves its committed offset forward,
+      // causing the new owner to start past messages still sitting in our Readable buffer.
+      for (const [key, { topic, partition, offset }] of this.#offsetsToCommit) {
+        if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+          this.#offsetsToCommit.delete(key)
+          this.#commitSkipped(topic, partition, offset)
+          const waiters = this.#commitWaiters.get(key)
+          if (waiters) {
+            for (const { callback } of waiters) {
+              callback(null)
+            }
+            this.#commitWaiters.delete(key)
+          }
+        }
+      }
 
       // [kAutocommit] skips flushing while mid-rejoin to avoid triggering a rejoin storm (see
       // below), leaving any queued offset waiting for the next tick of the autocommit timer.
@@ -285,6 +437,7 @@ export class MessagesStream<
 
     // Restore offsets
     this.#offsetsToFetch = new Map()
+    this.#assignedPartitions = new Set()
     if (offsets) {
       for (const { topic, partition, offset } of offsets) {
         this.#offsetsToFetch.set(partitionKey(topic, partition), offset)
@@ -325,6 +478,11 @@ export class MessagesStream<
   /* c8 ignore next 3 - Simple getter */
   get consumer (): Consumer<Key, Value, HeaderKey, HeaderValue> {
     return this.#consumer
+  }
+
+  /* c8 ignore next 3 - Simple getter */
+  get topics (): string[] {
+    return this.#topics
   }
 
   /* c8 ignore next 3 - Simple getter */
@@ -928,6 +1086,9 @@ export class MessagesStream<
     const valueDeserializer = this.#valueDeserializer
     const headerKeyDeserializer = this.#headerKeyDeserializer
     const headerValueDeserializer = this.#headerValueDeserializer
+    const deserializersUseHeaders = this.#deserializersUseHeaders
+    // In batch mode offsets are committed through the batch
+    const committer = autocommit || batchSize ? undefined : this.#messageCommitter
 
     /*
       Publishing on the diagnostic channel requires a context object and five publications for each message.
@@ -938,20 +1099,19 @@ export class MessagesStream<
 
     let canPush = true
 
-    const messageMetadata = {
-      consumer: {
-        groupId: this.#consumer.groupId,
-        memberId: this.#consumer.memberId,
-        generationId: this.#consumer.generationId,
-        coordinatorId: this.#consumer.coordinatorId
-      }
+    const consumer = {
+      groupId: this.#consumer.groupId,
+      memberId: this.#consumer.memberId,
+      generationId: this.#consumer.generationId,
+      coordinatorId: this.#consumer.coordinatorId
     }
 
     // Parse results
     for (const topicResponse of response.responses) {
       const topic = topicIds.get(topicResponse.topicId)!
 
-      for (const { records: recordsBatches, partitionIndex: partition } of topicResponse.partitions) {
+      for (const partitionResponse of topicResponse.partitions) {
+        const { records: recordsBatches, partitionIndex: partition } = partitionResponse
         const key = partitionKey(topic, partition)
 
         // The broker can return partitions which were not requested when they linger
@@ -964,6 +1124,10 @@ export class MessagesStream<
           continue
         }
 
+        // All record batches for this partition share the same Fetch snapshot.
+        const { highWatermark, lastStableOffset, logStartOffset } = partitionResponse
+        const watermarks = { highWatermark, lastStableOffset, logStartOffset }
+        const messageMetadata = { consumer, partition: watermarks }
         let pending: Message<Key, Value, HeaderKey, HeaderValue>[] | undefined
         let pendingContexts: DiagnosticContext<unknown>[] | undefined = batchSize && tracing ? [] : undefined
 
@@ -1030,13 +1194,15 @@ export class MessagesStream<
               consumerReceivesChannel.start.publish(diagnosticContext)
             }
 
-            const commit = autocommit || batchSize
-              ? noopCallback
-              : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
-
             try {
-              const headers = new Map<HeaderKey, HeaderValue>()
-              const headerEntries: Array<[HeaderKey, HeaderValue]> = []
+              // The Map is only needed here by the deserializers which read it, the message builds its own when asked
+              let headers: Map<HeaderKey, HeaderValue> | undefined = deserializersUseHeaders
+                ? new Map<HeaderKey, HeaderValue>()
+                : undefined
+              // Allocated at its final length, as a push on an empty array reserves room for 17 elements
+              const recordHeaders = record.headers
+              const headersCount = recordHeaders.length
+              const headerEntries: Array<[HeaderKey, HeaderValue]> = headersCount > 0 ? new Array(headersCount) : []
               let payloadType: BeforeHookPayloadType = 'headerKey'
               let deserializedKey: Key | undefined
               let deserializedValue: Value | undefined
@@ -1052,27 +1218,29 @@ export class MessagesStream<
                   throw hookError.error
                 }
 
-                for (const [headerKey, headerValue] of record.headers) {
+                for (let i = 0; i < headersCount; i++) {
+                  const header = recordHeaders[i]
                   payloadType = 'headerKey'
                   /* c8 ignore next - Hard to test */
-                  const deserializedHeaderKey = headerKeyDeserializer(headerKey ?? undefined, messageToConsume)
+                  const deserializedHeaderKey = headerKeyDeserializer(header[0] ?? undefined, messageToConsume)
                   payloadType = 'headerValue'
                   /* c8 ignore next - Hard to test */
-                  const deserializedHeaderValue = headerValueDeserializer(headerValue ?? undefined, messageToConsume)
-                  headers.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
-                  headerEntries.push([deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue])
+                  const deserializedHeaderValue = headerValueDeserializer(header[1] ?? undefined, messageToConsume)
+                  headers?.set(deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue)
+                  headerEntries[i] = [deserializedHeaderKey as HeaderKey, deserializedHeaderValue as HeaderValue]
                 }
 
                 payloadType = 'key'
                 /* c8 ignore next - Hard to test */
-                deserializedKey = keyDeserializer(record.key ?? undefined, headers, messageToConsume)
+                deserializedKey = keyDeserializer(record.key ?? undefined, headers!, messageToConsume)
                 payloadType = 'value'
-                deserializedValue = valueDeserializer(record.value ?? undefined, headers, messageToConsume)
+                deserializedValue = valueDeserializer(record.value ?? undefined, headers!, messageToConsume)
               } catch (error) {
-                // The error handler can explicitly commit a failed record even in batch mode.
-                const commitFailedMessage = (batchSize && !autocommit
-                  ? this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
-                  : commit) as Message['commit']
+                // Handlers are given a function, which is only worth creating when deserialization fails.
+                // It can explicitly commit a failed record even in batch mode.
+                const commitFailedMessage = (
+                  autocommit ? noopCallback : this.#commit.bind(this, topic, partition, offset + 1n, leaderEpoch)
+                ) as Message['commit']
                 const context: DeserializationErrorContext = {
                   error,
                   payloadType,
@@ -1115,12 +1283,13 @@ export class MessagesStream<
                   const headersFailed = hookFailed || payloadType === 'headerKey' || payloadType === 'headerValue'
 
                   if (headersFailed) {
-                    headers.clear()
-                    headerEntries.length = 0
+                    // The message builds the Map from the entries
+                    headers = undefined
 
-                    for (const [headerKey, headerValue] of record.headers) {
-                      headers.set(headerKey as HeaderKey, headerValue as HeaderValue)
-                      headerEntries.push([headerKey as HeaderKey, headerValue as HeaderValue])
+                    // Every entry is overwritten, including the ones which were never deserialized
+                    for (let i = 0; i < headersCount; i++) {
+                      const header = recordHeaders[i]
+                      headerEntries[i] = [header[0] as HeaderKey, header[1] as HeaderValue]
                     }
                   }
 
@@ -1145,28 +1314,28 @@ export class MessagesStream<
                 }
               }
 
-              const message = {
-                key: deserializedKey,
-                value: deserializedValue,
+              const message = new ConsumedMessage<Key, Value, HeaderKey, HeaderValue>(
+                deserializedKey as Key,
+                deserializedValue as Value,
                 headers,
                 headerEntries,
                 topic,
                 partition,
-                timestamp: logAppendTime ? batch.maxTimestamp : firstTimestamp + record.timestampDelta,
+                logAppendTime ? batch.maxTimestamp : firstTimestamp + record.timestampDelta,
                 timestampType,
                 offset,
                 // The batch header epoch is the epoch of the record itself, which is what
                 // OffsetCommit expects as committedLeaderEpoch (KIP-320).
-                leaderEpoch: batch.partitionLeaderEpoch,
-                commit,
+                batch.partitionLeaderEpoch,
+                committer,
+                leaderEpoch,
                 // Deserializers and hooks can enrich the metadata of the message they processed
-                metadata: deserializationError
-                  ? { ...messageMetadata, ...messageToConsume.metadata, deserializationError }
+                deserializationError
+                  ? { consumer, ...messageToConsume.metadata, partition: watermarks, deserializationError }
                   : messageToConsume.metadata
-                    ? { ...messageMetadata, ...messageToConsume.metadata }
-                    : messageMetadata,
-                toJSON: messageToJSON
-              } as Message<Key, Value, HeaderKey, HeaderValue>
+                    ? { consumer, ...messageToConsume.metadata, partition: watermarks }
+                    : messageMetadata
+              )
 
               if (batchSize) {
                 if (this.#closed || this.destroyed) {
@@ -1343,6 +1512,16 @@ export class MessagesStream<
       callback = createPromisifiedCallback<void>()
     }
 
+    // No-op if this partition is no longer assigned. After an eager rebalance the revoked
+    // partition's messages may still be buffered here; committing them with the new
+    // generationId is accepted by Kafka and would advance the committed offset, causing the
+    // new owner to skip those messages permanently.
+    if (!this.#assignmentsForTopic(topic)?.partitions.includes(partition)) {
+      this.#commitSkipped(topic, partition, offset)
+      callback(null)
+      return callback[kCallbackPromise]!
+    }
+
     const key = partitionKey(topic, partition)
 
     const current = this.#offsetsToCommit.get(key)
@@ -1510,7 +1689,20 @@ export class MessagesStream<
     })
   }
 
+  // A skipped commit is not an error, but it explains why the new owner of the partition consumes the messages again
+  #commitSkipped (topic: string, partition: number, offset: bigint): void {
+    this.#consumer.emitWithDebug('consumer', 'group:commit:skipped', {
+      groupId: this.#consumer.groupId,
+      generationId: this.#consumer.generationId,
+      topic,
+      partition,
+      offset
+    })
+  }
+
   #refreshOffsets (callback: Callback<void>) {
+    this.#forgetRevokedPartitions()
+
     /* c8 ignore next 4 - Hard to test */
     if (this.#topics.length === 0) {
       callback(null)
@@ -1583,6 +1775,9 @@ export class MessagesStream<
   }
 
   #scheduleRefreshOffsetsAndFetch (destroyOnError = true) {
+    // The epoch is bumped right below, so there is nothing else to do if a position is dropped.
+    this.#forgetRevokedPartitions()
+
     // Invalidate outstanding fetches immediately, not only after restoration completes.
     this.#offsetsEpoch++
     this.#refreshOffsetsDestroyOnError ||= destroyOnError
@@ -1621,15 +1816,81 @@ export class MessagesStream<
     })
   }
 
+  // Called by the consumer every time its assignments change, including when partitions are
+  // only revoked, which does not refresh the offsets.
+  [kForgetRevokedPartitions] (): void {
+    if (this.#forgetRevokedPartitions()) {
+      // A fetch issued before the revocation may still be inflight: invalidate it, otherwise its
+      // response would write back the position of the revoked partition.
+      // Partitions which are still assigned are fetched again from their current position.
+      this.#offsetsEpoch++
+    }
+  }
+
   [kRefreshOffsetsAndFetch] () {
     this.#scheduleRefreshOffsetsAndFetch(false)
   }
 
+  // When a partition is revoked, the position this stream reached on it is no longer meaningful:
+  // another member may have consumed it in the meanwhile, and the records this stream fetched
+  // were never committed. If it is kept, #assignOffsets prefers it over the fallback offset when
+  // the partition is assigned back without a committed offset, and the stream silently skips
+  // every record between the fallback offset and that position.
+  //
+  // Returns true if any position was dropped.
+  #forgetRevokedPartitions (): boolean {
+    // Only committed mode restores positions from the group, other modes keep their positions on purpose.
+    if (this.#mode !== MessagesStreamModes.COMMITTED) {
+      return false
+    }
+
+    const assigned = this.#assignedPartitionKeys()
+
+    let forgotten = false
+    for (const key of this.#assignedPartitions) {
+      if (!assigned.has(key) && this.#offsetsToFetch.delete(key)) {
+        forgotten = true
+      }
+    }
+
+    this.#assignedPartitions = assigned
+    return forgotten
+  }
+
+  // Unknown assignments (not joined yet, or after leaving the group) mean nothing is owned.
+  #assignedPartitionKeys (): Set<string> {
+    const assigned = new Set<string>()
+    for (const topic of this.#topics) {
+      const assignment = this.#assignmentsForTopic(topic)
+
+      if (!assignment) {
+        continue
+      }
+
+      for (const partition of assignment.partitions) {
+        assigned.add(partitionKey(topic, partition))
+      }
+    }
+
+    return assigned
+  }
+
   #assignOffsets (offsets: Offsets, commits: Offsets, callback: Callback<void>) {
+    // In committed mode only the partitions assigned right now get a position. The offsets list covers the
+    // whole topic and a response can arrive after a revocation: a position written for a partition this
+    // stream does not own would be kept when it is assigned back, instead of resolving its offset again.
+    const assigned = this.#mode === MessagesStreamModes.COMMITTED ? this.#assignedPartitionKeys() : undefined
+
     for (const [topic, partitions] of offsets) {
       for (let i = 0; i < partitions.length; i++) {
-        if (!this.#offsetsToFetch.has(`${topic}:${i}`)) {
-          this.#offsetsToFetch.set(`${topic}:${i}`, partitions[i])
+        const key = partitionKey(topic, i)
+
+        if (assigned && !assigned.has(key)) {
+          continue
+        }
+
+        if (!this.#offsetsToFetch.has(key)) {
+          this.#offsetsToFetch.set(key, partitions[i])
         }
       }
     }
@@ -1637,6 +1898,10 @@ export class MessagesStream<
     for (const [topic, partitions] of commits) {
       for (let i = 0; i < partitions.length; i++) {
         const offset = partitions[i]
+
+        if (assigned && !assigned.has(partitionKey(topic, i))) {
+          continue
+        }
 
         if (offset >= 0n) {
           this.#offsetsToFetch.set(`${topic}:${i}`, offset)

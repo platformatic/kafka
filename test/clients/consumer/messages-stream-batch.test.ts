@@ -1,4 +1,4 @@
-import { deepStrictEqual, rejects, strictEqual } from 'node:assert'
+import { deepStrictEqual, notStrictEqual, rejects, strictEqual } from 'node:assert'
 import { EventEmitter, once } from 'node:events'
 import { test, type TestContext } from 'node:test'
 import { setImmediate, setTimeout } from 'node:timers/promises'
@@ -16,6 +16,7 @@ import {
   MessagesStream,
   MessagesStreamFallbackModes,
   MessagesStreamModes,
+  kNoopCallbackReturnValue,
   noopCallback,
   UserError,
   type CommitOptions,
@@ -213,7 +214,7 @@ for (const batch of [100, true] as const) {
       strictEqual(batch.topic, topic)
       for (const message of batch.messages) {
         strictEqual(message.partition, batch.partition)
-        strictEqual(message.commit, noopCallback)
+        strictEqual(await message.commit(), kNoopCallbackReturnValue)
       }
     }
     strictEqual(fake.fetches.length, 1)
@@ -261,7 +262,7 @@ test('batch autocommit advances past control records and batch.commit is a no-op
   const batches = await Array.fromAsync(stream)
   strictEqual(batches.length, 1)
   strictEqual(batches[0].commit, noopCallback)
-  strictEqual(batches[0].messages[0].commit, noopCallback)
+  strictEqual(await batches[0].messages[0].commit(), kNoopCallbackReturnValue)
   deepStrictEqual(
     fake.commits.map(commit => [commit.partition, commit.offset]),
     [[0, 3n], [1, 1n]]
@@ -420,17 +421,46 @@ test('diagnostics wrap the batch push and the metrics count individual records',
   strictEqual((await metric.get()).values[0].value, 3)
 })
 
+test('messages share partition watermarks only within one Fetch response', async t => {
+  const fake = new FakeConsumer()
+  const first = { highWatermark: 9007199254740993n, lastStableOffset: 12n, logStartOffset: 0n }
+  const other = { highWatermark: 7n, lastStableOffset: 5n, logStartOffset: -1n }
+  const next = { ...first, lastStableOffset: 20n }
+  fake.responses.push(
+    [
+      { ...partitionResponse(0, recordBatch(0, 1), recordBatch(1, 1)), ...first },
+      { ...partitionResponse(1, recordBatch(0, 1)), ...other }
+    ],
+    [{ ...partitionResponse(0, recordBatch(2, 1)), ...next }]
+  )
+
+  const stream = createStream(t, fake, { maxFetches: 2 })
+  const [a, b, c, d] = (await Array.fromAsync(stream)).flatMap(batch => batch.messages)
+  deepStrictEqual(a.metadata.partition, first)
+  strictEqual(a.metadata, b.metadata)
+  notStrictEqual(a.metadata.partition, c.metadata.partition)
+  notStrictEqual(a.metadata.partition, d.metadata.partition)
+  deepStrictEqual(c.metadata.partition, other)
+  deepStrictEqual(d.metadata.partition, next)
+  deepStrictEqual(a.toJSON().metadata.partition, {
+    highWatermark: '9007199254740993',
+    lastStableOffset: '12',
+    logStartOffset: '0'
+  })
+})
+
 test('the before-deserialization hook enriches batch messages and toJSON converts offsets', async t => {
   const fake = new FakeConsumer()
   fake.responses.push([partitionResponse(0, recordBatch(0, 1))])
   const stream = createStream(t, fake, {
     maxFetches: 1,
     async beforeDeserialization (_data, _type, message) {
-      message.metadata = { fromHook: true }
+      message.metadata = { fromHook: true, partition: 'from hook' }
     }
   })
   const [batch] = await Array.fromAsync(stream)
   strictEqual(batch.messages[0].metadata.fromHook, true)
+  deepStrictEqual(batch.messages[0].metadata.partition, { highWatermark: 0n, lastStableOffset: 0n, logStartOffset: 0n })
   deepStrictEqual(batch.toJSON(), {
     topic,
     partition: 0,

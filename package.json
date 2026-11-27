@@ -1,6 +1,6 @@
 {
   "name": "@platformatic/kafka",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "description": "Modern and performant client for Apache Kafka",
   "homepage": "https://github.com/platformatic/kafka",
   "author": "Platformatic Inc. <oss@platformatic.dev> (https://platformatic.dev)",
@@ -67,8 +67,8 @@
     "create:api": "node scripts/create-api.ts"
   },
   "dependencies": {
-    "@platformatic/dynamic-buffer": "^0.5.0",
-    "@platformatic/wasm-utils": "^0.4.0",
+    "@platformatic/dynamic-buffer": "^0.6.0",
+    "@platformatic/wasm-utils": "^0.5.0",
     "ajv": "^8.20.0",
     "ajv-draft-04": "^1.0.0",
     "avsc": "^5.7.9",
@@ -114,7 +114,8 @@
     "semver": "^7.8.5",
     "snappy": "^7.4.3",
     "table": "^6.9.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "webpack": "^5.113.0"
   },
   "engines": {
     "node": ">= 22.22.0 || >= 24.6.0"

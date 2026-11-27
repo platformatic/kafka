@@ -80,6 +80,16 @@ test('real broker accepts KafkaJS v1 metadata during a mixed group rebalance (is
       })
 
       await admin.createTopics({ topics: [topic], partitions: 2, replicas: 1 })
+      // CreateTopics can return before the broker advertises both partition leaders to KafkaJS.
+      await retry(60, 100, async () => {
+        const metadata = await admin.metadata({ topics: [topic], forceUpdate: true })
+        const partitions = metadata.topics.get(topic)?.partitions
+        strictEqual(partitions?.length, 2)
+        for (const partition of partitions) {
+          ok(partition?.leader >= 0)
+        }
+      })
+
       await current.topics.trackAll(topic)
       const joinKafkaJs = async () => {
         await kafkaJs.connect()

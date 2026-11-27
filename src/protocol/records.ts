@@ -53,6 +53,16 @@ export interface MessageConsumerMetadata {
   memberId: string
 }
 
+export interface PartitionWatermarks<Offset = bigint> {
+  readonly highWatermark: Offset
+  readonly lastStableOffset: Offset
+  readonly logStartOffset: Offset
+}
+
+export interface MessageMetadata<Offset = bigint> extends Record<string, unknown> {
+  readonly partition: PartitionWatermarks<Offset>
+}
+
 export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown, HeaderValue = unknown> {
   key: Key
   value: Value
@@ -63,7 +73,7 @@ export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown
   timestampType?: TimestampType
   offset: string
   leaderEpoch: number
-  metadata: Record<string, unknown>
+  metadata: MessageMetadata<string>
 }
 
 // This is used in consume
@@ -75,7 +85,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
   timestampType?: TimestampType
   offset: bigint
   leaderEpoch: number
-  metadata: Record<string, unknown>
+  metadata: MessageMetadata
   commit (callback?: (error?: Error) => void): void | Promise<void>
   toJSON (): MessageJSON<Key, Value, HeaderKey, HeaderValue>
 }
@@ -329,11 +339,21 @@ function readRecords (buffer: Buffer, count: number, records: KafkaRecord[]): vo
     const value = readRecordVarIntBytes(buffer)
 
     const headersCount = readRecordVarInt(buffer)
-    const headers: [Buffer | null, Buffer | null][] = []
+
+    // Each header takes at least two bytes, so a count beyond that is corrupted and must not be allocated
+    if (headersCount > (buffer.length - recordsPosition) >> 1) {
+      throw new OutOfBoundsError('Out of bounds.')
+    }
+
+    /*
+      The array is allocated at its final length: the first push on an empty array reserves room for 17 elements,
+      while records usually have a few headers.
+    */
+    const headers: [Buffer | null, Buffer | null][] = headersCount > 0 ? new Array(headersCount) : []
 
     for (let j = 0; j < headersCount; j++) {
       const headerKey = readRecordVarIntBytes(buffer)
-      headers.push([headerKey, readRecordVarIntBytes(buffer)])
+      headers[j] = [headerKey, readRecordVarIntBytes(buffer)]
     }
 
     records.push({ length, attributes, timestampDelta, offsetDelta, key, value, headers })
@@ -432,6 +452,24 @@ interface PreparedRecordsBatch {
   maxTimestamp: bigint
 }
 
+/*
+  The headers of a record are a map, and iterating one with for...of allocates an array for each entry.
+  forEach() does not, and these functions are defined once so that no closure is created for each record.
+  Encoding is synchronous, which is what makes sharing this state possible.
+*/
+let headersSize = 0
+let headersBuffer: Buffer
+let headersPosition = 0
+
+function addHeaderSize (value: Buffer, key: Buffer): void {
+  headersSize += sizeOfVarIntBytes(key) + sizeOfVarIntBytes(value)
+}
+
+function writeHeader (value: Buffer, key: Buffer): void {
+  headersPosition = writeVarIntBytes(headersBuffer, key, headersPosition)
+  headersPosition = writeVarIntBytes(headersBuffer, value, headersPosition)
+}
+
 function prepareRecordsBatch (
   messages: MessageRecord[],
   options: Partial<CreateRecordsBatchOptions>,
@@ -485,9 +523,9 @@ function prepareRecordsBatch (
     } else {
       recordSize += sizeOfVarInt(headers.size)
 
-      for (const [key, value] of headers) {
-        recordSize += sizeOfVarIntBytes(key) + sizeOfVarIntBytes(value)
-      }
+      headersSize = 0
+      headers.forEach(addHeaderSize)
+      recordSize += headersSize
     }
 
     sizes[i] = recordSize
@@ -525,10 +563,10 @@ function prepareRecordsBatch (
     } else {
       position = writeVarInt(buffer, headers.size, position)
 
-      for (const [key, value] of headers) {
-        position = writeVarIntBytes(buffer, key, position)
-        position = writeVarIntBytes(buffer, value, position)
-      }
+      headersBuffer = buffer
+      headersPosition = position
+      headers.forEach(writeHeader)
+      position = headersPosition
     }
   }
 

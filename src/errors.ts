@@ -1,4 +1,5 @@
 import { type JoinGroupResponse } from './apis/consumer/join-group-v9.ts'
+import { type Broker } from './network/connection.ts'
 import { protocolAPIsById } from './protocol/apis.ts'
 import { type NullableString } from './protocol/definitions.ts'
 import { protocolErrors, protocolErrorsCodesById } from './protocol/errors.ts'
@@ -173,6 +174,8 @@ export class AuthenticationError extends GenericError {
 }
 
 export class NetworkError extends GenericError {
+  declare broker?: Broker
+
   static code: ErrorCode = 'PLT_KFK_NETWORK'
 
   static isRetryable (error: Error | null | undefined): boolean {
@@ -231,6 +234,8 @@ export class ProtocolError extends GenericError {
 }
 
 export class ResponseError extends MultipleErrors {
+  declare broker?: Broker
+
   static code: ErrorCode = 'PLT_KFK_RESPONSE'
 
   constructor (
@@ -257,6 +262,9 @@ export class ResponseError extends MultipleErrors {
 }
 
 export class TimeoutError extends GenericError {
+  declare broker?: Broker
+  declare correlationId?: number
+
   static code: ErrorCode = 'PLT_KFK_TIMEOUT'
 
   constructor (message: string, properties: ErrorProperties = {}) {

@@ -15,6 +15,7 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:group:rejoin`           | (none)                                | Emitted when re-joining a group after a rebalance.                                                                                                                                           |
 | `consumer:group:rebalance`        | `ConsumerGroupRebalancePayload`       | Emitted when group rebalancing occurs.                                                                                                                                                       |
 | `consumer:group:autocommit:error` | `ConsumerGroupAutocommitErrorPayload` | Emitted when autocommit fails during a cooperative rebalance. The rebalance still proceeds.                                                                                                  |
+| `consumer:group:commit:skipped`   | `ConsumerGroupCommitSkippedPayload`   | Emitted when the offset of a partition which is no longer assigned is not committed. The commit still resolves.                                                                              |
 | `consumer:heartbeat:start`        | `ConsumerHeartbeatPayload?`           | Emitted when starting new heartbeats.                                                                                                                                                        |
 | `consumer:heartbeat:cancel`       | `ConsumerHeartbeatPayload`            | Emitted if a scheduled heartbeat has been canceled.                                                                                                                                          |
 | `consumer:heartbeat:end`          | `ConsumerHeartbeatPayload?`           | Emitted during successful heartbeats.                                                                                                                                                        |
@@ -23,6 +24,11 @@ The complete TypeScript type of the `Consumer` is determined by the `deserialize
 | `consumer:group:lost`             | `ConsumerGroupLostPayload`            | Emitted when classic group membership recovery fails with no further retry scheduled, including rejoins triggered by heartbeats, commits, or offset fetches, and synchronization failures. |
 | `consumer:lag`                    | `Offsets`                             | Emitted during periodic lag monitoring with calculated lag data for topics and partitions.                                                                                                   |
 | `consumer:lag:error`              | `Error`                               | Emitted when lag calculation fails during monitoring operations.                                                                                                                             |
+
+The `consumer:group:commit:skipped` payload contains `groupId`, `generationId`, `topic`, `partition` and the
+`offset` which was not committed. After a rebalance, the messages still buffered for a revoked partition can be
+delivered and committed, but the partition now belongs to another member and the commit would overwrite its
+position. The commit is skipped instead, so the new owner consumes those messages again.
 
 The `consumer:group:lost` payload contains `groupId`, `memberId`, `generationId`, `error`, and `operation`.
 The operation is `joinGroup` or `syncGroup`, identifying the step that exhausted recovery, even when a heartbeat,
@@ -45,7 +51,7 @@ Options:
 | ------------------------------- | ------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | groupId                         | `string`                                                     |                           | Consumer group ID.                                                                                                                                                                                                                                                                                                                                                                                   |
 | groupInstanceId                 | `string`                                                     |                           | Consumer group instance ID.                                                                                                                                                                                                                                                                                                                                                                          |
-| autocommit                      | `boolean \| number`                                          | `true`                    | Whether to autocommit consumed messages.<br/><br/> If it is `true`, offsets are committed after each fetch. If it is a number, it specifies how often offsets are committed. Only the last offset for a topic-partition is committed.<br/><br/> If it is `false`, call `message.commit()` or, in batch mode, `batch.commit()` to commit offsets manually. |
+| autocommit                      | `boolean \| number`                                          | `true`                    | Commits offsets based on fetch progress, not stream reads. `true` triggers a commit after each fetch; a number sets the commit interval in milliseconds; `false` enables manual commits. See [Autocommit and processing guarantees](#autocommit-and-processing-guarantees). |
 | minBytes                        | `number`                                                     | `1`                       | Minimum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytes                        | `number`                                                     | 50MB                      | Maximum amount of data the brokers should return. The value might not be respected by Kafka.                                                                                                                                                                                                                                                                                                         |
 | maxBytesPerPartition            | `number`                                                     | 1MB                       | Maximum amount of data the broker should return for each partition in a stream fetch request. If not set, it defaults to 1MB or to `maxBytes`, whichever is lower. The value might not be respected by Kafka.                                                                                                                                                                                                                      |
@@ -66,7 +72,7 @@ Options:
 | partitionAssigner               | `GroupPartitionsAssigner`                                    |                           | Client-side partition assignment strategy.<br/><br/> Built-in assigners are `roundRobinAssigner` and `cooperativeStickyAssigner`. Not supported for `groupProtocol=consumer`, use `groupRemoteAssignor` instead.                                                                                                                                                                                     |
 | partitionAssignerTopicsSelector | `GroupPartitionsAssignerTopicsSelector`                      |                           | Selects the topic metadata required by a custom `partitionAssigner`. By default, metadata for every member's subscribed topics is required. Return `[]` to request no topic metadata for assignment. Not supported for `groupProtocol=consumer`.                                                                                                                                                     |
 | streamContext                   | `unknown`                                                    |                           | Default opaque user data for `MessagesStream` instances created by this consumer. It is forwarded to stream-owned `ConnectionPool` and `Connection` instances. Kafka never reads, mutates, or interprets this value.                                                                                                                                                                                 |
-| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds for the group leave step during `close()`, for either group protocol. Set to `0` to skip the leave request. When omitted, the existing `requestTimeout` applies. |
+| leaveGroupTimeout               | `number`                                                     | Unset                     | Maximum time in milliseconds to wait for a leave request during [`close()`](#closeforce-callback). `0` skips the request, including the temporary leave heartbeat for static members. Defaults to `requestTimeout`. |
 
 It also supports all the constructor options of `Base`.
 
@@ -189,6 +195,37 @@ For `consume()`, `maxBytesPerPartition` controls the per-partition fetch limit u
 
 Larger values reduce the number of fetch round trips and can increase throughput when records are small, at the cost of higher memory usage and longer pauses of the event loop while each response is decoded.
 
+### Autocommit and processing guarantees
+
+With `autocommit: true` (the default), `@platformatic/kafka` commits offsets based on fetch progress. Unlike a client
+that tracks records returned by `poll()`, it can commit offsets for messages that are still buffered in the stream
+and have not reached the application. A numeric `autocommit` value changes when commits run, not which offsets are eligible.
+
+If the process crashes or the stream is closed after the commit succeeds, a consumer that resumes from the group's
+committed offsets skips those messages, even if they were never read or their handler did not finish. To commit only
+after successful processing, disable autocommit and await the commit after your handler succeeds:
+
+```typescript
+import { MessagesStreamFallbackModes, MessagesStreamModes } from '@platformatic/kafka'
+
+const stream = await consumer.consume({
+  topics: ['events'],
+  mode: MessagesStreamModes.COMMITTED,
+  fallbackMode: MessagesStreamFallbackModes.EARLIEST,
+  autocommit: false
+})
+
+for await (const message of stream) {
+  await processMessage(message)
+  await message.commit()
+}
+```
+
+In [batch mode](#batch-consumption), call `batch.commit()` after the whole batch succeeds. If you process messages
+concurrently, commit only through the last consecutively processed message in each partition: committing a later
+offset also acknowledges earlier offsets in that partition. If the process fails before a commit succeeds, already
+processed messages can be delivered again.
+
 ### Handling deserialization errors
 
 Use `onDeserializationError` to inspect a failed deserialisation and decide whether to skip the record or fail the stream:
@@ -297,13 +334,15 @@ Closes the consumer and all its connections.
 
 If `force` is not `true`, then the method will throw an error if any `MessagesStream` created from this consumer is still active.
 
-If `force` is `true`, then the method will close all `MessagesStream` created from this consumer.
+If `force` is `true`, then the method will close all `MessagesStream` created from this consumer. If closing the streams or leaving the group fails, the connections are closed anyway and the error is returned afterwards: the consumer is closed and the broker expires the membership after the session timeout.
 
 The return value is `void`.
 
-The `leaveGroupTimeout` constructor option bounds only the group leave step, after active streams have been closed. It accepts a non-negative number of milliseconds and applies to both group protocols. When omitted, the existing `requestTimeout` applies.
+A dynamic member leaves the group on close so its partitions can be reassigned immediately. For a static member (`groupInstanceId` set), the broker keeps its assignment until the session timeout. With `groupProtocol: 'classic'`, the consumer stops heartbeating without sending `LeaveGroup`. With `groupProtocol: 'consumer'`, it sends a temporary leave heartbeat (member epoch `-2`) so a restarted consumer can reclaim the assignment with the same instance ID.
 
-On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the leave request entirely. The broker will expire the membership according to its session timeout if it does not receive the leave request. This option does not change other request timeouts or explicit `leaveGroup()` calls.
+The `leaveGroupTimeout` constructor option bounds only the leave request, after active streams have been closed. It has no effect on classic static members. When omitted, the existing `requestTimeout` applies.
+
+On timeout, the consumer clears its local group state and closes its connections without waiting for the broker. Setting `leaveGroupTimeout` to `0` skips the request entirely. Without the temporary leave heartbeat, a KIP-848 broker can reject a restart with the same instance ID (`UNRELEASED_INSTANCE_ID`) until the session expires. This option does not change other request timeouts or explicit `leaveGroup()` calls.
 
 ## Using Schema Registries
 
@@ -365,6 +404,22 @@ When using a schema registry:
 
 For more details, see the [Confluent Schema Registry](./confluent-schema-registry.md) documentation.
 
+### Partition watermarks and lag
+
+`message.metadata.partition` contains three `bigint` offsets from the Fetch response:
+`highWatermark` (the end of replicated data), `lastStableOffset` (the end visible to
+read-committed consumers), and `logStartOffset` (the earliest retained offset, or `-1n`
+when the Fetch version does not report it).
+
+To compute lag in offsets after this message, use the boundary for the stream's isolation level:
+
+- `read_committed` (default): `message.metadata.partition.lastStableOffset - (message.offset + 1n)`
+- `read_uncommitted`: `message.metadata.partition.highWatermark - (message.offset + 1n)`
+
+This is lag at fetch time. Messages from the same partition in one Fetch response share
+the snapshot, including across record batches. Treat it as read-only. `toJSON()` serializes
+the three offsets as decimal strings.
+
 ### Adding custom message metadata
 
 Deserializers and `beforeDeserialization` hooks receive the message being processed and can assign a
@@ -390,8 +445,8 @@ for await (const message of stream) {
 }
 ```
 
-Each message gets its own metadata object, so mutating it never affects the other messages of the
-same batch.
+Messages with custom metadata get their own outer metadata object. The `partition` field is
+reserved for the shared Fetch snapshot.
 
 ## Batch consumption
 

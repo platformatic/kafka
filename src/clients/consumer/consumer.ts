@@ -71,7 +71,13 @@ import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Connection } from '../../network/connection.ts'
 import { IS_CONTROL, IS_TRANSACTIONAL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
-import { kAutocommit, kGetFetchNode, kRefreshOffsetsAndFetch, kUpdateCommittedOffset } from '../../symbols.ts'
+import {
+  kAutocommit,
+  kForgetRevokedPartitions,
+  kGetFetchNode,
+  kRefreshOffsetsAndFetch,
+  kUpdateCommittedOffset
+} from '../../symbols.ts'
 import { emitExperimentalApiWarning } from '../../utils.ts'
 import {
   Base,
@@ -111,6 +117,7 @@ import {
   type ConsumeBatchOptions,
   type ConsumeOptions,
   type ConsumerGroupAutocommitErrorPayload,
+  type ConsumerGroupCommitSkippedPayload,
   type ConsumerGroupJoinPayload,
   type ConsumerGroupLeavePayload,
   type ConsumerGroupLostPayload,
@@ -171,6 +178,7 @@ export interface ConsumerEvents extends BaseEvents {
   'consumer:group:rejoin': () => void
   'consumer:group:rebalance': (payload: ConsumerGroupRebalancePayload) => void
   'consumer:group:autocommit:error': (payload: ConsumerGroupAutocommitErrorPayload) => void
+  'consumer:group:commit:skipped': (payload: ConsumerGroupCommitSkippedPayload) => void
   'consumer:heartbeat:start': (payload?: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:cancel': (payload: ConsumerHeartbeatPayload) => void
   'consumer:heartbeat:end': (payload?: ConsumerHeartbeatPayload) => void
@@ -352,18 +360,21 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
-    closer(force as boolean, error => {
-      if (error) {
+    closer(force as boolean, leaveError => {
+      // Without force the consumer stays open, so that the caller can close the streams and try again.
+      if (leaveError && !force) {
         this[kClosed] = false
         this.#membershipActive = membershipActive
-        callback(error)
+        callback(leaveError)
         return
       }
 
+      // With force the connections are closed even if the streams could not be closed or the group could not be
+      // left: there would be no other way to close them. The broker expires the membership after the session timeout.
       super.close(error => {
         if (error) {
           this[kClosed] = false
-          callback(error)
+          callback(leaveError ? new MultipleErrors('Closing the consumer failed.', [leaveError, error]) : error)
           return
         }
 
@@ -374,7 +385,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           ensureMetric<Gauge>(this[kPrometheus], 'Gauge', 'kafka_consumers', 'Number of active Kafka consumers').dec()
         }
 
-        callback(null)
+        callback(leaveError ?? null)
       })
     })
 
@@ -1841,8 +1852,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           const fenced = (error as any).response?.errorCode === protocolErrors.FENCED_MEMBER_EPOCH.code
           if (fenced) {
             this.#assignments = []
-            this.assignments = []
-            this.#syncPreferredReadReplicas()
+            this.#setAssignments([])
             this.#memberEpoch = 0
             // Retry after a delay, not immediately: if many members get fenced around the same
             // rebalance, resending ConsumerGroupHeartbeat with no delay at all can flood the
@@ -1940,13 +1950,27 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.emitWithDebug('consumer', 'group:rebalance', { groupId: this.groupId })
 
-    for (const stream of this.#streams) {
+    // The revoked partitions are identified by topic id. #updateAssignments keeps the named assignments
+    // in the same order as the ones by id, so the names come from the same position.
+    const revokedTopicIds = new Set(toRevoke.map(({ topicId }) => topicId))
+    const revokedTopics = new Set<string>()
+    for (let i = 0; i < this.#assignments.length; i++) {
+      if (revokedTopicIds.has(this.#assignments[i].topicId)) {
+        revokedTopics.add(this.assignments![i].topic)
+      }
+    }
+
+    const affectedStreams = this.#streamsConsuming(revokedTopics)
+    for (const stream of affectedStreams) {
       stream.pause()
+    }
+
+    for (const stream of this.#streams) {
       stream[kAutocommit]()
     }
 
     this.#updateAssignments(newAssignment, error => {
-      for (const stream of this.#streams) {
+      for (const stream of affectedStreams) {
         stream.resume()
       }
       /* c8 ignore next 3 - Hard to test */
@@ -1958,13 +1982,20 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     })
   }
 
+  // Only the streams consuming a revoked topic are paused, the others keep fetching during the rebalance
+  #streamsConsuming (
+    topics: Set<string>
+  ): MessagesStream<Key, Value, HeaderKey, HeaderValue, MessagesStreamItem<Key, Value, HeaderKey, HeaderValue>>[] {
+    return [...this.#streams].filter(stream => stream.topics.some(topic => topics.has(topic)))
+  }
+
   #assignPartitions (newAssignment: TopicPartition[]): void {
     const toAssign = this.#diffAssignments(newAssignment, this.#assignments)
     if (toAssign.length === 0) {
       // An explicit empty initial assignment confirms an idle member, even though
       // there are no partitions to add. An omitted assignment must remain unknown.
       if (this.assignments === null && newAssignment.length === 0) {
-        this.assignments = []
+        this.#setAssignments([])
         for (const stream of this.#streams) {
           stream[kRefreshOffsetsAndFetch]()
         }
@@ -2004,8 +2035,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         partitions: tp.partitions
       }))
       this.#assignments = newAssignments
-      this.assignments = assignments
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments(assignments)
       callback(null)
     })
   }
@@ -2061,17 +2091,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    // A static member closing temporarily releases its instance ID but keeps its assignment.
+    const leaveEpoch = this[kClosed] && this.groupInstanceId !== null ? -2 : -1
     const finish = () => {
       this.emitWithDebug('consumer', 'group:leave', { groupId: this.groupId, memberId: this.memberId })
       this.memberId = null
-      this.#memberEpoch = -1
+      this.#memberEpoch = leaveEpoch
       this.#assignments = []
-      this.assignments = []
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments([])
       callback(null)
     }
 
-    // Leave by sending a heartbeat with memberEpoch = -1
     this.#cancelHeartbeat()
     const operation = (connection: Connection, groupCallback: CallbackWithPromise<ConsumerGroupHeartbeatResponse>) => {
       this[kGetApi]<ConsumerGroupHeartbeatRequest, ConsumerGroupHeartbeatResponse>('ConsumerGroupHeartbeat', (
@@ -2089,7 +2119,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           connection,
           this.groupId,
           memberId,
-          -1, // memberEpoch = -1 signals leave
+          leaveEpoch,
           this.groupInstanceId,
           this.#clientRack || null,
           0, // rebalanceTimeout
@@ -2412,7 +2442,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const addedOnRevokeRound = this.#diffGroupAssignments(assignments, previousAssignments)
 
       if (revoked.length > 0) {
-        for (const stream of this.#streams) {
+        const affectedStreams = this.#streamsConsuming(new Set(revoked.map(a => a.topic)))
+
+        for (const stream of affectedStreams) {
           stream.pause()
         }
 
@@ -2442,10 +2474,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               })
             }
 
-            this.assignments = assignments
-            this.#syncPreferredReadReplicas()
+            this.#setAssignments(assignments)
 
-            for (const stream of this.#streams) {
+            for (const stream of affectedStreams) {
               stream.resume()
             }
 
@@ -2464,8 +2495,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     const added = this.#diffGroupAssignments(assignments, this.assignments ?? [])
-    this.assignments = assignments
-    this.#syncPreferredReadReplicas()
+    this.#setAssignments(assignments)
 
     this.#cancelHeartbeat()
     this.#heartbeatInterval = setTimeout(() => {
@@ -2537,12 +2567,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       })
       this.memberId = null
       this.generationId = 0
-      this.assignments = null
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments(null)
       callback(null)
     }
 
     this.#cancelHeartbeat()
+    // Classic static members keep their assignment until the session expires.
+    if (this[kClosed] && this.groupInstanceId !== null) {
+      finish()
+      return
+    }
+
     const operation = (connection: Connection, groupCallback: CallbackWithPromise<LeaveGroupResponse>) => {
       this[kGetApi]<LeaveGroupRequest, LeaveGroupResponse>('LeaveGroup', (error, api) => {
         if (error) {
@@ -3029,8 +3064,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // clear the assignments so the next JoinGroup advertises an empty ownedPartitions set
     // instead of re-claiming partitions the group has already reassigned elsewhere.
     if (this.#isCooperativeProtocol() && ['UNKNOWN_MEMBER_ID', 'ILLEGAL_GENERATION'].includes(protocolError.apiId)) {
-      this.assignments = []
-      this.#syncPreferredReadReplicas()
+      this.#setAssignments([])
     }
 
     if (protocolError.unknownMemberId || protocolError.fencedInstanceId) {
@@ -3109,6 +3143,18 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   // Drops cached preferred replicas for partitions that are no longer assigned.
   // Called whenever `this.assignments` changes so the cache does not retain
   // entries for partitions the consumer has lost during a rebalance.
+  // Every change of the assignments must go through here: streams need to know about revoked
+  // partitions as soon as they are revoked, even when no new partition is assigned and
+  // therefore their offsets are not refreshed.
+  #setAssignments (assignments: GroupAssignment[] | null): void {
+    this.assignments = assignments
+    this.#syncPreferredReadReplicas()
+
+    for (const stream of this.#streams) {
+      stream[kForgetRevokedPartitions]()
+    }
+  }
+
   #syncPreferredReadReplicas (): void {
     if (this.#preferredReadReplicas.size === 0) {
       return

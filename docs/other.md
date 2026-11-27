@@ -174,6 +174,13 @@ The types of the `key`, `value` and `headers` fields are determined by the curre
 
 `Message` also provides a `.toJSON()` method for debugging and logging.
 
+`headers` is an accessor rather than an own property of the message: the `Map` is only created when it is read, from
+the content of `headerEntries` at that time. It is therefore not copied by `{ ...message }` nor listed by `Object.keys(message)`.
+Use `message.headers` or `message.headerEntries` directly, or `.toJSON()`.
+
+`commit` is a method of the message, so it must be called on it (`message.commit()`): it is not copied by
+`{ ...message }` either, and it cannot be detached with `const { commit } = message`.
+
 ### `MessageToProduce<Key, Value, HeaderKey, HeaderValue>`
 
 Represents a message that is being produced to Kafka via using a [`Producer`](./producer.md).

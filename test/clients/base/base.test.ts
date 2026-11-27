@@ -13,7 +13,8 @@ import {
   kGetBootstrapConnection,
   kMetadata,
   kOptions,
-  kPerformWithRetry
+  kPerformWithRetry,
+  type BaseEvents
 } from '../../../src/clients/base/base.ts'
 import { defaultBaseOptions } from '../../../src/clients/base/options.ts'
 import {
@@ -31,8 +32,10 @@ import {
   baseMetadataChannel,
   type Callback,
   Connection,
+  FetchId,
   MultipleErrors,
   NetworkError,
+  ProduceId,
   Reader,
   ResponseError,
   type ResponseParser,
@@ -45,6 +48,7 @@ import {
   type ClientDiagnosticEvent,
   type ClusterMetadata,
   type KeepAliveOptions,
+  VoteId,
   Writer
 } from '../../../src/index.ts'
 import {
@@ -1041,13 +1045,13 @@ test('operations can be aborted without a retry', async t => {
   }
 })
 
-test('kGetApi should fail on unsupported API', (t, done) => {
+test('kGetApi should fail when the client does not support an API', (t, done) => {
   const client = createBase(t)
 
   client[kGetApi]('foo', (error, api) => {
     ok(typeof api === 'undefined')
     strictEqual(error instanceof UnsupportedApiError, true)
-    strictEqual(error!.message, 'Unsupported API foo.')
+    strictEqual(error!.message, 'API foo is not supported.')
 
     done()
   })
@@ -1055,25 +1059,47 @@ test('kGetApi should fail on unsupported API', (t, done) => {
 
 test('kGetApi should fail on unsupported API version', (t, done) => {
   const client = createBase(t)
-
-  mockAPI(client[kConnections], apiVersionsV1.api.key, null, {
-    errorCode: 0,
-    throttleTimeMs: 0,
-    apiKeys: [
-      { name: 'Metadata', minVersion: 0, maxVersion: 11 },
-      { name: 'Produce', minVersion: 30, maxVersion: 40 }
-    ]
-  })
+  client[kApis] = [{ apiKey: ProduceId, name: 'Produce', minVersion: 30, maxVersion: 40 }]
 
   client[kGetApi]('Produce', (error, api) => {
     ok(typeof api === 'undefined')
     strictEqual(error instanceof UnsupportedApiError, true)
     strictEqual((error as UnsupportedApiError).message, 'No usable implementation found for API Produce.')
-    strictEqual((error as UnsupportedApiError).minVersion, 30)
-    strictEqual((error as UnsupportedApiError).maxVersion, 40)
+    deepStrictEqual((error as UnsupportedApiError).broker, { minVersion: 30, maxVersion: 40 })
 
     done()
   })
+})
+
+test('kGetApi should cap the broker maximum to the local maximum', (t, done) => {
+  const client = createBase(t)
+  client[kApis] = [{ apiKey: FetchId, name: 'Fetch', minVersion: 0, maxVersion: 32767 }]
+
+  client[kGetApi]('Fetch', (error, api) => {
+    strictEqual(error, null)
+    strictEqual(api!.version, 17)
+    done()
+  })
+})
+
+test('kGetApi should reject broker versions below the local minimum and APIs without codecs', t => {
+  const client = createBase(t)
+  client[kApis] = [
+    { apiKey: FetchId, name: 'Fetch', minVersion: 0, maxVersion: 3 },
+    { apiKey: VoteId, name: 'Vote', minVersion: 0, maxVersion: 2 }
+  ]
+
+  for (const { name, minVersion, maxVersion } of client[kApis]) {
+    client[kGetApi](name, (error, api) => {
+      strictEqual(api, undefined)
+      strictEqual((error as UnsupportedApiError).code, 'PLT_KFK_UNSUPPORTED_API')
+      if (name === 'Fetch') {
+        deepStrictEqual((error as UnsupportedApiError).broker, { minVersion, maxVersion })
+      } else {
+        strictEqual(error!.message, `API ${name} is not supported.`)
+      }
+    })
+  }
 })
 
 test('every API version advertised in apis-status is exported and selectable', async t => {
@@ -1149,6 +1175,30 @@ test('kPerformWithRetry should accept a custom function', async t => {
 
   deepStrictEqual(first, 1000)
   deepStrictEqual(second, 2000)
+})
+
+test('kPerformWithRetry should report the broker only from the direct error', async t => {
+  const client = createBase(t, { retries: 3, retryDelay: 0 })
+  const first = { host: 'broker-a', port: 9092 }
+  const second = { host: 'broker-b', port: 9093 }
+  const networkError = new NetworkError('Connection closed.', { broker: { ...first, rack: 'rack-a' } })
+  const responseError = new ResponseError(18, 1, { '/': [7, null] }, {}, { broker: second })
+  const aggregateError = new MultipleErrors('Cannot connect to any broker.', [networkError, responseError])
+  const errors = [networkError, responseError, aggregateError, new Error('Operation failed.')]
+  const callback = createPromisifiedCallback<void>()
+  const retries: Parameters<BaseEvents['client:performWithRetry:retry']>[] = []
+
+  client.on('client:performWithRetry:retry', (...args) => retries.push(args))
+  const failed = once(client, 'client:performWithRetry:failed')
+  const result = client[kPerformWithRetry]('testOperation', (done, attempt) => done(errors[attempt]), callback)
+
+  await rejects(result!, MultipleErrors)
+  deepStrictEqual(retries, [
+    ['testOperation', 0, 3, 0, first],
+    ['testOperation', 1, 3, 0, second],
+    ['testOperation', 2, 3, 0]
+  ])
+  deepStrictEqual(await failed, ['testOperation', 3, errors])
 })
 
 test('kPerformWithRetry should route synchronous exceptions thrown on retry to callback', async t => {

@@ -32,6 +32,9 @@ The version ranges below are implemented message codec versions, not supported b
 | LeaveGroup             | 13  | 0-5     |
 | SyncGroup              | 14  | 0-5     |
 | ConsumerGroupHeartbeat | 68  | 0-1     |
+| ShareGroupHeartbeat    | 76  | 1       |
+| ShareFetch             | 78  | 1-2     |
+| ShareAcknowledge       | 79  | 1-2     |
 
 > Fetch v0-v3 use the legacy MessageSet format. This client supports Record Batches, which were introduced by Fetch v4, so v4 is the minimum supported Fetch version.
 
@@ -76,6 +79,7 @@ The version ranges below are implemented message codec versions, not supported b
 | ListTransactions             | 66  | 0-2     |
 | ConsumerGroupDescribe        | 69  | 0       |
 | DescribeTopicPartitions      | 75  | 0       |
+| ShareGroupDescribe           | 77  | 1       |
 
 ## Miscellaneous
 

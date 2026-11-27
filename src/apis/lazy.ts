@@ -6,10 +6,12 @@ import { apiLoaders, apiPaths } from './loaders.ts'
   The codecs are loaded on demand, once a client has negotiated which version of an API to use.
 
   They are loaded synchronously with require(), so that whoever asks for a codec gets it in the same tick.
-  That is not possible when the package has been bundled, as the files are not there anymore: in that
-  case the codecs are loaded with import(), which bundlers can follow.
+  Under webpack, use import() even if the original files are still present: require() could load
+  a second copy of the module graph outside the bundle.
 */
 type Codec = { api: API<any, any> }
+// eslint-disable-next-line camelcase -- Webpack injects this identifier.
+declare const __webpack_require__: unknown
 
 // The sources are TypeScript files, which is how they are run by the tests
 const extension = import.meta.url.endsWith('.ts') ? '.ts' : '.js'
@@ -26,7 +28,9 @@ function requireCodec<T extends object = Codec> (path: string): T {
 export function getApi (name: string): API<any, any> | undefined {
   let api = loadedApis.get(name)
 
-  if (!api && typeof apiPaths[name] === 'string') {
+  // eslint-disable-next-line camelcase -- Webpack injects this identifier.
+  const isWebpack = typeof __webpack_require__ !== 'undefined'
+  if (!api && !isWebpack && typeof apiPaths[name] === 'string') {
     try {
       api = requireCodec(apiPaths[name]).api
       loadedApis.set(name, api)

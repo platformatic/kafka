@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { mock, test, type TestContext } from 'node:test'
+import { api as apiVersionsV1 } from '../../src/apis/metadata/api-versions-v1.ts'
 import {
   type Broker,
   type CallbackWithPromise,
@@ -13,7 +14,10 @@ import {
   ConnectionStatuses,
   GenericError,
   instancesChannel,
+  MultipleErrors,
+  NetworkError,
   parseBroker,
+  ResponseError,
   Writer
 } from '../../src/index.ts'
 import {
@@ -272,6 +276,42 @@ test('get should handle connection disconnect event', async t => {
   await newConnection.close()
 })
 
+test('a Kafka response error should identify the broker that sent it', async t => {
+  const { server, port } = await createServer(t)
+  server.on('connection', socket => {
+    let request = Buffer.alloc(0)
+    function respond (chunk: Buffer) {
+      request = Buffer.concat([request, chunk])
+      if (request.length < 12) {
+        return
+      }
+
+      socket.off('data', respond)
+      // ApiVersions v1: response length, correlation ID, error code, empty API list, and throttle time.
+      const response = Buffer.alloc(18)
+      response.writeInt32BE(response.length - 4)
+      response.writeInt32BE(request.readInt32BE(8), 4)
+      response.writeInt16BE(7, 8) // REQUEST_TIMED_OUT
+      socket.write(response)
+    }
+
+    socket.on('data', respond)
+  })
+
+  const pool = new ConnectionPool('test-client')
+  t.after(() => pool.close())
+  const broker = { host: 'localhost', port }
+  const connection = await pool.get(broker)
+
+  await rejects(apiVersionsV1.async(connection, 'test-client', '1.0.0'), (error: unknown) => {
+    ok(error instanceof ResponseError)
+    strictEqual(error.code, 'PLT_KFK_RESPONSE')
+    deepStrictEqual(error.broker, broker)
+    strictEqual(error.errors[0].apiCode, 7)
+    return true
+  })
+})
+
 test('get should evict a connection whose request timed out', { timeout: 3000 }, async t => {
   const { port } = await createServer(t)
 
@@ -313,7 +353,7 @@ test('get should evict a connection whose request timed out', { timeout: 3000 },
           }
         )
       }),
-    { message: 'Request timed out' }
+    { code: 'PLT_KFK_NETWORK', message: 'Request timed out', broker, correlationId: 1 }
   )
 
   await disconnected
@@ -632,9 +672,19 @@ test('getFirstAvailable should fail if all brokers fail', async t => {
     { host: 'localhost', port: 300 }
   ]
 
-  await rejects(() => connectionPool.getFirstAvailable(brokers) as Promise<unknown>, {
-    code: 'PLT_KFK_MULTIPLE',
-    message: mockedErrorMessage
+  await rejects(connectionPool.getFirstAvailable(brokers), (error: unknown) => {
+    ok(error instanceof MultipleErrors)
+    strictEqual(error.code, 'PLT_KFK_MULTIPLE')
+    strictEqual(error.message, mockedErrorMessage)
+    strictEqual(Object.hasOwn(error, 'broker'), false)
+    deepStrictEqual(
+      error.errors.map((cause: unknown) => {
+        ok(cause instanceof NetworkError)
+        return cause.broker
+      }),
+      brokers
+    )
+    return true
   })
 })
 

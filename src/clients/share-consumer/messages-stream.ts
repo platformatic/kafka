@@ -8,6 +8,7 @@ import {
 import { type ShareAcknowledgeResponse } from '../../apis/consumer/share-acknowledge-v2.ts'
 import {
   type ShareFetchRequestAcknowledgementBatch,
+  type ShareFetchRequestForgottenTopic,
   type ShareFetchRequestTopic,
   type ShareFetchResponse,
   type ShareFetchResponseAcquiredRecords,
@@ -15,6 +16,7 @@ import {
 } from '../../apis/consumer/share-fetch-v2.ts'
 import { ShareAcknowledgeTypes, ShareAcquireModes } from '../../apis/enumerations.ts'
 import { findErrorBy, type GenericError, ProtocolError, UserError } from '../../errors.ts'
+import { type Callback } from '../../apis/definitions.ts'
 import { type ConnectionPool } from '../../network/connection-pool.ts'
 import { type Broker } from '../../network/connection.ts'
 import { type NullableString } from '../../protocol/definitions.ts'
@@ -325,27 +327,66 @@ export class ShareMessagesStream<
         return
       }
 
-      if (error) {
-        // A topic of the assignment was deleted: the next heartbeat removes it from the assignment
-        if (error instanceof UserError) {
-          return
-        }
+      // A topic of the assignment was deleted: the next heartbeat removes it from the assignment
+      if (error instanceof UserError) {
+        this.#fetchExistingTopics(assignments)
+        return
+      }
 
+      if (error) {
         this.destroy(error)
         return
       }
 
-      this.#sendRequests(this.#partitionsByLeader(metadata!, assignments))
+      this.#sendRequests(this.#partitionsByLeader(assignments.map(assignment => [assignment, metadata!])))
     })
   }
 
+  // Each topic is looked up on its own, so that the others are still fetched and acknowledged
+  #fetchExistingTopics (assignments: GroupAssignment[]): void {
+    runConcurrentCallbacks<ClusterMetadata | null, GroupAssignment>(
+      'Loading the metadata failed.',
+      assignments,
+      (assignment, concurrentCallback) => {
+        this.#consumer[kMetadata]({ topics: [assignment.topic] }, (error, metadata) => {
+          // Loading the metadata fails with a UserError when the topic does not exist
+          if (error instanceof UserError) {
+            concurrentCallback(null, null)
+            return
+          }
+
+          concurrentCallback(error, metadata)
+        })
+      },
+      (error, metadata) => {
+        if (this.#closing || this.destroyed) {
+          return
+        }
+
+        if (error) {
+          this.destroy(error)
+          return
+        }
+
+        const existing: Array<[GroupAssignment, ClusterMetadata]> = []
+        for (let i = 0; i < assignments.length; i++) {
+          if (metadata![i]) {
+            existing.push([assignments[i], metadata![i]!])
+          }
+        }
+
+        this.#sendRequests(this.#partitionsByLeader(existing))
+      }
+    )
+  }
+
   #partitionsByLeader (
-    metadata: ClusterMetadata,
-    assignments: GroupAssignment[]
+    assignments: Array<[GroupAssignment, ClusterMetadata]>
   ): Map<number, Map<string, SharePartition>> {
     const partitionsByLeader = new Map<number, Map<string, SharePartition>>()
+    const brokers = new Map<number, Broker>()
 
-    for (const { topic, partitions } of assignments) {
+    for (const [{ topic, partitions }, metadata] of assignments) {
       const { id: topicId, partitions: topicPartitions } = metadata.topics.get(topic)!
 
       for (const partition of partitions) {
@@ -360,6 +401,7 @@ export class ShareMessagesStream<
         if (!leaderPartitions) {
           leaderPartitions = new Map()
           partitionsByLeader.set(leader, leaderPartitions)
+          brokers.set(leader, metadata.brokers.get(leader)!)
         }
 
         const key = `${topicId}:${partition}`
@@ -367,8 +409,7 @@ export class ShareMessagesStream<
       }
     }
 
-    for (const nodeId of partitionsByLeader.keys()) {
-      const broker = metadata.brokers.get(nodeId)!
+    for (const [nodeId, broker] of brokers) {
       const session = this.#sessions.get(nodeId)
 
       if (!session) {
@@ -448,50 +489,61 @@ export class ShareMessagesStream<
       }
     }
 
-    // Nothing to fetch, acknowledge or remove from the session
-    if (!wanted.size && !sent.length && !removed.length) {
+    // Nothing to fetch, acknowledge or remove from the session. A session replaced after an error is still opened
+    // when it only has acknowledgements to send, as they cannot be sent with the request which opens it.
+    if (!wanted.size && !sent.length && !removed.length && !(session.epoch === 0 && session.acknowledgements.size)) {
       return
     }
 
-    const epoch = session.epoch
     session.inflight = true
 
-    const request: ShareFetchRequestArguments = [
-      this.#consumer.groupId,
-      this.#consumer.memberId,
-      epoch,
+    this.#sendShareFetch(
+      session,
       // Without partitions to fetch the broker would only wait
       wanted.size ? this.#maxWaitTime : 0,
-      this.#minBytes,
-      this.#maxBytes,
-      this.#maxRecords,
-      this.#maxRecords
-    ]
+      Array.from(topics.values()),
+      Array.from(forgotten, ([topicId, partitions]) => ({ topicId, partitions })),
+      (error, response) => {
+        this.#handleShareFetch(session, sent, removed, acknowledgements, error, response)
+      }
+    )
+  }
 
-    const forgottenTopicsData = Array.from(forgotten, ([topicId, partitions]) => ({ topicId, partitions }))
-
+  #sendShareFetch (
+    session: ShareSession,
+    maxWaitTime: number,
+    topics: ShareFetchRequestTopic[],
+    forgottenTopicsData: ShareFetchRequestForgottenTopic[],
+    callback: Callback<ShareFetchResponse>
+  ): void {
     this[kConnections].get(session.broker, (error, connection) => {
       if (error) {
-        this.#handleShareFetch(session, sent, removed, acknowledgements, error)
+        callback(error)
         return
       }
 
       this.#consumer[kGetApi]<ShareFetchRequestArguments, ShareFetchResponse>('ShareFetch', (error, api) => {
         if (error) {
-          this.#handleShareFetch(session, sent, removed, acknowledgements, error)
+          callback(error)
           return
         }
+
+        const request: ShareFetchRequestArguments = [
+          this.#consumer.groupId,
+          this.#consumer.memberId,
+          session.epoch,
+          maxWaitTime,
+          this.#minBytes,
+          this.#maxBytes,
+          this.#maxRecords,
+          this.#maxRecords
+        ]
 
         if (api!.version >= 2) {
           request.push(ShareAcquireModes.BATCH_OPTIMIZED, false)
         }
 
-        api!(connection!, ...request, Array.from(topics.values()), forgottenTopicsData, (
-          error: Error | null,
-          response?: ShareFetchResponse
-        ) => {
-          this.#handleShareFetch(session, sent, removed, acknowledgements, error, response)
-        })
+        api!(connection!, ...request, topics, forgottenTopicsData, callback)
       })
     })
   }
@@ -823,7 +875,21 @@ export class ShareMessagesStream<
 
     // A session being opened by a request still inflight is closed too, as the broker handles the requests in order
     if (session.epoch === 0 && !session.inflight) {
-      callback(null)
+      if (!session.acknowledgements.size) {
+        callback(null)
+        return
+      }
+
+      // A session replaced after an error is opened first, so that it can send the acknowledgements
+      this.#sendShareFetch(session, 0, [], [], error => {
+        if (error) {
+          callback(null)
+          return
+        }
+
+        session.epoch = 1
+        this.#closeSession(session, callback)
+      })
       return
     }
 

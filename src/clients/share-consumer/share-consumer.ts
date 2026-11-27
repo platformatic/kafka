@@ -214,6 +214,9 @@ export class ShareConsumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Hea
     if (this.#state === 'leaving') {
       callback(new UserError('The consumer is leaving the group.'))
       return callback[kCallbackPromise]
+    } else if (this.#state === 'joining') {
+      callback(new UserError('The consumer is already joining the group.'))
+      return callback[kCallbackPromise]
     } else if (this.#state !== 'idle') {
       callback(new UserError('The consumer has already joined the group.'))
       return callback[kCallbackPromise]
@@ -253,8 +256,14 @@ export class ShareConsumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Hea
   }
 
   leaveGroup (callback: CallbackWithPromise<void>): void
-  leaveGroup (): Promise<void>
-  leaveGroup (callback?: CallbackWithPromise<void>): void | Promise<void> {
+  leaveGroup (force: boolean, callback: CallbackWithPromise<void>): void
+  leaveGroup (force?: boolean): Promise<void>
+  leaveGroup (force?: boolean | CallbackWithPromise<void>, callback?: CallbackWithPromise<void>): void | Promise<void> {
+    if (typeof force === 'function') {
+      callback = force
+      force = false
+    }
+
     if (!callback) {
       callback = createPromisifiedCallback<void>()
     }
@@ -265,6 +274,12 @@ export class ShareConsumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Hea
 
     if (this.#state === 'idle') {
       callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    // As in the Consumer, only force closes the stream, which releases its buffered records
+    if (this.#stream && !force) {
+      callback(new UserError('Cannot leave group while consuming messages.'))
       return callback[kCallbackPromise]
     }
 

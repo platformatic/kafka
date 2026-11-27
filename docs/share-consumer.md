@@ -107,7 +107,7 @@ An accepted record is never delivered again to any member of the group. So if th
 
 The records which are still buffered in the stream when it is closed have not reached the application: they are released, so the group delivers them again. Their delivery count increases. Once it reaches the `group.share.delivery.count.limit` broker setting (5 by default), the record is archived and not delivered anymore.
 
-The broker locks the records it hands to a member for the time set by the `group.share.record.lock.duration.ms` broker setting (30 seconds by default). If a record is not acknowledged in time, for instance because it waited in the buffer of a slow consumer, the broker can deliver it to another member, and accepting it later fails with a `share-consumer:acknowledgement:error` event. Use a lower `highWaterMark` or `maxRecords` when processing records takes long, and keep `maxWaitTime` well below the lock duration.
+The broker locks the records it hands to a member for the time set by the `group.share.record.lock.duration.ms` broker setting (30 seconds by default). The stream still delivers a record which waited in its buffer for longer than that, but by then the broker may already have released the record and delivered it to another member. Accepting it then fails with a `share-consumer:acknowledgement:error` event. Share groups deliver records at least once, so applications must be ready to handle the same record more than once. Use a lower `highWaterMark` or `maxRecords` when processing records takes long, and keep `maxWaitTime` well below the lock duration.
 
 #### `ShareMessagesStream`
 
@@ -129,7 +129,7 @@ Once joined, the share consumer sends a heartbeat at the interval set by the coo
 
 It returns the member ID for this share consumer.
 
-It fails if the share consumer has already joined the group or is leaving it.
+It fails if the share consumer is joining the group, has already joined it, or is leaving it.
 
 The topics do not need to exist: the coordinator assigns their partitions once they are created, and removes the partitions of a deleted topic from the assignment.
 
@@ -141,9 +141,13 @@ Options:
 | -------- | ---------- | ----------------------- |
 | topics   | `string[]` | Topics to subscribe to. |
 
-### `leaveGroup([callback])`
+### `leaveGroup([force][, callback])`
 
-Leaves the share group. If a stream is consuming, it is closed first, since the broker refuses the acknowledgements of a member which left the group. If leaving fails the error is returned, but the share consumer stops sending heartbeats anyway and the coordinator removes the member when its session times out.
+Leaves the share group.
+
+If a stream is consuming and `force` is not `true`, it fails with an error. With `force`, the stream is closed first: its buffered records are released and its pending acknowledgements are sent, since the broker refuses the acknowledgements of a member which left the group.
+
+If leaving fails the error is returned, but the share consumer stops sending heartbeats anyway and the coordinator removes the member when its session times out.
 
 Concurrent calls wait for the same request. Calling `joinGroup` while leaving fails.
 

@@ -5,7 +5,7 @@ import { defineValidator, type OptionsValidator } from '../../ajv.ts'
 import { shareConsumerOptionsSchema, shareGroupOptionsSchema, shareConsumeOptionsSchema } from './options.ts'
 
 export const shareConsumerOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate58, () => shareConsumerOptionsSchema);
-const schema69 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"leaveGroupTimeout":{"type":"number","minimum":0},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"maxRecords":{"type":"number","minimum":1},"highWaterMark":{"type":"number","minimum":1}},"required":["groupId"],"additionalProperties":true};
+const schema69 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"leaveGroupTimeout":{"type":"number","minimum":0},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":0},"maxWaitTime":{"type":"integer","minimum":0},"maxRecords":{"type":"integer","minimum":1},"highWaterMark":{"type":"integer","minimum":1}},"required":["groupId"],"additionalProperties":true};
 const pattern4 = new RegExp("^\\S+$", "u");
 
 function validate58(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -156,9 +156,8 @@ errors++;
 }
 if(data.minBytes !== undefined){
 let data7 = data.minBytes;
-if((typeof data7 == "number") && (isFinite(data7))){
-if(data7 < 0 || isNaN(data7)){
-const err11 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data7 == "number") && (!(data7 % 1) && !isNaN(data7))) && (isFinite(data7)))){
+const err11 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err11];
 }
@@ -167,9 +166,9 @@ vErrors.push(err11);
 }
 errors++;
 }
-}
-else {
-const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 < 0 || isNaN(data7)){
+const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err12];
 }
@@ -179,11 +178,11 @@ vErrors.push(err12);
 errors++;
 }
 }
+}
 if(data.maxBytes !== undefined){
 let data8 = data.maxBytes;
-if((typeof data8 == "number") && (isFinite(data8))){
-if(data8 < 0 || isNaN(data8)){
-const err13 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data8 == "number") && (!(data8 % 1) && !isNaN(data8))) && (isFinite(data8)))){
+const err13 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err13];
 }
@@ -192,9 +191,9 @@ vErrors.push(err13);
 }
 errors++;
 }
-}
-else {
-const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 < 0 || isNaN(data8)){
+const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err14];
 }
@@ -204,11 +203,11 @@ vErrors.push(err14);
 errors++;
 }
 }
+}
 if(data.maxWaitTime !== undefined){
 let data9 = data.maxWaitTime;
-if((typeof data9 == "number") && (isFinite(data9))){
-if(data9 < 0 || isNaN(data9)){
-const err15 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data9 == "number") && (!(data9 % 1) && !isNaN(data9))) && (isFinite(data9)))){
+const err15 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err15];
 }
@@ -217,9 +216,9 @@ vErrors.push(err15);
 }
 errors++;
 }
-}
-else {
-const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 < 0 || isNaN(data9)){
+const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -229,11 +228,11 @@ vErrors.push(err16);
 errors++;
 }
 }
+}
 if(data.maxRecords !== undefined){
 let data10 = data.maxRecords;
-if((typeof data10 == "number") && (isFinite(data10))){
-if(data10 < 1 || isNaN(data10)){
-const err17 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
+const err17 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -242,9 +241,9 @@ vErrors.push(err17);
 }
 errors++;
 }
-}
-else {
-const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data10 == "number") && (isFinite(data10))){
+if(data10 < 1 || isNaN(data10)){
+const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -254,11 +253,11 @@ vErrors.push(err18);
 errors++;
 }
 }
+}
 if(data.highWaterMark !== undefined){
 let data11 = data.highWaterMark;
-if((typeof data11 == "number") && (isFinite(data11))){
-if(data11 < 1 || isNaN(data11)){
-const err19 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(!(((typeof data11 == "number") && (!(data11 % 1) && !isNaN(data11))) && (isFinite(data11)))){
+const err19 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -267,9 +266,9 @@ vErrors.push(err19);
 }
 errors++;
 }
-}
-else {
-const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data11 == "number") && (isFinite(data11))){
+if(data11 < 1 || isNaN(data11)){
+const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -277,6 +276,7 @@ else {
 vErrors.push(err20);
 }
 errors++;
+}
 }
 }
 }
@@ -399,7 +399,7 @@ return errors === 0;
 validate59.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const shareConsumeOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate60, () => shareConsumeOptionsSchema);
-const schema71 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"},"minItems":1},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"maxRecords":{"type":"number","minimum":1},"highWaterMark":{"type":"number","minimum":1}},"required":["topics"],"additionalProperties":false};
+const schema71 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"},"minItems":1},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"minBytes":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":0},"maxWaitTime":{"type":"integer","minimum":0},"maxRecords":{"type":"integer","minimum":1},"highWaterMark":{"type":"integer","minimum":1}},"required":["topics"],"additionalProperties":false};
 
 function validate60(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -562,9 +562,8 @@ errors++;
 }
 if(data.minBytes !== undefined){
 let data7 = data.minBytes;
-if((typeof data7 == "number") && (isFinite(data7))){
-if(data7 < 0 || isNaN(data7)){
-const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data7 == "number") && (!(data7 % 1) && !isNaN(data7))) && (isFinite(data7)))){
+const err12 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err12];
 }
@@ -573,9 +572,9 @@ vErrors.push(err12);
 }
 errors++;
 }
-}
-else {
-const err13 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 < 0 || isNaN(data7)){
+const err13 = {instancePath:instancePath+"/minBytes",schemaPath:"#/properties/minBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err13];
 }
@@ -585,11 +584,11 @@ vErrors.push(err13);
 errors++;
 }
 }
+}
 if(data.maxBytes !== undefined){
 let data8 = data.maxBytes;
-if((typeof data8 == "number") && (isFinite(data8))){
-if(data8 < 0 || isNaN(data8)){
-const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data8 == "number") && (!(data8 % 1) && !isNaN(data8))) && (isFinite(data8)))){
+const err14 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err14];
 }
@@ -598,9 +597,9 @@ vErrors.push(err14);
 }
 errors++;
 }
-}
-else {
-const err15 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 < 0 || isNaN(data8)){
+const err15 = {instancePath:instancePath+"/maxBytes",schemaPath:"#/properties/maxBytes/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err15];
 }
@@ -610,11 +609,11 @@ vErrors.push(err15);
 errors++;
 }
 }
+}
 if(data.maxWaitTime !== undefined){
 let data9 = data.maxWaitTime;
-if((typeof data9 == "number") && (isFinite(data9))){
-if(data9 < 0 || isNaN(data9)){
-const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(!(((typeof data9 == "number") && (!(data9 % 1) && !isNaN(data9))) && (isFinite(data9)))){
+const err16 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -623,9 +622,9 @@ vErrors.push(err16);
 }
 errors++;
 }
-}
-else {
-const err17 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 < 0 || isNaN(data9)){
+const err17 = {instancePath:instancePath+"/maxWaitTime",schemaPath:"#/properties/maxWaitTime/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -635,11 +634,11 @@ vErrors.push(err17);
 errors++;
 }
 }
+}
 if(data.maxRecords !== undefined){
 let data10 = data.maxRecords;
-if((typeof data10 == "number") && (isFinite(data10))){
-if(data10 < 1 || isNaN(data10)){
-const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(!(((typeof data10 == "number") && (!(data10 % 1) && !isNaN(data10))) && (isFinite(data10)))){
+const err18 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -648,9 +647,9 @@ vErrors.push(err18);
 }
 errors++;
 }
-}
-else {
-const err19 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data10 == "number") && (isFinite(data10))){
+if(data10 < 1 || isNaN(data10)){
+const err19 = {instancePath:instancePath+"/maxRecords",schemaPath:"#/properties/maxRecords/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -660,11 +659,11 @@ vErrors.push(err19);
 errors++;
 }
 }
+}
 if(data.highWaterMark !== undefined){
 let data11 = data.highWaterMark;
-if((typeof data11 == "number") && (isFinite(data11))){
-if(data11 < 1 || isNaN(data11)){
-const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(!(((typeof data11 == "number") && (!(data11 % 1) && !isNaN(data11))) && (isFinite(data11)))){
+const err20 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -673,9 +672,9 @@ vErrors.push(err20);
 }
 errors++;
 }
-}
-else {
-const err21 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data11 == "number") && (isFinite(data11))){
+if(data11 < 1 || isNaN(data11)){
+const err21 = {instancePath:instancePath+"/highWaterMark",schemaPath:"#/properties/highWaterMark/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -683,6 +682,7 @@ else {
 vErrors.push(err21);
 }
 errors++;
+}
 }
 }
 }

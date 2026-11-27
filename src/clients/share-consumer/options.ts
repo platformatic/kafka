@@ -3,11 +3,11 @@ import { serdeProperties } from '../serde.ts'
 
 export const shareFetchOptionsProperties = {
   deserializers: serdeProperties,
-  minBytes: { type: 'number', minimum: 0 },
-  maxBytes: { type: 'number', minimum: 0 },
-  maxWaitTime: { type: 'number', minimum: 0 },
-  maxRecords: { type: 'number', minimum: 1 },
-  highWaterMark: { type: 'number', minimum: 1 }
+  minBytes: { type: 'integer', minimum: 0 },
+  maxBytes: { type: 'integer', minimum: 0 },
+  maxWaitTime: { type: 'integer', minimum: 0 },
+  maxRecords: { type: 'integer', minimum: 1 },
+  highWaterMark: { type: 'integer', minimum: 1 }
 }
 
 export const shareConsumerOptionsSchema = {

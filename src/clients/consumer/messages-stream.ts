@@ -27,6 +27,9 @@ import {
 import { runAsyncSeries } from '../../registries/abstract.ts'
 import {
   kAutocommit,
+  kPendingCommitTargets,
+  kRevokingPartitions,
+  kResumeFetch,
   kDeserializationError,
   kGetFetchNode,
   kForgetRevokedPartitions,
@@ -235,6 +238,7 @@ export class MessagesStream<
   HeaderValue,
   Item = Message<Key, Value, HeaderKey, HeaderValue>
 > extends Readable {
+  [kPendingCommitTargets]?: Map<string, bigint>
   #consumer: Consumer<Key, Value, HeaderKey, HeaderValue>
   #mode: string
   #fallbackMode: string
@@ -305,6 +309,7 @@ export class MessagesStream<
   ) {
     const {
       autocommit,
+      waitForPendingCommitsOnRebalance,
       mode,
       fallbackMode,
       maxFetches,
@@ -350,6 +355,9 @@ export class MessagesStream<
     this.#fallbackMode = fallbackMode ?? MessagesStreamFallbackModes.LATEST
     this.#offsetsToCommit = new Map()
     this.#offsetsCommitted = new Map()
+    if (autocommit === false && waitForPendingCommitsOnRebalance) {
+      this[kPendingCommitTargets] = new Map()
+    }
     this.#commitWaiters = new Map()
     this.#partitionsEpochs = new Map()
     this.#paused = false
@@ -741,6 +749,12 @@ export class MessagesStream<
     this.#fetch()
   }
 
+  [kResumeFetch] (): void {
+    if (this.readableLength === 0 || this.readableLength < this.readableHighWaterMark) {
+      process.nextTick(() => this.#fetch())
+    }
+  }
+
   #maxFetchesReached (): boolean {
     return this.#maxFetches > 0 && this.#fetches >= this.#maxFetches
   }
@@ -816,7 +830,7 @@ export class MessagesStream<
           const targetNode = this.#consumer[kGetFetchNode](metadata!, topic, partition, now)
           const key = partitionKey(topic, partition)
 
-          if (this.#inflightNodes.has(targetNode)) {
+          if (this.#inflightNodes.has(targetNode) || this.#consumer[kRevokingPartitions]?.has(key)) {
             continue
           }
 
@@ -1110,7 +1124,7 @@ export class MessagesStream<
 
         // The broker can return partitions which were not requested when they linger
         // in an incremental fetch session - their data is stale and must not rewind offsets
-        if (!requestedOffsets.has(key)) {
+        if (!requestedOffsets.has(key) || this.#consumer[kRevokingPartitions]?.has(key)) {
           continue
         }
 
@@ -1324,6 +1338,10 @@ export class MessagesStream<
                     : messageMetadata
               )
 
+              if (!batchSize) {
+                this[kPendingCommitTargets]?.set(key, offset + 1n)
+              }
+
               if (batchSize) {
                 if (this.#closed || this.destroyed) {
                   return
@@ -1454,6 +1472,7 @@ export class MessagesStream<
           consumerReceivesChannel.asyncStart.publish(context)
         }
       }
+      this[kPendingCommitTargets]?.set(partitionKey(topic, partition), commitOffset)
       const canPush = this.push(batch)
       if (diagnosticContexts) {
         for (const context of diagnosticContexts) {
@@ -1605,7 +1624,8 @@ export class MessagesStream<
     // A caller-supplied callback means an explicitly requested flush (the cooperative rebalance
     // commits before revoking partitions) rather than a timer tick: it awaits this commit
     // instead of rejoining on failure, so it must not be skipped or the revoked offsets are lost.
-    if (!callback && !this.#consumer.isActive()) {
+    const draining = this[kPendingCommitTargets] && this.#consumer[kRevokingPartitions]
+    if (!callback && !this.#consumer.isActive() && !draining) {
       return
     }
 
@@ -1622,15 +1642,19 @@ export class MessagesStream<
         // (ILLEGAL_GENERATION, UNKNOWN_MEMBER_ID, REBALANCE_IN_PROGRESS).
         // Transient coordinator errors must not tear down the consumption loop.
         if (findErrorBy(error, 'needsRejoin', true)) {
-          // The stream is going away: every pending manual commit, for every partition, must be
-          // rejected now, since a destroyed stream never gets another chance to flush them.
+          // All manual waiters must observe the membership failure, including those queued mid-flush.
           for (const waiters of this.#commitWaiters.values()) {
             for (const waiter of waiters) {
               waiter.callback(error)
             }
           }
           this.#commitWaiters.clear()
-          this.destroy(error)
+          if (this[kPendingCommitTargets] && this.#consumer[kRevokingPartitions]) {
+            // The outer rebalance is recovering membership. Do not replay rejected commits after it.
+            this.#offsetsToCommit.clear()
+          } else {
+            this.destroy(error)
+          }
         } else {
           // Keep offsets produced while the commit was in flight, and retry the failed snapshot
           // without replacing a newer offset for the same partition.
@@ -1806,6 +1830,16 @@ export class MessagesStream<
   // Called by the consumer every time its assignments change, including when partitions are
   // only revoked, which does not refresh the offsets.
   [kForgetRevokedPartitions] (): void {
+    const pending = this[kPendingCommitTargets]
+    if (pending?.size) {
+      const assigned = this.#assignedPartitionKeys()
+      for (const key of pending.keys()) {
+        if (!assigned.has(key)) {
+          pending.delete(key)
+        }
+      }
+    }
+
     if (this.#forgetRevokedPartitions()) {
       // A fetch issued before the revocation may still be inflight: invalidate it, otherwise its
       // response would write back the position of the revoked partition.

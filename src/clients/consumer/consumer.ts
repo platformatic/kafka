@@ -73,6 +73,9 @@ import { IS_CONTROL, IS_TRANSACTIONAL } from '../../protocol/records.ts'
 import { Writer } from '../../protocol/writer.ts'
 import {
   kAutocommit,
+  kPendingCommitTargets,
+  kRevokingPartitions,
+  kResumeFetch,
   kForgetRevokedPartitions,
   kGetFetchNode,
   kRefreshOffsetsAndFetch,
@@ -194,6 +197,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   ConsumerOptions<Key, Value, HeaderKey, HeaderValue>,
   ConsumerEvents
 > {
+  [kRevokingPartitions]?: Set<string>
   groupId: string
   groupInstanceId: string | null
   generationId: number
@@ -201,6 +205,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   topics: TopicsMap
   assignments: GroupAssignment[] | null
   #assignments: TopicPartition[]
+  #drain?: Promise<void>
+  #finishDrain?: () => void
+  #pendingAssignment?: TopicPartition[]
 
   #members: Map<string, ExtendedGroupProtocolSubscription>
   #groupOptions: GroupOptions
@@ -457,6 +464,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     options.autocommit ??= this[kOptions].autocommit! ?? true
+    if (this[kOptions].waitForPendingCommitsOnRebalance) {
+      options.waitForPendingCommitsOnRebalance ??= true
+    }
     options.maxBytes ??= this[kOptions].maxBytes!
     // A partition can never be granted more than the limit of the whole response
     options.maxBytesPerPartition ??=
@@ -1292,6 +1302,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         })
       },
       error => {
+        if (error && this[kRevokingPartitions] && findErrorBy(error, 'needsRejoin', true)) {
+          this.#finishDrain?.()
+          callback(error)
+          return
+        }
+
         if (error && rejoinAttempts < (this[kOptions].retries as number) && this.#getRejoinError(error, sent)) {
           this.joinGroup({ ...this.#groupOptions }, joinError => {
             if (joinError) {
@@ -1319,11 +1335,17 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           for (const { topic, partition, offset } of options.offsets) {
             const key = partitionKey(topic, partition)
             for (const stream of this.#streams) {
+              const target = stream[kPendingCommitTargets]?.get(key)
+              if (target !== undefined && offset >= target) {
+                stream[kPendingCommitTargets]!.delete(key)
+              }
+
               if (stream.offsetsCommitted.has(key)) {
                 stream[kUpdateCommittedOffset](topic, partition, offset)
               }
             }
           }
+          this.#checkDrain()
         }
 
         callback(error)
@@ -1647,7 +1669,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
-  #heartbeat (options: Required<GroupOptions>): void {
+  #heartbeat (options: Required<GroupOptions>, drain?: Promise<void>): void {
     let sent: MembershipSnapshot | undefined
     const eventPayload = { groupId: this.groupId, memberId: this.memberId, generationId: this.generationId }
 
@@ -1679,7 +1701,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       },
       error => {
         // The heartbeat has been aborted elsewhere, ignore the response
-        if (this.#heartbeatInterval === null || !this.#membershipActive) {
+        if (this.#heartbeatInterval === null || !this.#membershipActive || (drain && drain !== this.#drain)) {
           this.emitWithDebug('consumer:heartbeat', 'cancel', eventPayload)
           return
         }
@@ -1688,6 +1710,12 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           this.#cancelHeartbeat()
 
           if (this.#getRejoinError(error, sent)) {
+            if (drain) {
+              // The cooperative sync already owns the next rejoin.
+              this.#finishDrain?.()
+              return
+            }
+
             // A rejoin can legitimately block up to rebalanceTimeout:
             // - extend the stall window by that bound rather than pausing it
             // - a rejoin that never completes still surfaces as a stall
@@ -1727,7 +1755,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           // The error was not group related, so we schedule another heartbeat.
           // Do this before notifying listeners so they can still cancel it.
           this.#heartbeatInterval = setTimeout(() => {
-            this.#heartbeat(options)
+            this.#heartbeat(options, drain)
           }, options.heartbeatInterval)
 
           this.emitWithDebug('consumer:heartbeat', 'error', { ...eventPayload, error })
@@ -1908,13 +1936,102 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
         const newAssignments = response!.assignment?.topicPartitions
         if (newAssignments) {
-          this.#revokePartitions(newAssignments)
-          this.#assignPartitions(newAssignments)
+          this.#reconcileAssignment(newAssignments, options.rebalanceTimeout)
         }
         this.emitWithDebug('consumer:heartbeat', 'end')
         callback(null)
       }
     )
+  }
+
+  #reconcileAssignment (assignment: TopicPartition[], timeout: number): void {
+    const current = this.#assignments
+    if (this.#hasCommitTargets()) {
+      // The wire and public assignments are installed together in the same topic order.
+      const revoked = this.#diffAssignments(current, assignment).map(({ topicId, partitions }) => ({
+        topic: this.assignments![current.findIndex(entry => entry.topicId === topicId)].topic,
+        partitions
+      }))
+      const drain = this.#drainCommits(revoked, timeout, true)
+      if (this.#pendingAssignment) {
+        this.#pendingAssignment = assignment
+        return
+      }
+      if (drain) {
+        this.#pendingAssignment = assignment
+        drain.then(() => {
+          const latest = this.#pendingAssignment
+          this.#pendingAssignment = undefined
+          if (latest && this.#assignments === current && this.#membershipActive && !this[kClosed]) {
+            this.#revokePartitions(latest)
+            this.#assignPartitions(latest)
+          }
+        })
+        return
+      }
+    }
+
+    this.#revokePartitions(assignment)
+    this.#assignPartitions(assignment)
+  }
+
+  #hasCommitTargets (): boolean {
+    return this.#streams.values().some(stream => !!stream[kPendingCommitTargets])
+  }
+
+  #checkDrain (): void {
+    if (this.#finishDrain && !this.#hasPendingRevokedOffsets()) {
+      this.#finishDrain()
+    }
+  }
+
+  #hasPendingRevokedOffsets (): boolean {
+    return this.#streams
+      .values()
+      .some(stream => stream[kPendingCommitTargets]?.keys().some(key => this[kRevokingPartitions]?.has(key)))
+  }
+
+  #drainCommits (assignments: GroupAssignment[], timeout: number, replace: boolean = false): Promise<void> | undefined {
+    const previous = this[kRevokingPartitions]
+    if ((!assignments.length && !(replace && previous)) || !this.#hasCommitTargets()) {
+      return
+    }
+
+    // Freeze ingress for the whole revocation, including fetch responses already in flight.
+    const revoked = new Set(replace ? undefined : previous)
+    for (const { topic, partitions } of assignments) {
+      for (const partition of partitions) {
+        revoked.add(partitionKey(topic, partition))
+      }
+    }
+    this[kRevokingPartitions] = revoked.size ? revoked : undefined
+    if (previous && !previous.isSubsetOf(revoked)) {
+      // A newer heartbeat retained a blocked partition. Resume at its existing fetch position.
+      for (const stream of this.#streams) {
+        stream[kResumeFetch]()
+      }
+      this.#checkDrain()
+    }
+    if (this.#drain || (previous && revoked.isSubsetOf(previous)) || !this.#hasPendingRevokedOffsets()) {
+      return this.#drain
+    }
+
+    const { promise, resolve } = Promise.withResolvers<void>()
+    const finish = () => {
+      clearTimeout(timer)
+      this.#finishDrain = undefined
+      this.#drain = undefined
+      resolve()
+    }
+    const timer = setTimeout(finish, timeout)
+    this.#drain = promise
+    this.#finishDrain = finish
+    for (const stream of this.#streams) {
+      if (stream[kPendingCommitTargets]) {
+        stream[kAutocommit]()
+      }
+    }
+    return this.#drain
   }
 
   #diffAssignments (A: TopicPartition[], B: TopicPartition[]): TopicPartition[] {
@@ -1971,16 +2088,22 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const affectedStreams = this.#streamsConsuming(revokedTopics)
     for (const stream of affectedStreams) {
+      if (stream[kPendingCommitTargets]) {
+        continue
+      }
       stream.pause()
     }
 
+    // Flush pending offsets even for streams that keep fetching during the rebalance.
     for (const stream of this.#streams) {
       stream[kAutocommit]()
     }
 
     this.#updateAssignments(newAssignment, error => {
       for (const stream of affectedStreams) {
-        stream.resume()
+        if (!stream[kPendingCommitTargets]) {
+          stream.resume()
+        }
       }
       /* c8 ignore next 3 - Hard to test */
       if (error) {
@@ -2224,6 +2347,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       this.#metricActiveStreams?.dec()
       this.topics.untrackAll(...options.topics)
       this.#streams.delete(stream)
+      this.#checkDrain()
     })
 
     callback(null, stream)
@@ -2281,6 +2405,13 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       return
     }
 
+    if (this.memberId && !this.#isCooperativeProtocol() && this.assignments) {
+      const drain = this.#drainCommits(this.assignments, options.rebalanceTimeout)
+      if (drain) {
+        drain.then(() => this.#performJoinGroupAttempt(options, callback, 0, []))
+        return
+      }
+    }
     this.#performJoinGroupAttempt(options, callback, 0, [])
   }
 
@@ -2431,6 +2562,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     // A failed recovery ends this membership episode. Only a successful sync re-arms it.
     this.#membershipEstablished = false
+    this.#finishDrain?.()
+    this[kRevokingPartitions] = undefined
     this.emitWithDebug('consumer', 'group:lost', {
       groupId: this.groupId,
       memberId: this.memberId,
@@ -2451,10 +2584,29 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       const addedOnRevokeRound = this.#diffGroupAssignments(assignments, previousAssignments)
 
       if (revoked.length > 0) {
-        const affectedStreams = this.#streamsConsuming(new Set(revoked.map(a => a.topic)))
+        const drain = this.#drainCommits(revoked, options.rebalanceTimeout)
+        if (drain) {
+          this.#heartbeatInterval = setTimeout(() => this.#heartbeat(options, drain), options.heartbeatInterval)
+          drain.then(() => {
+            this.#cancelHeartbeat()
+            if (!this.#membershipActive || this[kClosed]) {
+              callback(null)
+              return
+            }
+            if (this.assignments !== previousAssignments) {
+              this.#performJoinGroup(options, callback)
+              return
+            }
+            this.#completeClassicSyncGroup(options, assignments, callback)
+          })
+          return
+        }
 
+        const affectedStreams = this.#streamsConsuming(new Set(revoked.map(a => a.topic)))
         for (const stream of affectedStreams) {
-          stream.pause()
+          if (!stream[kPendingCommitTargets]) {
+            stream.pause()
+          }
         }
 
         // Snapshot the set: a failing autocommit destroys its stream, which removes it from
@@ -2464,7 +2616,7 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           [...this.#streams],
           (stream, concurrentCallback) => {
             // A destroyed stream never settles an autocommit, so do not wait on one.
-            if (stream.destroyed || stream.closed) {
+            if (stream.destroyed || stream.closed || stream[kPendingCommitTargets]) {
               concurrentCallback(null)
               return
             }
@@ -2486,7 +2638,9 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             this.#setAssignments(assignments)
 
             for (const stream of affectedStreams) {
-              stream.resume()
+              if (!stream[kPendingCommitTargets]) {
+                stream.resume()
+              }
             }
 
             if (addedOnRevokeRound.length > 0) {
@@ -3078,7 +3232,10 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // A cooperative member which lost its membership or generation no longer owns anything:
     // clear the assignments so the next JoinGroup advertises an empty ownedPartitions set
     // instead of re-claiming partitions the group has already reassigned elsewhere.
-    if (this.#isCooperativeProtocol() && ['UNKNOWN_MEMBER_ID', 'ILLEGAL_GENERATION'].includes(protocolError.apiId)) {
+    if (
+      (this.#isCooperativeProtocol() || this.#hasCommitTargets()) &&
+      ['UNKNOWN_MEMBER_ID', 'ILLEGAL_GENERATION'].includes(protocolError.apiId)
+    ) {
       this.#setAssignments([])
     }
 
@@ -3165,6 +3322,8 @@ export class Consumer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   // partitions as soon as they are revoked, even when no new partition is assigned and
   // therefore their offsets are not refreshed.
   #setAssignments (assignments: GroupAssignment[] | null): void {
+    this.#finishDrain?.()
+    this[kRevokingPartitions] = undefined
     this.assignments = assignments
     this.#syncPreferredReadReplicas()
 

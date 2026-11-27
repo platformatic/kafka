@@ -1017,7 +1017,7 @@ return errors === 0;
 validate27.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const consumeOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate28, () => consumeOptionsSchema);
-const schema39 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"}},"context":true,"mode":{"type":"string","enum":["latest","earliest","committed","manual"]},"fallbackMode":{"type":"string","enum":["latest","earliest","fail"]},"maxFetches":{"type":"number","minimum":0,"default":0},"offsets":{"type":"array","items":{"type":"object","properties":{"topic":{"type":"string","pattern":"^\\S+$"},"partition":{"type":"number","minimum":0},"offset":{"bigint":true}},"required":["topic","partition","offset"],"additionalProperties":false}},"onCorruptedMessage":{"function":true},"onDeserializationError":{"function":true},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"},"batch":{"oneOf":[{"type":"boolean"},{"type":"integer","minimum":1}]}},"required":["topics"],"additionalProperties":false};
+const schema39 = {"type":"object","properties":{"topics":{"type":"array","items":{"type":"string","pattern":"^\\S+$"}},"context":true,"mode":{"type":"string","enum":["latest","earliest","committed","manual"]},"fallbackMode":{"type":"string","enum":["latest","earliest","fail"]},"maxFetches":{"type":"number","minimum":0,"default":0},"offsets":{"type":"array","items":{"type":"object","properties":{"topic":{"type":"string","pattern":"^\\S+$"},"partition":{"type":"number","minimum":0},"offset":{"bigint":true}},"required":["topic","partition","offset"],"additionalProperties":false}},"onCorruptedMessage":{"function":true},"onDeserializationError":{"function":true},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"},"batch":{"oneOf":[{"type":"boolean"},{"type":"integer","minimum":1}]},"waitForPendingCommitsOnRebalance":{"type":"boolean"}},"required":["topics"],"additionalProperties":false};
 const func1 = Object.prototype.hasOwnProperty;
 
 function validate28(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2096,14 +2096,26 @@ vErrors = null;
 }
 }
 }
-}
-else {
-const err79 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.waitForPendingCommitsOnRebalance !== undefined){
+if(typeof data.waitForPendingCommitsOnRebalance !== "boolean"){
+const err79 = {instancePath:instancePath+"/waitForPendingCommitsOnRebalance",schemaPath:"#/properties/waitForPendingCommitsOnRebalance/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
 if(vErrors === null){
 vErrors = [err79];
 }
 else {
 vErrors.push(err79);
+}
+errors++;
+}
+}
+}
+else {
+const err80 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err80];
+}
+else {
+vErrors.push(err80);
 }
 errors++;
 }
@@ -2113,7 +2125,7 @@ return errors === 0;
 validate28.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const consumerOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate29, () => consumerOptionsSchema);
-const schema40 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"streamContext":true,"leaveGroupTimeout":{"type":"number","minimum":0},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"}},"required":["groupId"],"additionalProperties":true};
+const schema40 = {"type":"object","properties":{"groupId":{"type":"string","pattern":"^\\S+$"},"context":true,"streamContext":true,"leaveGroupTimeout":{"type":"number","minimum":0},"groupInstanceId":{"type":"string","pattern":"^\\S+$"},"sessionTimeout":{"type":"number","minimum":0},"rebalanceTimeout":{"type":"number","minimum":0},"heartbeatInterval":{"type":"number","minimum":0},"heartbeatStallTimeout":{"type":"number","minimum":0},"groupProtocol":{"type":"string","enum":["classic","consumer"]},"groupRemoteAssignor":{"type":"string"},"protocols":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","pattern":"^\\S+$"},"version":{"type":"number","minimum":0},"topics":{"type":"array","items":{"type":"string"}},"metadata":{"oneOf":[{"type":"string"},{"buffer":true}]}}}},"protocolsMetadata":{"function":true},"partitionAssigner":{"function":true},"partitionAssignerTopicsSelector":{"function":true},"autocommit":{"oneOf":[{"type":"boolean"},{"type":"number","minimum":100}]},"minBytes":{"type":"number","minimum":0},"maxBytes":{"type":"number","minimum":0},"maxBytesPerPartition":{"type":"number","minimum":0},"maxWaitTime":{"type":"number","minimum":0},"isolationLevel":{"type":"number","enum":[0,1]},"deserializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"highWaterMark":{"type":"number","minimum":1},"beforeDeserialization":{"function":true},"registry":{"type":"object"},"waitForPendingCommitsOnRebalance":{"type":"boolean"}},"required":["groupId"],"additionalProperties":true};
 
 function validate29(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -2881,14 +2893,26 @@ vErrors.push(err55);
 errors++;
 }
 }
-}
-else {
-const err56 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.waitForPendingCommitsOnRebalance !== undefined){
+if(typeof data.waitForPendingCommitsOnRebalance !== "boolean"){
+const err56 = {instancePath:instancePath+"/waitForPendingCommitsOnRebalance",schemaPath:"#/properties/waitForPendingCommitsOnRebalance/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
 if(vErrors === null){
 vErrors = [err56];
 }
 else {
 vErrors.push(err56);
+}
+errors++;
+}
+}
+}
+else {
+const err57 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err57];
+}
+else {
+vErrors.push(err57);
 }
 errors++;
 }

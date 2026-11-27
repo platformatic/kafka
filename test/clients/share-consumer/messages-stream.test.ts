@@ -684,6 +684,41 @@ test('close should end a for await loop and acknowledge what was read', async t 
   await stream.close()
 })
 
+test('close should not hand the released records to a readable listener', async t => {
+  const consumer = createShareConsumer(t)
+  const network = mockShareNetwork(consumer, {
+    fetch: scriptedFetch(
+      fetchResponse('topic-id', [partitionResponse(0, [recordsBatch(0n, ['a', 'b', 'c'])], [[0n, 2n, 1]])]),
+      null
+    )
+  })
+
+  const stream = await consumer.consume({ topics: ['topic'] })
+  const values: string[] = []
+
+  // Reads a single record each time, so the others stay buffered
+  stream.on('readable', () => {
+    const message = stream.read()
+
+    if (message) {
+      values.push(message.value)
+    }
+  })
+
+  await waitFor(() => ok(values.length === 1))
+  await stream.close()
+
+  deepStrictEqual(values, ['a'])
+  deepStrictEqual(
+    acknowledgedOffsets([...network.fetches, ...network.acknowledgements]),
+    new Map([
+      [0n, [ACCEPT]],
+      [1n, [RELEASE]],
+      [2n, [RELEASE]]
+    ])
+  )
+})
+
 test('close should wait for a stream which is already closing', async t => {
   const consumer = createShareConsumer(t)
   let release: () => void

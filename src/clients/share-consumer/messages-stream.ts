@@ -250,15 +250,16 @@ export class ShareMessagesStream<
 
     // Ending the stream, rather than destroying it, lets a for await loop finish without an error.
     // The buffered records are released, so they are discarded instead of reaching the application.
-    this.push(null)
     this.removeAllListeners('data')
     this.removeAllListeners('readable')
 
-    // A for await loop reads the buffer synchronously, so it is emptied before the loop can read it
+    // The buffer is emptied before ending the stream, since ending it emits readable synchronously and a listener
+    // would read the released records. A for await loop also reads the buffer synchronously.
     while (this.read() !== null) {
       // Nothing to do, the records are discarded
     }
 
+    this.push(null)
     this.resume()
 
     return callback[kCallbackPromise]

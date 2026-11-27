@@ -28,9 +28,11 @@ test('custom messages and their JSON representation can omit timestampType', () 
     headerEntries: [],
     offset: 0n,
     leaderEpoch: 0,
-    metadata: {},
+    metadata: { partition: { highWatermark: 1n, lastStableOffset: 1n, logStartOffset: 0n } },
     commit () {},
     toJSON () {
+      const { highWatermark, lastStableOffset, logStartOffset } = this.metadata.partition
+
       return {
         key: this.key,
         value: this.value,
@@ -40,7 +42,13 @@ test('custom messages and their JSON representation can omit timestampType', () 
         headers: this.headerEntries,
         offset: this.offset.toString(),
         leaderEpoch: this.leaderEpoch,
-        metadata: this.metadata
+        metadata: {
+          partition: {
+            highWatermark: highWatermark.toString(),
+            lastStableOffset: lastStableOffset.toString(),
+            logStartOffset: logStartOffset.toString()
+          }
+        }
       }
     }
   }

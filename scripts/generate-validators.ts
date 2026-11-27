@@ -71,6 +71,10 @@ export const sources: Record<string, Record<string, string>> = {
     deleteAclsOptionsValidator: 'deleteAclsOptionsSchema',
     adminListOffsetsOptionsValidator: 'adminListOffsetsOptionsSchema',
     findCoordinatorOptionsValidator: 'findCoordinatorOptionsSchema'
+  },
+  'share-consumer': {
+    shareConsumerOptionsValidator: 'shareConsumerOptionsSchema',
+    shareGroupOptionsValidator: 'shareGroupOptionsSchema'
   }
 }
 

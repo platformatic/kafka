@@ -3,7 +3,7 @@ import { type Base } from './clients/base/base.ts'
 import { type ConnectionPool } from './network/connection-pool.ts'
 import { type Connection } from './network/connection.ts'
 
-export type ClientType = 'base' | 'producer' | 'consumer' | 'admin'
+export type ClientType = 'base' | 'producer' | 'consumer' | 'share-consumer' | 'admin'
 
 export interface CreationEvent<InstanceType> {
   type: ClientType | 'connection' | 'connection-pool' | 'messages-stream' | 'producer-stream'
@@ -97,3 +97,7 @@ export const consumerConsumesChannel = createTracingChannel<ClientDiagnosticEven
 export const consumerCommitsChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:commits')
 export const consumerOffsetsChannel = createTracingChannel<ClientDiagnosticEvent>('consumer:offsets')
 export const consumerLagChannel = createChannel<ClientDiagnosticEvent>('consumer:lag')
+
+// Share consumer channels
+export const shareConsumerGroupChannel = createTracingChannel<ClientDiagnosticEvent>('share-consumer:group')
+export const shareConsumerHeartbeatChannel = createTracingChannel<ClientDiagnosticEvent>('share-consumer:heartbeat')

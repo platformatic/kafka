@@ -1359,3 +1359,46 @@ test('addOffset should handle errors from the API', async t => {
     }
   )
 })
+
+test('transaction send should reject a sendTimeout', async t => {
+  const producer = createProducer(t, { strict: true, idempotent: true, transactionalId: randomUUID() })
+  const testTopic = await createTopic(t, true)
+
+  const transaction = await producer.beginTransaction()
+
+  await rejects(
+    transaction.send({ messages: [{ topic: testTopic, value: Buffer.from('value') }], sendTimeout: 1000 }),
+    (error: Error) => {
+      ok(error instanceof UserError)
+      strictEqual(error.message, 'Cannot use sendTimeout within a transaction.')
+      return true
+    }
+  )
+
+  // The transaction can still be used
+  await transaction.send({ messages: [{ topic: testTopic, value: Buffer.from('value') }] })
+  await transaction.commit()
+})
+
+test('transaction send should not use the sendTimeout of the producer', async t => {
+  const producer = createProducer(t, {
+    strict: true,
+    idempotent: true,
+    transactionalId: randomUUID(),
+    sendTimeout: 4321
+  })
+  const testTopic = await createTopic(t, true)
+
+  const transaction = await producer.beginTransaction()
+
+  // The timer of a send is started when send() is called
+  const setTimeoutSpy = t.mock.method(globalThis, 'setTimeout')
+  const sent = transaction.send({ messages: [{ topic: testTopic, value: Buffer.from('value') }] })
+  const timers = setTimeoutSpy.mock.calls.filter(call => call.arguments[1] === 4321).length
+  setTimeoutSpy.mock.restore()
+
+  strictEqual(timers, 0)
+
+  await sent
+  await transaction.commit()
+})

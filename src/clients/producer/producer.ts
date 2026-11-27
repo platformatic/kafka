@@ -143,6 +143,8 @@ interface SendCall {
 const kTimedOut = Symbol('plt.kafka.producer.timedOut')
 
 type TimedOutCheck = () => boolean
+
+const abandonedMessage = 'The messages were not produced as all their sends timed out.'
 type TimedCallback = CallbackWithPromise<ProduceResult> & { [kTimedOut]?: TimedOutCheck }
 
 function timedOutCheckOf (callback: CallbackWithPromise<ProduceResult>): TimedOutCheck | undefined {
@@ -525,9 +527,18 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       }
     }
 
+    /*
+      A transaction must only be committed or aborted once its requests have completed. A send which failed while
+      its request was still in flight would let them race, so the sends of a transaction are not bounded.
+    */
+    if (this.#transaction && typeof options.sendTimeout !== 'undefined') {
+      callback(new UserError('Cannot use sendTimeout within a transaction.'))
+      return callback[kCallbackPromise]
+    }
+
     options.acks ??= idempotent ? ProduceAcks.ALL : ProduceAcks.LEADER
 
-    const sendTimeout = options.sendTimeout ?? this[kOptions].sendTimeout
+    const sendTimeout = this.#transaction ? undefined : (options.sendTimeout ?? this[kOptions].sendTimeout)
 
     producerSendsChannel.traceCallback(
       typeof sendTimeout === 'number' ? this.#sendWithTimeout.bind(this, sendTimeout) : this.#sendOperation,
@@ -592,6 +603,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     if (!this[kOptions].idempotent) {
       callback(new UserError('Cannot begin a transaction on a non-idempotent producer.'))
+      return callback[kCallbackPromise]
+    }
+
+    // See send()
+    if (typeof options.sendTimeout !== 'undefined') {
+      callback(new UserError('Cannot use sendTimeout within a transaction.'))
       return callback[kCallbackPromise]
     }
 
@@ -1826,6 +1843,15 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     // No other call can join from now on
     operation.started = true
 
+    /*
+      Nothing is reserved, such as sequences, for calls which have all failed with their sendTimeout.
+      The operation completes on the next tick, as a long queue of such operations would otherwise exhaust the stack.
+    */
+    if (sendsTimedOutCheck(operation.sends)?.()) {
+      process.nextTick(() => this.#completeOrderedSend(operation, new TimeoutError(abandonedMessage)))
+      return
+    }
+
     const { sendOptions, produceOptions } = operation
 
     if (!metadata) {
@@ -2140,6 +2166,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this[kPerformWithRetry]<boolean | ProduceResponse>(
       'produce',
       retryCallback => {
+        // No attempt starts for calls which have all failed with their sendTimeout
+        if (timedOut?.()) {
+          retryCallback(new TimeoutError(abandonedMessage))
+          return
+        }
+
         this[kMetadata]({ topics, autocreateTopics, forceUpdate: refreshMetadata, retries: 0 }, (error, metadata) => {
           if (error) {
             refreshMetadata = NetworkError.isRetryable(error)
@@ -2165,9 +2197,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 return
               }
 
-              // Nothing is written for calls which have all failed with their sendTimeout
+              // Nor is anything written when they have while the attempt was getting there
               if (timedOut?.()) {
-                retryCallback(new TimeoutError('The messages were not produced as all their sends timed out.'))
+                retryCallback(new TimeoutError(abandonedMessage))
                 return
               }
 
@@ -2188,6 +2220,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           // Only the head of a partition's queue can reach the broker, so a sequence refusal is a real gap.
           if (
             recoverOnProducerStateLoss &&
+            !timedOut?.() &&
             produceOptions.sequences &&
             !this.#transaction &&
             this.#isProducerStateLost(error)

@@ -26,7 +26,14 @@ import {
   producerSendsChannel,
   producerTransactionsChannel
 } from '../../diagnostic.ts'
-import { findErrorBy, type GenericError, NetworkError, type ProtocolError, UserError } from '../../errors.ts'
+import {
+  findErrorBy,
+  type GenericError,
+  NetworkError,
+  type ProtocolError,
+  TimeoutError,
+  UserError
+} from '../../errors.ts'
 import { type Broker, type Connection } from '../../network/connection.ts'
 import {
   type CreateRecordsBatchOptions,
@@ -127,6 +134,30 @@ const dataOnlySerializers = new Set<unknown>([noopSerializer, stringSerializer, 
 interface SendCall {
   count: number
   callback: CallbackWithPromise<ProduceResult>
+}
+
+/*
+  The callback of a send() which has a sendTimeout tells whether the send has failed because of it, see
+  #sendWithTimeout. A request is not written, nor retried, once this is true for all the calls it is made for.
+*/
+const kTimedOut = Symbol('plt.kafka.producer.timedOut')
+
+type TimedOutCheck = () => boolean
+type TimedCallback = CallbackWithPromise<ProduceResult> & { [kTimedOut]?: TimedOutCheck }
+
+function timedOutCheckOf (callback: CallbackWithPromise<ProduceResult>): TimedOutCheck | undefined {
+  return (callback as TimedCallback)[kTimedOut]
+}
+
+// When some of the calls have a sendTimeout, what tells whether all of them have failed because of it
+function sendsTimedOutCheck (sends: SendCall[]): TimedOutCheck | undefined {
+  for (const { callback } of sends) {
+    if (timedOutCheckOf(callback)) {
+      return () => sends.every(send => timedOutCheckOf(send.callback)?.() === true)
+    }
+  }
+
+  return undefined
 }
 
 interface PendingSends {
@@ -496,8 +527,10 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     options.acks ??= idempotent ? ProduceAcks.ALL : ProduceAcks.LEADER
 
+    const sendTimeout = options.sendTimeout ?? this[kOptions].sendTimeout
+
     producerSendsChannel.traceCallback(
-      this.#sendOperation,
+      typeof sendTimeout === 'number' ? this.#sendWithTimeout.bind(this, sendTimeout) : this.#sendOperation,
       1,
       createDiagnosticContext({ client: this, operation: 'send', options }),
       this,
@@ -1105,6 +1138,39 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     )
   }
 
+  /*
+    Fails the send() with a TimeoutError once sendTimeout milliseconds have passed, whatever is still going on.
+
+    This is best-effort: a request which is in flight is not cancelled, so the messages might still be produced.
+    A request stops retrying, and is not written again, only once all the calls it is made for have failed this
+    way, as with linger it can carry the messages of calls which have a longer sendTimeout, or none.
+  */
+  #sendWithTimeout (
+    sendTimeout: number,
+    options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
+    callback: CallbackWithPromise<ProduceResult>
+  ): void {
+    let timedOut = false
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      callback(new TimeoutError(`Producing messages timed out after ${sendTimeout} ms.`))
+    }, sendTimeout)
+
+    const timedCallback: TimedCallback = (error, result) => {
+      if (timedOut) {
+        return
+      }
+
+      clearTimeout(timer)
+      callback(error, result)
+    }
+
+    timedCallback[kTimedOut] = () => timedOut
+
+    this.#sendOperation(options, timedCallback)
+  }
+
   #send (options: SendOptions<Key, Value, HeaderKey, HeaderValue>, callback: CallbackWithPromise<ProduceResult>): void {
     options.idempotent ??= this[kOptions].idempotent
     options.repeatOnStaleMetadata ??= this[kOptions].repeatOnStaleMetadata
@@ -1354,22 +1420,26 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     this.#lingerInflight++
 
+    const callback: TimedCallback = (error, result) => {
+      this.#lingerInflight--
+
+      // What has been waiting for this request is sent before the calls are notified, as they might send more
+      if (this.#lingerInflight === 0 && this.#pendingSends && this.#pendingSends.bytes >= this.#batchMaxBytes) {
+        this.#flushPendingSends()
+      }
+
+      this.#notifySends(messages, sends, error, result)
+      onComplete?.()
+    }
+
+    callback[kTimedOut] = sendsTimedOutCheck(sends)
+
     this.#performSend(
       Array.from(pending.topics),
       messages,
       pending.sendOptions as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
       pending.produceOptions,
-      (error, result) => {
-        this.#lingerInflight--
-
-        // What has been waiting for this request is sent before the calls are notified, as they might send more
-        if (this.#lingerInflight === 0 && this.#pendingSends && this.#pendingSends.bytes >= this.#batchMaxBytes) {
-          this.#flushPendingSends()
-        }
-
-        this.#notifySends(messages, sends, error, result)
-        onComplete?.()
-      }
+      callback
     )
   }
 
@@ -1538,6 +1608,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
         sendOptions,
         produceOptions,
         sendOptions.repeatOnStaleMetadata,
+        timedOutCheckOf(callback),
         {},
         (error, results) => {
           this.#metricsProducedMessages?.inc(messages.length)
@@ -1869,6 +1940,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       sendOptions,
       produceOptions,
       sendOptions.repeatOnStaleMetadata,
+      sendsTimedOutCheck(operation.sends),
       {},
       (error, results) => {
         this.#metricsProducedMessages?.inc(messages.length)
@@ -1928,6 +2000,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     sendOptions: Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
     produceOptions: Partial<CreateRecordsBatchOptions>,
     repeatOnStaleMetadata: boolean,
+    timedOut: TimedOutCheck | undefined,
     results: ProduceResult,
     callback: (error: Error | null, results: ProduceResult) => void
   ): void {
@@ -1949,6 +2022,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
           repeatOnStaleMetadata,
           produceOptions,
           true,
+          timedOut,
           concurrentCallback
         )
       },
@@ -2021,6 +2095,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
             sendOptions,
             produceOptions,
             false,
+            timedOut,
             results,
             (error, results) => {
               // Report the partitions in the order they were first sent in, as when no leader moved
@@ -2057,6 +2132,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     repeatOnStaleMetadata: boolean,
     produceOptions: Partial<CreateRecordsBatchOptions>,
     recoverOnProducerStateLoss: boolean,
+    timedOut: TimedOutCheck | undefined,
     callback: CallbackWithPromise<boolean | ProduceResponse>
   ): void {
     let refreshMetadata = false
@@ -2086,6 +2162,12 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
               if (error) {
                 refreshMetadata = NetworkError.isRetryable(error)
                 retryCallback(error)
+                return
+              }
+
+              // Nothing is written for calls which have all failed with their sendTimeout
+              if (timedOut?.()) {
+                retryCallback(new TimeoutError('The messages were not produced as all their sends timed out.'))
                 return
               }
 
@@ -2125,6 +2207,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
                 repeatOnStaleMetadata,
                 recoveredProduceOptions!,
                 false,
+                timedOut,
                 (error, results) => {
                   if (error) {
                     this.#invalidateProducer(recoveredProduceOptions!)
@@ -2146,6 +2229,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
       0,
       [],
       error => {
+        // There is nobody left to retry for
+        if (timedOut?.()) {
+          return true
+        }
+
         /* c8 ignore next 3 - Hard to test */
         if (!repeatOnStaleMetadata) {
           return false

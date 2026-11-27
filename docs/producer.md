@@ -26,8 +26,9 @@ Options:
 | `autocreateTopics`      | `boolean`                                                                                                                           | Whether to ask brokers to auto-create missing topics during produce requests.                                                                                                                                                                                                                                                                      |
 | `repeatOnStaleMetadata` | `boolean`                                                                                                                           | Whether to retry a produce operation when the system detects outdated topic or broker information.<br/><br/>Default is `true`.                                                                                                                                                                                                                     |
 | `linger`                | `number`                                                                                                                            | Time in milliseconds to wait for other `send()` calls so that their messages are produced in the same request. Default is `0`, which disables it. See [Batching messages across calls](#batching-messages-across-calls).                                                                                                                           |
-| `batchMaxBytes`         | `number`                                                                                                                            | When `linger` is set, how many bytes of keys, values and headers can be waiting before they are sent without waiting further. Default is `16384`.                                                                                                                                                                                                  |
+| `batchMaxBytes`         | `number`                                                                                                                            | When `linger` or `autoBatching` is set, how many bytes of keys, values and headers can be waiting before they are sent without waiting further. Default is `16384`.                                                                                                                                                                                                  |
 | `orderedSends`          | `boolean`                                                                                                                           | When `true`, the requests which write to the same partition are sent one at a time, so that concurrent `send()` calls keep their order when a request is sent again. Default is `false`. See [Keeping the order of concurrent calls](#keeping-the-order-of-concurrent-calls). |
+| `autoBatching` | `boolean` | When `true`, the `send()` calls made in the same tick are produced in the same request, without waiting for any time. Default is `false`. See [Batching the calls made in the same tick](#batching-the-calls-made-in-the-same-tick). |
 | `serializers`           | `Serializers<Key, Value, HeaderKey, HeaderValue>`                                                                                   | Object that specifies which serialisers to use.<br/><br/>The object should only contain one or more of the `key`, `value`, `headerKey` and `headerValue` properties.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                                            |
 | `beforeSerialization`   | `BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>`                                                                       | Hook function called before serialization of each message component (key, value, headers).<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** Should not be provided when using a `registry`.                                                                                            |
 | `registry`              | `AbstractSchemaRegistry<Key, Value, HeaderKey, HeaderValue>`                                                                        | Schema registry instance for automatic serialization with schema management. See the [Confluent Schema Registry](./confluent-schema-registry.md) guide for details.<br/><br/>**Experimental:** Does not follow semver and may change in minor/patch releases.<br/><br/>**Note:** When provided, do not use `serializers` or `beforeSerialization`. |
@@ -130,6 +131,31 @@ Things to know:
 - If the request fails, all the calls which were part of it fail with the same error.
 - Calls made within a transaction, or which specify `producerId` or `producerEpoch`, are never delayed.
 - `close()` sends what is waiting before closing the producer.
+
+#### Batching the calls made in the same tick
+
+When the producer is created with `autoBatching: true`, the messages of the `send()` calls made in the same tick are produced in the same request. These are the calls made one after the other without returning to the event loop, including the ones made from promise callbacks which are already due. The request is scheduled with `process.nextTick()`, so no time is spent waiting for other calls.
+
+```typescript
+const producer = new Producer({
+  clientId: 'my-producer',
+  bootstrapBrokers: ['localhost:9092'],
+  serializers: stringSerializers,
+  autoBatching: true
+})
+
+// These are produced with a single request
+await Promise.all(events.map(event => producer.send({ messages: [{ topic: 'events', value: event }] })))
+```
+
+This reduces the number of requests of applications which call `send()` many times at once, without the additional latency of `linger`. An application which awaits each `send()` before making the next one is not slowed down.
+
+Things to know:
+
+- The calls share requests the same way they do with `linger`, so everything listed above applies.
+- Calls made from different I/O callbacks or timers, for instance one for each incoming HTTP request, are not in the same tick and do not share a request. Use `linger` for those.
+- The messages are sent before the tick ends once `batchMaxBytes` bytes are waiting.
+- When `linger` is also set, the calls wait for the `linger` time instead.
 
 ### `getSendTopicPartitions<Key, Value, HeaderKey, HeaderValue>(options)`
 

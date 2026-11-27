@@ -56,6 +56,7 @@ export type ProducerOptions<Key, Value, HeaderKey, HeaderValue> = BaseOptions &
     linger?: number
     batchMaxBytes?: number
     orderedSends?: boolean
+    autoBatching?: boolean
     serializers?: Partial<Serializers<Key, Value, HeaderKey, HeaderValue>>
     beforeSerialization?: BeforeSerializationHook<Key, Value, HeaderKey, HeaderValue>
     registry?: SchemaRegistry<unknown, unknown, Key, Value, HeaderKey, HeaderValue>

@@ -131,13 +131,17 @@ interface SendCall {
 
 interface PendingSends {
   key: string
-  topics: Set<string>
+  // The topics of the first call, and the ones of all the calls once there is more than one
+  firstTopics: string[]
+  topics: Set<string> | undefined
   messages: MessageRecord[]
   sends: SendCall[]
+  // -1 when they have not been counted yet, see #lingerSend
   bytes: number
   sendOptions: Required<SendOptions<any, any, any, any>>
   produceOptions: Partial<CreateRecordsBatchOptions>
-  timer: NodeJS.Timeout
+  // Not set when the calls are only waiting for process.nextTick()
+  timer: NodeJS.Timeout | undefined
 }
 
 /*
@@ -222,6 +226,9 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
   // For each partition with operations which have not completed, the last of them
   #partitionTails: Map<string, Map<number, OrderedSend>>
   #orderedSends: boolean
+  #autoBatching: boolean
+  #flushPendingSendsNow: () => void
+  #flushPendingSendsTick: (pending: PendingSends) => void
   #sendOperation: (
     options: SendOptions<Key, Value, HeaderKey, HeaderValue>,
     callback: CallbackWithPromise<ProduceResult>
@@ -277,6 +284,14 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#linger = options.linger ?? 0
     this.#partitionTails = new Map()
     this.#orderedSends = options.orderedSends ?? false
+    this.#autoBatching = options.autoBatching ?? false
+    this.#flushPendingSendsNow = () => this.#flushPendingSends()
+    // process.nextTick() cannot be cancelled, so this does nothing when the calls have already been sent
+    this.#flushPendingSendsTick = pending => {
+      if (this.#pendingSends === pending) {
+        this.#flushPendingSends()
+      }
+    }
     this.#batchMaxBytes = options.batchMaxBytes ?? defaultBatchMaxBytes
     this.#lingerInflight = 0
     this[kOptions].transactionalId ??= randomUUID()
@@ -1222,7 +1237,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
 
     const topicsArray = Array.from(topics)
 
-    if (this.#linger > 0) {
+    if (this.#linger > 0 || this.#autoBatching) {
       /*
         Transactions and explicit producer IDs are never merged with other send() calls.
         Whatever is lingering is sent first, so that messages are still produced in the order they were sent.
@@ -1285,6 +1300,11 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     time expires. A producer which is faster than the broker therefore sends requests which
     are larger, not more numerous, and the cost of making a request is paid less often.
 
+    With autoBatching and no linger time, the calls only wait for process.nextTick(): the ones made one after
+    the other, or from promise callbacks which are already due, share a request and no time is spent waiting
+    for others. setImmediate() would also merge the calls made from different I/O callbacks, but it makes an
+    application which awaits each send() measurably slower, while process.nextTick() does not.
+
     Only calls made with the same settings can share a produce request. When the settings change, what is
     waiting is sent first.
   */
@@ -1296,6 +1316,35 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     callback: CallbackWithPromise<ProduceResult>
   ): void {
     const key = `${sendOptions.acks}:${produceOptions.compression}:${sendOptions.idempotent}:${sendOptions.autocreateTopics}:${sendOptions.repeatOnStaleMetadata}`
+
+    /*
+      With autoBatching a call is alone when the application awaits each send().
+      Such a call must cost as little as possible: its messages are used as they are and their bytes are only
+      counted if another call joins.
+    */
+    if (this.#linger === 0) {
+      if (!this.#pendingSends) {
+        this.#pendingSends = {
+          key,
+          firstTopics: topics,
+          topics: undefined,
+          messages,
+          sends: [{ count: messages.length, callback }],
+          bytes: -1,
+          sendOptions,
+          produceOptions,
+          timer: undefined
+        }
+
+        process.nextTick(this.#flushPendingSendsTick, this.#pendingSends)
+
+        return
+      }
+
+      if (this.#pendingSends.bytes === -1) {
+        this.#pendingSends.bytes = messagesBytes(this.#pendingSends.messages)
+      }
+    }
 
     const bytes = messagesBytes(messages)
 
@@ -1312,15 +1361,22 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     if (!pending) {
       pending = this.#pendingSends = {
         key,
+        firstTopics: topics,
         topics: new Set(),
         messages: [],
         sends: [],
         bytes: 0,
         sendOptions,
         produceOptions,
-        timer: setTimeout(() => this.#flushPendingSends(), this.#linger)
+        timer: this.#linger > 0 ? setTimeout(this.#flushPendingSendsNow, this.#linger) : undefined
+      }
+
+      if (this.#linger === 0) {
+        process.nextTick(this.#flushPendingSendsTick, pending)
       }
     }
+
+    pending.topics ??= new Set(pending.firstTopics)
 
     for (const topic of topics) {
       pending.topics.add(topic)
@@ -1348,6 +1404,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     }
 
     this.#pendingSends = undefined
+
     clearTimeout(pending.timer)
 
     const { messages, sends } = pending
@@ -1355,7 +1412,7 @@ export class Producer<Key = Buffer, Value = Buffer, HeaderKey = Buffer, HeaderVa
     this.#lingerInflight++
 
     this.#performSend(
-      Array.from(pending.topics),
+      pending.topics ? Array.from(pending.topics) : pending.firstTopics,
       messages,
       pending.sendOptions as Required<SendOptions<Key, Value, HeaderKey, HeaderValue>>,
       pending.produceOptions,

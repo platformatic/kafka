@@ -179,7 +179,7 @@ return errors === 0;
 validate22.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const producerOptionsValidator: OptionsValidator = /* @__PURE__ */ defineValidator(validate23, () => producerOptionsSchema);
-const schema34 = {"type":"object","properties":{"producerId":{"bigint":true},"producerEpoch":{"type":"number"},"idempotent":{"type":"boolean"},"transactionalId":{"type":"string"},"acks":{"type":"number","enumeration":{"allowed":[-1,0,1],"errorMessage":"should be one of -1 (ALL), 0 (NO_RESPONSE) or 1 (LEADER)"}},"compression":{"type":"string","enumeration":{"allowed":["none","gzip","snappy","lz4","zstd"],"errorMessage":"should be one of [object Object] (none), [object Object] (gzip), [object Object] (snappy), [object Object] (lz4) or [object Object] (zstd)"}},"partitioner":{"function":true},"autocreateTopics":{"type":"boolean"},"repeatOnStaleMetadata":{"type":"boolean"},"linger":{"type":"number","minimum":0},"batchMaxBytes":{"type":"integer","minimum":1},"orderedSends":{"type":"boolean"},"serializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"beforeSerialization":{"function":true},"registry":{"type":"object"}},"additionalProperties":true};
+const schema34 = {"type":"object","properties":{"producerId":{"bigint":true},"producerEpoch":{"type":"number"},"idempotent":{"type":"boolean"},"transactionalId":{"type":"string"},"acks":{"type":"number","enumeration":{"allowed":[-1,0,1],"errorMessage":"should be one of -1 (ALL), 0 (NO_RESPONSE) or 1 (LEADER)"}},"compression":{"type":"string","enumeration":{"allowed":["none","gzip","snappy","lz4","zstd"],"errorMessage":"should be one of [object Object] (none), [object Object] (gzip), [object Object] (snappy), [object Object] (lz4) or [object Object] (zstd)"}},"partitioner":{"function":true},"autocreateTopics":{"type":"boolean"},"repeatOnStaleMetadata":{"type":"boolean"},"linger":{"type":"number","minimum":0},"batchMaxBytes":{"type":"integer","minimum":1},"orderedSends":{"type":"boolean"},"autoBatching":{"type":"boolean"},"serializers":{"type":"object","properties":{"key":{"function":true},"value":{"function":true},"headerKey":{"function":true},"headerValue":{"function":true}},"additionalProperties":false},"beforeSerialization":{"function":true},"registry":{"type":"object"}},"additionalProperties":true};
 
 function validate23(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -385,12 +385,9 @@ vErrors.push(err15);
 errors++;
 }
 }
-if(data.serializers !== undefined){
-let data12 = data.serializers;
-if(data12 && typeof data12 == "object" && !Array.isArray(data12)){
-for(const key0 in data12){
-if(!((((key0 === "key") || (key0 === "value")) || (key0 === "headerKey")) || (key0 === "headerValue"))){
-const err16 = {instancePath:instancePath+"/serializers",schemaPath:"#/properties/serializers/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(data.autoBatching !== undefined){
+if(typeof data.autoBatching !== "boolean"){
+const err16 = {instancePath:instancePath+"/autoBatching",schemaPath:"#/properties/autoBatching/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -400,9 +397,12 @@ vErrors.push(err16);
 errors++;
 }
 }
-if(data12.key !== undefined){
-if(typeof data12.key !== "function"){
-const err17 = {instancePath:instancePath+"/serializers/key",schemaPath:"#/properties/serializers/properties/key/function",keyword:"function",params:{},message:"must be function"};
+if(data.serializers !== undefined){
+let data13 = data.serializers;
+if(data13 && typeof data13 == "object" && !Array.isArray(data13)){
+for(const key0 in data13){
+if(!((((key0 === "key") || (key0 === "value")) || (key0 === "headerKey")) || (key0 === "headerValue"))){
+const err17 = {instancePath:instancePath+"/serializers",schemaPath:"#/properties/serializers/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -412,9 +412,9 @@ vErrors.push(err17);
 errors++;
 }
 }
-if(data12.value !== undefined){
-if(typeof data12.value !== "function"){
-const err18 = {instancePath:instancePath+"/serializers/value",schemaPath:"#/properties/serializers/properties/value/function",keyword:"function",params:{},message:"must be function"};
+if(data13.key !== undefined){
+if(typeof data13.key !== "function"){
+const err18 = {instancePath:instancePath+"/serializers/key",schemaPath:"#/properties/serializers/properties/key/function",keyword:"function",params:{},message:"must be function"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -424,9 +424,9 @@ vErrors.push(err18);
 errors++;
 }
 }
-if(data12.headerKey !== undefined){
-if(typeof data12.headerKey !== "function"){
-const err19 = {instancePath:instancePath+"/serializers/headerKey",schemaPath:"#/properties/serializers/properties/headerKey/function",keyword:"function",params:{},message:"must be function"};
+if(data13.value !== undefined){
+if(typeof data13.value !== "function"){
+const err19 = {instancePath:instancePath+"/serializers/value",schemaPath:"#/properties/serializers/properties/value/function",keyword:"function",params:{},message:"must be function"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -436,9 +436,9 @@ vErrors.push(err19);
 errors++;
 }
 }
-if(data12.headerValue !== undefined){
-if(typeof data12.headerValue !== "function"){
-const err20 = {instancePath:instancePath+"/serializers/headerValue",schemaPath:"#/properties/serializers/properties/headerValue/function",keyword:"function",params:{},message:"must be function"};
+if(data13.headerKey !== undefined){
+if(typeof data13.headerKey !== "function"){
+const err20 = {instancePath:instancePath+"/serializers/headerKey",schemaPath:"#/properties/serializers/properties/headerKey/function",keyword:"function",params:{},message:"must be function"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -448,9 +448,9 @@ vErrors.push(err20);
 errors++;
 }
 }
-}
-else {
-const err21 = {instancePath:instancePath+"/serializers",schemaPath:"#/properties/serializers/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data13.headerValue !== undefined){
+if(typeof data13.headerValue !== "function"){
+const err21 = {instancePath:instancePath+"/serializers/headerValue",schemaPath:"#/properties/serializers/properties/headerValue/function",keyword:"function",params:{},message:"must be function"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -460,9 +460,9 @@ vErrors.push(err21);
 errors++;
 }
 }
-if(data.beforeSerialization !== undefined){
-if(typeof data.beforeSerialization !== "function"){
-const err22 = {instancePath:instancePath+"/beforeSerialization",schemaPath:"#/properties/beforeSerialization/function",keyword:"function",params:{},message:"must be function"};
+}
+else {
+const err22 = {instancePath:instancePath+"/serializers",schemaPath:"#/properties/serializers/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err22];
 }
@@ -472,10 +472,9 @@ vErrors.push(err22);
 errors++;
 }
 }
-if(data.registry !== undefined){
-let data18 = data.registry;
-if(!(data18 && typeof data18 == "object" && !Array.isArray(data18))){
-const err23 = {instancePath:instancePath+"/registry",schemaPath:"#/properties/registry/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.beforeSerialization !== undefined){
+if(typeof data.beforeSerialization !== "function"){
+const err23 = {instancePath:instancePath+"/beforeSerialization",schemaPath:"#/properties/beforeSerialization/function",keyword:"function",params:{},message:"must be function"};
 if(vErrors === null){
 vErrors = [err23];
 }
@@ -485,14 +484,27 @@ vErrors.push(err23);
 errors++;
 }
 }
-}
-else {
-const err24 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.registry !== undefined){
+let data19 = data.registry;
+if(!(data19 && typeof data19 == "object" && !Array.isArray(data19))){
+const err24 = {instancePath:instancePath+"/registry",schemaPath:"#/properties/registry/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err24];
 }
 else {
 vErrors.push(err24);
+}
+errors++;
+}
+}
+}
+else {
+const err25 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
 }
 errors++;
 }

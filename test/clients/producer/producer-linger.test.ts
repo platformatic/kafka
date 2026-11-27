@@ -435,3 +435,165 @@ test('close should send the messages which are lingering', async t => {
 
   await rejects(() => producer.send({ messages: [{ topic, value: 'c' }] }))
 })
+
+test('autoBatching should be validated', () => {
+  try {
+    // eslint-disable-next-line no-new
+    new Producer({
+      clientId: 'test',
+      bootstrapBrokers: kafkaBootstrapServers,
+      strict: true,
+      autoBatching: 'yes' as unknown as boolean
+    })
+    throw new Error('Expected the constructor to throw.')
+  } catch (error) {
+    ok(error instanceof UserError)
+  }
+})
+
+test('send should merge the calls made in the same tick when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  const sends: Promise<ProduceResult>[] = []
+  for (let i = 0; i < 20; i++) {
+    sends.push(producer.send({ messages: [{ topic, key: `key-${i}`, value: `value-${i}` }] }))
+  }
+
+  // Calls made from promise callbacks which are already due are still in the same tick
+  await Promise.resolve()
+  sends.push(producer.send({ messages: [{ topic, key: 'key-20', value: 'value-20' }] }))
+  await Promise.resolve()
+  sends.push(producer.send({ messages: [{ topic, key: 'key-21', value: 'value-21' }] }))
+
+  const results = await Promise.all(sends)
+
+  strictEqual(produceRequests(), 1)
+
+  // Each call gets the offset of its own message, in the order the calls were made
+  for (let i = 0; i < 22; i++) {
+    deepStrictEqual(results[i], { offsets: [{ topic, partition: 0, offset: BigInt(i) }] })
+  }
+})
+
+test('send should not merge the calls made in different ticks when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  const first = producer.send({ messages: [{ topic, value: 'a' }] })
+  await new Promise<void>(resolve => process.nextTick(resolve))
+  const second = producer.send({ messages: [{ topic, value: 'b' }] })
+
+  const results = await Promise.all([first, second])
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n]
+  )
+})
+
+test('send should not wait for the end of the tick once batchMaxBytes are waiting when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The first two calls reach the limit exactly, so the third one is produced on its own
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(50) }] }),
+    producer.send({ messages: [{ topic, value: 'b'.repeat(50) }] }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(50) }] })
+  ])
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset).sort(),
+    [0n, 1n, 2n]
+  )
+})
+
+test('send should wait for the linger time when both linger and autoBatching are set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true, linger: 50 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  const first = producer.send({ messages: [{ topic, value: 'a' }] })
+  await sleep(5)
+  const second = producer.send({ messages: [{ topic, value: 'b' }] })
+
+  const results = await Promise.all([first, second])
+
+  strictEqual(produceRequests(), 1)
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n]
+  )
+})
+
+test('send should keep the order of the calls with autoBatching and orderedSends', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true, orderedSends: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const sends: Promise<ProduceResult>[] = []
+  for (let round = 0; round < 5; round++) {
+    for (let i = 0; i < 10; i++) {
+      sends.push(producer.send({ messages: [{ topic, value: `value-${round * 10 + i}` }] }))
+    }
+
+    await new Promise<void>(resolve => setImmediate(resolve))
+  }
+
+  const results = await Promise.all(sends)
+
+  for (let i = 0; i < 50; i++) {
+    deepStrictEqual(results[i], { offsets: [{ topic, partition: 0, offset: BigInt(i) }] })
+  }
+})
+
+test('close should send the messages which are waiting when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const sends = Promise.all([
+    producer.send({ messages: [{ topic, value: 'a' }] }),
+    producer.send({ messages: [{ topic, value: 'b' }] })
+  ])
+
+  await producer.close()
+
+  const results = await sends
+  deepStrictEqual(
+    results.map(result => result.offsets![0].offset),
+    [0n, 1n]
+  )
+})
+
+test('send should send what is waiting before a call which would exceed batchMaxBytes when autoBatching is set', async t => {
+  const producer = createProducer(t, { serializers: stringSerializers, autoBatching: true, batchMaxBytes: 100 })
+  const topic = await createTopic(t, true)
+  await producer.metadata({ topics: [topic] })
+
+  const produceRequests = countProduceRequests(t)
+
+  // The second call does not fit with the first one, while the third one fits with the second
+  const results = await Promise.all([
+    producer.send({ messages: [{ topic, value: 'a'.repeat(60) }] }),
+    producer.send({ messages: [{ topic, value: 'b'.repeat(60) }] }),
+    producer.send({ messages: [{ topic, value: 'c'.repeat(30) }] })
+  ])
+
+  strictEqual(produceRequests(), 2)
+  deepStrictEqual(results.map(result => result.offsets![0].offset).sort(), [0n, 1n, 2n])
+})

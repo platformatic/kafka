@@ -13,8 +13,41 @@ import {
   readRecordsBatch,
   Writer,
   type CompressionAlgorithmSpecification,
+  type Message,
   type MessageRecord
 } from '../../src/index.ts'
+
+test('custom messages and their JSON representation can omit timestampType', () => {
+  const message: Message = {
+    key: Buffer.from('key'),
+    value: Buffer.from('value'),
+    topic: 'test-topic',
+    partition: 0,
+    timestamp: 10n,
+    headers: new Map(),
+    headerEntries: [],
+    offset: 0n,
+    leaderEpoch: 0,
+    metadata: {},
+    commit () {},
+    toJSON () {
+      return {
+        key: this.key,
+        value: this.value,
+        topic: this.topic,
+        partition: this.partition,
+        timestamp: this.timestamp.toString(),
+        headers: this.headerEntries,
+        offset: this.offset.toString(),
+        leaderEpoch: this.leaderEpoch,
+        metadata: this.metadata
+      }
+    }
+  }
+
+  strictEqual('timestampType' in message, false)
+  strictEqual('timestampType' in message.toJSON(), false)
+})
 
 test('createRecord should create a buffer with the correct format', () => {
   const timestamp = BigInt(1720000000000) // Fixed timestamp for testing

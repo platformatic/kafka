@@ -60,7 +60,7 @@ export interface MessageJSON<Key = unknown, Value = unknown, HeaderKey = unknown
   topic: string
   partition: number
   timestamp: string
-  timestampType: TimestampType
+  timestampType?: TimestampType
   offset: string
   leaderEpoch: number
   metadata: Record<string, unknown>
@@ -72,7 +72,7 @@ export interface Message<Key = Buffer, Value = Buffer, HeaderKey = Buffer, Heade
 > {
   headers: Map<HeaderKey, HeaderValue>
   headerEntries: Array<[HeaderKey, HeaderValue]>
-  timestampType: TimestampType
+  timestampType?: TimestampType
   offset: bigint
   leaderEpoch: number
   metadata: Record<string, unknown>

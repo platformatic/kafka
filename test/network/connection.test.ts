@@ -5,7 +5,7 @@ import { type AddressInfo, createConnection, createServer as createNetworkServer
 import { PassThrough } from 'node:stream'
 import test, { before, type TestContext } from 'node:test'
 import { scheduler } from 'node:timers/promises'
-import { createServer as createSecureServer, TLSSocket } from 'node:tls'
+import { connect as tlsConnect, createServer as createSecureServer, TLSSocket } from 'node:tls'
 import {
   type SaslAuthenticateResponse,
   type SASLAuthenticationAPI
@@ -482,12 +482,15 @@ test('Connection.send should use the socket returned by socketFactory', async t 
     })
   })
 
+  // The signal is passed on, as the documentation suggests: it must not end the connection once it is up
   const connection = new Connection('test-client', {
-    socketFactory: ({ port }) => createConnection({ host: 'localhost', port })
+    socketFactory: ({ port, signal }) => createConnection({ host: 'localhost', port, signal })
   })
   t.after(() => connection.close())
 
   await connection.connect('broker.invalid', port)
+  await scheduler.wait(10)
+  ok(!connection.socket.destroyed)
 
   const result = await new Promise<string>((resolve, reject) => {
     connection.send(
@@ -621,6 +624,131 @@ for (const value of [undefined, {}]) {
     deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
   })
 }
+
+for (const { label, open } of [
+  { label: 'a socket that never connected', open: async () => new Socket() },
+  {
+    label: 'a destroyed socket',
+    open: async (port: number) => {
+      const socket = await openSocket(port)
+      socket.destroy()
+      await once(socket, 'close')
+      return socket
+    }
+  }
+]) {
+  test(`Connection.connect should fail when socketFactory returns ${label}`, async t => {
+    const { port } = await createServer(t)
+    let returned: Socket | undefined
+    const connection = new Connection('test-client', {
+      socketFactory: async ({ port }) => {
+        returned = await open(port)
+        return returned
+      }
+    })
+    t.after(() => connection.close())
+
+    await rejects(() => connection.connect('localhost', port) as Promise<unknown>, (error: NetworkError) => {
+      ok(error.cause instanceof UserError)
+      strictEqual(error.cause.message, 'socketFactory must return a socket that is connected or connecting.')
+      return true
+    })
+
+    deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
+    ok(returned?.destroyed)
+  })
+}
+
+test('Connection.connect should refuse a TLS socket from socketFactory when tls is set', async t => {
+  const { port } = await createTLSServer(t)
+  let returned: TLSSocket | undefined
+  const connection = new Connection('test-client', {
+    tls: { rejectUnauthorized: false },
+    socketFactory: ({ port }) => {
+      returned = tlsConnect({ host: 'localhost', port, rejectUnauthorized: false })
+      return returned
+    }
+  })
+  t.after(() => connection.close())
+
+  await rejects(() => connection.connect('localhost', port) as Promise<unknown>, (error: NetworkError) => {
+    ok(error.cause instanceof UserError)
+    strictEqual(error.cause.message, 'socketFactory must return a plain socket when tls is set: the client negotiates TLS.')
+    return true
+  })
+
+  ok(returned?.destroyed)
+})
+
+test('Connection.connect should fail every waiter when a pending socketFactory times out', async t => {
+  const connection = new Connection('test-client', {
+    connectTimeout: 100,
+    socketFactory: () => new Promise<Socket>(() => {})
+  })
+  t.after(() => connection.close())
+
+  const first = connection.connect('localhost', 9092) as Promise<void>
+  const second = connection.ready()
+
+  const results = await Promise.allSettled([first, second])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['rejected', 'rejected']
+  )
+  for (const result of results) {
+    strictEqual(((result as PromiseRejectedResult).reason as Error).message, 'Connection to localhost:9092 timed out.')
+  }
+  deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
+})
+
+test('Connection.connect should time out a TLS handshake on a socketFactory socket', async t => {
+  // A plain server that accepts and never answers the TLS ClientHello
+  const { port } = await createServer(t)
+  const connection = new Connection('test-client', {
+    connectTimeout: 100,
+    tls: { rejectUnauthorized: false },
+    socketFactory: ({ port }) => openSocket(port)
+  })
+  t.after(() => connection.close())
+
+  const first = connection.connect('localhost', port) as Promise<void>
+  const second = connection.ready()
+
+  const results = await Promise.allSettled([first, second])
+
+  deepStrictEqual(
+    results.map(result => result.status),
+    ['rejected', 'rejected']
+  )
+  deepStrictEqual(connection.status, ConnectionStatuses.ERROR)
+})
+
+test('Connection.close should end the connect diagnostics of a pending socketFactory', async () => {
+  const connection = new Connection('test-client', {
+    socketFactory: () => new Promise<Socket>(() => {})
+  })
+
+  const verifyTracingChannel = createTracingChannelVerifier(
+    connectionsConnectsChannel.name,
+    ['connection'],
+    {
+      error (context: ConnectionDiagnosticEvent) {
+        deepStrictEqual((context.error as Error).message, 'Connection closed while connecting.')
+      },
+      asyncEnd (context: ConnectionDiagnosticEvent) {
+        ok(context, 'the connect must end')
+      }
+    },
+    (_label, data) => data.operation === 'connect'
+  )
+
+  const connecting = connection.connect('localhost', 9092) as Promise<void>
+  await connection.close()
+  await rejects(connecting, NetworkError)
+
+  verifyTracingChannel()
+})
 
 test('Connection.connect should destroy a stream returned by socketFactory that is not a socket', async t => {
   const stream = new PassThrough()

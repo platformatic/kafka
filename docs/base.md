@@ -209,11 +209,15 @@ The factory receives an object with these properties:
 | `timeout` | `number`      | The `connectTimeout` of the connection, in milliseconds.                                                 |
 | `signal`  | `AbortSignal` | Aborted when the connection attempt times out or the connection is closed before the socket is returned. |
 
-It returns a plain `net.Socket` to the broker, or a promise of one, either connected or still connecting. The client then uses it as it uses its own sockets: when `tls` is set, TLS is negotiated on it with the same options and SNI rules (`tlsServerName`), the certificate is verified against `host`, and `keepAlive`, SASL and `connectionsMaxIdle` apply as usual. A socket returned after the attempt timed out or was closed is destroyed.
+It returns a plain `net.Socket` to the broker, or a promise of one, either connected or still connecting. The client then uses it as it uses its own sockets: when `tls` is set, TLS is negotiated on it with the same options and SNI rules (`tlsServerName`), the certificate is verified against `host`, and `keepAlive`, SASL and `connectionsMaxIdle` apply as usual. `connectTimeout` bounds the whole attempt: the factory, the TCP connection of a socket it returns still connecting, and the TLS handshake. A socket returned after the attempt timed out or was closed is destroyed, and so is a socket that is destroyed or was never connected, a `tls.TLSSocket` while `tls` is set, or a value that is not a `net.Socket`; the last three fail the connection with a `UserError`.
+
+The `signal` is aborted only when an attempt is given up, never once the connection is up, so it can be passed to `net.connect()`.
+
+Only a `net.Socket` is accepted, since the client calls `setNoDelay()`, `setKeepAlive()` and `destroySoon()` on it. A tunnel that gives a plain stream, such as an SSH channel, has to be exposed as a socket, for example through a local forwarding server.
 
 An error thrown by the factory, or a promise it rejects, fails the connection with a `NetworkError` whose `cause` is that error. Like any connection error it is retried, unless the error, or one of its causes, has `canRetry` set to `false`.
 
-This example connects only to public addresses, and connects to the address it checked:
+This example refuses brokers on loopback, private, link-local and shared addresses, and connects to the address it checked, so a second DNS answer cannot change it. Adjust the list to your network: it is a starting point, not a complete policy.
 
 ```javascript
 import { lookup } from 'node:dns/promises'
@@ -221,8 +225,28 @@ import { BlockList, createConnection } from 'node:net'
 import { Admin } from '@platformatic/kafka'
 
 const blocked = new BlockList()
-blocked.addSubnet('169.254.0.0', 16, 'ipv4')
-blocked.addSubnet('10.0.0.0', 8, 'ipv4')
+
+// IPv4-mapped IPv6 addresses (::ffff:10.0.0.1) are checked against these too
+for (const [network, prefix] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16]
+]) {
+  blocked.addSubnet(network, prefix, 'ipv4')
+}
+
+for (const [network, prefix] of [
+  ['::', 128],
+  ['::1', 128],
+  ['fc00::', 7],
+  ['fe80::', 10]
+]) {
+  blocked.addSubnet(network, prefix, 'ipv6')
+}
 
 const admin = new Admin({
   clientId: 'my-admin',

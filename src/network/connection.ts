@@ -1,7 +1,7 @@
 import { DynamicBuffer } from '@platformatic/dynamic-buffer'
 import fastq from 'fastq'
 import { createConnection, isIP, Socket, type NetConnectOpts } from 'node:net'
-import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions } from 'node:tls'
+import { connect as createTLSConnection, type ConnectionOptions as TLSConnectionOptions, TLSSocket } from 'node:tls'
 import {
   type CallbackWithPromise,
   createPromisifiedCallback,
@@ -97,7 +97,20 @@ export interface KeepAliveOptions {
   count?: number
 }
 
+export interface SocketFactoryOptions {
+  host: string
+  port: number
+  // The connection's connectTimeout, in milliseconds
+  timeout: number
+  // Aborted when the attempt times out or the connection is closed before the socket is returned
+  signal: AbortSignal
+}
+
+// Returns a plain socket to the broker, connected or still connecting. TLS, when configured, is negotiated on it.
+export type SocketFactory = (options: SocketFactoryOptions) => Socket | Promise<Socket>
+
 export interface ConnectionOptions {
+  socketFactory?: SocketFactory
   connectTimeout?: number
   requestTimeout?: number
   maxInflights?: number
@@ -161,6 +174,18 @@ export function validateKeepAliveOptions (keepAlive: KeepAliveOptions | undefine
   }
 }
 
+// A connection attempt opened with a socketFactory, from the call until the connection is up
+interface SocketFactoryAttempt {
+  // Whether the factory has returned the socket
+  attached: boolean
+  // The connection is up or failed: the attempt is over
+  end: () => void
+  // The attempt ran out of time: every waiter gets the timeout
+  expire: () => void
+  // The connection was closed before the factory returned the socket
+  abandon: () => void
+}
+
 export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #host: string | undefined
   #port: number | undefined
@@ -180,6 +205,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #responseBuffer: DynamicBuffer
   #responseReader: Reader
   #socket!: Socket
+  #factoryAttempt: SocketFactoryAttempt | undefined
   #socketMustBeDrained: boolean
   #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
@@ -304,7 +330,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
           broker: { host, port }
         })
         diagnosticContext.error = error
-        this.#socket.destroy()
+        this.#socket?.destroy()
 
         this.#status = ConnectionStatuses.ERROR
 
@@ -334,18 +360,9 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       this.#host = host
       this.#port = port
-      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
-      this.#socket = this.#options.tls
-        ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
-        : createConnection({ ...connectionOptions, port, host })
-      this.#socket.setNoDelay(true)
 
-      if (this.#options.keepAlive) {
-        const { initialDelay, interval, count } = this.#options.keepAlive
-        ;(this.#socket.setKeepAlive as SetKeepAlive).call(this.#socket, true, initialDelay ?? 0, interval, count)
-      }
-
-      this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
+      const onSocketConnected = () => {
+        this.#endFactoryAttempt()
         this.#socket.removeListener('timeout', connectingSocketTimeoutHandler)
         this.#socket.removeListener('error', connectingSocketErrorHandler)
 
@@ -363,10 +380,44 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         } else {
           this.#onConnectionSucceed(diagnosticContext)
         }
-      })
+      }
 
-      this.#socket.once('timeout', connectingSocketTimeoutHandler)
-      this.#socket.once('error', connectingSocketErrorHandler)
+      // connectedEvent is undefined for a socket that is already connected
+      const attachSocket = (socket: Socket, connectedEvent: 'connect' | 'secureConnect' | undefined) => {
+        this.#socket = socket
+        this.#socket.setNoDelay(true)
+
+        if (this.#options.keepAlive) {
+          const { initialDelay, interval, count } = this.#options.keepAlive
+          ;(this.#socket.setKeepAlive as SetKeepAlive).call(this.#socket, true, initialDelay ?? 0, interval, count)
+        }
+
+        if (connectedEvent) {
+          this.#socket.once(connectedEvent, onSocketConnected)
+        }
+
+        this.#socket.once('timeout', connectingSocketTimeoutHandler)
+        this.#socket.once('error', connectingSocketErrorHandler)
+
+        if (!connectedEvent) {
+          onSocketConnected()
+        }
+      }
+
+      if (typeof this.#options.socketFactory === 'function') {
+        this.#openWithSocketFactory(host, port, connectionOptions, diagnosticContext, {
+          attach: attachSocket,
+          onTimeout: connectingSocketTimeoutHandler,
+          onError: connectingSocketErrorHandler
+        })
+      } else {
+        /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
+        const socket = this.#options.tls
+          ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
+          : createConnection({ ...connectionOptions, port, host })
+
+        attachSocket(socket, this.#options.tls ? 'secureConnect' : 'connect')
+      }
     } catch (error) {
       this.#status = ConnectionStatuses.ERROR
 
@@ -411,6 +462,12 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     }
 
     const timeout = setTimeout(() => {
+      // A socketFactory attempt fails for every waiter, this one included, through the 'error' event
+      if (this.#factoryAttempt) {
+        this.#factoryAttempt.expire()
+        return
+      }
+
       cleanup()
 
       // If the connection already failed (e.g. invalid port), don't double-invoke the callback
@@ -461,6 +518,20 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       return callback[kCallbackPromise]
     }
+
+    // A socketFactory has not returned the socket yet: there is nothing to tear down
+    if (this.#factoryAttempt && !this.#factoryAttempt.attached) {
+      this.#factoryAttempt.abandon()
+
+      this.#status = ConnectionStatuses.CLOSING
+      this.emit('closing')
+      this.#status = ConnectionStatuses.CLOSED
+      this.emit('close')
+      callback(null)
+      return callback[kCallbackPromise]
+    }
+
+    this.#endFactoryAttempt()
 
     // Ignore all disconnection errors
     this.#socket.removeAllListeners('error')
@@ -838,6 +909,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   }
 
   #onConnectionError (host: string, port: number, diagnosticContext: DiagnosticContext, cause: Error): void {
+    this.#endFactoryAttempt()
     const error = new NetworkError(`Connection to ${host}:${port} failed.`, { cause, broker: { host, port } })
     this.#status = ConnectionStatuses.ERROR
     clearTimeout(this.#reauthenticationTimeout)
@@ -848,7 +920,116 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.emit('error', error)
     connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
 
-    this.#socket.end()
+    this.#socket?.end()
+  }
+
+  #endFactoryAttempt (): void {
+    this.#factoryAttempt?.end()
+  }
+
+  #openWithSocketFactory (
+    host: string,
+    port: number,
+    connectionOptions: Partial<NetConnectOpts & TLSConnectionOptions>,
+    diagnosticContext: DiagnosticContext,
+    handlers: {
+      attach: (socket: Socket, connectedEvent: 'connect' | 'secureConnect' | undefined) => void
+      onTimeout: () => void
+      onError: (error: Error) => void
+    }
+  ): void {
+    const controller = new AbortController()
+    const timeout = this.#options.connectTimeout!
+
+    // Only the current attempt is ever ended: every caller reads it from #factoryAttempt, and ending it clears
+    // the timer. The signal is aborted only for an attempt given up: aborting it after a success would destroy a
+    // socket created with it.
+    const finish = (abort: boolean): void => {
+      this.#factoryAttempt = undefined
+      clearTimeout(timer)
+
+      if (abort) {
+        controller.abort()
+      }
+    }
+
+    const attempt: SocketFactoryAttempt = {
+      attached: false,
+      end: () => {
+        finish(false)
+      },
+      // Bounds the factory, the TCP connect of a socket it returns still connecting and the TLS handshake
+      expire: () => {
+        finish(true)
+        handlers.onTimeout()
+      },
+      // Only called before the factory returned the socket
+      abandon: () => {
+        finish(true)
+
+        diagnosticContext.error = new NetworkError('Connection closed while connecting.', {
+          broker: { host, port }
+        })
+        connectionsConnectsChannel.error.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncStart.publish(diagnosticContext)
+        connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
+      }
+    }
+
+    const timer = setTimeout(attempt.expire, timeout)
+    this.#factoryAttempt = attempt
+
+    Promise.resolve()
+      .then(() => this.#options.socketFactory!({ host, port, timeout, signal: controller.signal }))
+      .then(
+        socket => {
+          // A socket that arrives after the attempt timed out or was closed is not used
+          if (this.#factoryAttempt !== attempt || this.#status !== ConnectionStatuses.CONNECTING) {
+            ;(socket as Partial<Socket> | undefined)?.destroy?.()
+            return
+          }
+
+          const problem = this.#socketFactoryProblem(socket)
+
+          if (problem) {
+            ;(socket as Partial<Socket> | undefined)?.destroy?.()
+            handlers.onError(new UserError(problem))
+            return
+          }
+
+          attempt.attached = true
+
+          if (this.#options.tls) {
+            handlers.attach(
+              createTLSConnection({ ...this.#options.tls, ...connectionOptions, socket, host }),
+              'secureConnect'
+            )
+          } else {
+            handlers.attach(socket, socket.connecting ? 'connect' : undefined)
+          }
+        },
+        error => {
+          if (this.#factoryAttempt === attempt) {
+            handlers.onError(error)
+          }
+        }
+      )
+  }
+
+  #socketFactoryProblem (socket: unknown): string | undefined {
+    if (!(socket instanceof Socket)) {
+      return 'socketFactory must return a net.Socket.'
+    }
+
+    if (socket.destroyed || (socket.pending && !socket.connecting)) {
+      return 'socketFactory must return a socket that is connected or connecting.'
+    }
+
+    if (this.#options.tls && socket instanceof TLSSocket) {
+      return 'socketFactory must return a plain socket when tls is set: the client negotiates TLS.'
+    }
+
+    return undefined
   }
 
   #onSaslAuthenticate (

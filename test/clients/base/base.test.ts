@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
+import { createConnection } from 'node:net'
 import { test } from 'node:test'
 import * as apis from '../../../src/apis/index.ts'
 import { createPromisifiedCallback } from '../../../src/apis/callbacks.ts'
@@ -48,6 +49,7 @@ import {
   type ClientDiagnosticEvent,
   type ClusterMetadata,
   type KeepAliveOptions,
+  type SocketFactory,
   VoteId,
   Writer
 } from '../../../src/index.ts'
@@ -250,6 +252,20 @@ test('constructor validates keep-alive and idle connection options', t => {
   new Base({ ...options, keepAlive: { initialDelay: 0 } }).close()
 
   const client = new Base({ ...options, keepAlive: { initialDelay: 1000 }, connectionsMaxIdle: 60000 })
+  t.after(() => client.close())
+})
+
+test('constructor validates socketFactory', t => {
+  const options = {
+    clientId: 'test-client',
+    bootstrapBrokers: ['localhost:9092'],
+    strict: true
+  }
+
+  throws(() => new Base({ ...options, socketFactory: 'socket' as unknown as SocketFactory }), { code: 'PLT_KFK_USER' })
+  throws(() => new Base({ ...options, socketFactory: 1 as unknown as SocketFactory }), { code: 'PLT_KFK_USER' })
+
+  const client = new Base({ ...options, socketFactory: ({ host, port }) => createConnection({ host, port }) })
   t.after(() => client.close())
 })
 

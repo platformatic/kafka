@@ -58,6 +58,7 @@ export const baseOptionsSchema = {
     tls: { type: 'object', additionalProperties: true }, // No validation as they come from Node.js
     ssl: { type: 'object', additionalProperties: true }, // Alias for tls, no validation as they come from Node.js
     tlsServerName: { oneOf: [{ type: 'boolean' }, { type: 'string' }] },
+    socketFactory: { function: true },
     sasl: {
       type: 'object',
       properties: {

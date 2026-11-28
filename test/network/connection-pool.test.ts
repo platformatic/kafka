@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert'
 import { once } from 'node:events'
-import { type AddressInfo, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
+import { type AddressInfo, createConnection, createServer as createNetworkServer, type Server, type Socket } from 'node:net'
 import { networkInterfaces } from 'node:os'
 import { mock, test, type TestContext } from 'node:test'
 import { api as apiVersionsV1 } from '../../src/apis/metadata/api-versions-v1.ts'
@@ -18,6 +18,7 @@ import {
   NetworkError,
   parseBroker,
   ResponseError,
+  type SocketFactoryOptions,
   Writer
 } from '../../src/index.ts'
 import {
@@ -90,6 +91,29 @@ test('get should return a connection for a broker', async t => {
   ok(connection instanceof Connection)
   deepStrictEqual(connection.status, ConnectionStatuses.CONNECTED)
   await connection.close()
+})
+
+test('get should open connections through socketFactory once per broker', async t => {
+  const { port: first } = await createServer(t)
+  const { port: second } = await createServer(t)
+  const calls: Broker[] = []
+
+  const connectionPool = new ConnectionPool('test-client', {
+    socketFactory: ({ host, port }: SocketFactoryOptions) => {
+      calls.push({ host, port })
+      return createConnection({ host, port })
+    }
+  })
+  t.after(() => connectionPool.close())
+
+  const connection = await connectionPool.get({ host: 'localhost', port: first })
+  strictEqual(await connectionPool.get({ host: 'localhost', port: first }), connection)
+  await connectionPool.get({ host: 'localhost', port: second })
+
+  deepStrictEqual(calls, [
+    { host: 'localhost', port: first },
+    { host: 'localhost', port: second }
+  ])
 })
 
 test('get should connect to a parsed IPv6 bootstrap broker', { skip: !hasIPv6Loopback }, async t => {

@@ -97,7 +97,20 @@ export interface KeepAliveOptions {
   count?: number
 }
 
+export interface SocketFactoryOptions {
+  host: string
+  port: number
+  // The connection's connectTimeout, in milliseconds
+  timeout: number
+  // Aborted when the attempt times out or the connection is closed before the socket is returned
+  signal: AbortSignal
+}
+
+// Returns a plain socket to the broker, connected or still connecting. TLS, when configured, is negotiated on it.
+export type SocketFactory = (options: SocketFactoryOptions) => Socket | Promise<Socket>
+
 export interface ConnectionOptions {
+  socketFactory?: SocketFactory
   connectTimeout?: number
   requestTimeout?: number
   maxInflights?: number
@@ -180,6 +193,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
   #responseBuffer: DynamicBuffer
   #responseReader: Reader
   #socket!: Socket
+  #pendingSocket: AbortController | undefined
   #socketMustBeDrained: boolean
   #detectMissingTLS: boolean
   #reauthenticationTimeout!: NodeJS.Timeout
@@ -304,7 +318,7 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
           broker: { host, port }
         })
         diagnosticContext.error = error
-        this.#socket.destroy()
+        this.#socket?.destroy()
 
         this.#status = ConnectionStatuses.ERROR
 
@@ -334,18 +348,8 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
 
       this.#host = host
       this.#port = port
-      /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
-      this.#socket = this.#options.tls
-        ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
-        : createConnection({ ...connectionOptions, port, host })
-      this.#socket.setNoDelay(true)
 
-      if (this.#options.keepAlive) {
-        const { initialDelay, interval, count } = this.#options.keepAlive
-        ;(this.#socket.setKeepAlive as SetKeepAlive).call(this.#socket, true, initialDelay ?? 0, interval, count)
-      }
-
-      this.#socket.once(this.#options.tls ? 'secureConnect' : 'connect', () => {
+      const onSocketConnected = () => {
         this.#socket.removeListener('timeout', connectingSocketTimeoutHandler)
         this.#socket.removeListener('error', connectingSocketErrorHandler)
 
@@ -363,10 +367,43 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         } else {
           this.#onConnectionSucceed(diagnosticContext)
         }
-      })
+      }
 
-      this.#socket.once('timeout', connectingSocketTimeoutHandler)
-      this.#socket.once('error', connectingSocketErrorHandler)
+      // connectedEvent is undefined for a socket that is already connected
+      const attachSocket = (socket: Socket, connectedEvent: 'connect' | 'secureConnect' | undefined) => {
+        this.#socket = socket
+        this.#socket.setNoDelay(true)
+
+        if (this.#options.keepAlive) {
+          const { initialDelay, interval, count } = this.#options.keepAlive
+          ;(this.#socket.setKeepAlive as SetKeepAlive).call(this.#socket, true, initialDelay ?? 0, interval, count)
+        }
+
+        if (connectedEvent) {
+          this.#socket.once(connectedEvent, onSocketConnected)
+        }
+
+        this.#socket.once('timeout', connectingSocketTimeoutHandler)
+        this.#socket.once('error', connectingSocketErrorHandler)
+
+        if (!connectedEvent) {
+          onSocketConnected()
+        }
+      }
+
+      if (typeof this.#options.socketFactory === 'function') {
+        this.#openWithSocketFactory(host, port, connectionOptions, {
+          attach: attachSocket,
+          onError: connectingSocketErrorHandler
+        })
+      } else {
+        /* c8 ignore next 3 - TLS connection is not tested but we rely on Node.js tests */
+        const socket = this.#options.tls
+          ? createTLSConnection(port, host, { ...this.#options.tls, ...connectionOptions })
+          : createConnection({ ...connectionOptions, port, host })
+
+        attachSocket(socket, this.#options.tls ? 'secureConnect' : 'connect')
+      }
     } catch (error) {
       this.#status = ConnectionStatuses.ERROR
 
@@ -419,7 +456,16 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
       }
 
       const brokerProperties = this.#brokerProperties
-      this.#socket?.destroy()
+
+      // A socketFactory that has not returned yet is abandoned; the socket it returns later is destroyed
+      if (this.#pendingSocket) {
+        this.#pendingSocket.abort()
+        this.#pendingSocket = undefined
+        this.#status = ConnectionStatuses.ERROR
+      } else {
+        this.#socket?.destroy()
+      }
+
       callback!(
         new TimeoutError(
           this.#host
@@ -459,6 +505,19 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
         callback(null)
       })
 
+      return callback[kCallbackPromise]
+    }
+
+    // A socketFactory has not returned the socket yet: there is nothing to tear down
+    if (this.#pendingSocket) {
+      this.#pendingSocket.abort()
+      this.#pendingSocket = undefined
+
+      this.#status = ConnectionStatuses.CLOSING
+      this.emit('closing')
+      this.#status = ConnectionStatuses.CLOSED
+      this.emit('close')
+      callback(null)
       return callback[kCallbackPromise]
     }
 
@@ -848,7 +907,67 @@ export class Connection extends TypedEventEmitter<ConnectionEvents> {
     this.emit('error', error)
     connectionsConnectsChannel.asyncEnd.publish(diagnosticContext)
 
-    this.#socket.end()
+    this.#socket?.end()
+  }
+
+  #openWithSocketFactory (
+    host: string,
+    port: number,
+    connectionOptions: Partial<NetConnectOpts & TLSConnectionOptions>,
+    handlers: {
+      attach: (socket: Socket, connectedEvent: 'connect' | 'secureConnect' | undefined) => void
+      onError: (error: Error) => void
+    }
+  ): void {
+    // The attempt is bounded by the connectTimeout of ready(), which aborts the controller
+    const controller = new AbortController()
+    const timeout = this.#options.connectTimeout!
+    this.#pendingSocket = controller
+
+    // A socket that arrives after the attempt timed out or was closed is not used
+    const settle = (): boolean => {
+      if (this.#pendingSocket !== controller) {
+        return false
+      }
+
+      this.#pendingSocket = undefined
+      return this.#status === ConnectionStatuses.CONNECTING
+    }
+
+    Promise.resolve()
+      .then(() => this.#options.socketFactory!({ host, port, timeout, signal: controller.signal }))
+      .then(
+        socket => {
+          const usable = settle()
+
+          if (!usable || !(socket instanceof Socket)) {
+            ;(socket as Partial<Socket> | undefined)?.destroy?.()
+
+            if (usable) {
+              handlers.onError(new UserError('socketFactory must return a net.Socket.'))
+            }
+
+            return
+          }
+
+          if (this.#options.tls) {
+            handlers.attach(
+              createTLSConnection({ ...this.#options.tls, ...connectionOptions, socket, host }),
+              'secureConnect'
+            )
+          } else if (socket.connecting) {
+            socket.setTimeout(timeout)
+            handlers.attach(socket, 'connect')
+          } else {
+            handlers.attach(socket, undefined)
+          }
+        },
+        error => {
+          if (settle()) {
+            handlers.onError(error)
+          }
+        }
+      )
   }
 
   #onSaslAuthenticate (
